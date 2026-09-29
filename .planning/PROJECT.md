@@ -106,6 +106,10 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 | Add Anthropic Claude alongside OpenAI | User request; enables provider choice | — Pending |
 | Incremental saving + Batch API; no pause/resume in v1 | Protects long 5K runs and cuts cost without project-file complexity | — Pending |
 | Keep all existing attachment types | Reuse working builders; richer evidence | — Pending |
+| Running narrative ledger built during generation; relevant threads rendered in chronological waves | Later emails build on details earlier emails invented; trade-off: relevant threads are less parallel/batchable than noise | — Pending |
+| Code-owned plan (manifest) before prose; answer key derived from plan | Research: LLM must not own dates/counts/labels; exact key by construction | — Pending |
+| Per-custodian mailbox folders; privilege tagging, hot docs, review protocol, blind-review QA in v1 | User scoping after research | — Pending |
+| Retarget .NET 10; gpt-image replaces dall-e-3; DPAPI keys; add tests | .NET 8 EOL 2026-11-10; dall-e-3 retired; security; no tests today | — Pending |
 
 ## Evolution
 

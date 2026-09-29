@@ -172,12 +172,92 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| PLAT-01 | Phase 1 | Pending |
+| PLAT-02 | Phase 1 | Pending |
+| PLAT-03 | Phase 1 | Pending |
+| PLAT-04 | Phase 1 | Pending |
+| PLAT-05 | Phase 7 | Pending |
+| PROV-01 | Phase 1 | Pending |
+| PROV-02 | Phase 1 | Pending |
+| PROV-03 | Phase 1 | Pending |
+| PROV-04 | Phase 1 | Pending |
+| PROV-05 | Phase 1 | Pending |
+| PROV-06 | Phase 1 | Pending |
+| PROV-07 | Phase 7 | Pending |
+| CASE-01 | Phase 2 | Pending |
+| CASE-02 | Phase 2 | Pending |
+| CASE-03 | Phase 2 | Pending |
+| CASE-04 | Phase 2 | Pending |
+| CASE-05 | Phase 2 | Pending |
+| CASE-06 | Phase 2 | Pending |
+| CASE-07 | Phase 2 | Pending |
+| GUIDE-01 | Phase 3 | Pending |
+| GUIDE-02 | Phase 3 | Pending |
+| GUIDE-03 | Phase 3 | Pending |
+| GUIDE-04 | Phase 3 | Pending |
+| GUIDE-05 | Phase 3 | Pending |
+| GUIDE-06 | Phase 3 | Pending |
+| GUIDE-07 | Phase 3 | Pending |
+| GUIDE-08 | Phase 3 | Pending |
+| GUIDE-09 | Phase 3 | Pending |
+| GUIDE-10 | Phase 3 | Pending |
+| GUIDE-11 | Phase 3 | Pending |
+| ANC-01 | Phase 8 | Pending |
+| ANC-02 | Phase 8 | Pending |
+| ANC-03 | Phase 8 | Pending |
+| ANC-04 | Phase 8 | Pending |
+| ANC-05 | Phase 8 | Pending |
+| PLAN-01 | Phase 4 | Pending |
+| PLAN-02 | Phase 4 | Pending |
+| PLAN-03 | Phase 4 | Pending |
+| PLAN-04 | Phase 4 | Pending |
+| PLAN-05 | Phase 4 | Pending |
+| PLAN-06 | Phase 4 | Pending |
+| PLAN-07 | Phase 4 | Pending |
+| CORP-01 | Phase 5 | Pending |
+| CORP-02 | Phase 5 | Pending |
+| CORP-03 | Phase 5 | Pending |
+| CORP-04 | Phase 5 | Pending |
+| CORP-05 | Phase 5 | Pending |
+| CORP-06 | Phase 5 | Pending |
+| CORP-07 | Phase 5 | Pending |
+| CORP-08 | Phase 5 | Pending |
+| CORP-09 | Phase 5 | Pending |
+| CORP-10 | Phase 5 | Pending |
+| CORP-11 | Phase 5 | Pending |
+| NOISE-01 | Phase 6 | Pending |
+| NOISE-02 | Phase 6 | Pending |
+| NOISE-03 | Phase 6 | Pending |
+| NOISE-04 | Phase 6 | Pending |
+| NOISE-05 | Phase 6 | Pending |
+| ATT-01 | Phase 6 | Pending |
+| ATT-02 | Phase 6 | Pending |
+| ATT-03 | Phase 6 | Pending |
+| ATT-04 | Phase 6 | Pending |
+| KEY-01 | Phase 4 | Pending |
+| KEY-02 | Phase 4 | Pending |
+| KEY-03 | Phase 4 | Pending |
+| KEY-04 | Phase 4 | Pending |
+| KEY-05 | Phase 4 | Pending |
+| QA-01 | Phase 7 | Pending |
+| QA-02 | Phase 7 | Pending |
+| QA-03 | Phase 7 | Pending |
+| RUN-01 | Phase 5 | Pending |
+| RUN-02 | Phase 5 | Pending |
+| RUN-03 | Phase 7 | Pending |
+| RUN-04 | Phase 7 | Pending |
+| RUN-05 | Phase 7 | Pending |
+| RUN-06 | Phase 5 | Pending |
+| RUN-07 | Phase 5 | Pending |
+| OUT-01 | Phase 5 | Pending |
+| OUT-02 | Phase 5 | Pending |
+| OUT-03 | Phase 7 | Pending |
 
 **Coverage:**
 - v1 requirements: 80 total
-- Mapped to phases: 0
-- Unmapped: 80 ⚠️
+- Mapped to phases: 80
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-09-29*
-*Last updated: 2026-09-29 after initial definition*
+*Last updated: 2026-09-29 after roadmap creation*

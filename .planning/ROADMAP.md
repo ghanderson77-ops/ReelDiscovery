@@ -1,0 +1,139 @@
+# Roadmap: ReelDiscovery
+
+## Overview
+
+ReelDiscovery moves from a loose topic/storyline wizard to a case-guide-driven pipeline. We first stabilize the platform and put both AI providers (OpenAI and Claude) behind one structured-output gateway. Then the user can seed a case and get a realistic core pleading, followed by a structured, ID-stable case guide (issues, cast, dated facts, canonical values) saved as case.json. From that guide, code plans every thread and message and derives the answer key before any prose is written. The renderer then writes relevant evidence in chronological waves, using knowledge-gated context and a running narrative ledger, and saves each thread as it finishes. Attachments and non-relevant material fill out the full mixed corpus. Batch APIs, prompt caching, blind-review QA and the final cutover make 5,000-email runs affordable and trustworthy. Optional ancillary discovery documents depend only on the case guide and come last.
+
+## Phases
+
+**Phase Numbering:**
+- Integer phases (1, 2, 3): Planned milestone work
+- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+
+Decimal phases appear between their surrounding integers in numeric order.
+
+- [ ] **Phase 1: Foundation & Provider Gateway** - .NET 10 retarget, tests, concurrency fixes, DPAPI keys, and one OpenAI + Claude gateway with strict structured outputs
+- [ ] **Phase 2: Case Scenario & Core Document** - Scenario + preset input produces a realistic, citation-safe Complaint / Petition / Investigation Memo the user can edit
+- [ ] **Phase 3: Case Guide** - ID-stable issues, cast, dated facts timeline and canonical-value registry, validated, editable, saved as case.json and exported to .docx
+- [ ] **Phase 4: Corpus Plan & Answer Key** - Code-owned manifest of every thread/message with a validator, a plan review screen, the answer key and the review protocol derived from it
+- [ ] **Phase 5: Relevant Evidence Generation & Narrative Ledger** - Knowledge-gated, chronologically waved rendering of relevant threads with a running narrative ledger, saved incrementally as per-custodian EMLs
+- [ ] **Phase 6: Attachments & Non-Relevant Corpus** - Case-driven attachments plus daily business, ancillary, newsletter/spam/personal and near-miss decoy traffic through the same pipeline
+- [ ] **Phase 7: Scale, Cost, QA & Cutover** - Batch APIs, prompt caching, cost accounting, blind-review and leakage QA, 5K-scale runs, and removal of the old wizard flow
+- [ ] **Phase 8: Ancillary Discovery Documents** - Optional depositions, RFPs, RFAs and interrogatories grounded in the case guide and exported as .docx
+
+## Phase Details
+
+### Phase 1: Foundation & Provider Gateway
+**Goal**: The app runs on a supported runtime with tests and safe concurrency, and all text generation goes through one provider-agnostic gateway, so the user can choose OpenAI or Claude.
+**Depends on**: Nothing (first phase)
+**Requirements**: PLAT-01, PLAT-02, PLAT-03, PLAT-04, PROV-01, PROV-02, PROV-03, PROV-04, PROV-05, PROV-06
+**Success Criteria** (what must be TRUE):
+  1. The app builds on net10.0-windows with a pinned SDK and publishes as a single-file self-contained exe that launches and runs the existing flow.
+  2. The user can enter and test both an OpenAI and an Anthropic API key. Keys are stored DPAPI-encrypted, and an existing Base64 key file is migrated automatically.
+  3. The user can pick Claude or OpenAI plus a model, and a structured (JSON-schema) request returns a valid typed result from either provider. Refusals, truncations and spend-limit errors show up as classified outcomes and are not retried blindly.
+  4. Image generation works again on a gpt-image model. With Claude selected and no OpenAI key configured, images and voicemail are disabled and the user sees a clear notice.
+  5. `dotnet test` runs a test project that passes, and the shared-Random and parallel-mutation bugs are fixed.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 2: Case Scenario & Core Document
+**Goal**: The user describes a real-life dispute or investigation and gets a realistic, legally structured core document that they can review, edit and regenerate.
+**Depends on**: Phase 1
+**Requirements**: CASE-01, CASE-02, CASE-03, CASE-04, CASE-05, CASE-06, CASE-07
+**Success Criteria** (what must be TRUE):
+  1. The user can enter a free-text scenario and pick Simple, Standard or Complex, and the preset visibly changes the parties, counts, characters, timeline span and document length.
+  2. If the scenario names real people or companies, the user sees a warning and fictional substitutes are applied by default. The user can override this.
+  3. A civil scenario produces a Complaint/Petition, and a criminal or regulatory scenario produces an Investigation Memo. Either one has the full realistic structure (caption, parties, jurisdiction/venue, numbered factual allegations, counts, prayer, or the memo equivalent) for one consistent jurisdiction.
+  4. Generated documents contain no invented case-law citations, and an automatic check flags any that appear.
+  5. The user can edit the core document or regenerate it (in whole or by section) before continuing.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 3: Case Guide
+**Goal**: The core document becomes a structured, validated, ID-stable case guide (issues, cast, dated facts, canonical values). This guide is the single source of truth for everything generated downstream.
+**Depends on**: Phase 2
+**Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08, GUIDE-09, GUIDE-10, GUIDE-11
+**Success Criteria** (what must be TRUE):
+  1. The user sees an issue list, a Cast of Key Characters (including in-house and outside counsel and ancillary per-organization staff), and a dated Key Facts timeline. Every entry has a stable ID, and each fact is linked to issues, actors and who knew about it.
+  2. The user sees a registry of canonical values (amounts, invoice/change-order numbers, document titles, project names), and a validator reports any inconsistency: dates out of range, or facts pointing to missing cast members or issues.
+  3. The user can edit and regenerate the cast and the timeline. Editing the core document, cast or facts warns the user and marks downstream artifacts stale.
+  4. The case guide is saved as case.json next to the output, can be reloaded, and the user can export the core document, cast and key-facts summary as .docx files that open in Word.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 4: Corpus Plan & Answer Key
+**Goal**: Before any prose is written, code plans every thread and message against the facts timeline. The user reviews the plan, and the answer key and review protocol come straight from it.
+**Depends on**: Phase 3
+**Requirements**: PLAN-01, PLAN-02, PLAN-03, PLAN-04, PLAN-05, PLAN-06, PLAN-07, KEY-01, KEY-02, KEY-03, KEY-04, KEY-05
+**Success Criteria** (what must be TRUE):
+  1. The user sets the corpus size (up to about 5,000) and the relevant/non-relevant ratio. The resulting plan fixes every message's date/time, sender, To/CC, reply/forward structure, linked facts/issues, relevance label and attachments.
+  2. Planned relevant threads follow the key-facts timeline, with overlapping issues running at the same time among shared characters. Timestamps respect business hours, time zones, weekends/holidays and reply latency, and thread depth, CC and attachment distributions look realistic.
+  3. A plan validator reports counts, ratio, dates outside each character's active range, and any key fact with no planned evidence.
+  4. The user sees a plan summary (counts by issue, fact, relevance and custodian, plus a date histogram) and can approve the plan or re-plan.
+  5. From the plan alone, the user gets a CSV and Excel answer key with one row per email and attachment. It has all required columns, family relevance propagated to attachments and quoted replies, and a statistics sheet. The user also gets a review protocol / coding manual document.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 5: Relevant Evidence Generation & Narrative Ledger
+**Goal**: Relevant threads are written as a coherent evidentiary story. Each email knows only what its participants could know at that date, later emails build on a running narrative ledger, and every finished thread is saved immediately.
+**Depends on**: Phase 4
+**Requirements**: CORP-01, CORP-02, CORP-03, CORP-04, CORP-05, CORP-06, CORP-07, CORP-08, CORP-09, CORP-10, CORP-11, OUT-01, OUT-02, RUN-01, RUN-02, RUN-06, RUN-07
+**Success Criteria** (what must be TRUE):
+  1. Running an approved plan produces relevant threads in chronological waves. Later emails correctly refer to commitments, figures, meetings and people that earlier emails introduced, and no email mentions facts dated after it or unknown to its participants.
+  2. After each thread, new details are extracted into the narrative ledger. Content that contradicts the ledger, canonical values or the plan (participants, dates, values) is flagged and retried. The ledger is saved in case.json and exports as a readable "story so far".
+  3. The relevant emails read as natural business correspondence with varied subtlety, deliberate hot documents, privileged counsel threads, distinct per-character voices and signatures, and correct threading (quoting, Message-ID, In-Reply-To, References).
+  4. EML files appear in each participating custodian's mailbox folder (sent and received), and each one carries an X-ReelDiscovery-DocID header that matches the answer key.
+  5. Killing the app or pressing Cancel mid-run keeps every completed thread and its answer-key rows. A single failed email is logged and retried or skipped without aborting the run, and live progress and cost stay responsive throughout.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 6: Attachments & Non-Relevant Corpus
+**Goal**: The corpus becomes a full mixed collection. Case-consistent attachments serve as evidence, and non-relevant traffic (including near-miss decoys) comes from the same pipeline, so nothing but content separates relevant from non-relevant.
+**Depends on**: Phase 5
+**Requirements**: ATT-01, ATT-02, ATT-03, ATT-04, NOISE-01, NOISE-02, NOISE-03, NOISE-04, NOISE-05
+**Success Criteria** (what must be TRUE):
+  1. Planned Word, Excel and PowerPoint attachments, calendar invites, inline images and voicemails are generated. Their content matches the case guide and canonical values, and media types follow the provider availability rules.
+  2. The corpus includes the custodians' own daily business, ancillary-character traffic, and newsletters/spam/personal email in the proportion the user set.
+  3. Near-miss decoys share project names and keywords with the case, but a reader can confirm they are not about the alleged conduct.
+  4. Relevant and non-relevant emails show matched length, style, attachment, CC and thread-depth distributions (they come from the same model and formatter path).
+**Plans**: TBD
+
+### Phase 7: Scale, Cost, QA & Cutover
+**Goal**: The user can run a full 5,000-email case affordably and verify its quality, and the case-driven flow is the only flow in the app.
+**Depends on**: Phase 6
+**Requirements**: RUN-03, RUN-04, RUN-05, PROV-07, QA-01, QA-02, QA-03, OUT-03, PLAT-05
+**Success Criteria** (what must be TRUE):
+  1. The user can turn on Batch API execution for OpenAI or Anthropic. Submitted batches are tracked on disk, and after an app restart their results are collected and failed or expired items are re-run.
+  2. Shared case-guide context uses prompt caching. The cost display reflects cache writes, cache reads and batch discounts, and the user can edit pricing per model.
+  3. A roughly 5,000-email run completes with the expected file and answer-key counts and without running out of memory.
+  4. The user can run a blind-review pass that flags label disagreements for relabel or regeneration, a metadata-only leakage audit with a reported result, and timeline/value scans that flag future-fact references or canonical-value contradictions.
+  5. The old topic/storyline wizard steps and their dead generation code are gone, and the app opens directly into the case-driven flow.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 8: Ancillary Discovery Documents
+**Goal**: The user can optionally generate realistic discovery documents that are consistent with the case guide.
+**Depends on**: Phase 3 (off the corpus critical path; scheduled last)
+**Requirements**: ANC-01, ANC-02, ANC-03, ANC-04, ANC-05
+**Success Criteria** (what must be TRUE):
+  1. The user can pick key witnesses and generate deposition transcript excerpts with numbered lines and pages.
+  2. The user can generate Requests for Production and Interrogatories keyed to the issues, and Requests for Admission keyed to the key facts.
+  3. All ancillary documents use the same names, dates, amounts and allegations as the core document, cast and facts, and export as .docx.
+**Plans**: TBD
+**UI hint**: yes
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Phase 8 depends only on Phase 3 and can be pulled forward if desired.
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Foundation & Provider Gateway | 0/TBD | Not started | - |
+| 2. Case Scenario & Core Document | 0/TBD | Not started | - |
+| 3. Case Guide | 0/TBD | Not started | - |
+| 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
+| 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
+| 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |
+| 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |
+| 8. Ancillary Discovery Documents | 0/TBD | Not started | - |

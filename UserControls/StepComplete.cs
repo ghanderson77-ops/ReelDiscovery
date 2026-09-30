@@ -17,7 +17,8 @@ public class StepComplete : UserControl, IWizardStep
     public bool CanMoveBack => false;
     public string NextButtonText => "Finish";
 
-    public event EventHandler? StateChanged;
+    // Final step never changes navigation state; explicit empty accessors satisfy IWizardStep without CS0067
+    public event EventHandler? StateChanged { add { } remove { } }
 
     public StepComplete()
     {

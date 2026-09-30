@@ -11,13 +11,14 @@ public interface ILlmProvider
     int? MaxTokensCeiling { get; }
 
     /// <summary>
-    /// Sends one structured-output request. Never throws for API/HTTP failures: they are mapped to
-    /// Outcome = Failed with a FailureKind. Rethrows OperationCanceledException.
+    /// Sends one structured-output request. Never throws for API/HTTP failures (including transport timeouts):
+    /// they are mapped to Outcome = Failed with a FailureKind. Throws OperationCanceledException only when
+    /// <paramref name="ct"/> is cancelled.
     /// </summary>
     Task<LlmProviderResponse> SendAsync(LlmProviderRequest request, CancellationToken ct = default);
 
     /// <summary>
-    /// Free key check (model retrieve). Never throws except OperationCanceledException.
+    /// Free key check (model retrieve). Never throws except OperationCanceledException when <paramref name="ct"/> is cancelled.
     /// </summary>
     Task<LlmKeyTestResult> TestKeyAsync(string modelId, CancellationToken ct = default);
 }

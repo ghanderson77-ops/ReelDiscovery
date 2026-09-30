@@ -51,9 +51,14 @@ public class OpenAITextProvider : ILlmProvider
             ChatCompletion completion = (await chatClient.CompleteChatAsync(BuildMessages(request), BuildOptions(request), ct)).Value;
             return Classify(completion);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // Caller cancelled (user cancel or fatal run stop)
+        }
         catch (OperationCanceledException)
         {
-            throw;
+            // Caller token not cancelled: the SDK/HttpClient network timeout fired. Classify, never throw (CR-01)
+            return Failed(LlmFailureKind.Network, "Request to OpenAI timed out");
         }
         catch (ClientResultException ex)
         {
@@ -75,9 +80,14 @@ public class OpenAITextProvider : ILlmProvider
             await _modelClient.GetModelAsync(modelId, ct);
             return new LlmKeyTestResult { Succeeded = true, Message = $"OpenAI key OK ({modelId})" };
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // Caller cancelled (user cancel or fatal run stop)
+        }
         catch (OperationCanceledException)
         {
-            throw;
+            // Caller token not cancelled: the SDK/HttpClient network timeout fired. Classify, never throw (CR-01)
+            return new LlmKeyTestResult { FailureKind = LlmFailureKind.Network, Message = "Key test timed out contacting api.openai.com" };
         }
         catch (ClientResultException ex)
         {

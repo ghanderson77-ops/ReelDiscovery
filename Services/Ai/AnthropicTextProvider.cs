@@ -59,9 +59,14 @@ public class AnthropicTextProvider : ILlmProvider
             var message = await _client.Messages.Create(BuildParams(request), ct);
             return Classify(message);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // Caller cancelled (user cancel or fatal run stop)
+        }
         catch (OperationCanceledException)
         {
-            throw;
+            // Caller token not cancelled: the SDK/HttpClient network timeout fired. Classify, never throw (CR-01)
+            return Failed(LlmFailureKind.Network, "Request to Anthropic timed out");
         }
         catch (AnthropicApiException ex)
         {
@@ -86,9 +91,14 @@ public class AnthropicTextProvider : ILlmProvider
             await _client.Models.Retrieve(modelId, new ModelRetrieveParams(), ct);
             return new LlmKeyTestResult { Succeeded = true, Message = $"Anthropic key OK ({modelId})" };
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // Caller cancelled (user cancel or fatal run stop)
+        }
         catch (OperationCanceledException)
         {
-            throw;
+            // Caller token not cancelled: the SDK/HttpClient network timeout fired. Classify, never throw (CR-01)
+            return new LlmKeyTestResult { FailureKind = LlmFailureKind.Network, Message = "Key test timed out contacting api.anthropic.com" };
         }
         catch (AnthropicApiException ex)
         {

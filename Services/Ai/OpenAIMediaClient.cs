@@ -7,7 +7,8 @@ namespace ReelDiscovery.Services.Ai;
 
 /// <summary>
 /// OpenAI media generation (gpt-image images and tts-1 speech). Transient 429/5xx errors are retried by the
-/// SDK transport; a 400 (content policy or invalid prompt) returns null so the caller skips the attachment.
+/// SDK transport; a 400 (content policy or invalid prompt) or a transport timeout returns null so the caller skips
+/// the attachment; caller cancellation propagates.
 /// Media usage is not token-tracked in Phase 1; <c>operationName</c> is accepted for signature parity with callers.
 /// </summary>
 public class OpenAIMediaClient
@@ -31,7 +32,7 @@ public class OpenAIMediaClient
     /// <summary>
     /// Generate a 1024x1024 PNG image with the configured gpt-image model and quality.
     /// </summary>
-    /// <returns>PNG bytes, or null when the request is rejected (e.g. moderation)</returns>
+    /// <returns>PNG bytes, or null when the request is rejected (e.g. moderation) or times out</returns>
     public async Task<byte[]?> GenerateImageAsync(string prompt, string? operationName = null, CancellationToken ct = default)
     {
         try
@@ -52,6 +53,11 @@ public class OpenAIMediaClient
 
             var result = await imageClient.GenerateImageAsync(prompt, options, ct);
             return result.Value?.ImageBytes?.ToArray();
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Network timeout, not a user cancel: skip this media item instead of aborting the run (CR-01)
+            return null;
         }
         catch (ClientResultException ex) when (ex.Status == 400)
         {
@@ -97,6 +103,11 @@ public class OpenAIMediaClient
 
             var response = await audioClient.GenerateSpeechAsync(text, voiceEnum, options, ct);
             return response.Value?.ToArray();
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Network timeout, not a user cancel: skip this media item instead of aborting the run (CR-01)
+            return null;
         }
         catch (ClientResultException ex) when (ex.Status == 400)
         {

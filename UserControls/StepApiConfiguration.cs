@@ -6,7 +6,6 @@ namespace ReelDiscovery.UserControls;
 
 public class StepApiConfiguration : UserControl, IWizardStep
 {
-    private const string SettingsFileName = "reeldiscovery.settings";
     private WizardState _state = null!;
     private TextBox _txtApiKey = null!;
     private ComboBox _cboModel = null!;
@@ -337,26 +336,16 @@ public class StepApiConfiguration : UserControl, IWizardStep
         return Task.FromResult(true);
     }
 
-    private static string GetSettingsPath()
-    {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var folder = Path.Combine(appData, "ReelDiscovery");
-        Directory.CreateDirectory(folder);
-        return Path.Combine(folder, SettingsFileName);
-    }
-
     private static void SaveApiKey(string apiKey)
     {
         try
         {
-            var path = GetSettingsPath();
-            // Simple obfuscation - not secure, but prevents casual viewing
-            var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(apiKey));
-            File.WriteAllText(path, encoded);
+            // Interim bridge until the keys screen (plan 01-07): persist via the DPAPI store
+            new ApiKeyStore().SetKey(Services.Ai.LlmProviderKind.OpenAI, apiKey);
         }
-        catch
+        catch (Exception)
         {
-            // Ignore save errors
+            // Ignore save errors - persistence is a convenience; the key is still used this session
         }
     }
 
@@ -364,16 +353,11 @@ public class StepApiConfiguration : UserControl, IWizardStep
     {
         try
         {
-            var path = GetSettingsPath();
-            if (File.Exists(path))
-            {
-                var encoded = File.ReadAllText(path);
-                return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
-            }
+            return new ApiKeyStore().GetKey(Services.Ai.LlmProviderKind.OpenAI);
         }
-        catch
+        catch (Exception)
         {
-            // Ignore load errors
+            // Ignore load errors - the user can re-enter the key
         }
         return null;
     }

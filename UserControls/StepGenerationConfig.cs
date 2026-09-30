@@ -27,6 +27,7 @@ public class StepGenerationConfig : UserControl, IWizardStep
     private Button _btnBrowse = null!;
     private CheckBox _chkOrganizeBySender = null!;
     private CheckBox _chkTelemetry = null!;
+    private Label _lblMediaNotice = null!;
 
     public string StepTitle => "Generation Settings";
     public bool CanMoveNext => !string.IsNullOrWhiteSpace(_txtOutputFolder?.Text);
@@ -223,14 +224,31 @@ public class StepGenerationConfig : UserControl, IWizardStep
         y += sectionGap;
 
         // === Images Section ===
-        y = AddSectionHeader(mainPanel, "AI-Generated Images (DALL-E)", y);
+        y = AddSectionHeader(mainPanel, "AI-Generated Images (OpenAI gpt-image)", y);
+
+        // Shown when no tested OpenAI key exists (images/voicemail need OpenAI, PROV-06)
+        y = AddLabeledRow(mainPanel, "", y, labelWidth, rowHeight, () =>
+        {
+            var panel = new Panel { Width = 600, Height = rowHeight };
+            _lblMediaNotice = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = Color.DarkOrange,
+                Font = new Font(this.Font.FontFamily, 9.5F, FontStyle.Bold),
+                Visible = false
+            };
+            panel.Controls.Add(_lblMediaNotice);
+            return panel;
+        });
 
         y = AddLabeledRow(mainPanel, "Include Images:", y, labelWidth, rowHeight, () =>
         {
             var panel = new Panel { Width = 500, Height = rowHeight };
             _chkImages = new CheckBox
             {
-                Text = "Generate images for emails (uses DALL-E API)",
+                Text = "Generate images for emails (uses the OpenAI image API)",
                 Checked = false,
                 AutoSize = true,
                 Font = new Font(this.Font.FontFamily, 10F),
@@ -246,7 +264,7 @@ public class StepGenerationConfig : UserControl, IWizardStep
 
         y = AddLabeledRow(mainPanel, "% with Images:", y, labelWidth, rowHeight, () =>
         {
-            var panel = new Panel { Width = 450, Height = rowHeight };
+            var panel = new Panel { Width = 540, Height = rowHeight };
             _numImagePercent = new NumericUpDown
             {
                 Minimum = 1,
@@ -259,7 +277,7 @@ public class StepGenerationConfig : UserControl, IWizardStep
             };
             var helpLabel = new Label
             {
-                Text = "(Images are inline or attachments, costs ~$0.04/image)",
+                Text = "(Images are inline or attachments, about $0.006/image at low quality)",
                 AutoSize = true,
                 ForeColor = Color.DimGray,
                 Font = new Font(this.Font.FontFamily, 9F),
@@ -534,6 +552,20 @@ public class StepGenerationConfig : UserControl, IWizardStep
         _numVoicemailPercent.Value = _state.Config.VoicemailPercentage;
         _numVoicemailPercent.Enabled = _state.Config.IncludeVoicemails;
 
+        // Gate image/voicemail options on a tested OpenAI key (PROV-06)
+        var mediaAvailable = _state.IsMediaAvailable;
+        if (!mediaAvailable)
+        {
+            _chkImages.Checked = false;
+            _chkVoicemails.Checked = false;
+        }
+        _chkImages.Enabled = mediaAvailable;
+        _chkVoicemails.Enabled = mediaAvailable;
+        _numImagePercent.Enabled = mediaAvailable && _chkImages.Checked;
+        _numVoicemailPercent.Enabled = mediaAvailable && _chkVoicemails.Checked;
+        _lblMediaNotice.Text = _state.MediaUnavailableNotice;
+        _lblMediaNotice.Visible = !mediaAvailable;
+
         _chkCalendarInvites.Checked = _state.Config.IncludeCalendarInvites;
         _numCalendarPercent.Value = _state.Config.CalendarInvitePercentage;
         _numCalendarPercent.Enabled = _state.Config.IncludeCalendarInvites;
@@ -593,6 +625,7 @@ public class StepGenerationConfig : UserControl, IWizardStep
         _state.Config.ImagePercentage = (int)_numImagePercent.Value;
         _state.Config.IncludeVoicemails = _chkVoicemails.Checked;
         _state.Config.VoicemailPercentage = (int)_numVoicemailPercent.Value;
+        _state.ApplyMediaAvailability();
         _state.Config.IncludeCalendarInvites = _chkCalendarInvites.Checked;
         _state.Config.CalendarInvitePercentage = (int)_numCalendarPercent.Value;
         _state.Config.OutputFolder = _txtOutputFolder.Text;

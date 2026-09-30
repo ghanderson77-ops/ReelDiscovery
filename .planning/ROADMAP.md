@@ -33,7 +33,20 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The user can pick Claude or OpenAI plus a model, and a structured (JSON-schema) request returns a valid typed result from either provider. Refusals, truncations and spend-limit errors show up as classified outcomes and are not retried blindly.
   4. Image generation works again on a gpt-image model. With Claude selected and no OpenAI key configured, images and voicemail are disabled and the user sees a clear notice.
   5. `dotnet test` runs a test project that passes, and the shared-Random and parallel-mutation bugs are fixed.
-**Plans**: TBD
+**Plans**: 11 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Retarget to net10.0-windows, pin SDK, upgrade packages, xUnit test project + document regressions (Wave 1)
+- [ ] 01-02-PLAN.md — Concurrency fixes (Random.Shared, error sink, progress snapshots) and legacy bug fixes B1-B5 (Wave 2)
+- [ ] 01-03-PLAN.md — Gateway core: contracts, strict JSON-schema registry, LlmGateway retry policy, new model catalog (Wave 2)
+- [ ] 01-04-PLAN.md — Anthropic Claude provider translator, outcome classification, free key test (Wave 3)
+- [ ] 01-05-PLAN.md — OpenAI text provider, quota-aware retry, key test, gpt-image/tts-1 media client (Wave 3)
+- [ ] 01-06-PLAN.md — DPAPI ApiKeyStore + legacy Base64 key migration at startup (Wave 3)
+- [ ] 01-07-PLAN.md — WizardState provider/tier model, two-provider keys screen, model catalog dialog (Wave 4)
+- [ ] 01-08-PLAN.md — Port Storyline/Character/Theme generators to the gateway (Wave 5)
+- [ ] 01-09-PLAN.md — Media gating UI on Topic and Generation Config steps (Wave 5)
+- [ ] 01-10-PLAN.md — Port EmailGenerator to the gateway + media client, delete dead code (Wave 5)
+- [ ] 01-11-PLAN.md — Fatal-stop/outcome UX, generator media guard, delete OpenAIService, phase gate (Wave 6)
 **UI hint**: yes
 
 ### Phase 2: Case Scenario & Core Document
@@ -129,7 +142,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Provider Gateway | 0/TBD | Not started | - |
+| 1. Foundation & Provider Gateway | 0/11 | Planned | - |
 | 2. Case Scenario & Core Document | 0/TBD | Not started | - |
 | 3. Case Guide | 0/TBD | Not started | - |
 | 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |

@@ -85,7 +85,13 @@ public class StepApiConfiguration : UserControl, IWizardStep
         mainLayout.SetColumnSpan(openAIHeader, 2);
 
         mainLayout.Controls.Add(CreateFieldLabel("OpenAI API Key:"), 0, 1);
-        _txtOpenAIKey = CreateKeyTextBox();
+        _txtOpenAIKey = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            UseSystemPasswordChar = true, // masked against shoulder surfing/screenshots
+            Font = new Font("Consolas", 11F),
+            Margin = new Padding(0, 6, 8, 0)
+        };
         _txtOpenAIKey.TextChanged += (s, e) => OnKeyTextChanged(LlmProviderKind.OpenAI);
         _btnTestOpenAI = ButtonHelper.CreateButton("Test", 100, 34, ButtonStyle.Primary);
         _btnTestOpenAI.Click += async (s, e) => await TestKeyAsync(LlmProviderKind.OpenAI);
@@ -105,7 +111,13 @@ public class StepApiConfiguration : UserControl, IWizardStep
         mainLayout.SetColumnSpan(anthropicHeader, 2);
 
         mainLayout.Controls.Add(CreateFieldLabel("Anthropic API Key:"), 0, 5);
-        _txtAnthropicKey = CreateKeyTextBox();
+        _txtAnthropicKey = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            UseSystemPasswordChar = true, // masked against shoulder surfing/screenshots
+            Font = new Font("Consolas", 11F),
+            Margin = new Padding(0, 6, 8, 0)
+        };
         _txtAnthropicKey.TextChanged += (s, e) => OnKeyTextChanged(LlmProviderKind.Anthropic);
         _btnTestAnthropic = ButtonHelper.CreateButton("Test", 100, 34, ButtonStyle.Primary);
         _btnTestAnthropic.Click += async (s, e) => await TestKeyAsync(LlmProviderKind.Anthropic);
@@ -211,14 +223,6 @@ public class StepApiConfiguration : UserControl, IWizardStep
         TextAlign = ContentAlignment.MiddleLeft,
         ForeColor = Color.Gray,
         Font = new Font(this.Font.FontFamily, 9.5F)
-    };
-
-    private static TextBox CreateKeyTextBox() => new()
-    {
-        Dock = DockStyle.Fill,
-        UseSystemPasswordChar = true,
-        Font = new Font("Consolas", 11F),
-        Margin = new Padding(0, 6, 8, 0)
     };
 
     private ComboBox CreateComboBox() => new()

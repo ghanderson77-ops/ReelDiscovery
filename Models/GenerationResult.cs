@@ -15,6 +15,19 @@ public class GenerationResult
     public TimeSpan ElapsedTime { get; set; }
     public List<string> Errors { get; set; } = new();
     public bool WasCancelled { get; set; }
+
+    private readonly object _errorsLock = new();
+
+    /// <summary>
+    /// Thread-safe way to record an error from parallel generation tasks.
+    /// </summary>
+    public void AddError(string message)
+    {
+        lock (_errorsLock)
+        {
+            Errors.Add(message);
+        }
+    }
 }
 
 public class GenerationProgress
@@ -30,4 +43,10 @@ public class GenerationProgress
 
     public double OverallPercentage =>
         TotalEmails == 0 ? 0 : (CompletedEmails * 100.0) / TotalEmails;
+
+    /// <summary>
+    /// Immutable-by-convention snapshot for progress reporting. All members are value types
+    /// or strings, so a shallow copy is a full snapshot.
+    /// </summary>
+    public GenerationProgress Clone() => (GenerationProgress)MemberwiseClone();
 }

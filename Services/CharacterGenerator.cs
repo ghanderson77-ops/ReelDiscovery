@@ -6,7 +6,6 @@ namespace ReelDiscovery.Services;
 public class CharacterGenerator
 {
     private readonly OpenAIService _openAI;
-    private readonly Random _random = new();
 
     // Available TTS voices with characteristics
     private static readonly string[] MaleVoices = ["echo", "onyx", "fable"];
@@ -28,11 +27,11 @@ public class CharacterGenerator
         var lowerGender = gender?.ToLowerInvariant() ?? "";
         if (lowerGender == "female" || lowerGender == "f")
         {
-            return FemaleVoices[_random.Next(FemaleVoices.Length)];
+            return FemaleVoices[Random.Shared.Next(FemaleVoices.Length)];
         }
         if (lowerGender == "male" || lowerGender == "m")
         {
-            return MaleVoices[_random.Next(MaleVoices.Length)];
+            return MaleVoices[Random.Shared.Next(MaleVoices.Length)];
         }
 
         // Fallback: use heuristics based on name and personality notes
@@ -59,17 +58,17 @@ public class CharacterGenerator
         // Pick a random voice from the appropriate set
         if (likelyFemale && !likelyMale)
         {
-            return FemaleVoices[_random.Next(FemaleVoices.Length)];
+            return FemaleVoices[Random.Shared.Next(FemaleVoices.Length)];
         }
         else if (likelyMale && !likelyFemale)
         {
-            return MaleVoices[_random.Next(MaleVoices.Length)];
+            return MaleVoices[Random.Shared.Next(MaleVoices.Length)];
         }
         else
         {
             // Unknown or ambiguous - pick randomly from all
             var allVoices = MaleVoices.Concat(FemaleVoices).ToArray();
-            return allVoices[_random.Next(allVoices.Length)];
+            return allVoices[Random.Shared.Next(allVoices.Length)];
         }
     }
 

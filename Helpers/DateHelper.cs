@@ -2,7 +2,6 @@ namespace ReelDiscovery.Helpers;
 
 public static class DateHelper
 {
-    private static readonly Random _random = new();
 
     public static List<DateTime> DistributeDatesForThread(
         int emailCount,
@@ -26,7 +25,7 @@ public static class DateHelper
         for (int i = 0; i < emailCount; i++)
         {
             // Adjust to business hours 90% of the time
-            var adjustedDate = _random.NextDouble() < 0.9
+            var adjustedDate = Random.Shared.NextDouble() < 0.9
                 ? AdjustToBusinessHours(current)
                 : current;
 
@@ -35,7 +34,7 @@ public static class DateHelper
             if (i < emailCount - 1)
             {
                 // Add some randomness to gaps (0.3x to 1.7x the average)
-                var gapVariation = avgGap * (0.3 + _random.NextDouble() * 1.4);
+                var gapVariation = avgGap * (0.3 + Random.Shared.NextDouble() * 1.4);
                 current = current.AddMinutes(gapVariation);
 
                 // Ensure we don't go past the end date
@@ -58,7 +57,7 @@ public static class DateHelper
         // Adjust to business hours (8 AM - 7 PM)
         if (dt.Hour < 8)
         {
-            dt = dt.Date.AddHours(8).AddMinutes(_random.Next(0, 60));
+            dt = dt.Date.AddHours(8).AddMinutes(Random.Shared.Next(0, 60));
         }
         else if (dt.Hour >= 19)
         {
@@ -68,7 +67,7 @@ public static class DateHelper
             {
                 dt = dt.AddDays(1);
             }
-            dt = dt.AddHours(8).AddMinutes(_random.Next(0, 60));
+            dt = dt.AddHours(8).AddMinutes(Random.Shared.Next(0, 60));
         }
 
         return dt;
@@ -99,7 +98,7 @@ public static class DateHelper
     public static DateTime RandomDateInRange(DateTime start, DateTime end)
     {
         var range = (end - start).TotalMinutes;
-        var randomMinutes = _random.NextDouble() * range;
+        var randomMinutes = Random.Shared.NextDouble() * range;
         return start.AddMinutes(randomMinutes);
     }
 

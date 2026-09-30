@@ -48,7 +48,7 @@ Plans:
 - [x] 01-10-PLAN.md — Port EmailGenerator to the gateway + media client, delete dead code (Wave 5)
 - [x] 01-11-PLAN.md — Fatal-stop/outcome UX, generator media guard, delete OpenAIService, phase gate (Wave 6)
 - [x] 01-12-PLAN.md — Gap closure: classify provider/media transport timeouts (CR-01), stale key-test guard (CR-02) (Wave 1, gaps)
-- [ ] 01-13-PLAN.md — Gap closure: timeout-safe EmailGenerator + no silent success (CR-01), always-visible result + StepComplete status (WR-05), safe email distribution (WR-06) (Wave 1, gaps)
+- [x] 01-13-PLAN.md — Gap closure: timeout-safe EmailGenerator + no silent success (CR-01), always-visible result + StepComplete status (WR-05), safe email distribution (WR-06) (Wave 1, gaps)
 **UI hint**: yes
 
 ### Phase 2: Case Scenario & Core Document

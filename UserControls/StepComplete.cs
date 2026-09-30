@@ -156,7 +156,7 @@ public class StepComplete : UserControl, IWizardStep
         AddStatRow("Output Folder", result.OutputFolder);
         AddStatRow("", "");
         AddStatRow("--- API Usage ---", "");
-        AddStatRow("Model Used", _state.SelectedModel);
+        AddStatRow("Models Used", _state.ProviderSummary);
         AddStatRow("Input Tokens", $"{_state.UsageTracker.TotalInputTokens:N0}");
         AddStatRow("Output Tokens", $"{_state.UsageTracker.TotalOutputTokens:N0}");
         AddStatRow("Total Tokens", $"{_state.UsageTracker.TotalInputTokens + _state.UsageTracker.TotalOutputTokens:N0}");
@@ -190,7 +190,7 @@ public class StepComplete : UserControl, IWizardStep
                 _state.Result.TotalEmailsGenerated,
                 _state.Result.TotalThreadsGenerated,
                 _state.Result.TotalAttachmentsGenerated,
-                _state.SelectedModel,
+                _state.ProviderSummary,
                 _state.Result.ElapsedTime);
         }
     }

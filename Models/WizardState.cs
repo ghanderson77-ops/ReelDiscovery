@@ -1,8 +1,89 @@
+using ReelDiscovery.Services.Ai;
+
 namespace ReelDiscovery.Models;
 
 public class WizardState
 {
+    public WizardState()
+    {
+        SetTextProvider(LlmProviderKind.OpenAI);
+    }
+
     // Step 1 - API Configuration
+    public string OpenAIApiKey { get; set; } = string.Empty;
+    public string AnthropicApiKey { get; set; } = string.Empty;
+    public bool OpenAIKeyTested { get; set; }
+    public bool AnthropicKeyTested { get; set; }
+
+    /// <summary>
+    /// Text provider for this run; defaults to OpenAI on every launch (D-05) and is never persisted.
+    /// </summary>
+    public LlmProviderKind TextProvider { get; private set; } = LlmProviderKind.OpenAI;
+
+    public string StoryModelId { get; set; } = string.Empty;
+    public string VolumeModelId { get; set; } = string.Empty;
+
+    // Tiers never mix providers (D-11): configs are filtered to the selected text provider
+    public AIModelConfig? StoryModelConfig =>
+        AvailableModelConfigs.FirstOrDefault(m => m.ModelId == StoryModelId && m.Provider == TextProvider);
+
+    public AIModelConfig? VolumeModelConfig =>
+        AvailableModelConfigs.FirstOrDefault(m => m.ModelId == VolumeModelId && m.Provider == TextProvider);
+
+    /// <summary>
+    /// Selects the text provider and resets Story/Volume to that provider's catalog tier defaults.
+    /// </summary>
+    public void SetTextProvider(LlmProviderKind provider)
+    {
+        TextProvider = provider;
+        StoryModelId = AIModelConfig.GetTierDefault(AvailableModelConfigs, provider, LlmTier.Story)?.ModelId ?? string.Empty;
+        VolumeModelId = AIModelConfig.GetTierDefault(AvailableModelConfigs, provider, LlmTier.Volume)?.ModelId ?? string.Empty;
+    }
+
+    // Images and voicemail always use OpenAI, regardless of the text provider
+    public bool IsMediaAvailable => !string.IsNullOrWhiteSpace(OpenAIApiKey) && OpenAIKeyTested;
+
+    public string MediaUnavailableNotice =>
+        "Images and voicemail need a tested OpenAI key. Add one on the API Keys step to enable them.";
+
+    /// <summary>
+    /// Next is allowed once the selected text provider's key has passed its test (D-06).
+    /// </summary>
+    public static bool CanProceedFromKeys(LlmProviderKind provider, bool openAITested, bool anthropicTested) =>
+        provider == LlmProviderKind.OpenAI ? openAITested : anthropicTested;
+
+    public bool CanProceedFromKeys() => CanProceedFromKeys(TextProvider, OpenAIKeyTested, AnthropicKeyTested);
+
+    public string ProviderSummary =>
+        $"{TextProvider}: {StoryModelConfig?.DisplayName ?? StoryModelId} / {VolumeModelConfig?.DisplayName ?? VolumeModelId}";
+
+    /// <summary>
+    /// Model used to test a key: the text provider tests its Story model; the other provider
+    /// (e.g. OpenAI used only for media) tests its Volume default so a key without access to the
+    /// newest model does not needlessly disable media.
+    /// </summary>
+    public string GetKeyTestModelId(LlmProviderKind provider) =>
+        provider == TextProvider
+            ? StoryModelId
+            : AIModelConfig.GetTierDefault(AvailableModelConfigs, provider, LlmTier.Volume)?.ModelId ?? string.Empty;
+
+    public string GetApiKey(LlmProviderKind provider) =>
+        provider == LlmProviderKind.OpenAI ? OpenAIApiKey : AnthropicApiKey;
+
+    public ILlmGateway CreateGateway()
+    {
+        var key = GetApiKey(TextProvider);
+        var story = StoryModelConfig
+            ?? throw new InvalidOperationException($"No Story model selected for {TextProvider}");
+        var volume = VolumeModelConfig
+            ?? throw new InvalidOperationException($"No Volume model selected for {TextProvider}");
+        return new LlmGateway(LlmProviderFactory.Create(TextProvider, key), story, volume, UsageTracker);
+    }
+
+    public OpenAIMediaClient? CreateMediaClient() =>
+        IsMediaAvailable ? new OpenAIMediaClient(OpenAIApiKey, Config.ImageModel, Config.ImageQuality) : null;
+
+    // Legacy single-key state (removed once the keys screen is rebuilt)
     public string ApiKey { get; set; } = string.Empty;
     public string SelectedModel { get; set; } = "gpt-4o-mini";
     public bool ConnectionTested { get; set; }

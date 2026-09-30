@@ -46,7 +46,7 @@ Plans:
 - [x] 01-08-PLAN.md — Port Storyline/Character/Theme generators to the gateway (Wave 5)
 - [x] 01-09-PLAN.md — Media gating UI on Topic and Generation Config steps; remove Slack telemetry (D-16) (Wave 5)
 - [x] 01-10-PLAN.md — Port EmailGenerator to the gateway + media client, delete dead code (Wave 5)
-- [ ] 01-11-PLAN.md — Fatal-stop/outcome UX, generator media guard, delete OpenAIService, phase gate (Wave 6)
+- [x] 01-11-PLAN.md — Fatal-stop/outcome UX, generator media guard, delete OpenAIService, phase gate (Wave 6)
 **UI hint**: yes
 
 ### Phase 2: Case Scenario & Core Document

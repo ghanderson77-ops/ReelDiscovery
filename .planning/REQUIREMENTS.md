@@ -10,19 +10,19 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Platform & Foundation
 
 - [x] **PLAT-01**: App targets .NET 10 (net10.0-windows) with the SDK pinned via global.json and still publishes as a single-file self-contained exe
-- [ ] **PLAT-02**: API keys are stored encrypted with Windows DPAPI (existing Base64 key file migrated)
+- [x] **PLAT-02**: API keys are stored encrypted with Windows DPAPI (existing Base64 key file migrated)
 - [ ] **PLAT-03**: A test project exists and runs unit tests for planner, validators, answer-key writer and EML output
 - [x] **PLAT-04**: Known concurrency bugs are fixed (shared `System.Random`, non-thread-safe mutation in parallel sections)
 - [ ] **PLAT-05**: Dead code in the old generation path is removed as it is replaced
 
 ### AI Providers
 
-- [ ] **PROV-01**: User can choose Anthropic Claude or OpenAI as the text-generation provider and select a model
-- [ ] **PROV-02**: User can enter and test API keys for both providers
-- [ ] **PROV-03**: All text generation goes through one provider abstraction that supports strict structured (JSON-schema) outputs on both providers
-- [ ] **PROV-04**: Provider responses are classified (succeeded / refused / truncated / invalid / failed) so refusals and spend-limit errors are not blindly retried
-- [ ] **PROV-05**: Image generation uses a current OpenAI image model (gpt-image family) instead of the retired dall-e-3
-- [ ] **PROV-06**: When Claude is the text provider, images and voicemail use a configured OpenAI key; if none is configured those media types are disabled with a clear notice
+- [x] **PROV-01**: User can choose Anthropic Claude or OpenAI as the text-generation provider and select a model
+- [x] **PROV-02**: User can enter and test API keys for both providers
+- [x] **PROV-03**: All text generation goes through one provider abstraction that supports strict structured (JSON-schema) outputs on both providers
+- [x] **PROV-04**: Provider responses are classified (succeeded / refused / truncated / invalid / failed) so refusals and spend-limit errors are not blindly retried
+- [x] **PROV-05**: Image generation uses a current OpenAI image model (gpt-image family) instead of the retired dall-e-3
+- [x] **PROV-06**: When Claude is the text provider, images and voicemail use a configured OpenAI key; if none is configured those media types are disabled with a clear notice
 - [ ] **PROV-07**: Token usage and cost tracking accounts for cache writes, cache reads and batch discounts, with editable pricing per model
 
 ### Case Scenario & Core Document
@@ -173,16 +173,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PLAT-01 | Phase 1 | Complete |
-| PLAT-02 | Phase 1 | Pending |
+| PLAT-02 | Phase 1 | Complete |
 | PLAT-03 | Phase 1, Phase 4 | Partial (Phase 1: harness + EML tests; planner/validator/answer-key tests in Phase 4) |
 | PLAT-04 | Phase 1 | Complete |
 | PLAT-05 | Phase 7 | Pending |
-| PROV-01 | Phase 1 | Pending |
-| PROV-02 | Phase 1 | Pending |
-| PROV-03 | Phase 1 | Pending |
-| PROV-04 | Phase 1 | Pending |
-| PROV-05 | Phase 1 | Pending |
-| PROV-06 | Phase 1 | Pending |
+| PROV-01 | Phase 1 | Complete |
+| PROV-02 | Phase 1 | Complete |
+| PROV-03 | Phase 1 | Complete |
+| PROV-04 | Phase 1 | Complete |
+| PROV-05 | Phase 1 | Complete |
+| PROV-06 | Phase 1 | Complete |
 | PROV-07 | Phase 7 | Pending |
 | CASE-01 | Phase 2 | Pending |
 | CASE-02 | Phase 2 | Pending |

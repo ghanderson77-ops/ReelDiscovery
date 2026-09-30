@@ -132,6 +132,9 @@ public class StepComplete : UserControl, IWizardStep
 
         var result = _state.Result;
 
+        AddStatRow("Status", DescribeStatus(result));
+        if (result.Errors.Count > 0)
+            AddStatRow("Errors / Skipped Items", result.Errors.Count.ToString());
         AddStatRow("Total Emails Generated", result.TotalEmailsGenerated.ToString());
         AddStatRow("Email Threads Created", result.TotalThreadsGenerated.ToString());
         AddStatRow("", "");
@@ -161,10 +164,48 @@ public class StepComplete : UserControl, IWizardStep
         AddStatRow("Total Tokens", $"{_state.UsageTracker.TotalInputTokens + _state.UsageTracker.TotalOutputTokens:N0}");
         AddStatRow("Estimated Cost", $"${_state.UsageTracker.TotalCost:F4}");
 
-        _lblSummary.Text = "Your email dataset is ready for import into your e-discovery platform.\n\n" +
-                          "The .EML files contain proper threading headers (Message-ID, In-Reply-To, References)\n" +
-                          "so email threads will be grouped correctly when imported.\n\n" +
-                          "Click 'Finish' to close this wizard, or 'Open Output Folder' to view the generated files.";
+        _lblSummary.Text = BuildSummaryText(result);
+        _lblSummary.ForeColor = result.FatalError != null ? Color.Firebrick : Color.DimGray;
+    }
+
+    /// <summary>
+    /// Short run outcome for the Status row. Same precedence as StepGeneration: fatal, cancelled, errors, clean.
+    /// </summary>
+    internal static string DescribeStatus(GenerationResult result) =>
+        result.FatalError != null ? "Stopped by provider error"
+        : result.WasCancelled ? "Cancelled"
+        : result.Errors.Count > 0 ? $"Completed with {result.Errors.Count} error(s)"
+        : "Completed";
+
+    /// <summary>
+    /// Summary text for the completion page; only a clean run says the dataset is ready for import (WR-05).
+    /// </summary>
+    internal static string BuildSummaryText(GenerationResult result)
+    {
+        if (result.FatalError != null)
+        {
+            return $"Generation was stopped by a provider error: {result.FatalError}\n\n" +
+                   "Threads completed before the stop were saved to the output folder. " +
+                   "Check your API key, billing or spend limit, then run again.";
+        }
+
+        if (result.WasCancelled)
+        {
+            return "Generation was cancelled. Threads completed before the cancel were saved to the output folder.\n\n" +
+                   "Click 'Finish' to close this wizard, or 'Open Output Folder' to view the generated files.";
+        }
+
+        if (result.Errors.Count > 0)
+        {
+            return $"Generation finished, but {result.Errors.Count} item(s) were skipped or failed " +
+                   "(see the run log on the previous step). The saved .EML files are usable for import.\n\n" +
+                   "Click 'Finish' to close this wizard, or 'Open Output Folder' to view the generated files.";
+        }
+
+        return "Your email dataset is ready for import into your e-discovery platform.\n\n" +
+               "The .EML files contain proper threading headers (Message-ID, In-Reply-To, References)\n" +
+               "so email threads will be grouped correctly when imported.\n\n" +
+               "Click 'Finish' to close this wizard, or 'Open Output Folder' to view the generated files.";
     }
 
     private void AddStatRow(string metric, string value)

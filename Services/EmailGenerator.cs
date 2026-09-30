@@ -90,6 +90,7 @@ public class EmailGenerator
         {
             OutputFolder = state.Config.OutputFolder
         };
+        state.Result = result; // Current run's result is visible on every exit path (WR-05)
 
         var startTime = DateTime.Now;
         var progressData = new GenerationProgress
@@ -175,9 +176,16 @@ public class EmailGenerator
                     var newCompleted = Interlocked.Add(ref completedEmails[0], emailCount);
                     Report(p => p.CompletedEmails = newCompleted);
                 }
+                catch (OperationCanceledException) when (runCts.IsCancellationRequested)
+                {
+                    throw; // User cancel or fatal run stop
+                }
                 catch (OperationCanceledException)
                 {
-                    throw; // Let cancellation propagate
+                    // Run not cancelled: a request timed out. Skip this storyline and keep going (CR-01)
+                    result.AddError($"Storyline '{storyline.Title}' skipped (request timed out)");
+                    var newCompleted = Interlocked.Add(ref completedEmails[0], emailCount);
+                    Report(p => p.CompletedEmails = newCompleted);
                 }
                 catch (LlmCallException ex) when (ex.Result.IsFatal)
                 {
@@ -427,10 +435,29 @@ public class EmailGenerator
         }
         catch (OperationCanceledException)
         {
-            // User cancel sets WasCancelled; a fatal provider stop leaves it false (FatalError is set instead)
-            result.WasCancelled = ct.IsCancellationRequested;
+            // User cancel sets WasCancelled; a fatal provider stop leaves it false (FatalError is set instead);
+            // any other stop is recorded as an error so it never looks like a clean success
+            RecordUnexpectedStop(result, ct.IsCancellationRequested);
 
             // Save the threads completed so far so a cancelled run still leaves usable output
+            await SavePartialAsync();
+
+            result.ElapsedTime = DateTime.Now - startTime;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            result.AddError(ex.Message);
+
+            // Save the threads completed so far, same as the cancel path (WR-05)
+            await SavePartialAsync();
+
+            result.ElapsedTime = DateTime.Now - startTime;
+            return result;
+        }
+
+        async Task SavePartialAsync()
+        {
             if (!threads.IsEmpty)
             {
                 var threadsList = threads.ToList();
@@ -439,21 +466,17 @@ public class EmailGenerator
                 await SaveAndFinalizeAsync(threadsList, allEmails, attachmentsSoFar, state, result, startTime,
                     op => Report(p => p.CurrentOperation = op));
             }
-
-            result.ElapsedTime = DateTime.Now - startTime;
-            return result;
-        }
-        catch (Exception ex)
-        {
-            result.AddError(ex.Message);
-            result.ElapsedTime = DateTime.Now - startTime;
-            return result;
+            else
+            {
+                state.GeneratedThreads = new List<EmailThread>();
+            }
         }
     }
 
     /// <summary>
     /// Run one enrichment item (attachment, image, calendar invite, voicemail) so that a failure
-    /// is recorded and skipped instead of faulting the whole pass. Cancellation still propagates.
+    /// is recorded and skipped instead of faulting the whole pass. Cancellation of the run propagates;
+    /// any other OperationCanceledException (timeout) is recorded as a skip.
     /// </summary>
     /// <param name="runCts">Linked run token source; used by plan 01-11 to stop the run on fatal provider errors.</param>
     internal static async Task<int> RunIsolatedAsync(
@@ -463,9 +486,15 @@ public class EmailGenerator
         {
             return await work();
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (runCts.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // Run not cancelled: a request timed out. Skip this item (CR-01)
+            result.AddError($"{failureLabel} skipped (request timed out)");
+            return 0;
         }
         catch (LlmCallException ex) when (ex.Result.IsFatal)
         {
@@ -506,6 +535,19 @@ public class EmailGenerator
         lock (_fatalLock)
         {
             result.FatalError ??= message;
+        }
+    }
+
+    /// <summary>
+    /// Outer-catch bookkeeping: a user cancel sets WasCancelled; a stop that is neither a user cancel nor a
+    /// recorded fatal error is reported as an error so the run can never look like a clean success (CR-01).
+    /// </summary>
+    internal static void RecordUnexpectedStop(GenerationResult result, bool userCancelled)
+    {
+        result.WasCancelled = userCancelled;
+        if (!userCancelled && result.FatalError == null)
+        {
+            result.AddError("Run stopped unexpectedly (a request timed out or was aborted). Completed threads were saved.");
         }
     }
 

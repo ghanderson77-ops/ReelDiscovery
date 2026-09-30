@@ -11,6 +11,7 @@ public class StepTopicInput : UserControl, IWizardStep
     private CheckBox _chkDocuments = null!;
     private CheckBox _chkImages = null!;
     private CheckBox _chkVoicemails = null!;
+    private Label _lblMediaNotice = null!;
 
     public string StepTitle => "Topic Selection";
     public bool CanMoveNext => !string.IsNullOrWhiteSpace(_txtTopic?.Text);
@@ -43,7 +44,7 @@ public class StepTopicInput : UserControl, IWizardStep
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));  // 4: Storyline count label
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));  // 5: Storyline count input
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));  // 6: Media types label
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));  // 7: Media type checkboxes
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));  // 7: Media type checkboxes + unavailable notice (wraps)
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));   // 8: Help text
 
         // Topic label
@@ -123,7 +124,7 @@ public class StepTopicInput : UserControl, IWizardStep
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false
+            WrapContents = true
         };
 
         _chkDocuments = new CheckBox
@@ -155,6 +156,17 @@ public class StepTopicInput : UserControl, IWizardStep
             Margin = new Padding(0, 5, 0, 0)
         };
         mediaPanel.Controls.Add(_chkVoicemails);
+
+        // Shown when no tested OpenAI key exists (images/voicemail need OpenAI)
+        _lblMediaNotice = new Label
+        {
+            AutoSize = true,
+            ForeColor = Color.DarkOrange,
+            Font = new Font("Segoe UI", 9F),
+            Margin = new Padding(20, 7, 0, 0),
+            Visible = false
+        };
+        mediaPanel.Controls.Add(_lblMediaNotice);
 
         mainLayout.Controls.Add(mediaPanel, 0, 7);
 
@@ -202,6 +214,18 @@ public class StepTopicInput : UserControl, IWizardStep
         _chkImages.Checked = _state.WantsImages;
         _chkVoicemails.Checked = _state.WantsVoicemails;
 
+        // Gate image/voicemail options on a tested OpenAI key (PROV-06)
+        var mediaAvailable = _state.IsMediaAvailable;
+        _chkImages.Enabled = mediaAvailable;
+        _chkVoicemails.Enabled = mediaAvailable;
+        if (!mediaAvailable)
+        {
+            _chkImages.Checked = false;
+            _chkVoicemails.Checked = false;
+        }
+        _lblMediaNotice.Text = _state.MediaUnavailableNotice;
+        _lblMediaNotice.Visible = !mediaAvailable;
+
         return Task.CompletedTask;
     }
 
@@ -230,6 +254,7 @@ public class StepTopicInput : UserControl, IWizardStep
         // Also pre-populate the generation config so these carry forward
         _state.Config.IncludeImages = _chkImages.Checked;
         _state.Config.IncludeVoicemails = _chkVoicemails.Checked;
+        _state.ApplyMediaAvailability();
 
         // Clear previously generated data if topic changed
         if (_state.Storylines.Count > 0)

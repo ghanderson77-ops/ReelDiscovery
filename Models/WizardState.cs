@@ -46,6 +46,16 @@ public class WizardState
     public string MediaUnavailableNotice =>
         "Images and voicemail need a tested OpenAI key. Add one on the API Keys step to enable them.";
 
+    /// <summary>Forces image/voicemail options off when no tested OpenAI key is configured (PROV-06).</summary>
+    public void ApplyMediaAvailability()
+    {
+        if (IsMediaAvailable) return;
+        WantsImages = false;
+        WantsVoicemails = false;
+        Config.IncludeImages = false;
+        Config.IncludeVoicemails = false;
+    }
+
     /// <summary>
     /// Next is allowed once the selected text provider's key has passed its test (D-06).
     /// </summary>

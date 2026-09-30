@@ -40,7 +40,7 @@ Plans:
 - [x] 01-02-PLAN.md — Concurrency fixes (Random.Shared, error sink, progress snapshots) and legacy bug fixes B1-B5 (Wave 2)
 - [x] 01-03-PLAN.md — Gateway core: contracts, strict JSON-schema registry, LlmGateway retry policy, new model catalog (Wave 2)
 - [x] 01-04-PLAN.md — Anthropic Claude provider translator, outcome classification, spend-cap retry guard, free key test (Wave 3)
-- [ ] 01-05-PLAN.md — OpenAI text provider, quota-aware retry, key test, gpt-image/tts-1 media client (Wave 3)
+- [x] 01-05-PLAN.md — OpenAI text provider, quota-aware retry, key test, gpt-image/tts-1 media client (Wave 3)
 - [ ] 01-06-PLAN.md — DPAPI ApiKeyStore + legacy Base64 key migration at startup (Wave 3)
 - [ ] 01-07-PLAN.md — WizardState provider/tier model, two-provider keys screen, model catalog dialog (Wave 4)
 - [ ] 01-08-PLAN.md — Port Storyline/Character/Theme generators to the gateway (Wave 5)

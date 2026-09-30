@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-09-30T13:58:43.232Z"
+last_updated: "2026-09-30T14:04:05.669Z"
 last_activity: 2026-09-30
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 4
-  percent: 36
+  completed_plans: 5
+  percent: 45
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 01 (foundation-provider-gateway) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 Status: Ready to execute
 Last activity: 2026-09-30
 
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P02 | 12min | 3 tasks | 6 files |
 | Phase 01 P03 | 14min | 3 tasks | 15 files |
 | Phase 01 P04 | 6min | 2 tasks | 7 files |
+| Phase 01 P05 | 8min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 01-03]: Gateway treats provider Outcome=Invalid like unparseable output (3-attempt cap); MEAI inlines nested DTOs (no $ref)
 - [Phase 01-04]: Anthropic spend-cap 429 guard uses x-should-retry: false (SDK 12.51.0 honours it); MaxNonStreamingTokens 21_333 kept (SDK has no client-side long-request guard)
 - [Phase 01-04]: JsonSchemaRegistry serializer options frozen with explicit TypeInfoResolver (fixes concurrent-build race)
+- [Phase 01]: D-15 verified: gpt-6.1-sol supports Chat Completions, strict Structured Outputs and reasoning_effort low (none/minimal unsupported); catalog values unchanged
+- [Phase 01]: OpenAI transport retries use QuotaAwareRetryPolicy: 429 insufficient_quota is never retried
+- [Phase 01]: OpenAI images use gpt-image-2.5-flare at quality low (GenerationConfig.ImageModel/ImageQuality); speech stays tts-1
 
 ### Pending Todos
 
@@ -95,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-30T13:58:43.228Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-09-30T14:04:05.665Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None

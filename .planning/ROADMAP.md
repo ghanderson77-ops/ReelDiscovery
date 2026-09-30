@@ -43,7 +43,7 @@ Plans:
 - [x] 01-05-PLAN.md — OpenAI text provider, quota-aware retry, key test, gpt-image/tts-1 media client (Wave 3)
 - [x] 01-06-PLAN.md — DPAPI ApiKeyStore + legacy Base64 key migration at startup (Wave 3)
 - [x] 01-07-PLAN.md — WizardState provider/tier model, two-provider keys screen, model catalog dialog (Wave 4)
-- [ ] 01-08-PLAN.md — Port Storyline/Character/Theme generators to the gateway (Wave 5)
+- [x] 01-08-PLAN.md — Port Storyline/Character/Theme generators to the gateway (Wave 5)
 - [ ] 01-09-PLAN.md — Media gating UI on Topic and Generation Config steps; remove Slack telemetry (D-16) (Wave 5)
 - [ ] 01-10-PLAN.md — Port EmailGenerator to the gateway + media client, delete dead code (Wave 5)
 - [ ] 01-11-PLAN.md — Fatal-stop/outcome UX, generator media guard, delete OpenAIService, phase gate (Wave 6)

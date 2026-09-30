@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-07-PLAN.md
-last_updated: "2026-09-30T14:11:47.979Z"
+stopped_at: Completed 01-08-PLAN.md
+last_updated: "2026-09-30T14:15:52.517Z"
 last_activity: 2026-09-30
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 7
-  percent: 64
+  completed_plans: 8
+  percent: 73
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 01 (foundation-provider-gateway) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-09-30
 
@@ -59,6 +59,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P05 | 8min | 2 tasks | 8 files |
 | Phase 01 P06 | 3min | 2 tasks | 4 files |
 | Phase 01 P07 | 6min | 3 tasks | 8 files |
+| Phase 01 P08 | 5min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,7 @@ Recent decisions affecting current work:
 - [Phase 01]: Keys loaded from the DPAPI store are shown untested; the user must Test before Next (tested flags never persisted)
 - [Phase 01]: Configure Models OK requires one Story and one Volume default per provider; first default per (Provider, Tier) wins
 - [Phase 01]: Legacy CreateOpenAIService() uses the OpenAI Volume model until deleted in 01-11
+- [Phase 01-08]: Legacy generators take ILlmGateway; SuggestedDateRange non-null (empty startDate = none); SuggestedEmailCount clamped in code; themes rethrow fatal failures, else default-theme fallback
 
 ### Pending Todos
 
@@ -105,6 +107,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-30T14:11:47.975Z
-Stopped at: Completed 01-07-PLAN.md
+Last session: 2026-09-30T14:15:52.513Z
+Stopped at: Completed 01-08-PLAN.md
 Resume file: None

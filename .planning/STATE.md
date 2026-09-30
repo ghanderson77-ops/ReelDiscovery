@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-09-30T13:52:47.164Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-09-30T13:58:43.232Z"
 last_activity: 2026-09-30
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 11
-  completed_plans: 3
-  percent: 27
+  completed_plans: 4
+  percent: 36
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 01 (foundation-provider-gateway) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 Status: Ready to execute
 Last activity: 2026-09-30
 
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P01 | 5min | 2 tasks | 9 files |
 | Phase 01 P02 | 12min | 3 tasks | 6 files |
 | Phase 01 P03 | 14min | 3 tasks | 15 files |
+| Phase 01 P04 | 6min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,8 @@ Recent decisions affecting current work:
 - [01-02]: Doc chain versions reserved before generation (gaps possible on failure, never duplicates)
 - [Phase 01-03]: OpenAI Story default gpt-6.1-sol effort low (D-15); gpt-6-sol kept as alternative
 - [Phase 01-03]: Gateway treats provider Outcome=Invalid like unparseable output (3-attempt cap); MEAI inlines nested DTOs (no $ref)
+- [Phase 01-04]: Anthropic spend-cap 429 guard uses x-should-retry: false (SDK 12.51.0 honours it); MaxNonStreamingTokens 21_333 kept (SDK has no client-side long-request guard)
+- [Phase 01-04]: JsonSchemaRegistry serializer options frozen with explicit TypeInfoResolver (fixes concurrent-build race)
 
 ### Pending Todos
 
@@ -92,6 +95,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-30T13:52:47.159Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-09-30T13:58:43.228Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None

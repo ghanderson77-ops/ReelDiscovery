@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 01-11-PLAN.md
-last_updated: "2026-09-30T14:28:02.167Z"
+stopped_at: Completed 01-12-PLAN.md
+last_updated: "2026-09-30T15:21:58.238Z"
 last_activity: 2026-09-30
 progress:
   total_phases: 8
-  completed_phases: 1
-  total_plans: 11
-  completed_plans: 11
-  percent: 100
+  completed_phases: 0
+  total_plans: 13
+  completed_plans: 12
+  percent: 92
 ---
 
 # Project State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 01 (foundation-provider-gateway) — EXECUTING
-Plan: 11 of 11
-Status: Phase complete — ready for verification
+Plan: 12 of 13
+Status: Executing gap closure (01-13 remaining)
 Last activity: 2026-09-30
 
 Progress: [░░░░░░░░░░] 0%
@@ -93,6 +93,8 @@ Recent decisions affecting current work:
 - [Phase 01-10]: EmailGenerator on ILlmGateway (Volume tier) + OpenAIMediaClient; null media skips image/voicemail passes before any API call; VoicemailScriptResponse reduced to voicemailScript
 - [01-11]: Fatal provider stop (Auth/SpendLimit) sets FatalError and saves completed threads; WasCancelled means user cancel only
 - [01-11]: PLAT-03 partial in Phase 1; planner/validator/answer-key tests carried to Phase 4
+- [01-12]: Provider OCE rethrown only when caller ct is cancelled; other OCE (transport timeout) -> Failed(Network) / media null
+- [01-12]: Key test result applied only if KeyTestGuard.IsResultCurrent; key box and Clear locked during test
 
 ### Pending Todos
 
@@ -115,5 +117,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-09-30T14:28:02.162Z
-Stopped at: Completed 01-11-PLAN.md
+Stopped at: Completed 01-12-PLAN.md
 Resume file: None

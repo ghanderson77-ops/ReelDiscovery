@@ -44,6 +44,10 @@ Not in this phase: batch APIs, prompt caching, cache/batch cost accounting (Phas
 - **D-13:** OpenAI defaults: the **researcher verifies the current model IDs and prices.** Story is OpenAI's current flagship chat model (prefer non-reasoning or low-latency for throughput), and Volume is its cheapest current tier. Do not hard-code gpt-4o / gpt-4o-mini as the defaults without verifying. The research confidence on OpenAI naming is LOW.
 - **D-14:** Legacy flow tier mapping: **Story** for storylines and characters, **Volume** for emails and themes.
 
+### Added at plan review (2026-09-29)
+- **D-15:** OpenAI **Story** default is **`gpt-6.1-sol` with reasoning effort `low`**. The user chose the newest model over `gpt-6-sol`/none, and this overrides the research recommendation. `gpt-6-sol` stays in the catalog as an alternative. The OpenAI Volume default stays `gpt-6-luna`.
+- **D-16:** **Remove Slack telemetry entirely.** Delete `Services/TelemetryService.cs`, `Forms/TelemetryOptInDialog.cs`, the telemetry calls in `Program.cs` and `UserControls/StepComplete.cs`, and the telemetry toggle in `UserControls/StepGenerationConfig.cs`. Stop reading or writing the telemetry flag in `%LOCALAPPDATA%\ReelDiscovery\settings.json` (an existing file can be left alone or deleted). This resolves the pre-existing HIGH finding for the hard-coded webhook. The user will rotate or revoke the webhook themselves.
+
 ### Claude's Discretion
 - **Outcome UX for refusals, truncations and spend-limit errors:** how each classified outcome is shown to the user (status label or log color), and the retry policy for each class. Constraints: never blindly retry a refusal or a spend-limit or quota error. Truncation may get one retry with a higher max-token limit. Invalid JSON may be retried a bounded number of times. Rely on the SDKs' built-in 429/5xx retries, with no Polly and no double-retry.
 - **Default gpt-image tier and size/quality** for PROV-05 (for example gpt-image-1-mini for cost). Pick a value and make it configurable where cheap to do so. TTS stays `tts-1` unless research shows otherwise.

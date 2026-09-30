@@ -1,8 +1,8 @@
 ---
 phase: 1
 slug: foundation-provider-gateway
-status: draft
-nyquist_compliant: false
+status: planned
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-09-29
 ---
@@ -36,22 +36,24 @@ created: 2026-09-29
 
 ## Per-Task Verification Map
 
-The planner fills in task IDs. Requirement-level map (from RESEARCH.md §Validation Architecture):
+Task IDs are `{plan}-T{n}` (plan 01-04 Task 2 = `01-04-T2`). Requirement-level map (from RESEARCH.md §Validation Architecture) with the tasks that deliver and verify each row:
 
-| Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
-|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| PLAT-01 | — | N/A | build/smoke | `dotnet publish ReelDiscovery.csproj -c Release` + exe exists; `PlatformTests` | ❌ W0 | ⬜ pending |
-| PLAT-02 | T-key-disclosure | keys.dat contains no plaintext key; legacy Base64 file deleted | unit | `--filter FullyQualifiedName~ApiKeyStoreTests` | ❌ W0 | ⬜ pending |
-| PLAT-03 | — | N/A | meta | `dotnet test` exit 0 | ❌ W0 | ⬜ pending |
-| PLAT-04 | — | N/A | unit | `--filter FullyQualifiedName~ConcurrencyTests` | ❌ W0 | ⬜ pending |
-| D-02 fixes | T-hostile-output | Clamp hour/minute; per-item isolation | unit | `--filter FullyQualifiedName~EmailGeneratorFixTests` | ❌ W0 | ⬜ pending |
-| PROV-01 | — | N/A | unit | `--filter FullyQualifiedName~ModelCatalogTests\|FullyQualifiedName~LlmGatewayTests` | ❌ W0 | ⬜ pending |
-| PROV-02 | T-key-in-logs | Key-test errors never include the key | unit | `--filter FullyQualifiedName~KeyTestTests` | ❌ W0 | ⬜ pending |
-| PROV-03 | T-hostile-output | Strict schema; typed DTO deserialization only | unit | `--filter FullyQualifiedName~Ai.` | ❌ W0 | ⬜ pending |
-| PROV-04 | T-denial-of-wallet | SpendLimit/Auth/Refused get 0 app retries | unit | `--filter FullyQualifiedName~OutcomeClassificationTests` | ❌ W0 | ⬜ pending |
-| PROV-05 | — | N/A | unit | `--filter FullyQualifiedName~OpenAIMediaClientTests` | ❌ W0 | ⬜ pending |
-| PROV-06 | — | N/A | unit | `--filter FullyQualifiedName~MediaGatingTests` | ❌ W0 | ⬜ pending |
-| Regression | — | N/A | unit | `--filter FullyQualifiedName~DocumentRegressionTests` | ❌ W0 | ⬜ pending |
+| Requirement | Plan / Tasks | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
+|-------------|--------------|------------|-----------------|-----------|-------------------|-------------|--------|
+| PLAT-01 | 01-01-T1, 01-01-T2, 01-11-T2 (phase gate) | — | N/A | build/smoke | `dotnet publish ReelDiscovery.csproj -c Release` + exe exists; `PlatformTests` | ❌ W0 | ⬜ pending |
+| PLAT-02 | 01-06-T1, 01-06-T2, 01-07-T1, 01-07-T2 | T-key-disclosure | keys.dat contains no plaintext key; legacy Base64 file deleted | unit | `--filter FullyQualifiedName~ApiKeyStoreTests` | ❌ W0 | ⬜ pending |
+| PLAT-03 (partial in Phase 1; planner/validator/answer-key tests carry to Phase 4) | 01-01-T2, 01-11-T2 | — | N/A | meta | `dotnet test` exit 0 | ❌ W0 | ⬜ pending |
+| PLAT-04 | 01-02-T1, 01-02-T2, 01-02-T3, 01-11-T1 | — | N/A | unit | `--filter FullyQualifiedName~ConcurrencyTests` | ❌ W0 | ⬜ pending |
+| D-02 fixes | 01-02-T2, 01-02-T3, 01-11-T1 | T-hostile-output | Clamp hour/minute; per-item isolation; fatal stop saves work | unit | `--filter FullyQualifiedName~EmailGeneratorFixTests\|FullyQualifiedName~EmailGeneratorOutcomeTests` | ❌ W0 | ⬜ pending |
+| PROV-01 | 01-03-T1, 01-03-T3, 01-07-T1, 01-07-T3, 01-08-T2 | — | N/A | unit | `--filter FullyQualifiedName~ModelCatalogTests\|FullyQualifiedName~LlmGatewayTests\|FullyQualifiedName~WizardStateProviderTests` | ❌ W0 | ⬜ pending |
+| D-15 (OpenAI Story = gpt-6.1-sol, effort low) | 01-03-T1, 01-07-T1 | — | N/A | unit | `--filter FullyQualifiedName~ModelCatalogTests\|FullyQualifiedName~WizardStateProviderTests` | ❌ W0 | ⬜ pending |
+| PROV-02 | 01-04-T2, 01-05-T1, 01-07-T2 | T-key-in-logs | Key-test errors never include the key | unit | `--filter FullyQualifiedName~KeyTestTests` | ❌ W0 | ⬜ pending |
+| PROV-03 | 01-03-T2, 01-04-T1, 01-05-T1, 01-08-T1, 01-08-T2, 01-10-T1, 01-10-T2 | T-hostile-output | Strict schema; typed DTO deserialization only | unit | `--filter FullyQualifiedName~Ai.\|FullyQualifiedName~PortTests` | ❌ W0 | ⬜ pending |
+| PROV-04 | 01-03-T3, 01-04-T1, 01-04-T2, 01-05-T1, 01-11-T1, 01-11-T2 | T-denial-of-wallet | SpendLimit/Auth/Refused get 0 app retries; spend-cap 429 not retried by either SDK (Anthropic: Calls==1 at MaxRetries=2); Anthropic max_tokens clamped for non-streaming | unit | `--filter FullyQualifiedName~OutcomeClassificationTests\|FullyQualifiedName~AnthropicWireTests` | ❌ W0 | ⬜ pending |
+| PROV-05 | 01-05-T2, 01-09-T2, 01-10-T2 | — | N/A | unit | `--filter FullyQualifiedName~OpenAIMediaClientTests` | ❌ W0 | ⬜ pending |
+| PROV-06 | 01-07-T1, 01-09-T1, 01-09-T2, 01-11-T1 | — | N/A | unit | `--filter FullyQualifiedName~MediaGatingTests\|FullyQualifiedName~MediaAvailabilityPolicyTests` | ❌ W0 | ⬜ pending |
+| D-16 telemetry removal | 01-09-T3, 01-11-T2 (gate re-check) | T-01-45 | No hooks.slack.com in app source; TelemetryService/TelemetryOptInDialog deleted | unit (source scan) | `--filter FullyQualifiedName~TelemetryRemovalTests` | ❌ W0 | ⬜ pending |
+| Regression | 01-01-T2 | — | N/A | unit | `--filter FullyQualifiedName~DocumentRegressionTests` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -77,11 +79,11 @@ The planner fills in task IDs. Requirement-level map (from RESEARCH.md §Validat
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 30s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies (26 tasks, 26 automated commands)
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (01-01 creates the project + FakeHttpHandler; 01-03 creates FakeLlmProvider + StrictSchemaValidator)
+- [x] No watch-mode flags
+- [x] Feedback latency < 30s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** planned (execution fills Status)

@@ -28,6 +28,16 @@ public sealed class FakeHttpHandler : HttpMessageHandler
     /// </summary>
     public Queue<(int Status, string Body)> Responses { get; } = new();
 
+    /// <summary>
+    /// Headers added to every response (e.g. retry-after).
+    /// </summary>
+    public Dictionary<string, string> ResponseHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// HTTP method of the most recent request.
+    /// </summary>
+    public HttpMethod? LastRequestMethod { get; private set; }
+
     public string? LastRequestBody { get; private set; }
     public Uri? LastRequestUri { get; private set; }
     public List<string> RequestBodies { get; } = new();
@@ -39,6 +49,7 @@ public sealed class FakeHttpHandler : HttpMessageHandler
     {
         Calls++;
         LastRequestUri = request.RequestUri;
+        LastRequestMethod = request.Method;
         LastRequestBody = request.Content == null ? null : await request.Content.ReadAsStringAsync(ct);
         RequestBodies.Add(LastRequestBody ?? string.Empty);
 
@@ -50,10 +61,10 @@ public sealed class FakeHttpHandler : HttpMessageHandler
         if (Responses.Count > 0)
         {
             var (status, body) = Responses.Dequeue();
-            return new HttpResponseMessage((HttpStatusCode)status)
+            return WithHeaders(new HttpResponseMessage((HttpStatusCode)status)
             {
                 Content = new StringContent(body, Encoding.UTF8, ContentType)
-            };
+            });
         }
 
         HttpContent content;
@@ -68,6 +79,16 @@ public sealed class FakeHttpHandler : HttpMessageHandler
             content = new StringContent(Body, Encoding.UTF8, ContentType);
         }
 
-        return new HttpResponseMessage((HttpStatusCode)Status) { Content = content };
+        return WithHeaders(new HttpResponseMessage((HttpStatusCode)Status) { Content = content });
+    }
+
+    private HttpResponseMessage WithHeaders(HttpResponseMessage response)
+    {
+        foreach (var (name, value) in ResponseHeaders)
+        {
+            response.Headers.TryAddWithoutValidation(name, value);
+        }
+
+        return response;
     }
 }

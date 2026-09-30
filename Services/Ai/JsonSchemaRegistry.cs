@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 
@@ -15,10 +16,9 @@ public static partial class JsonSchemaRegistry
 {
     private static readonly ConcurrentDictionary<Type, string> _schemas = new();
 
-    private static readonly JsonSerializerOptions SchemaSerializerOptions = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() }
-    };
+    // Resolver set up front and options frozen: AIJsonUtilities otherwise assigns TypeInfoResolver lazily
+    // on first use, which throws "read-only" when two schemas are built concurrently
+    private static readonly JsonSerializerOptions SchemaSerializerOptions = CreateSerializerOptions();
 
     private static readonly AIJsonSchemaCreateOptions SchemaOptions = new()
     {
@@ -50,6 +50,17 @@ public static partial class JsonSchemaRegistry
         if (name.Length == 0)
             name = "Schema";
         return name.Length > 64 ? name[..64] : name;
+    }
+
+    private static JsonSerializerOptions CreateSerializerOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter() },
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+        };
+        options.MakeReadOnly();
+        return options;
     }
 
     private static string Build(Type type)

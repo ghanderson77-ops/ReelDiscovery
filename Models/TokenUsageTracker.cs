@@ -35,6 +35,7 @@ public class TokenUsageTracker
                 Timestamp = DateTime.Now,
                 Operation = operation,
                 ModelId = model.ModelId,
+                Provider = model.Provider.ToString(),
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
                 Cost = cost
@@ -105,6 +106,7 @@ public class TokenUsageEntry
     public DateTime Timestamp { get; set; }
     public string Operation { get; set; } = string.Empty;
     public string ModelId { get; set; } = string.Empty;
+    public string Provider { get; set; } = string.Empty;
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
     public decimal Cost { get; set; }

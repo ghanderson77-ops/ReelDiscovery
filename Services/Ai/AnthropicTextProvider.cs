@@ -2,7 +2,9 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using Anthropic;
+using Anthropic.Exceptions;
 using Anthropic.Models.Messages;
+using Anthropic.Models.Models;
 using AnthropicMessage = Anthropic.Models.Messages.Message;
 
 namespace ReelDiscovery.Services.Ai;
@@ -28,6 +30,7 @@ public class AnthropicTextProvider : ILlmProvider
         : this(new Anthropic.Core.ClientOptions
         {
             ApiKey = apiKey,
+            HttpClient = CreateHttpClient(new HttpClientHandler()),
             Timeout = TimeSpan.FromMinutes(10)
         })
     {
@@ -42,16 +45,167 @@ public class AnthropicTextProvider : ILlmProvider
 
     public int? MaxTokensCeiling => MaxNonStreamingTokens;
 
+    /// <summary>
+    /// Wraps the transport in <see cref="AnthropicSpendLimitHandler"/> so spend-cap 429s are never retried by the SDK.
+    /// </summary>
+    internal static HttpClient CreateHttpClient(HttpMessageHandler inner) =>
+        new(new AnthropicSpendLimitHandler { InnerHandler = inner }) { Timeout = TimeSpan.FromMinutes(10) };
+
     public async Task<LlmProviderResponse> SendAsync(LlmProviderRequest request, CancellationToken ct = default)
     {
-        var message = await _client.Messages.Create(BuildParams(request), ct);
-        return Classify(message);
+        // No app-level retry loop: the SDK already retries 429/5xx (spend-cap 429s are excluded by the handler)
+        try
+        {
+            var message = await _client.Messages.Create(BuildParams(request), ct);
+            return Classify(message);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (AnthropicApiException ex)
+        {
+            var kind = MapException(ex);
+            return Failed(kind, SafeMessage(kind, ex));
+        }
+        catch (AnthropicIOException ex)
+        {
+            return Failed(LlmFailureKind.Network, "Network error contacting Anthropic: " + ex.Message);
+        }
+        catch (HttpRequestException ex)
+        {
+            return Failed(LlmFailureKind.Network, "Network error contacting Anthropic: " + ex.Message);
+        }
     }
 
-    public Task<LlmKeyTestResult> TestKeyAsync(string modelId, CancellationToken ct = default)
+    public async Task<LlmKeyTestResult> TestKeyAsync(string modelId, CancellationToken ct = default)
     {
-        throw new NotImplementedException();
+        // Model retrieve is free: validates the key and model access without billing tokens
+        try
+        {
+            await _client.Models.Retrieve(modelId, new ModelRetrieveParams(), ct);
+            return new LlmKeyTestResult { Succeeded = true, Message = $"Anthropic key OK ({modelId})" };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (AnthropicApiException ex)
+        {
+            var kind = MapException(ex);
+            var message = kind switch
+            {
+                LlmFailureKind.Auth => "Key rejected (authentication failed)",
+                LlmFailureKind.BadRequest => $"Model '{modelId}' is not available to this key",
+                LlmFailureKind.SpendLimit => "Key valid but spend limit or credit balance reached",
+                _ => $"Key test failed: {kind}"
+            };
+            return new LlmKeyTestResult { FailureKind = kind, Message = message };
+        }
+        catch (AnthropicIOException)
+        {
+            return new LlmKeyTestResult { FailureKind = LlmFailureKind.Network, Message = "Could not reach api.anthropic.com" };
+        }
+        catch (HttpRequestException)
+        {
+            return new LlmKeyTestResult { FailureKind = LlmFailureKind.Network, Message = "Could not reach api.anthropic.com" };
+        }
     }
+
+    /// <summary>
+    /// Maps an Anthropic API error to a FailureKind, most specific first. Spend-limit errors are classified
+    /// from the body because they arrive as 429 (tier spend cap), 402 (billing) or 400 (user-set usage limit).
+    /// </summary>
+    internal static LlmFailureKind MapException(AnthropicApiException ex)
+    {
+        var body = ex.ResponseBody ?? string.Empty;
+        var status = (int)ex.StatusCode;
+
+        if (ex is AnthropicUnauthorizedException or AnthropicForbiddenException || status is 401 or 403)
+            return LlmFailureKind.Auth;
+
+        if (ex is AnthropicRateLimitException || status == 429)
+        {
+            // Tier spend cap: 429 rate_limit_error with error.details.error_code enforced_spend_limit_reached
+            return body.Contains("enforced_spend_limit_reached", StringComparison.Ordinal)
+                ? LlmFailureKind.SpendLimit
+                : LlmFailureKind.RateLimited;
+        }
+
+        if (status == 402 || body.Contains("billing_error", StringComparison.Ordinal))
+            return LlmFailureKind.SpendLimit;
+
+        if (ex is AnthropicBadRequestException || status == 400)
+        {
+            if (body.Contains("usage limits", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("credit balance", StringComparison.OrdinalIgnoreCase))
+                return LlmFailureKind.SpendLimit;
+
+            return LlmFailureKind.BadRequest;
+        }
+
+        if (ex is AnthropicNotFoundException or AnthropicUnprocessableEntityException || status is 404 or 422)
+            return LlmFailureKind.BadRequest;
+
+        if (ex is Anthropic5xxException || status >= 500)
+            return LlmFailureKind.Transient;
+
+        return LlmFailureKind.Unknown;
+    }
+
+    /// <summary>
+    /// Builds a user-facing message from the provider's error.message only; request headers (and thus the key)
+    /// are never included.
+    /// </summary>
+    private static string SafeMessage(LlmFailureKind kind, AnthropicApiException ex)
+    {
+        var prefix = kind switch
+        {
+            LlmFailureKind.Auth => "Authentication failed",
+            LlmFailureKind.SpendLimit => "Spend limit reached",
+            LlmFailureKind.RateLimited => "Rate limited",
+            LlmFailureKind.Transient => "Anthropic service error",
+            LlmFailureKind.BadRequest => "Request rejected",
+            _ => "Anthropic error"
+        };
+
+        var detail = ExtractErrorMessage(ex.ResponseBody);
+        return detail != null
+            ? $"{prefix}: {detail}"
+            : $"{prefix} (HTTP {(int)ex.StatusCode})";
+    }
+
+    private static string? ExtractErrorMessage(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("message", out var message)
+                && message.ValueKind == JsonValueKind.String)
+            {
+                return message.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            // Non-JSON error body (e.g. HTML from a proxy): fall back to the status-only message
+        }
+
+        return null;
+    }
+
+    private static LlmProviderResponse Failed(LlmFailureKind kind, string message) => new()
+    {
+        Outcome = LlmOutcome.Failed,
+        FailureKind = kind,
+        Message = message
+    };
 
     internal static MessageCreateParams BuildParams(LlmProviderRequest r)
     {

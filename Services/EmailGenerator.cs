@@ -145,6 +145,11 @@ public class EmailGenerator
             var storylineTasks = state.Storylines.Select(async (storyline, i) =>
             {
                 var emailCount = emailDistribution[i];
+
+                // More storylines than emails: this storyline gets no emails, so make no LLM call (WR-06)
+                if (emailCount == 0)
+                    return;
+
                 var (storyStart, storyEnd) = DateHelper.AllocateDateWindow(
                     startDate, endDate, i, state.Storylines.Count);
 
@@ -619,40 +624,63 @@ public class EmailGenerator
         return string.Join("\n", lines.Select(l => $"    {l}"));
     }
 
-    private List<int> DistributeEmails(List<Storyline> storylines, int totalEmails)
+    /// <summary>
+    /// Split the email budget across storylines. Never negative; always sums to max(0, totalEmails).
+    /// When there are at least as many emails as storylines each storyline gets one, and the rest is split
+    /// by SuggestedEmailCount (equal split if all are 0) using largest remainder (ties -> lower index).
+    /// With fewer emails than storylines the first totalEmails storylines get one email each; the rest get 0 (WR-06).
+    /// </summary>
+    internal static List<int> DistributeEmails(IReadOnlyList<Storyline> storylines, int totalEmails)
     {
-        var distribution = new List<int>();
-        var totalSuggested = storylines.Sum(s => s.SuggestedEmailCount);
+        if (storylines.Count == 0)
+            throw new InvalidOperationException("No storylines to generate emails for. Generate storylines before starting the run.");
 
-        if (totalSuggested == 0)
+        var n = storylines.Count;
+        var total = Math.Max(0, totalEmails);
+        var distribution = new int[n];
+
+        // Fewer emails than storylines: one email each for the first `total` storylines
+        if (total <= n)
         {
-            // Equal distribution
-            var perStoryline = totalEmails / storylines.Count;
-            var remainder = totalEmails % storylines.Count;
-
-            for (int i = 0; i < storylines.Count; i++)
-            {
-                distribution.Add(perStoryline + (i < remainder ? 1 : 0));
-            }
-        }
-        else
-        {
-            // Proportional distribution based on suggested counts
-            foreach (var storyline in storylines)
-            {
-                var proportion = (double)storyline.SuggestedEmailCount / totalSuggested;
-                distribution.Add(Math.Max(1, (int)Math.Round(totalEmails * proportion)));
-            }
-
-            // Adjust to match total
-            var diff = totalEmails - distribution.Sum();
-            if (diff != 0)
-            {
-                distribution[0] += diff;
-            }
+            for (var i = 0; i < total; i++)
+                distribution[i] = 1;
+            return distribution.ToList();
         }
 
-        return distribution;
+        // Every storyline gets one, the remainder is split by weight
+        for (var i = 0; i < n; i++)
+            distribution[i] = 1;
+        var remaining = total - n;
+
+        // Negative suggestions (user-edited grid) count as 0; all-zero means equal split
+        var weights = storylines.Select(s => Math.Max(0, s.SuggestedEmailCount)).ToArray();
+        if (weights.Sum() == 0)
+        {
+            for (var i = 0; i < n; i++)
+                weights[i] = 1;
+        }
+        double weightSum = weights.Sum();
+
+        var exact = new double[n];
+        var assigned = 0;
+        for (var i = 0; i < n; i++)
+        {
+            exact[i] = remaining * weights[i] / weightSum;
+            var floor = (int)Math.Floor(exact[i]);
+            distribution[i] += floor;
+            assigned += floor;
+        }
+
+        // Largest remainder: hand out what flooring left over, ties to the lower index
+        var leftover = remaining - assigned;
+        var byRemainder = Enumerable.Range(0, n)
+            .OrderByDescending(i => exact[i] - Math.Floor(exact[i]))
+            .ThenBy(i => i)
+            .Take(leftover);
+        foreach (var i in byRemainder)
+            distribution[i]++;
+
+        return distribution.ToList();
     }
 
     private async Task<List<EmailThread>> GenerateThreadsForStorylineAsync(

@@ -63,6 +63,27 @@ public class EmailGenerator
             TotalEmails = state.Config.TotalEmailCount,
             CurrentOperation = "Initializing..."
         };
+        var progressLock = new object();
+
+        // Mutate the shared progress under the lock, then report an immutable snapshot
+        void Report(Action<GenerationProgress>? mutate = null)
+        {
+            GenerationProgress snapshot;
+            lock (progressLock)
+            {
+                mutate?.Invoke(progressData);
+                snapshot = progressData.Clone();
+            }
+            progress.Report(snapshot);
+        }
+
+        // Linked run token: plan 01-11 uses runCts to stop the run on fatal provider errors
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var runToken = runCts.Token;
+
+        // Hoisted so completed threads can still be saved if the run is cancelled
+        var threads = new ConcurrentBag<EmailThread>();
+        var totalAttachments = 0;
 
         try
         {
@@ -77,17 +98,12 @@ public class EmailGenerator
                 ? state.AISuggestedEndDate.Value
                 : state.Config.EndDate;
 
-            var threads = new ConcurrentBag<EmailThread>();
-            var totalAttachments = 0;
             var completedEmails = new int[1]; // Use array to allow ref-like access in closure
-            var progressLock = new object();
 
             // Generate threads for each storyline in parallel
             var parallelism = Math.Max(1, state.Config.ParallelThreads);
             using var semaphore = new SemaphoreSlim(parallelism, parallelism);
 
-            // EML service for incremental saving
-            var emlService = new EmlFileService();
             Directory.CreateDirectory(state.Config.OutputFolder);
 
             // Prepare all storyline tasks with their parameters
@@ -97,24 +113,23 @@ public class EmailGenerator
                 var (storyStart, storyEnd) = DateHelper.AllocateDateWindow(
                     startDate, endDate, i, state.Storylines.Count);
 
-                await semaphore.WaitAsync(ct);
+                await semaphore.WaitAsync(runToken);
                 try
                 {
-                    ct.ThrowIfCancellationRequested();
+                    runToken.ThrowIfCancellationRequested();
 
                     // Report that we're starting this storyline
-                    lock (progressLock)
+                    Report(p =>
                     {
-                        progressData.CurrentStoryline = storyline.Title;
-                        progressData.CurrentOperation = $"Processing storyline: {storyline.Title}";
-                    }
-                    progress.Report(progressData);
+                        p.CurrentStoryline = storyline.Title;
+                        p.CurrentOperation = $"Processing storyline: {storyline.Title}";
+                    });
 
                     // Generate thread(s) for this storyline
                     var storylineThreads = await GenerateThreadsForStorylineAsync(
                         storyline, state.Characters, state.CompanyDomain,
                         emailCount, storyStart, storyEnd,
-                        state.Config, state.DomainThemes, ct);
+                        state.Config, state.DomainThemes, runToken);
 
                     // Add to concurrent collection
                     foreach (var thread in storylineThreads)
@@ -124,11 +139,7 @@ public class EmailGenerator
 
                     // Update progress atomically
                     var newCompleted = Interlocked.Add(ref completedEmails[0], emailCount);
-                    lock (progressLock)
-                    {
-                        progressData.CompletedEmails = newCompleted;
-                    }
-                    progress.Report(progressData);
+                    Report(p => p.CompletedEmails = newCompleted);
                 }
                 catch (OperationCanceledException)
                 {
@@ -137,15 +148,11 @@ public class EmailGenerator
                 catch (Exception ex)
                 {
                     // Per-storyline error handling: log and continue with others
-                    result.Errors.Add($"Storyline '{storyline.Title}' failed: {ex.Message}");
+                    result.AddError($"Storyline '{storyline.Title}' failed: {ex.Message}");
 
                     // Still count these emails as "completed" for progress tracking
                     var newCompleted = Interlocked.Add(ref completedEmails[0], emailCount);
-                    lock (progressLock)
-                    {
-                        progressData.CompletedEmails = newCompleted;
-                    }
-                    progress.Report(progressData);
+                    Report(p => p.CompletedEmails = newCompleted);
                 }
                 finally
                 {
@@ -156,62 +163,63 @@ public class EmailGenerator
             // Wait for all storylines to complete
             await Task.WhenAll(storylineTasks);
 
-            // Update final progress
-            progressData.CompletedEmails = completedEmails[0];
-
             var allEmails = threads.SelectMany(t => t.Messages).ToList();
-
-            // Generate document attachments for emails that were planned to have them
-            progressData.CurrentOperation = "Adding attachments...";
-            progress.Report(progressData);
-
             var emailsWithPlannedDocuments = allEmails.Where(e => e.PlannedHasDocument).ToList();
-            progressData.TotalAttachments = emailsWithPlannedDocuments.Count;
 
-            // Generate document attachments in parallel
+            // Update final progress and start the attachment pass
+            Report(p =>
+            {
+                p.CompletedEmails = completedEmails[0];
+                p.CurrentOperation = "Adding attachments...";
+                p.TotalAttachments = emailsWithPlannedDocuments.Count;
+            });
+
+            // Generate document attachments in parallel; each item is isolated
             var attachmentTasks = emailsWithPlannedDocuments.Select(async email =>
             {
-                await semaphore.WaitAsync(ct);
+                await semaphore.WaitAsync(runToken);
                 try
                 {
-                    ct.ThrowIfCancellationRequested();
-
-                    lock (progressLock)
+                    return await RunIsolatedAsync(async () =>
                     {
-                        progressData.CurrentOperation = $"Creating attachment for: {email.Subject}";
-                    }
-                    progress.Report(progressData);
+                        runToken.ThrowIfCancellationRequested();
 
-                    await GeneratePlannedDocumentAsync(email, state, ct);
+                        Report(p => p.CurrentOperation = $"Creating attachment for: {email.Subject}");
 
-                    var attachment = email.Attachments.FirstOrDefault(a =>
-                        a.Type == AttachmentType.Word ||
-                        a.Type == AttachmentType.Excel ||
-                        a.Type == AttachmentType.PowerPoint);
+                        await GeneratePlannedDocumentAsync(email, state, runToken);
 
-                    lock (progressLock)
-                    {
-                        progressData.CompletedAttachments++;
+                        var attachment = email.Attachments.FirstOrDefault(a =>
+                            a.Type == AttachmentType.Word ||
+                            a.Type == AttachmentType.Excel ||
+                            a.Type == AttachmentType.PowerPoint);
 
-                        if (attachment != null)
+                        GenerationProgress snapshot;
+                        lock (progressLock)
                         {
-                            switch (attachment.Type)
-                            {
-                                case AttachmentType.Word:
-                                    result.WordDocumentsGenerated++;
-                                    break;
-                                case AttachmentType.Excel:
-                                    result.ExcelDocumentsGenerated++;
-                                    break;
-                                case AttachmentType.PowerPoint:
-                                    result.PowerPointDocumentsGenerated++;
-                                    break;
-                            }
-                        }
-                    }
+                            progressData.CompletedAttachments++;
 
-                    progress.Report(progressData);
-                    return attachment != null ? 1 : 0;
+                            if (attachment != null)
+                            {
+                                switch (attachment.Type)
+                                {
+                                    case AttachmentType.Word:
+                                        result.WordDocumentsGenerated++;
+                                        break;
+                                    case AttachmentType.Excel:
+                                        result.ExcelDocumentsGenerated++;
+                                        break;
+                                    case AttachmentType.PowerPoint:
+                                        result.PowerPointDocumentsGenerated++;
+                                        break;
+                                }
+                            }
+
+                            snapshot = progressData.Clone();
+                        }
+
+                        progress.Report(snapshot);
+                        return attachment != null ? 1 : 0;
+                    }, result, $"Attachment for '{email.Subject}'", runCts);
                 }
                 finally
                 {
@@ -223,45 +231,48 @@ public class EmailGenerator
             totalAttachments = attachmentResults.Sum();
 
             // Generate images for emails that were planned to have them
-            var totalImages = 0;
             if (state.Config.IncludeImages)
             {
                 var emailsWithPlannedImages = allEmails.Where(e => e.PlannedHasImage).ToList();
 
                 if (emailsWithPlannedImages.Count > 0)
                 {
-                    progressData.CurrentOperation = "Generating images...";
-                    progress.Report(progressData);
-                    progressData.TotalImages = emailsWithPlannedImages.Count;
+                    Report(p =>
+                    {
+                        p.CurrentOperation = "Generating images...";
+                        p.TotalImages = emailsWithPlannedImages.Count;
+                    });
 
                     var imageTasks = emailsWithPlannedImages.Select(async email =>
                     {
-                        await semaphore.WaitAsync(ct);
+                        await semaphore.WaitAsync(runToken);
                         try
                         {
-                            ct.ThrowIfCancellationRequested();
-
-                            lock (progressLock)
+                            return await RunIsolatedAsync(async () =>
                             {
-                                progressData.CurrentOperation = $"Generating image for: {email.Subject}";
-                            }
-                            progress.Report(progressData);
+                                runToken.ThrowIfCancellationRequested();
 
-                            await GeneratePlannedImageAsync(email, state, ct);
+                                Report(p => p.CurrentOperation = $"Generating image for: {email.Subject}");
 
-                            var hasImage = email.Attachments.Any(a => a.Type == AttachmentType.Image);
+                                await GeneratePlannedImageAsync(email, state, runToken);
 
-                            lock (progressLock)
-                            {
-                                progressData.CompletedImages++;
-                                if (hasImage)
+                                var hasImage = email.Attachments.Any(a => a.Type == AttachmentType.Image);
+
+                                GenerationProgress snapshot;
+                                lock (progressLock)
                                 {
-                                    result.ImagesGenerated++;
-                                }
-                            }
+                                    progressData.CompletedImages++;
+                                    if (hasImage)
+                                    {
+                                        result.ImagesGenerated++;
+                                    }
 
-                            progress.Report(progressData);
-                            return hasImage ? 1 : 0;
+                                    snapshot = progressData.Clone();
+                                }
+
+                                progress.Report(snapshot);
+                                return hasImage ? 1 : 0;
+                            }, result, $"Image for '{email.Subject}'", runCts);
                         }
                         finally
                         {
@@ -269,16 +280,14 @@ public class EmailGenerator
                         }
                     }).ToList();
 
-                    var imageResults = await Task.WhenAll(imageTasks);
-                    totalImages = imageResults.Sum();
+                    await Task.WhenAll(imageTasks);
                 }
             }
 
             // Detect and add calendar invites (if enabled)
             if (state.Config.IncludeCalendarInvites && state.Config.CalendarInvitePercentage > 0)
             {
-                progressData.CurrentOperation = "Detecting meetings and adding calendar invites...";
-                progress.Report(progressData);
+                Report(p => p.CurrentOperation = "Detecting meetings and adding calendar invites...");
 
                 // Only check a limited number of emails for calendar invites based on percentage
                 var maxCalendarEmails = Math.Max(1, (int)Math.Round(allEmails.Count * state.Config.CalendarInvitePercentage / 100.0));
@@ -290,12 +299,15 @@ public class EmailGenerator
                 // Check selected emails for meeting references (run in parallel)
                 var calendarTasks = emailsToCheckForCalendar.Select(async email =>
                 {
-                    await semaphore.WaitAsync(ct);
+                    await semaphore.WaitAsync(runToken);
                     try
                     {
-                        ct.ThrowIfCancellationRequested();
-                        await DetectAndAddCalendarInviteAsync(email, state.Characters, ct);
-                        return email.Attachments.Any(a => a.Type == AttachmentType.CalendarInvite) ? 1 : 0;
+                        return await RunIsolatedAsync(async () =>
+                        {
+                            runToken.ThrowIfCancellationRequested();
+                            await DetectAndAddCalendarInviteAsync(email, state.Characters, runToken);
+                            return email.Attachments.Any(a => a.Type == AttachmentType.CalendarInvite) ? 1 : 0;
+                        }, result, $"Calendar invite for '{email.Subject}'", runCts);
                     }
                     finally
                     {
@@ -314,35 +326,33 @@ public class EmailGenerator
 
                 if (emailsWithPlannedVoicemails.Count > 0)
                 {
-                    progressData.CurrentOperation = "Generating voicemails...";
-                    progress.Report(progressData);
+                    Report(p => p.CurrentOperation = "Generating voicemails...");
 
                     var voicemailTasks = emailsWithPlannedVoicemails.Select(async email =>
                     {
-                        await semaphore.WaitAsync(ct);
+                        await semaphore.WaitAsync(runToken);
                         try
                         {
-                            ct.ThrowIfCancellationRequested();
-
-                            lock (progressLock)
+                            return await RunIsolatedAsync(async () =>
                             {
-                                progressData.CurrentOperation = $"Generating voicemail for: {email.From.FullName}";
-                            }
-                            progress.Report(progressData);
+                                runToken.ThrowIfCancellationRequested();
 
-                            await GeneratePlannedVoicemailAsync(email, state, ct);
+                                Report(p => p.CurrentOperation = $"Generating voicemail for: {email.From.FullName}");
 
-                            var hasVoicemail = email.Attachments.Any(a => a.Type == AttachmentType.Voicemail);
+                                await GeneratePlannedVoicemailAsync(email, state, runToken);
 
-                            lock (progressLock)
-                            {
-                                if (hasVoicemail)
+                                var hasVoicemail = email.Attachments.Any(a => a.Type == AttachmentType.Voicemail);
+
+                                lock (progressLock)
                                 {
-                                    result.VoicemailsGenerated++;
+                                    if (hasVoicemail)
+                                    {
+                                        result.VoicemailsGenerated++;
+                                    }
                                 }
-                            }
 
-                            return hasVoicemail ? 1 : 0;
+                                return hasVoicemail ? 1 : 0;
+                            }, result, $"Voicemail for '{email.Subject}'", runCts);
                         }
                         finally
                         {
@@ -354,70 +364,113 @@ public class EmailGenerator
                 }
             }
 
-            // Convert to list for saving and results
-            var threadsList = threads.ToList();
+            await SaveAndFinalizeAsync(threads.ToList(), allEmails, totalAttachments, state, result, startTime,
+                op => Report(p => p.CurrentOperation = op));
 
-            // Save any remaining EML files (threads that weren't saved incrementally)
-            progressData.CurrentOperation = "Saving EML files...";
-            progress.Report(progressData);
-
-            try
-            {
-                var emlProgress = new Progress<(int completed, int total, string currentFile)>(p =>
-                {
-                    progressData.CurrentOperation = $"Saving: {p.currentFile}";
-                    progress.Report(progressData);
-                });
-
-                await emlService.SaveAllEmailsAsync(threadsList, state.Config.OutputFolder, state.Config.OrganizeBySender, emlProgress, ct);
-
-                // Release attachment byte arrays to free memory after saving
-                foreach (var thread in threadsList)
-                {
-                    foreach (var email in thread.Messages)
-                    {
-                        foreach (var attachment in email.Attachments)
-                        {
-                            attachment.Content = null;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Errors.Add($"Failed to save EML files: {ex.Message}");
-                if (ex.InnerException != null)
-                {
-                    result.Errors.Add($"  Inner error: {ex.InnerException.Message}");
-                }
-            }
-
-            // Finalize results
-            result.TotalEmailsGenerated = allEmails.Count;
-            result.TotalThreadsGenerated = threadsList.Count;
-            result.TotalAttachmentsGenerated = totalAttachments;
-            result.ElapsedTime = DateTime.Now - startTime;
-
-            state.GeneratedThreads = threadsList;
-            state.Result = result;
-
-            progressData.CurrentOperation = "Complete!";
-            progress.Report(progressData);
+            Report(p => p.CurrentOperation = "Complete!");
 
             return result;
         }
         catch (OperationCanceledException)
         {
             result.WasCancelled = true;
+
+            // Save the threads completed so far so a cancelled run still leaves usable output
+            if (!threads.IsEmpty)
+            {
+                var threadsList = threads.ToList();
+                var allEmails = threadsList.SelectMany(t => t.Messages).ToList();
+                var attachmentsSoFar = result.WordDocumentsGenerated + result.ExcelDocumentsGenerated + result.PowerPointDocumentsGenerated;
+                await SaveAndFinalizeAsync(threadsList, allEmails, attachmentsSoFar, state, result, startTime,
+                    op => Report(p => p.CurrentOperation = op));
+            }
+
             result.ElapsedTime = DateTime.Now - startTime;
             return result;
         }
         catch (Exception ex)
         {
-            result.Errors.Add(ex.Message);
+            result.AddError(ex.Message);
             result.ElapsedTime = DateTime.Now - startTime;
             return result;
         }
+    }
+
+    /// <summary>
+    /// Run one enrichment item (attachment, image, calendar invite, voicemail) so that a failure
+    /// is recorded and skipped instead of faulting the whole pass. Cancellation still propagates.
+    /// </summary>
+    /// <param name="runCts">Linked run token source; used by plan 01-11 to stop the run on fatal provider errors.</param>
+    internal static async Task<int> RunIsolatedAsync(
+        Func<Task<int>> work, GenerationResult result, string failureLabel, CancellationTokenSource runCts)
+    {
+        try
+        {
+            return await work();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            result.AddError($"{failureLabel} failed: {ex.Message}");
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Save all threads to EML and fill in the final result counters. Always saves with
+    /// CancellationToken.None so a cancelled run still writes the threads it completed.
+    /// </summary>
+    private async Task SaveAndFinalizeAsync(
+        List<EmailThread> threadsList,
+        List<EmailMessage> allEmails,
+        int totalAttachments,
+        WizardState state,
+        GenerationResult result,
+        DateTime startTime,
+        Action<string> reportOperation)
+    {
+        reportOperation("Saving EML files...");
+
+        try
+        {
+            var emlService = new EmlFileService();
+            var emlProgress = new Progress<(int completed, int total, string currentFile)>(p =>
+                reportOperation($"Saving: {p.currentFile}"));
+
+            await emlService.SaveAllEmailsAsync(threadsList, state.Config.OutputFolder, state.Config.OrganizeBySender, emlProgress, CancellationToken.None);
+
+            // Release attachment byte arrays to free memory after saving
+            foreach (var thread in threadsList)
+            {
+                foreach (var email in thread.Messages)
+                {
+                    foreach (var attachment in email.Attachments)
+                    {
+                        attachment.Content = null;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            result.AddError($"Failed to save EML files: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                result.AddError($"  Inner error: {ex.InnerException.Message}");
+            }
+        }
+
+        // Finalize results
+        result.TotalEmailsGenerated = allEmails.Count;
+        result.TotalThreadsGenerated = threadsList.Count;
+        result.TotalAttachmentsGenerated = totalAttachments;
+        result.ElapsedTime = DateTime.Now - startTime;
+
+        state.GeneratedThreads = threadsList;
+        state.Result = result;
     }
 
     private static string IndentSignature(string signature)

@@ -262,6 +262,9 @@ public class StepApiConfiguration : UserControl, IWizardStep
     private Button GetTestButton(LlmProviderKind provider) =>
         provider == LlmProviderKind.OpenAI ? _btnTestOpenAI : _btnTestAnthropic;
 
+    private Button GetClearButton(LlmProviderKind provider) =>
+        provider == LlmProviderKind.OpenAI ? _btnClearOpenAI : _btnClearAnthropic;
+
     private static string GetProviderName(LlmProviderKind provider) =>
         provider == LlmProviderKind.OpenAI ? "OpenAI" : "Anthropic";
 
@@ -322,12 +325,25 @@ public class StepApiConfiguration : UserControl, IWizardStep
 
         var button = GetTestButton(provider);
         button.Enabled = false;
+
+        // Lock the key box and Clear while the request is in flight so the tested key cannot change underneath it
+        var keyBox = GetKeyBox(provider);
+        var clearButton = GetClearButton(provider);
+        keyBox.Enabled = false;
+        clearButton.Enabled = false;
         SetStatus(provider, "Testing...", Color.Gray);
 
         try
         {
             var modelId = _state.GetKeyTestModelId(provider);
             var result = await LlmProviderFactory.Create(provider, key).TestKeyAsync(modelId);
+
+            // The key was cleared or edited while the test ran: discard the stale result (never re-save a removed key)
+            if (!KeyTestGuard.IsResultCurrent(key, keyBox.Text))
+            {
+                SetStatus(provider, "Key changed during test; test again.", Color.Gray);
+                return;
+            }
 
             if (result.Succeeded)
             {
@@ -358,6 +374,8 @@ public class StepApiConfiguration : UserControl, IWizardStep
         finally
         {
             button.Enabled = true;
+            keyBox.Enabled = true;
+            clearButton.Enabled = true;
             UpdateMediaStatus();
             StateChanged?.Invoke(this, EventArgs.Empty);
         }

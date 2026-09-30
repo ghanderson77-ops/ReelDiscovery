@@ -56,10 +56,11 @@ public class EmailGeneratorFixTests
     {
         var result = new GenerationResult();
         using var runCts = new CancellationTokenSource();
+        runCts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             EmailGenerator.RunIsolatedAsync(
-                () => throw new OperationCanceledException(), result, "Image for 'X'", runCts));
+                () => throw new OperationCanceledException(runCts.Token), result, "Image for 'X'", runCts));
 
         Assert.Empty(result.Errors);
     }

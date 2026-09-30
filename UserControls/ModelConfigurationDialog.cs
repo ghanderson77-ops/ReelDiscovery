@@ -1,5 +1,6 @@
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.UserControls;
 
@@ -22,9 +23,12 @@ public class ModelConfigurationDialog : Form
         {
             ModelId = m.ModelId,
             DisplayName = m.DisplayName,
+            Provider = m.Provider,
+            DefaultForTier = m.DefaultForTier,
+            Effort = m.Effort,
+            MaxOutputTokens = m.MaxOutputTokens,
             InputTokenPricePerMillion = m.InputTokenPricePerMillion,
-            OutputTokenPricePerMillion = m.OutputTokenPricePerMillion,
-            IsDefault = m.IsDefault
+            OutputTokenPricePerMillion = m.OutputTokenPricePerMillion
         }).ToList();
 
         InitializeUI();
@@ -33,8 +37,8 @@ public class ModelConfigurationDialog : Form
     private void InitializeUI()
     {
         this.Text = "Configure AI Models";
-        this.Size = new Size(700, 450);
-        this.MinimumSize = new Size(600, 350);
+        this.Size = new Size(980, 480);
+        this.MinimumSize = new Size(820, 360);
         this.StartPosition = FormStartPosition.CenterParent;
         this.FormBorderStyle = FormBorderStyle.Sizable;
         this.MaximizeBox = false;
@@ -55,7 +59,7 @@ public class ModelConfigurationDialog : Form
         // Header label
         var lblHeader = new Label
         {
-            Text = "Configure model IDs and pricing (per million tokens). Pricing is used for cost tracking.",
+            Text = "Configure models per provider: one Story and one Volume default each, optional Effort, output ceiling and pricing (per million tokens).",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft
         };
@@ -79,12 +83,14 @@ public class ModelConfigurationDialog : Form
             DataSource = _bindingSource
         };
 
-        _gridModels.Columns.Add(new DataGridViewCheckBoxColumn
+        _gridModels.Columns.Add(new DataGridViewComboBoxColumn
         {
-            Name = "IsDefault",
-            HeaderText = "Default",
-            DataPropertyName = "IsDefault",
-            Width = 55
+            Name = "Provider",
+            HeaderText = "Provider",
+            DataPropertyName = "Provider",
+            DataSource = Enum.GetValues<LlmProviderKind>(),
+            ValueType = typeof(LlmProviderKind),
+            Width = 90
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -121,7 +127,34 @@ public class ModelConfigurationDialog : Form
             DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }
         });
 
-        _gridModels.CellValueChanged += GridModels_CellValueChanged;
+        var tierColumn = new DataGridViewComboBoxColumn
+        {
+            Name = "DefaultForTier",
+            HeaderText = "Default For Tier",
+            DataPropertyName = "DefaultForTierText",
+            Width = 110
+        };
+        tierColumn.Items.AddRange("None", "Story", "Volume");
+        _gridModels.Columns.Add(tierColumn);
+
+        _gridModels.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Effort",
+            HeaderText = "Effort",
+            DataPropertyName = "EffortText",
+            Width = 70
+        });
+
+        _gridModels.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "MaxOutputTokens",
+            HeaderText = "Max Output",
+            DataPropertyName = "MaxOutputTokens",
+            Width = 90,
+            ValueType = typeof(int)
+        });
+
+        _gridModels.DataError += GridModels_DataError;
         _gridModels.CurrentCellDirtyStateChanged += GridModels_CurrentCellDirtyStateChanged;
 
         // Button panel on the right side of grid
@@ -176,38 +209,19 @@ public class ModelConfigurationDialog : Form
 
     private void GridModels_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
     {
-        // Commit checkbox changes immediately
-        if (_gridModels.IsCurrentCellDirty && _gridModels.CurrentCell is DataGridViewCheckBoxCell)
+        // Commit combo box changes immediately
+        if (_gridModels.IsCurrentCellDirty && _gridModels.CurrentCell is DataGridViewComboBoxCell)
         {
             _gridModels.CommitEdit(DataGridViewDataErrorContexts.Commit);
         }
     }
 
-    private void GridModels_CellValueChanged(object? sender, DataGridViewCellEventArgs e)
+    private void GridModels_DataError(object? sender, DataGridViewDataErrorEventArgs e)
     {
-        // Handle default checkbox - only one can be default
-        if (e.ColumnIndex == 0 && e.RowIndex >= 0)
-        {
-            var currentRow = _gridModels.Rows[e.RowIndex];
-            var isDefault = (bool?)currentRow.Cells["IsDefault"].Value ?? false;
-
-            if (isDefault)
-            {
-                // Uncheck all other rows
-                foreach (DataGridViewRow row in _gridModels.Rows)
-                {
-                    if (row.Index != e.RowIndex)
-                    {
-                        var model = row.DataBoundItem as AIModelConfig;
-                        if (model != null)
-                        {
-                            model.IsDefault = false;
-                        }
-                    }
-                }
-                _gridModels.Refresh();
-            }
-        }
+        // Invalid typed values (e.g. text in Max Output) are rejected instead of crashing the dialog
+        MessageBox.Show("Please enter a valid value for this column.", "Validation Error",
+            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        e.Cancel = true;
     }
 
     private void BtnAdd_Click(object? sender, EventArgs e)
@@ -218,7 +232,8 @@ public class ModelConfigurationDialog : Form
             DisplayName = "New Model",
             InputTokenPricePerMillion = 1.00m,
             OutputTokenPricePerMillion = 3.00m,
-            IsDefault = false
+            Provider = LlmProviderKind.OpenAI,
+            MaxOutputTokens = 16_000
         };
         Models.Add(newModel);
         _bindingSource.ResetBindings(false);
@@ -246,13 +261,6 @@ public class ModelConfigurationDialog : Form
 
                 Models.Remove(selectedModel);
                 _bindingSource.ResetBindings(false);
-
-                // Ensure at least one model is default
-                if (!Models.Any(m => m.IsDefault) && Models.Count > 0)
-                {
-                    Models[0].IsDefault = true;
-                    _bindingSource.ResetBindings(false);
-                }
             }
         }
     }
@@ -287,10 +295,28 @@ public class ModelConfigurationDialog : Form
             }
         }
 
-        // Ensure exactly one default
-        if (!Models.Any(m => m.IsDefault))
+        // Keep only the first default per (Provider, Tier)
+        foreach (var group in Models.Where(m => m.DefaultForTier != null).GroupBy(m => (m.Provider, m.DefaultForTier)))
         {
-            Models[0].IsDefault = true;
+            foreach (var extra in group.Skip(1))
+            {
+                extra.DefaultForTier = null;
+            }
+        }
+        _bindingSource.ResetBindings(false);
+
+        // Every provider needs a Story and a Volume default
+        foreach (var provider in Enum.GetValues<LlmProviderKind>())
+        {
+            foreach (var tier in Enum.GetValues<LlmTier>())
+            {
+                if (AIModelConfig.GetTierDefault(Models, provider, tier) == null)
+                {
+                    MessageBox.Show($"Pick a {tier} default for {provider}.", "Validation Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
         }
 
         this.DialogResult = DialogResult.OK;

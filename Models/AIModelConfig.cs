@@ -8,8 +8,6 @@ public class AIModelConfig
     public string DisplayName { get; set; } = string.Empty;
     public decimal InputTokenPricePerMillion { get; set; }
     public decimal OutputTokenPricePerMillion { get; set; }
-    public bool IsDefault { get; set; }
-
     public LlmProviderKind Provider { get; set; }
 
     /// <summary>
@@ -27,6 +25,24 @@ public class AIModelConfig
     /// Model output-token ceiling; caps truncation retries.
     /// </summary>
     public int MaxOutputTokens { get; set; }
+
+    /// <summary>
+    /// Grid binding helper for DefaultForTier: "None", "Story" or "Volume".
+    /// </summary>
+    public string DefaultForTierText
+    {
+        get => DefaultForTier?.ToString() ?? "None";
+        set => DefaultForTier = Enum.TryParse<LlmTier>(value, out var t) ? t : null;
+    }
+
+    /// <summary>
+    /// Grid binding helper for Effort: blank means null (parameter not sent).
+    /// </summary>
+    public string EffortText
+    {
+        get => Effort ?? string.Empty;
+        set => Effort = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
 
     public decimal CalculateInputCost(int tokens) =>
         tokens * InputTokenPricePerMillion / 1_000_000m;
@@ -109,8 +125,7 @@ public class AIModelConfig
             OutputTokenPricePerMillion = 0.50m,
             DefaultForTier = LlmTier.Volume,
             Effort = "none",
-            MaxOutputTokens = 128_000,
-            IsDefault = true // Legacy keys screen preselection until plan 01-07
+            MaxOutputTokens = 128_000
         }
     };
 }

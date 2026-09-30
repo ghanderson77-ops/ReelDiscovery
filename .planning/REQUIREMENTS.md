@@ -11,7 +11,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 - [x] **PLAT-01**: App targets .NET 10 (net10.0-windows) with the SDK pinned via global.json and still publishes as a single-file self-contained exe
 - [ ] **PLAT-02**: API keys are stored encrypted with Windows DPAPI (existing Base64 key file migrated)
-- [x] **PLAT-03**: A test project exists and runs unit tests for planner, validators, answer-key writer and EML output
+- [ ] **PLAT-03**: A test project exists and runs unit tests for planner, validators, answer-key writer and EML output
 - [x] **PLAT-04**: Known concurrency bugs are fixed (shared `System.Random`, non-thread-safe mutation in parallel sections)
 - [ ] **PLAT-05**: Dead code in the old generation path is removed as it is replaced
 
@@ -174,7 +174,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | PLAT-01 | Phase 1 | Complete |
 | PLAT-02 | Phase 1 | Pending |
-| PLAT-03 | Phase 1 | Complete |
+| PLAT-03 | Phase 1, Phase 4 | Partial (Phase 1: harness + EML tests; planner/validator/answer-key tests in Phase 4) |
 | PLAT-04 | Phase 1 | Complete |
 | PLAT-05 | Phase 7 | Pending |
 | PROV-01 | Phase 1 | Pending |

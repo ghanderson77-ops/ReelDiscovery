@@ -77,7 +77,7 @@ Plans:
 ### Phase 4: Corpus Plan & Answer Key
 **Goal**: Before any prose is written, code plans every thread and message against the facts timeline. The user reviews the plan, and the answer key and review protocol come straight from it.
 **Depends on**: Phase 3
-**Requirements**: PLAN-01, PLAN-02, PLAN-03, PLAN-04, PLAN-05, PLAN-06, PLAN-07, KEY-01, KEY-02, KEY-03, KEY-04, KEY-05
+**Requirements**: PLAN-01, PLAN-02, PLAN-03, PLAN-04, PLAN-05, PLAN-06, PLAN-07, KEY-01, KEY-02, KEY-03, KEY-04, KEY-05, PLAT-03
 **Success Criteria** (what must be TRUE):
   1. The user sets the corpus size (up to about 5,000) and the relevant/non-relevant ratio. The resulting plan fixes every message's date/time, sender, To/CC, reply/forward structure, linked facts/issues, relevance label and attachments.
   2. Planned relevant threads follow the key-facts timeline, with overlapping issues running at the same time among shared characters. Timestamps respect business hours, time zones, weekends/holidays and reply latency, and thread depth, CC and attachment distributions look realistic.

@@ -139,6 +139,15 @@ public class StepGeneration : UserControl, IWizardStep
         _txtLog.ScrollToCaret();
     }
 
+    // Orange = item skipped by a classified outcome (refused/truncated/invalid); Red = failure
+    private void LogErrors(IEnumerable<string> errors)
+    {
+        foreach (var error in errors)
+        {
+            AppendLog($"  - {error}", error.Contains(" skipped (") ? Color.Orange : Color.Red);
+        }
+    }
+
     private void UpdateTokenUsageLabel()
     {
         if (_state?.UsageTracker == null) return;
@@ -192,7 +201,16 @@ public class StepGeneration : UserControl, IWizardStep
 
             var result = await generator.GenerateEmailsAsync(_state, progress, _cts.Token);
 
-            if (result.WasCancelled)
+            if (result.FatalError != null)
+            {
+                // Auth / spend-limit failure: the run was stopped to avoid further spend
+                LogErrors(result.Errors);
+                AppendLog($"Run stopped: {result.FatalError}", Color.Red);
+                AppendLog("Completed threads were saved. Check your API key, billing or spend limit, then run again.", Color.Red);
+                _lblProgress.Text = "Generation stopped by a provider error.";
+                _generationComplete = true;
+            }
+            else if (result.WasCancelled)
             {
                 AppendLog("Generation cancelled by user.", Color.Yellow);
                 _lblProgress.Text = "Generation cancelled.";
@@ -200,10 +218,7 @@ public class StepGeneration : UserControl, IWizardStep
             else if (result.Errors.Count > 0)
             {
                 AppendLog("Generation completed with errors:", Color.Orange);
-                foreach (var error in result.Errors)
-                {
-                    AppendLog($"  - {error}", Color.Red);
-                }
+                LogErrors(result.Errors);
                 _lblProgress.Text = "Generation completed with errors.";
                 _generationComplete = true;
             }

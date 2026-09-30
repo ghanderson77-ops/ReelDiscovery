@@ -128,12 +128,4 @@ public class WizardState
     // Step 6-7 - Results
     public List<EmailThread> GeneratedThreads { get; set; } = new();
     public GenerationResult? Result { get; set; }
-
-    // Legacy OpenAI-only text path; deleted in plan 01-11 once all generators use CreateGateway()
-    public Services.OpenAIService CreateOpenAIService()
-    {
-        var legacyModel = (TextProvider == LlmProviderKind.OpenAI ? VolumeModelConfig : null)
-            ?? AIModelConfig.GetTierDefault(AvailableModelConfigs, LlmProviderKind.OpenAI, LlmTier.Volume)!;
-        return new Services.OpenAIService(OpenAIApiKey, legacyModel, UsageTracker);
-    }
 }

@@ -10,7 +10,6 @@ public class EmailGenerator
     private readonly OpenAIService _openAI;
     private readonly OfficeDocumentService _officeService;
     private readonly CalendarService _calendarService;
-    private readonly Random _random = new();
 
     // Track document chains across threads for versioning
     private readonly ConcurrentDictionary<string, DocumentChainState> _documentChains = new();
@@ -25,13 +24,27 @@ public class EmailGenerator
         _calendarService = new CalendarService();
     }
 
-    private class DocumentChainState
+    internal class DocumentChainState
     {
+        private readonly object _versionLock = new();
+
         public string ChainId { get; set; } = Guid.NewGuid().ToString("N")[..8];
         public string BaseTitle { get; set; } = "";
         public AttachmentType Type { get; set; }
         public int VersionNumber { get; set; } = 1;
         public string LastContent { get; set; } = "";
+
+        /// <summary>
+        /// Atomically claim the next version number for a revision of this chain.
+        /// </summary>
+        public int ReserveNextVersion()
+        {
+            lock (_versionLock)
+            {
+                VersionNumber++;
+                return VersionNumber;
+            }
+        }
     }
 
     public async Task<GenerationResult> GenerateEmailsAsync(
@@ -270,7 +283,7 @@ public class EmailGenerator
                 // Only check a limited number of emails for calendar invites based on percentage
                 var maxCalendarEmails = Math.Max(1, (int)Math.Round(allEmails.Count * state.Config.CalendarInvitePercentage / 100.0));
                 var emailsToCheckForCalendar = allEmails
-                    .OrderBy(_ => _random.Next()) // Randomize which emails to check
+                    .OrderBy(_ => Random.Shared.Next()) // Randomize which emails to check
                     .Take(maxCalendarEmails)
                     .ToList();
 
@@ -539,14 +552,25 @@ public class EmailGenerator
                 thread.Subject = response.Subject;
             }
 
-            // Process emails from this batch
-            foreach (var e in response.Emails)
+            // Trim to the requested batch size - never trust the model's count
+            var batchEmails = response.Emails.Take(batchSize).ToList();
+            if (batchEmails.Count == 0)
             {
-                var emailMessage = ConvertDtoToEmailMessage(e, thread, characters, domainThemes, startDate, endDate, ref sequence);
+                // An empty batch would never advance the loop's progress
+                break;
+            }
+
+            // replyToIndex values are relative to this batch
+            var batchOffset = thread.Messages.Count;
+
+            // Process emails from this batch
+            foreach (var e in batchEmails)
+            {
+                var emailMessage = ConvertDtoToEmailMessage(e, thread, batchOffset, characters, domainThemes, startDate, endDate, ref sequence);
                 thread.Messages.Add(emailMessage);
             }
 
-            emailsGenerated += response.Emails.Count;
+            emailsGenerated += batchEmails.Count;
         }
 
         // Setup threading headers
@@ -875,14 +899,35 @@ ATTACHMENT REMINDER:
     /// <summary>
     /// Convert an EmailDto from the API response into an EmailMessage, handling threading and quoted content
     /// </summary>
+    /// <summary>
+    /// Resolve a model-supplied replyToIndex, which is relative to the current batch
+    /// (the batch starts at <paramref name="batchOffset"/> in the thread). Out-of-range
+    /// indexes fall back to the last message; an empty thread returns null.
+    /// </summary>
+    internal static EmailMessage? ResolveReferencedEmail(IReadOnlyList<EmailMessage> messages, int batchOffset, int replyToIndex)
+    {
+        if (replyToIndex >= 0 && batchOffset + replyToIndex < messages.Count)
+        {
+            return messages[batchOffset + replyToIndex];
+        }
+
+        return messages.Count > 0 ? messages[^1] : null;
+    }
+
+    /// <summary>
+    /// Build a meeting start time, clamping model-supplied hour/minute to valid ranges.
+    /// </summary>
+    internal static DateTime BuildMeetingStart(DateTime date, int hour, int minute) =>
+        new(date.Year, date.Month, date.Day, Math.Clamp(hour, 0, 23), Math.Clamp(minute, 0, 59), 0);
+
     private EmailMessage ConvertDtoToEmailMessage(
-        EmailDto e, EmailThread thread, List<Character> characters,
+        EmailDto e, EmailThread thread, int batchOffset, List<Character> characters,
         Dictionary<string, OrganizationTheme> domainThemes,
         DateTime startDate, DateTime endDate, ref int sequence)
     {
         var fromChar = characters.FirstOrDefault(c =>
             c.Email.Equals(e.FromEmail, StringComparison.OrdinalIgnoreCase))
-            ?? characters[_random.Next(characters.Count)];
+            ?? characters[Random.Shared.Next(characters.Count)];
 
         var toChars = e.ToEmails
             .Select(email => characters.FirstOrDefault(c =>
@@ -893,7 +938,8 @@ ATTACHMENT REMINDER:
 
         if (toChars.Count == 0)
         {
-            toChars.Add(characters.Where(c => c.Id != fromChar.Id).First());
+            // Fall back to the sender when the cast has only one character
+            toChars.Add(characters.FirstOrDefault(c => c.Id != fromChar.Id) ?? fromChar);
         }
 
         var ccChars = (e.CcEmails ?? new List<string>())
@@ -921,16 +967,8 @@ ATTACHMENT REMINDER:
         // Build the full email body with quoted content for replies/forwards
         var fullBody = correctedBody;
 
-        // Get the email being replied to/forwarded based on replyToIndex
-        EmailMessage? referencedEmail = null;
-        if (e.ReplyToIndex >= 0 && e.ReplyToIndex < thread.Messages.Count)
-        {
-            referencedEmail = thread.Messages[e.ReplyToIndex];
-        }
-        else if (thread.Messages.Count > 0)
-        {
-            referencedEmail = thread.Messages.Last();
-        }
+        // Get the email being replied to/forwarded based on the batch-relative replyToIndex
+        var referencedEmail = ResolveReferencedEmail(thread.Messages, batchOffset, e.ReplyToIndex);
 
         var shouldQuoteAsReply = e.IsReply;
         if (!shouldQuoteAsReply && !e.IsForward && sequence > 0 && referencedEmail != null)
@@ -1097,7 +1135,7 @@ ATTACHMENT REMINDER:
         if (percentage <= 0) return new List<EmailMessage>();
 
         var count = Math.Max(1, (int)Math.Round(emails.Count * percentage / 100.0));
-        return emails.OrderBy(_ => _random.Next()).Take(count).ToList();
+        return emails.OrderBy(_ => Random.Shared.Next()).Take(count).ToList();
     }
 
     /// <summary>
@@ -1133,7 +1171,8 @@ Email body preview: {email.BodyPlain[..Math.Min(300, email.BodyPlain.Length)]}..
 
         // Check if we should continue an existing document chain
         DocumentChainState? chainState = null;
-        if (state.Config.EnableAttachmentChains && _documentChains.Count > 0 && _random.Next(100) < 30)
+        int? reservedVersion = null;
+        if (state.Config.EnableAttachmentChains && _documentChains.Count > 0 && Random.Shared.Next(100) < 30)
         {
             var matchingChains = _documentChains.Values
                 .Where(c => c.Type == attachmentType)
@@ -1141,9 +1180,11 @@ Email body preview: {email.BodyPlain[..Math.Min(300, email.BodyPlain.Length)]}..
 
             if (matchingChains.Count > 0)
             {
-                chainState = matchingChains[_random.Next(matchingChains.Count)];
+                chainState = matchingChains[Random.Shared.Next(matchingChains.Count)];
+                // Reserve the version up front so parallel revisions never share a number
+                reservedVersion = chainState.ReserveNextVersion();
                 context += $"\n\nIMPORTANT: This is a REVISION of a document titled '{chainState.BaseTitle}'. ";
-                context += $"This is version {chainState.VersionNumber + 1}. ";
+                context += $"This is version {reservedVersion}. ";
                 context += "Make changes/updates to reflect edits, feedback, or revisions.";
             }
         }
@@ -1152,7 +1193,7 @@ Email body preview: {email.BodyPlain[..Math.Min(300, email.BodyPlain.Length)]}..
         switch (attachmentType)
         {
             case AttachmentType.Word:
-                attachment = await GenerateWordAttachmentAsync(context, email, isDetailed, state, ct, chainState);
+                attachment = await GenerateWordAttachmentAsync(context, email, isDetailed, state, ct, chainState, reservedVersion);
                 break;
             case AttachmentType.Excel:
                 attachment = await GenerateExcelAttachmentAsync(context, email, isDetailed, ct);
@@ -1165,15 +1206,14 @@ Email body preview: {email.BodyPlain[..Math.Min(300, email.BodyPlain.Length)]}..
         }
 
         // Handle document chain versioning
-        if (chainState != null && attachment.Content != null)
+        if (chainState != null && reservedVersion.HasValue && attachment.Content != null)
         {
-            chainState.VersionNumber++;
             attachment.DocumentChainId = chainState.ChainId;
-            attachment.VersionLabel = GetVersionLabel(chainState.VersionNumber);
+            attachment.VersionLabel = GetVersionLabel(reservedVersion.Value);
             var baseName = chainState.BaseTitle.Replace(" ", "_");
             attachment.FileName = $"{baseName}_{attachment.VersionLabel}{attachment.Extension}";
         }
-        else if (state.Config.EnableAttachmentChains && attachment.Type == AttachmentType.Word && _random.Next(100) < 50)
+        else if (state.Config.EnableAttachmentChains && attachment.Type == AttachmentType.Word && Random.Shared.Next(100) < 50)
         {
             // Start a new chain for Word documents
             var newChain = new DocumentChainState
@@ -1347,12 +1387,13 @@ Respond with JSON:
         var enabledTypes = state.Config.EnabledAttachmentTypes;
         if (enabledTypes.Count == 0) return;
 
-        var attachmentType = enabledTypes[_random.Next(enabledTypes.Count)];
+        var attachmentType = enabledTypes[Random.Shared.Next(enabledTypes.Count)];
         var isDetailed = state.Config.AttachmentComplexity == AttachmentComplexity.Detailed;
 
         // Check if we should continue an existing document chain (30% chance if enabled)
         DocumentChainState? chainState = null;
-        if (state.Config.EnableAttachmentChains && _documentChains.Count > 0 && _random.Next(100) < 30)
+        int? reservedVersion = null;
+        if (state.Config.EnableAttachmentChains && _documentChains.Count > 0 && Random.Shared.Next(100) < 30)
         {
             // Pick a random existing chain of the same type
             var matchingChains = _documentChains.Values
@@ -1361,7 +1402,9 @@ Respond with JSON:
 
             if (matchingChains.Count > 0)
             {
-                chainState = matchingChains[_random.Next(matchingChains.Count)];
+                chainState = matchingChains[Random.Shared.Next(matchingChains.Count)];
+                // Reserve the version up front so parallel revisions never share a number
+                reservedVersion = chainState.ReserveNextVersion();
             }
         }
 
@@ -1376,14 +1419,14 @@ Respond with JSON:
         if (chainState != null)
         {
             context += $"\n\nIMPORTANT: This is a REVISION of a document titled '{chainState.BaseTitle}'. ";
-            context += $"This is version {chainState.VersionNumber + 1}. ";
+            context += $"This is version {reservedVersion}. ";
             context += "Make changes/updates to reflect edits, feedback, or revisions - don't create something completely new.";
         }
 
         switch (attachmentType)
         {
             case AttachmentType.Word:
-                attachment = await GenerateWordAttachmentAsync(context, email, isDetailed, state, ct, chainState);
+                attachment = await GenerateWordAttachmentAsync(context, email, isDetailed, state, ct, chainState, reservedVersion);
                 break;
             case AttachmentType.Excel:
                 attachment = await GenerateExcelAttachmentAsync(context, email, isDetailed, ct);
@@ -1394,11 +1437,10 @@ Respond with JSON:
         }
 
         // Handle document chain versioning
-        if (chainState != null && attachment.Content != null)
+        if (chainState != null && reservedVersion.HasValue && attachment.Content != null)
         {
-            chainState.VersionNumber++;
             attachment.DocumentChainId = chainState.ChainId;
-            attachment.VersionLabel = GetVersionLabel(chainState.VersionNumber);
+            attachment.VersionLabel = GetVersionLabel(reservedVersion.Value);
 
             // Update filename to include version
             var baseName = chainState.BaseTitle.Replace(" ", "_");
@@ -1407,7 +1449,7 @@ Respond with JSON:
         else if (state.Config.EnableAttachmentChains && attachment.Type == AttachmentType.Word)
         {
             // Start a new chain for Word documents (50% chance)
-            if (_random.Next(100) < 50)
+            if (Random.Shared.Next(100) < 50)
             {
                 var newChain = new DocumentChainState
                 {
@@ -1446,7 +1488,7 @@ Respond with JSON:
     }
 
     private async Task<Attachment> GenerateWordAttachmentAsync(
-        string context, EmailMessage email, bool detailed, WizardState state, CancellationToken ct, DocumentChainState? chainState = null)
+        string context, EmailMessage email, bool detailed, WizardState state, CancellationToken ct, DocumentChainState? chainState = null, int? reservedVersion = null)
     {
         var systemPrompt = @"Generate content for a Word document attachment.
 The content should be realistic and related to the email context.
@@ -1462,7 +1504,7 @@ Respond with valid JSON only.";
         {
             versionNote = $@"
 
-IMPORTANT: This is VERSION {chainState.VersionNumber + 1} of '{chainState.BaseTitle}'.
+IMPORTANT: This is VERSION {reservedVersion ?? chainState.VersionNumber} of '{chainState.BaseTitle}'.
 Make realistic revisions:
 - Keep the same overall topic/title
 - Add or modify some sections
@@ -1793,7 +1835,7 @@ Respond with JSON:
         var hour = int.TryParse(timeParts[0], out var h) ? h : 10;
         var minute = timeParts.Length > 1 && int.TryParse(timeParts[1], out var m) ? m : 0;
 
-        var startTime = new DateTime(meetingDate.Year, meetingDate.Month, meetingDate.Day, hour, minute, 0);
+        var startTime = BuildMeetingStart(meetingDate, hour, minute);
         var endTime = startTime.AddMinutes(response.DurationMinutes > 0 ? response.DurationMinutes : 60);
 
         // Get attendees from the email recipients

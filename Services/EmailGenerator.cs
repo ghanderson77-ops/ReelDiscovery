@@ -3,12 +3,14 @@ using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
 using ReelDiscovery.Helpers;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Services;
 
 public class EmailGenerator
 {
-    private readonly OpenAIService _openAI;
+    private readonly ILlmGateway _llm;
+    private readonly OpenAIMediaClient? _media;
     private readonly OfficeDocumentService _officeService;
     private readonly CalendarService _calendarService;
 
@@ -29,11 +31,31 @@ public class EmailGenerator
         typeof(MeetingDetectionResponse)
     };
 
-    public EmailGenerator(OpenAIService openAI)
+    public EmailGenerator(ILlmGateway llm, OpenAIMediaClient? media = null)
     {
-        _openAI = openAI;
+        _llm = llm;
+        _media = media;
         _officeService = new OfficeDocumentService();
         _calendarService = new CalendarService();
+    }
+
+    /// <summary>
+    /// Structured call on the Volume tier (D-14: emails and attachments). Failures throw
+    /// LlmCallException, which the per-storyline catch / RunIsolatedAsync log and skip.
+    /// </summary>
+    private async Task<T> GenerateVolumeAsync<T>(string systemPrompt, string userPrompt, string operationName, int maxOutputTokens, CancellationToken ct)
+        where T : class
+    {
+        var result = await _llm.GenerateAsync<T>(new LlmRequest
+        {
+            Tier = LlmTier.Volume,
+            OperationName = operationName,
+            SystemPrompt = systemPrompt,
+            UserPrompt = userPrompt,
+            MaxOutputTokens = maxOutputTokens
+        }, ct);
+
+        return result.GetValueOrThrow();
     }
 
     internal class DocumentChainState
@@ -606,10 +628,8 @@ public class EmailGenerator
                 batchSize, batchAttachmentInstructions, narrativeContext,
                 narrativePhase, isFirstBatch, thread.Subject);
 
-            var response = await _openAI.GetJsonCompletionAsync<ThreadApiResponse>(systemPrompt, userPrompt, $"Email Thread Generation (batch {batch + 1}/{totalBatches})", ct);
-
-            if (response == null)
-                throw new InvalidOperationException($"Failed to generate batch {batch + 1} for storyline: {storyline.Title}");
+            var response = await GenerateVolumeAsync<ThreadApiResponse>(
+                systemPrompt, userPrompt, $"Email Thread Generation (batch {batch + 1}/{totalBatches})", 32_000, ct);
 
             // Capture the subject from the first batch
             if (isFirstBatch)
@@ -740,9 +760,7 @@ For longer threads (5+ emails), create realistic branching and side conversation
 
 Use the 'replyToIndex' field to specify which email is being replied to or forwarded:
 - Index 0 = first email, 1 = second email, etc.
-- This allows branching: email 5 might reply to email 2 (a side conversation), not email 4
-
-Respond with valid JSON only.";
+- This allows branching: email 5 might reply to email 2 (a side conversation), not email 4";
     }
 
     /// <summary>
@@ -823,7 +841,7 @@ The first email in this batch should be a reply or forward continuing the conver
   - This is REQUIRED, not optional. Set hasImage: true for {imageCount} emails.
   - Images should be photos, screenshots, or visual evidence relevant to the plot
   - MAKE MOST IMAGES INLINE (isImageInline: true) - the reader sees the image embedded in the email
-  - Provide a VIVID, DETAILED imageDescription that can be used to generate the image with DALL-E
+  - Provide a VIVID, DETAILED imageDescription that can be used to generate the image with an image model
   - Example: 'A candid photo taken at the office party showing Michael wearing a ridiculous costume while Jim looks on with an exasperated expression'");
             limits.Add($"images: {imageCount}");
         }
@@ -859,11 +877,11 @@ The first email in this batch should be a reply or forward continuing the conver
         bool isFirstBatch, string? existingSubject)
     {
         var subjectInstruction = isFirstBatch
-            ? @"""subject"": ""string (original email subject, not including RE: or FW:)"""
-            : $@"""subject"": ""{existingSubject}"" (MUST use this exact subject)";
+            ? "- subject: the original email subject, not including RE: or FW:"
+            : $"- subject: MUST be exactly \"{existingSubject}\"";
 
         var firstEmailNote = isFirstBatch
-            ? "- First email should NOT be a reply (replyToIndex: -1 or omit)"
+            ? "- First email should NOT be a reply (replyToIndex: -1)"
             : "- First email in this batch should continue the thread (reply or forward)";
 
         return $@"Storyline: {storyline.Title}
@@ -906,32 +924,8 @@ For threads with 5+ emails, include at least ONE of these realistic patterns:
 - A reply that only goes to one person instead of the whole group
 - Someone who was CC'd jumps into the conversation
 
-Respond with JSON in this exact format:
-{{
-  {subjectInstruction},
-  ""emails"": [
-    {{
-      ""fromEmail"": ""string (must be one of the character emails)"",
-      ""toEmails"": [""string""],
-      ""ccEmails"": [""string""] (optional, can be empty array),
-      ""sentDateTime"": ""ISO 8601 format"",
-      ""bodyPlain"": ""string (full email body including greeting and signature)"",
-      ""isReply"": boolean,
-      ""isForward"": boolean,
-      ""replyToIndex"": number (0-based index WITHIN THIS BATCH of which email this replies to/forwards; use -1 for first email),
-      ""hasDocument"": boolean (true if this email has a document attachment),
-      ""documentType"": ""word"" | ""excel"" | ""powerpoint"" (only if hasDocument is true),
-      ""documentDescription"": ""string describing document content (only if hasDocument is true)"",
-      ""hasImage"": boolean (true if this email includes an image),
-      ""imageDescription"": ""string describing what the image shows (only if hasImage is true)"",
-      ""isImageInline"": boolean (true = image embedded in email body, false = regular attachment),
-      ""hasVoicemail"": boolean (true if a voicemail accompanies this email),
-      ""voicemailContext"": ""string describing voicemail context (only if hasVoicemail is true)""
-    }}
-  ]
-}}
-
 CRITICAL RULES:
+{subjectInstruction}
 - Generate EXACTLY {batchSize} emails
 - All email addresses must match exactly one of the characters listed above
 - Dates must be within the specified range and in chronological order
@@ -1195,14 +1189,6 @@ ATTACHMENT REMINDER:
         return body;
     }
 
-    private List<EmailMessage> SelectEmailsForAttachments(List<EmailMessage> emails, int percentage)
-    {
-        if (percentage <= 0) return new List<EmailMessage>();
-
-        var count = Math.Max(1, (int)Math.Round(emails.Count * percentage / 100.0));
-        return emails.OrderBy(_ => Random.Shared.Next()).Take(count).ToList();
-    }
-
     /// <summary>
     /// Generate a document attachment based on the AI-planned description
     /// </summary>
@@ -1308,10 +1294,14 @@ Email body preview: {email.BodyPlain[..Math.Min(300, email.BodyPlain.Length)]}..
         if (!email.PlannedHasImage || string.IsNullOrEmpty(email.PlannedImageDescription))
             return;
 
-        // Generate the image using DALL-E with the planned description
+        // No media client means no usable OpenAI key: never call the image API
+        if (_media == null)
+            return;
+
+        // Generate the image using gpt-image with the planned description
         var imagePrompt = $"A vivid, realistic image in the style/universe of {state.Topic}: {email.PlannedImageDescription}. High quality, detailed.";
 
-        var imageBytes = await _openAI.GenerateImageAsync(imagePrompt, "Image Generation", ct);
+        var imageBytes = await _media.GenerateImageAsync(imagePrompt, "Image Generation", ct);
 
         if (imageBytes == null || imageBytes.Length == 0)
             return;
@@ -1390,15 +1380,14 @@ Email body preview: {email.BodyPlain[..Math.Min(300, email.BodyPlain.Length)]}..
     /// </summary>
     private async Task GeneratePlannedVoicemailAsync(EmailMessage email, WizardState state, CancellationToken ct)
     {
-        if (!email.PlannedHasVoicemail)
+        // No media client means no usable OpenAI key: skip before spending on the script
+        if (!email.PlannedHasVoicemail || _media == null)
             return;
 
         // Generate a voicemail script using the planned context
         var systemPrompt = @"You are creating a voicemail message that relates to an email.
 The voicemail should sound natural and conversational, as if someone called and left a message.
-Keep the voicemail BRIEF - 15-30 seconds when spoken (about 40-80 words).
-
-Respond with JSON only.";
+Keep the voicemail BRIEF - 15-30 seconds when spoken (about 40-80 words).";
 
         var context = $@"Email subject: {email.Subject}
 Sender: {email.From.FullName}
@@ -1413,20 +1402,15 @@ The voicemail should:
 - Reference the email topic with appropriate urgency
 - Start with a greeting ('Hey, it's [name]...' or 'Hi, this is [name] calling about...')
 - End naturally ('...call me back when you get this' or 'talk soon')
-- Be 40-80 words total
+- Be 40-80 words total";
 
-Respond with JSON:
-{{
-  ""voicemailScript"": ""string (the voicemail transcript)""
-}}";
+        var response = await GenerateVolumeAsync<VoicemailScriptResponse>(systemPrompt, userPrompt, "Voicemail Script", 4_000, ct);
 
-        var response = await _openAI.GetJsonCompletionAsync<VoicemailScriptResponse>(systemPrompt, userPrompt, "Voicemail Script", ct);
-
-        if (response == null || string.IsNullOrEmpty(response.VoicemailScript))
+        if (string.IsNullOrEmpty(response.VoicemailScript))
             return;
 
         // Generate the audio using TTS
-        var audioBytes = await _openAI.GenerateSpeechAsync(
+        var audioBytes = await _media.GenerateSpeechAsync(
             response.VoicemailScript,
             email.From.VoiceId,
             "Voicemail TTS",
@@ -1444,94 +1428,6 @@ Respond with JSON:
             FileName = $"voicemail_{email.From.LastName}_{email.SentDate:yyyyMMdd_HHmm}.mp3"
         };
 
-        email.Attachments.Add(attachment);
-    }
-
-    private async Task GenerateAttachmentAsync(EmailMessage email, WizardState state, CancellationToken ct)
-    {
-        var enabledTypes = state.Config.EnabledAttachmentTypes;
-        if (enabledTypes.Count == 0) return;
-
-        var attachmentType = enabledTypes[Random.Shared.Next(enabledTypes.Count)];
-        var isDetailed = state.Config.AttachmentComplexity == AttachmentComplexity.Detailed;
-
-        // Check if we should continue an existing document chain (30% chance if enabled)
-        DocumentChainState? chainState = null;
-        int? reservedVersion = null;
-        if (state.Config.EnableAttachmentChains && _documentChains.Count > 0 && Random.Shared.Next(100) < 30)
-        {
-            // Pick a random existing chain of the same type
-            var matchingChains = _documentChains.Values
-                .Where(c => c.Type == attachmentType)
-                .ToList();
-
-            if (matchingChains.Count > 0)
-            {
-                chainState = matchingChains[Random.Shared.Next(matchingChains.Count)];
-                // Reserve the version up front so parallel revisions never share a number
-                reservedVersion = chainState.ReserveNextVersion();
-            }
-        }
-
-        var attachment = new Attachment
-        {
-            Type = attachmentType
-        };
-
-        var context = $"Email subject: {email.Subject}\nEmail body preview: {email.BodyPlain[..Math.Min(200, email.BodyPlain.Length)]}...";
-
-        // Add version context if continuing a chain
-        if (chainState != null)
-        {
-            context += $"\n\nIMPORTANT: This is a REVISION of a document titled '{chainState.BaseTitle}'. ";
-            context += $"This is version {reservedVersion}. ";
-            context += "Make changes/updates to reflect edits, feedback, or revisions - don't create something completely new.";
-        }
-
-        switch (attachmentType)
-        {
-            case AttachmentType.Word:
-                attachment = await GenerateWordAttachmentAsync(context, email, isDetailed, state, ct, chainState, reservedVersion);
-                break;
-            case AttachmentType.Excel:
-                attachment = await GenerateExcelAttachmentAsync(context, email, isDetailed, ct);
-                break;
-            case AttachmentType.PowerPoint:
-                attachment = await GeneratePowerPointAttachmentAsync(context, email, isDetailed, state, ct);
-                break;
-        }
-
-        // Handle document chain versioning
-        if (chainState != null && reservedVersion.HasValue && attachment.Content != null)
-        {
-            attachment.DocumentChainId = chainState.ChainId;
-            attachment.VersionLabel = GetVersionLabel(reservedVersion.Value);
-
-            // Update filename to include version
-            var baseName = chainState.BaseTitle.Replace(" ", "_");
-            attachment.FileName = $"{baseName}_{attachment.VersionLabel}{attachment.Extension}";
-        }
-        else if (state.Config.EnableAttachmentChains && attachment.Type == AttachmentType.Word)
-        {
-            // Start a new chain for Word documents (50% chance)
-            if (Random.Shared.Next(100) < 50)
-            {
-                var newChain = new DocumentChainState
-                {
-                    BaseTitle = attachment.ContentDescription,
-                    Type = attachment.Type,
-                    VersionNumber = 1
-                };
-                _documentChains.TryAdd(newChain.ChainId, newChain);
-                attachment.DocumentChainId = newChain.ChainId;
-                attachment.VersionLabel = "v1";
-            }
-        }
-
-        if (string.IsNullOrEmpty(attachment.FileName))
-        {
-            attachment.FileName = FileNameHelper.GenerateAttachmentFileName(attachment, email);
-        }
         email.Attachments.Add(attachment);
     }
 
@@ -1556,8 +1452,7 @@ Respond with JSON:
         string context, EmailMessage email, bool detailed, WizardState state, CancellationToken ct, DocumentChainState? chainState = null, int? reservedVersion = null)
     {
         var systemPrompt = @"Generate content for a Word document attachment.
-The content should be realistic and related to the email context.
-Respond with valid JSON only.";
+The content should be realistic and related to the email context.";
 
         var detailLevel = detailed
             ? "Generate a detailed document with 4-6 paragraphs, including an introduction, main content with 2-3 key points, and a conclusion."
@@ -1580,17 +1475,11 @@ Make realistic revisions:
         var userPrompt = $@"Context:
 {context}
 {versionNote}
-{detailLevel}
+{detailLevel}";
 
-Respond with JSON:
-{{
-  ""title"": ""string (document title)"",
-  ""content"": ""string (full document content, paragraphs separated by double newlines)""
-}}";
+        var response = await GenerateVolumeAsync<WordDocResponse>(systemPrompt, userPrompt, "Word Attachment", 16_000, ct);
 
-        var response = await _openAI.GetJsonCompletionAsync<WordDocResponse>(systemPrompt, userPrompt, "Word Attachment", ct);
-
-        var title = response?.Title ?? "Document";
+        var title = string.IsNullOrWhiteSpace(response.Title) ? "Document" : response.Title;
 
         // If continuing a chain, keep the original title
         if (chainState != null)
@@ -1608,7 +1497,7 @@ Respond with JSON:
 
         var content = _officeService.CreateWordDocument(
             title,
-            response?.Content ?? "Content unavailable.",
+            string.IsNullOrWhiteSpace(response.Content) ? "Content unavailable." : response.Content,
             theme);
 
         return new Attachment
@@ -1625,8 +1514,7 @@ Respond with JSON:
         var systemPrompt = @"Generate data for an Excel spreadsheet attachment.
 The data should be realistic and related to the email context.
 IMPORTANT: All values in the rows array MUST be strings, even if they represent numbers.
-For example: use ""1234"" instead of 1234, use ""$5,000"" instead of 5000.
-Respond with valid JSON only.";
+For example: use ""1234"" instead of 1234, use ""$5,000"" instead of 5000.";
 
         var rowCount = detailed ? "10-15" : "5-8";
 
@@ -1636,33 +1524,26 @@ Respond with valid JSON only.";
 Generate spreadsheet data with:
 - Appropriate column headers (3-6 columns)
 - {rowCount} rows of realistic data
-- Format numeric values as strings (e.g., ""$1,234"", ""500"", ""12.5%"")
+- Format numeric values as strings (e.g., ""$1,234"", ""500"", ""12.5%"")";
 
-Respond with JSON:
-{{
-  ""title"": ""string (spreadsheet title)"",
-  ""headers"": [""string""],
-  ""rows"": [[""string (ALL values must be strings, even numbers)""]]
-}}";
+        var response = await GenerateVolumeAsync<ExcelDocResponse>(systemPrompt, userPrompt, "Excel Attachment", 16_000, ct);
 
-        var response = await _openAI.GetJsonCompletionAsync<ExcelDocResponse>(systemPrompt, userPrompt, "Excel Attachment", ct);
-
-        var rows = response?.Rows.Where(r => r.Count > 0).ToList() ?? new List<List<string>>();
+        var rows = response.Rows.Where(r => r.Count > 0).ToList();
 
         if (rows.Count == 0)
         {
             rows.Add(new List<string> { "Data1", "Data2" });
         }
 
-        var content = _officeService.CreateExcelDocument(
-            response?.Title ?? "Spreadsheet",
-            response?.Headers ?? new List<string> { "Column1", "Column2" },
-            rows);
+        var excelTitle = string.IsNullOrWhiteSpace(response.Title) ? "Spreadsheet" : response.Title;
+        var headers = response.Headers.Count > 0 ? response.Headers : new List<string> { "Column1", "Column2" };
+
+        var content = _officeService.CreateExcelDocument(excelTitle, headers, rows);
 
         return new Attachment
         {
             Type = AttachmentType.Excel,
-            ContentDescription = response?.Title ?? "Spreadsheet",
+            ContentDescription = excelTitle,
             Content = content
         };
     }
@@ -1671,8 +1552,7 @@ Respond with JSON:
         string context, EmailMessage email, bool detailed, WizardState state, CancellationToken ct)
     {
         var systemPrompt = @"Generate content for a PowerPoint presentation attachment.
-The content should be realistic and related to the email context.
-Respond with valid JSON only.";
+The content should be realistic and related to the email context.";
 
         var slideCount = detailed ? "5-8" : "3-4";
 
@@ -1682,24 +1562,19 @@ Respond with valid JSON only.";
 Generate presentation content with:
 - A main title
 - {slideCount} content slides
-- Each slide should have a title and bullet points or brief content
+- Each slide should have a title and bullet points or brief content";
 
-Respond with JSON:
-{{
-  ""title"": ""string (presentation title)"",
-  ""slides"": [
-    {{
-      ""slideTitle"": ""string"",
-      ""content"": ""string (bullet points or paragraph)""
-    }}
-  ]
-}}";
+        var response = await GenerateVolumeAsync<PowerPointDocResponse>(systemPrompt, userPrompt, "PowerPoint Attachment", 16_000, ct);
 
-        var response = await _openAI.GetJsonCompletionAsync<PowerPointDocResponse>(systemPrompt, userPrompt, "PowerPoint Attachment", ct);
-
-        var slides = response?.Slides?
+        var slides = response.Slides
             .Select(s => (s.SlideTitle, s.Content))
-            .ToList() ?? new List<(string, string)> { ("Slide 1", "Content") };
+            .ToList();
+        if (slides.Count == 0)
+        {
+            slides.Add(("Slide 1", "Content"));
+        }
+
+        var pptTitle = string.IsNullOrWhiteSpace(response.Title) ? "Presentation" : response.Title;
 
         // Get the organization theme for the sender's domain
         OrganizationTheme? theme = null;
@@ -1710,132 +1585,16 @@ Respond with JSON:
         }
 
         var content = _officeService.CreatePowerPointDocument(
-            response?.Title ?? "Presentation",
+            pptTitle,
             slides,
             theme);
 
         return new Attachment
         {
             Type = AttachmentType.PowerPoint,
-            ContentDescription = response?.Title ?? "Presentation",
+            ContentDescription = pptTitle,
             Content = content
         };
-    }
-
-    private async Task GenerateImageForEmailAsync(EmailMessage email, WizardState state, CancellationToken ct)
-    {
-        // First, get AI to describe what image would be appropriate for this email
-        var systemPrompt = @"You are helping generate an image for an email in a fictional universe.
-Based on the email content, suggest a single image that someone might attach or embed in this email.
-The image should feel authentic to the fictional world and relevant to the email's content.
-
-Respond with JSON only.";
-
-        var context = $@"Email subject: {email.Subject}
-Email body: {email.BodyPlain[..Math.Min(500, email.BodyPlain.Length)]}
-Topic/Universe: {state.Topic}";
-
-        var userPrompt = $@"{context}
-
-Suggest ONE image that would be realistic to include with this email. Consider:
-- Photos someone might share ('Here's a picture from the event')
-- Screenshots or diagrams being discussed
-- Images that add context to the storyline
-
-Respond with JSON:
-{{
-  ""shouldIncludeImage"": boolean (false if no image makes sense for this email),
-  ""imageDescription"": ""string (detailed description for image generation, 2-3 sentences)"",
-  ""imageContext"": ""string (brief caption or how it's referenced in email, e.g., 'Attached: Photo from the banquet')"",
-  ""isInline"": boolean (true if image should display in email body, false for attachment)
-}}";
-
-        var response = await _openAI.GetJsonCompletionAsync<ImageSuggestionResponse>(systemPrompt, userPrompt, "Image Suggestion", ct);
-
-        if (response == null || !response.ShouldIncludeImage || string.IsNullOrEmpty(response.ImageDescription))
-            return;
-
-        // Generate the image using DALL-E
-        // Craft a safe, descriptive prompt
-        var imagePrompt = $"A realistic image in the style of {state.Topic}: {response.ImageDescription}. High quality, photorealistic where appropriate.";
-
-        var imageBytes = await _openAI.GenerateImageAsync(imagePrompt, "Image Generation", ct);
-
-        if (imageBytes == null || imageBytes.Length == 0)
-            return;
-
-        var contentId = $"img_{Guid.NewGuid():N}";
-        var attachment = new Attachment
-        {
-            Type = AttachmentType.Image,
-            Content = imageBytes,
-            ContentDescription = response.ImageContext ?? "Attached image",
-            IsInline = response.IsInline,
-            ContentId = contentId,
-            FileName = $"image_{email.SentDate:yyyyMMdd}_{Guid.NewGuid().ToString("N")[..6]}.png"
-        };
-
-        email.Attachments.Add(attachment);
-
-        // If inline, update the HTML body to include the image in the main content (before quoted text)
-        if (response.IsInline && !string.IsNullOrEmpty(email.BodyHtml))
-        {
-            var safeContext = System.Net.WebUtility.HtmlEncode(response.ImageContext ?? "Attached image");
-            var imageHtml = $@"<div style=""margin: 15px 0;""><p><em>{safeContext}</em></p><div style=""text-align: center;""><img src=""cid:{contentId}"" alt=""{safeContext}"" style=""max-width: 600px; height: auto; border-radius: 4px;"" /></div></div>";
-
-            // Try to insert the image BEFORE the quoted content (reply or forward sections)
-            var insertionPoints = new[]
-            {
-                "<div class=\"quoted-content\">",
-                "<div class=\"forward-header\">",
-                "<div class=\"signature\">"
-            };
-
-            bool inserted = false;
-            foreach (var marker in insertionPoints)
-            {
-                var markerIndex = email.BodyHtml.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-                if (markerIndex > 0)
-                {
-                    email.BodyHtml = email.BodyHtml.Insert(markerIndex, imageHtml);
-                    inserted = true;
-                    break;
-                }
-            }
-
-            if (!inserted)
-            {
-                var disclaimerIndex = email.BodyHtml.IndexOf("<img src=\"data:image/png;base64,", StringComparison.OrdinalIgnoreCase);
-                if (disclaimerIndex > 0)
-                {
-                    email.BodyHtml = email.BodyHtml.Insert(disclaimerIndex, imageHtml);
-                }
-                else if (email.BodyHtml.Contains("</body>"))
-                {
-                    email.BodyHtml = email.BodyHtml.Replace("</body>", imageHtml + "</body>");
-                }
-                else
-                {
-                    email.BodyHtml += imageHtml;
-                }
-            }
-        }
-    }
-
-    internal class ImageSuggestionResponse
-    {
-        [JsonPropertyName("shouldIncludeImage")]
-        public bool ShouldIncludeImage { get; set; }
-
-        [JsonPropertyName("imageDescription")]
-        [Description("What the image shows; empty when hasImage is false")]
-        public string ImageDescription { get; set; } = string.Empty;
-
-        [JsonPropertyName("imageContext")]
-        public string? ImageContext { get; set; }
-
-        [JsonPropertyName("isInline")]
-        public bool IsInline { get; set; }
     }
 
     private async Task DetectAndAddCalendarInviteAsync(EmailMessage email, List<Character> characters, CancellationToken ct)
@@ -1847,30 +1606,17 @@ Look for:
 - Specific dates and times mentioned ('tomorrow at 3pm', 'Friday at noon', 'next week Monday')
 - Meeting requests or confirmations
 - Event invitations
-- Scheduled calls or gatherings
-
-Respond with JSON only.";
+- Scheduled calls or gatherings";
 
         var userPrompt = $@"Email subject: {email.Subject}
 Email body: {email.BodyPlain[..Math.Min(800, email.BodyPlain.Length)]}
 Email sent date: {email.SentDate:yyyy-MM-dd}
 
-Does this email mention a specific meeting, event, or call that should have a calendar invite?
+Does this email mention a specific meeting, event, or call that should have a calendar invite?";
 
-Respond with JSON:
-{{
-  ""hasMeeting"": boolean,
-  ""meetingTitle"": ""string (title for the calendar invite)"",
-  ""meetingDescription"": ""string (brief description)"",
-  ""location"": ""string (meeting location or 'Virtual' or 'TBD')"",
-  ""suggestedDate"": ""YYYY-MM-DD (the date of the meeting, based on context)"",
-  ""suggestedStartTime"": ""HH:MM (24-hour format)"",
-  ""durationMinutes"": number (30, 60, 90, 120, etc.)
-}}";
+        var response = await GenerateVolumeAsync<MeetingDetectionResponse>(systemPrompt, userPrompt, "Meeting Detection", 4_000, ct);
 
-        var response = await _openAI.GetJsonCompletionAsync<MeetingDetectionResponse>(systemPrompt, userPrompt, "Meeting Detection", ct);
-
-        if (response == null || !response.HasMeeting)
+        if (!response.HasMeeting)
             return;
 
         // Parse the meeting date and time
@@ -1945,79 +1691,11 @@ Respond with JSON:
         public int DurationMinutes { get; set; }
     }
 
-    private async Task GenerateVoicemailForEmailAsync(EmailMessage email, WizardState state, CancellationToken ct)
-    {
-        // Ask AI to create a voicemail script related to this email thread
-        var systemPrompt = @"You are creating a voicemail message that relates to an email thread.
-The voicemail should sound natural and conversational, as if someone called and left a message.
-It should relate to the email content but not simply read the email aloud.
-
-Keep the voicemail BRIEF - 15-30 seconds when spoken (about 40-80 words).
-
-Respond with JSON only.";
-
-        var context = $@"Email subject: {email.Subject}
-Email body preview: {email.BodyPlain[..Math.Min(400, email.BodyPlain.Length)]}
-Sender: {email.From.FullName}
-Topic/Universe: {state.Topic}";
-
-        var userPrompt = $@"{context}
-
-Create a voicemail that {email.From.FirstName} might leave that relates to this email thread.
-The voicemail should:
-- Sound natural and conversational (include 'um', 'uh', pauses indicated by '...')
-- Reference the email topic but add urgency or context
-- Start with a greeting ('Hey, it's [name]...' or 'Hi, this is [name] calling about...')
-- End naturally ('...call me back when you get this' or 'talk soon')
-- Be 40-80 words total
-
-Respond with JSON:
-{{
-  ""shouldCreateVoicemail"": boolean (false if voicemail doesn't make sense),
-  ""voicemailScript"": ""string (the voicemail transcript)"",
-  ""recipientName"": ""string (who the voicemail is for)""
-}}";
-
-        var response = await _openAI.GetJsonCompletionAsync<VoicemailScriptResponse>(systemPrompt, userPrompt, "Voicemail Script", ct);
-
-        if (response == null || !response.ShouldCreateVoicemail || string.IsNullOrEmpty(response.VoicemailScript))
-            return;
-
-        // Generate the audio using TTS
-        var audioBytes = await _openAI.GenerateSpeechAsync(
-            response.VoicemailScript,
-            email.From.VoiceId,
-            "Voicemail TTS",
-            ct);
-
-        if (audioBytes == null || audioBytes.Length == 0)
-            return;
-
-        var attachment = new Attachment
-        {
-            Type = AttachmentType.Voicemail,
-            Content = audioBytes,
-            ContentDescription = $"Voicemail from {email.From.FullName}",
-            VoiceId = email.From.VoiceId,
-            FileName = $"voicemail_{email.From.LastName}_{email.SentDate:yyyyMMdd_HHmm}.mp3"
-        };
-
-        email.Attachments.Add(attachment);
-    }
-
     internal class VoicemailScriptResponse
     {
-        [JsonPropertyName("shouldCreateVoicemail")]
-        [Description("False if a voicemail does not make sense")]
-        public bool ShouldCreateVoicemail { get; set; }
-
         [JsonPropertyName("voicemailScript")]
         [Description("The voicemail transcript, 40-80 words")]
         public string VoicemailScript { get; set; } = string.Empty;
-
-        [JsonPropertyName("recipientName")]
-        [Description("Who the voicemail is for")]
-        public string? RecipientName { get; set; }
     }
 
     // Response DTOs

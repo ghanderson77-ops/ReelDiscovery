@@ -176,8 +176,7 @@ public class StepGeneration : UserControl, IWizardStep
 
         try
         {
-            var openAI = _state.CreateOpenAIService();
-            var generator = new EmailGenerator(openAI);
+            var generator = new EmailGenerator(_state.CreateGateway(), _state.CreateMediaClient());
 
             var progress = new Progress<GenerationProgress>(p =>
             {

@@ -81,6 +81,35 @@ public class EmailDistributionTests
     }
 
     [Fact]
+    public void HugeSuggested_NoOverflow_SumsToTotal()
+    {
+        // T-01-13-03: 5,000,000 * 498 used to wrap negative as int
+        var distribution = EmailGenerator.DistributeEmails(S(5_000_000, 1), 500);
+
+        Assert.All(distribution, n => Assert.True(n >= 0));
+        Assert.Equal(500, distribution.Sum());
+    }
+
+    [Fact]
+    public void MaxIntSuggested_NoOverflowException()
+    {
+        // Two int.MaxValue weights used to throw OverflowException from Sum()
+        var distribution = EmailGenerator.DistributeEmails(S(int.MaxValue, int.MaxValue), 500);
+
+        Assert.Equal(new[] { 250, 250 }, distribution);
+    }
+
+    [Fact]
+    public void SuggestedAboveCap_ClampedToCap()
+    {
+        // Values above MaxSuggestedEmailCount weigh the same as the cap itself
+        var capped = EmailGenerator.DistributeEmails(S(Storyline.MaxSuggestedEmailCount, 1), 1_000);
+        var huge = EmailGenerator.DistributeEmails(S(int.MaxValue, 1), 1_000);
+
+        Assert.Equal(capped, huge);
+    }
+
+    [Fact]
     public void NoStorylines_Throws()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>

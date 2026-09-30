@@ -652,8 +652,8 @@ public class EmailGenerator
             distribution[i] = 1;
         var remaining = total - n;
 
-        // Negative suggestions (user-edited grid) count as 0; all-zero means equal split
-        var weights = storylines.Select(s => Math.Max(0, s.SuggestedEmailCount)).ToArray();
+        // User-edited grid values are clamped to 0..MaxSuggestedEmailCount; all-zero means equal split
+        var weights = storylines.Select(s => Math.Clamp(s.SuggestedEmailCount, 0, Storyline.MaxSuggestedEmailCount)).ToArray();
         if (weights.Sum() == 0)
         {
             for (var i = 0; i < n; i++)
@@ -665,7 +665,8 @@ public class EmailGenerator
         var assigned = 0;
         for (var i = 0; i < n; i++)
         {
-            exact[i] = remaining * weights[i] / weightSum;
+            // Multiply in double so remaining * weight can never wrap
+            exact[i] = (double)remaining * weights[i] / weightSum;
             var floor = (int)Math.Floor(exact[i]);
             distribution[i] += floor;
             assigned += floor;

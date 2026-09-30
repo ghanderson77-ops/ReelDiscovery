@@ -126,6 +126,8 @@ public class StepStorylines : UserControl, IWizardStep
         _gridStorylines.ColumnHeaderMouseClick += GridStorylines_ColumnHeaderMouseClick;
         _gridStorylines.SelectionChanged += GridStorylines_SelectionChanged;
         _gridStorylines.UserDeletingRow += GridStorylines_UserDeletingRow;
+        _gridStorylines.CellValidating += GridStorylines_CellValidating;
+        _gridStorylines.CellEndEdit += GridStorylines_CellEndEdit;
 
         mainLayout.Controls.Add(_gridStorylines, 0, 1);
 
@@ -197,6 +199,26 @@ public class StepStorylines : UserControl, IWizardStep
         // Allow deletion - the binding list will handle it
         UpdateStatus();
         StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void GridStorylines_CellValidating(object? sender, DataGridViewCellValidatingEventArgs e)
+    {
+        if (_gridStorylines.Columns[e.ColumnIndex].Name != "Emails")
+            return;
+
+        // Est. Emails must be a whole number in 0..MaxSuggestedEmailCount (T-01-13-03)
+        var text = e.FormattedValue?.ToString()?.Trim();
+        if (!int.TryParse(text, out var value) || value < 0 || value > Storyline.MaxSuggestedEmailCount)
+        {
+            _gridStorylines.Rows[e.RowIndex].ErrorText =
+                $"Est. Emails must be a whole number from 0 to {Storyline.MaxSuggestedEmailCount:N0}.";
+            e.Cancel = true;
+        }
+    }
+
+    private void GridStorylines_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
+    {
+        _gridStorylines.Rows[e.RowIndex].ErrorText = string.Empty;
     }
 
     private void GridStorylines_ColumnHeaderMouseClick(object? sender, DataGridViewCellMouseEventArgs e)

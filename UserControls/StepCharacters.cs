@@ -296,8 +296,8 @@ public class StepCharacters : UserControl, IWizardStep
 
         try
         {
-            var openAI = _state.CreateOpenAIService();
-            var generator = new CharacterGenerator(openAI);
+            var llm = _state.CreateGateway();
+            var generator = new CharacterGenerator(llm);
 
             // Create progress reporter that updates the status label
             IProgress<string> progress = new Progress<string>(status =>
@@ -320,7 +320,7 @@ public class StepCharacters : UserControl, IWizardStep
 
             // Generate presentation themes for each domain
             progress.Report("Generating presentation themes...");
-            var themeGenerator = new ThemeGenerator(openAI);
+            var themeGenerator = new ThemeGenerator(llm);
             _state.DomainThemes = await themeGenerator.GenerateThemesForDomainsAsync(
                 _state.Topic,
                 _state.Characters,

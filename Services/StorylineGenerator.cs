@@ -1,12 +1,13 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Services;
 
 public class StorylineGenerator
 {
-    private readonly OpenAIService _openAI;
+    private readonly ILlmGateway _llm;
     private const int MaxStorylinesPerBatch = 15;
 
     /// <summary>
@@ -14,9 +15,9 @@ public class StorylineGenerator
     /// </summary>
     internal static IReadOnlyList<Type> SchemaTypes { get; } = new[] { typeof(StorylineApiResponse) };
 
-    public StorylineGenerator(OpenAIService openAI)
+    public StorylineGenerator(ILlmGateway llm)
     {
-        _openAI = openAI;
+        _llm = llm;
     }
 
     public async Task<StorylineGenerationResult> GenerateStorylinesAsync(
@@ -166,30 +167,21 @@ DO NOT create bland, cordial storylines:
 - BAD: 'Planning the company picnic' (boring, no conflict)
 - GOOD: 'Company picnic disaster - food poisoning blamed on Angela, accusations of deliberate sabotage, HR gets involved'
 - BAD: 'Quarterly budget review' (routine, no stakes)
-- GOOD: 'Quarterly budget exposes missing funds - accusations fly between departments, someone's getting fired'
-
-Always respond with valid JSON matching the specified schema exactly.";
+- GOOD: 'Quarterly budget exposes missing funds - accusations fly between departments, someone's getting fired'";
 
         var existingTitlesNote = existingTitles != null && existingTitles.Count > 0
             ? $"\n\nIMPORTANT: The following storylines have already been created. DO NOT duplicate these - create DIFFERENT storylines based on OTHER events from the source material:\n{string.Join("\n", existingTitles.Select(t => $"- {t}"))}\n"
             : "";
 
-        var dateRangeSection = includeDateRange
-            ? @",
-  ""suggestedDateRange"": {
-    ""reasoning"": ""string explaining why these dates were chosen"",
-    ""startDate"": ""YYYY-MM-DD"",
-    ""endDate"": ""YYYY-MM-DD""
-  }"
-            : "";
-
         var dateRangeInstruction = includeDateRange
             ? @"
 
-Also suggest an appropriate date range for when these emails would have been sent, based on:
+Also suggest a realistic date range (startDate, endDate as yyyy-MM-dd) with reasoning for when these emails would have been sent, based on:
 - If this is a movie/TV show/book, use dates that fit the setting or release period
 - If this is a general topic, suggest dates within the past 1-2 years"
-            : "";
+            : @"
+
+Leave the suggested date range empty.";
 
         var userPrompt = $@"Topic: {topic}
 
@@ -221,25 +213,17 @@ CRITICAL - MAKE STORYLINES EMOTIONALLY CHARGED:
 - The description MUST name who is in conflict with whom
 - Include the EMOTIONAL STAKES (fear, anger, betrayal, desperation, jealousy)
 - Characters who are enemies/rivals should CLASH in email threads
-- Don't make everyone professional and cordial - let real emotions show
+- Don't make everyone professional and cordial - let real emotions show";
 
-Respond with JSON in this exact format:
-{{
-  ""storylines"": [
-    {{
-      ""title"": ""string"",
-      ""description"": ""string (2-3 sentences: the conflict, who's against whom, and the emotional stakes)"",
-      ""timelineHint"": ""string (e.g., 'Spans 2 weeks', 'Single day event')"",
-      ""suggestedEmailCount"": number (5-20),
-      ""keyCharacterRoles"": [""string""]
-    }}
-  ]{dateRangeSection}
-}}";
-
-        var response = await _openAI.GetJsonCompletionAsync<StorylineApiResponse>(systemPrompt, userPrompt, "Storyline Generation", ct);
-
-        if (response == null)
-            throw new InvalidOperationException("Failed to generate storylines");
+        var llmResult = await _llm.GenerateAsync<StorylineApiResponse>(new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = "Storyline Generation",
+            SystemPrompt = systemPrompt,
+            UserPrompt = userPrompt,
+            MaxOutputTokens = 32_000
+        }, ct);
+        var response = llmResult.GetValueOrThrow();
 
         var result = new StorylineGenerationResult();
 

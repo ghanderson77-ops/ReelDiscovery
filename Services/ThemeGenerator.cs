@@ -1,21 +1,22 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Services;
 
 public class ThemeGenerator
 {
-    private readonly OpenAIService _openAI;
+    private readonly ILlmGateway _llm;
 
     /// <summary>
     /// Top-level response types sent as strict JSON schemas (verified by tests).
     /// </summary>
     internal static IReadOnlyList<Type> SchemaTypes { get; } = new[] { typeof(ThemeApiResponse) };
 
-    public ThemeGenerator(OpenAIService openAI)
+    public ThemeGenerator(ILlmGateway llm)
     {
-        _openAI = openAI;
+        _llm = llm;
     }
 
     /// <summary>
@@ -58,9 +59,7 @@ Font Guidelines - choose fonts that match the organization's personality:
 - Creative agencies, media companies: Modern fonts like 'Century Gothic', 'Trebuchet MS'
 - Government, formal institutions: Traditional like 'Times New Roman', 'Book Antiqua'
 - Healthcare, scientific: Clean professional like 'Calibri', 'Arial'
-- The heading font should be bolder/more distinctive than the body font
-
-Respond with valid JSON only.";
+- The heading font should be bolder/more distinctive than the body font";
 
         var orgList = string.Join("\n", domainOrgs.Select(kv => $"- {kv.Value} ({kv.Key})"));
 
@@ -79,25 +78,22 @@ For example:
 
 Available fonts (use ONLY these - they are commonly installed):
 Serif: Georgia, Times New Roman, Garamond, Book Antiqua, Palatino Linotype
-Sans-serif: Segoe UI, Arial, Calibri, Trebuchet MS, Century Gothic, Verdana, Tahoma
+Sans-serif: Segoe UI, Arial, Calibri, Trebuchet MS, Century Gothic, Verdana, Tahoma";
 
-Respond with JSON:
-{{
-  ""themes"": [
-    {{
-      ""domain"": ""string (the email domain)"",
-      ""organizationName"": ""string"",
-      ""themeName"": ""string (descriptive name like 'Corporate Navy' or 'Tech Vibrant')"",
-      ""primaryColor"": ""RRGGBB (hex without #, main brand color)"",
-      ""secondaryColor"": ""RRGGBB (complementary color)"",
-      ""accentColor"": ""RRGGBB (highlight/emphasis color)"",
-      ""headingFont"": ""string (font for titles/headings)"",
-      ""bodyFont"": ""string (font for body text)""
-    }}
-  ]
-}}";
+        var llmResult = await _llm.GenerateAsync<ThemeApiResponse>(new LlmRequest
+        {
+            Tier = LlmTier.Volume,
+            OperationName = "Theme Generation",
+            SystemPrompt = systemPrompt,
+            UserPrompt = userPrompt,
+            MaxOutputTokens = 8_000
+        }, ct);
 
-        var response = await _openAI.GetJsonCompletionAsync<ThemeApiResponse>(systemPrompt, userPrompt, "Theme Generation", ct);
+        // Bad key / spend limit must stop the run; other failures fall back to default themes
+        if (llmResult.IsFatal)
+            throw new LlmCallException(llmResult);
+
+        var response = llmResult.Outcome == LlmOutcome.Succeeded ? llmResult.Value : null;
 
         if (response?.Themes != null)
         {

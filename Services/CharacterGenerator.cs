@@ -1,20 +1,21 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Services;
 
 public class CharacterGenerator
 {
-    private readonly OpenAIService _openAI;
+    private readonly ILlmGateway _llm;
 
     // Available TTS voices with characteristics
     private static readonly string[] MaleVoices = ["echo", "onyx", "fable"];
     private static readonly string[] FemaleVoices = ["nova", "shimmer", "alloy"];
 
-    public CharacterGenerator(OpenAIService openAI)
+    public CharacterGenerator(ILlmGateway llm)
     {
-        _openAI = openAI;
+        _llm = llm;
     }
 
     private const int MaxCharactersPerBatch = 25;
@@ -233,9 +234,7 @@ Examples of GOOD personalityNotes (emotionally rich):
 Examples of BAD personalityNotes (too bland - DO NOT DO THIS):
 - 'Professional and organized. Good communicator.'
 - 'Friendly and helpful team player.'
-- 'Experienced manager with strong leadership skills.'
-
-Always respond with valid JSON matching the specified schema exactly.";
+- 'Experienced manager with strong leadership skills.'";
 
         // Build storyline summary with indices for character assignment
         var storylinesSummary = string.Join("\n", storylines.Select((s, i) =>
@@ -298,33 +297,17 @@ PERSONALITY NOTES - MAKE THEM EMOTIONALLY RICH:
 - INCLUDE who they like, who they dislike, who they resent
 - INCLUDE what triggers them emotionally
 - INCLUDE their real attitudes toward colleagues (not just job function)
-- Think about the SOURCE MATERIAL - how do these characters ACTUALLY interact?
+- Think about the SOURCE MATERIAL - how do these characters ACTUALLY interact?";
 
-Respond with JSON in this exact format:
-{{
-  ""primaryCompanyDomain"": ""string (e.g., dundermifflin.com)"",
-  ""primaryCompanyName"": ""string (e.g., Dunder Mifflin Paper Company)"",
-  ""characters"": [
-    {{
-      ""firstName"": ""string"",
-      ""lastName"": ""string"",
-      ""gender"": ""male"" | ""female"" (for TTS voice selection),
-      ""role"": ""string (job title)"",
-      ""department"": ""string"",
-      ""organization"": ""string (company name)"",
-      ""domain"": ""string (email domain for this character)"",
-      ""isExternal"": boolean (true if not part of primary company),
-      ""personalityNotes"": ""string (2-3 sentences about personality, relationships, who they like/dislike, what triggers them)"",
-      ""signatureBlock"": ""string (professional email signature with name, title, company, phone - use \\n for line breaks)"",
-      ""storylineIndices"": [0, 1, 2] (array of storyline indices this character is involved in)
-    }}
-  ]
-}}";
-
-        var response = await _openAI.GetJsonCompletionAsync<CharacterApiResponse>(systemPrompt, userPrompt, "Character Generation", ct);
-
-        if (response == null)
-            throw new InvalidOperationException("Failed to generate characters");
+        var llmResult = await _llm.GenerateAsync<CharacterApiResponse>(new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = "Character Generation",
+            SystemPrompt = systemPrompt,
+            UserPrompt = userPrompt,
+            MaxOutputTokens = 32_000
+        }, ct);
+        var response = llmResult.GetValueOrThrow();
 
         var result = new CharacterGenerationResult
         {

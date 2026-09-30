@@ -265,8 +265,7 @@ public class StepStorylines : UserControl, IWizardStep
 
         try
         {
-            var openAI = _state.CreateOpenAIService();
-            var generator = new StorylineGenerator(openAI);
+            var generator = new StorylineGenerator(_state.CreateGateway());
 
             // Create progress reporter that updates the status label
             var progress = new Progress<string>(status =>

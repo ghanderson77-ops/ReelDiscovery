@@ -179,6 +179,20 @@ public class EmailGenerator
                 {
                     throw; // Let cancellation propagate
                 }
+                catch (LlmCallException ex) when (ex.Result.IsFatal)
+                {
+                    // Bad key or exhausted spend limit: stop the whole run (completed threads are still saved)
+                    SetFatalError(result, ex.Message);
+                    runCts.Cancel();
+                }
+                catch (LlmCallException ex)
+                {
+                    // Refused / truncated / invalid / non-fatal failure: skip this storyline, no blind retry
+                    result.AddError($"Storyline '{storyline.Title}' skipped ({DescribeOutcome(ex.Result)}): {ex.Result.Message}");
+
+                    var newCompleted = Interlocked.Add(ref completedEmails[0], emailCount);
+                    Report(p => p.CompletedEmails = newCompleted);
+                }
                 catch (Exception ex)
                 {
                     // Per-storyline error handling: log and continue with others
@@ -196,6 +210,7 @@ public class EmailGenerator
 
             // Wait for all storylines to complete
             await Task.WhenAll(storylineTasks);
+            ThrowIfRunStopped(runCts);
 
             var allEmails = threads.SelectMany(t => t.Messages).ToList();
             var emailsWithPlannedDocuments = allEmails.Where(e => e.PlannedHasDocument).ToList();
@@ -263,9 +278,11 @@ public class EmailGenerator
 
             var attachmentResults = await Task.WhenAll(attachmentTasks);
             totalAttachments = attachmentResults.Sum();
+            ThrowIfRunStopped(runCts);
 
             // Generate images for emails that were planned to have them
-            if (state.Config.IncludeImages)
+            // Media needs a media client (PROV-06): never call image/speech APIs without one
+            if (state.Config.IncludeImages && _media != null)
             {
                 var emailsWithPlannedImages = allEmails.Where(e => e.PlannedHasImage).ToList();
 
@@ -315,6 +332,7 @@ public class EmailGenerator
                     }).ToList();
 
                     await Task.WhenAll(imageTasks);
+                    ThrowIfRunStopped(runCts);
                 }
             }
 
@@ -351,10 +369,11 @@ public class EmailGenerator
 
                 var calendarResults = await Task.WhenAll(calendarTasks);
                 result.CalendarInvitesGenerated = calendarResults.Sum();
+                ThrowIfRunStopped(runCts);
             }
 
             // Generate voicemails for emails that were planned to have them
-            if (state.Config.IncludeVoicemails)
+            if (state.Config.IncludeVoicemails && _media != null)
             {
                 var emailsWithPlannedVoicemails = allEmails.Where(e => e.PlannedHasVoicemail).ToList();
 
@@ -395,6 +414,7 @@ public class EmailGenerator
                     }).ToList();
 
                     await Task.WhenAll(voicemailTasks);
+                    ThrowIfRunStopped(runCts);
                 }
             }
 
@@ -407,7 +427,8 @@ public class EmailGenerator
         }
         catch (OperationCanceledException)
         {
-            result.WasCancelled = true;
+            // User cancel sets WasCancelled; a fatal provider stop leaves it false (FatalError is set instead)
+            result.WasCancelled = ct.IsCancellationRequested;
 
             // Save the threads completed so far so a cancelled run still leaves usable output
             if (!threads.IsEmpty)
@@ -446,11 +467,53 @@ public class EmailGenerator
         {
             throw;
         }
+        catch (LlmCallException ex) when (ex.Result.IsFatal)
+        {
+            // Bad key or exhausted spend limit: stop spending immediately
+            SetFatalError(result, ex.Message);
+            runCts.Cancel();
+            return 0;
+        }
+        catch (LlmCallException ex)
+        {
+            // Classified non-fatal outcome: skip this item, no blind retry
+            result.AddError($"{failureLabel} skipped ({DescribeOutcome(ex.Result)}): {ex.Result.Message}");
+            return 0;
+        }
         catch (Exception ex)
         {
             result.AddError($"{failureLabel} failed: {ex.Message}");
             return 0;
         }
+    }
+
+    /// <summary>
+    /// Short user-facing label for a classified non-success outcome.
+    /// </summary>
+    internal static string DescribeOutcome(LlmResult r) => r.Outcome switch
+    {
+        LlmOutcome.Refused => "refused by model",
+        LlmOutcome.Truncated => "response truncated",
+        LlmOutcome.Invalid => "invalid response",
+        _ => $"failed: {r.FailureKind}"
+    };
+
+    private static readonly object _fatalLock = new();
+
+    // First fatal error wins; parallel items may fail fatally at the same time
+    private static void SetFatalError(GenerationResult result, string message)
+    {
+        lock (_fatalLock)
+        {
+            result.FatalError ??= message;
+        }
+    }
+
+    // Stop before starting the next pass when a fatal provider error cancelled the run
+    private static void ThrowIfRunStopped(CancellationTokenSource runCts)
+    {
+        if (runCts.IsCancellationRequested)
+            throw new OperationCanceledException(runCts.Token);
     }
 
     /// <summary>
@@ -580,10 +643,12 @@ public class EmailGenerator
         var totalDocAttachments = config.AttachmentPercentage > 0 && config.EnabledAttachmentTypes.Count > 0
             ? Math.Max(0, (int)Math.Round(emailCount * config.AttachmentPercentage / 100.0))
             : 0;
-        var totalImageAttachments = config.IncludeImages && config.ImagePercentage > 0
+        // Never plan media without a media client (PROV-06 defence in depth)
+        var mediaAvailable = _media != null;
+        var totalImageAttachments = config.IncludeImages && mediaAvailable && config.ImagePercentage > 0
             ? Math.Max(1, (int)Math.Round(emailCount * config.ImagePercentage / 100.0))
             : 0;
-        var totalVoicemailAttachments = config.IncludeVoicemails && config.VoicemailPercentage > 0
+        var totalVoicemailAttachments = config.IncludeVoicemails && mediaAvailable && config.VoicemailPercentage > 0
             ? Math.Max(0, (int)Math.Round(emailCount * config.VoicemailPercentage / 100.0))
             : 0;
 

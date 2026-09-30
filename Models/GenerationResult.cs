@@ -16,6 +16,9 @@ public class GenerationResult
     public List<string> Errors { get; set; } = new();
     public bool WasCancelled { get; set; }
 
+    /// <summary>Set when a fatal provider error (auth or spend limit) stopped the run early.</summary>
+    public string? FatalError { get; set; }
+
     private readonly object _errorsLock = new();
 
     /// <summary>

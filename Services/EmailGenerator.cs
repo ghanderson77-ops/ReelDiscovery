@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
 using ReelDiscovery.Helpers;
@@ -16,6 +17,17 @@ public class EmailGenerator
 
     // Maximum emails per API call to avoid token limits and timeouts
     private const int MaxEmailsPerBatch = 15;
+
+    // Every structured-output DTO requested through the gateway (verified strict in tests)
+    internal static IReadOnlyList<Type> SchemaTypes { get; } = new[]
+    {
+        typeof(ThreadApiResponse),
+        typeof(VoicemailScriptResponse),
+        typeof(WordDocResponse),
+        typeof(ExcelDocResponse),
+        typeof(PowerPointDocResponse),
+        typeof(MeetingDetectionResponse)
+    };
 
     public EmailGenerator(OpenAIService openAI)
     {
@@ -995,7 +1007,7 @@ ATTACHMENT REMINDER:
             toChars.Add(characters.FirstOrDefault(c => c.Id != fromChar.Id) ?? fromChar);
         }
 
-        var ccChars = (e.CcEmails ?? new List<string>())
+        var ccChars = e.CcEmails
             .Select(email => characters.FirstOrDefault(c =>
                 c.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
             .Where(c => c != null)
@@ -1631,29 +1643,11 @@ Respond with JSON:
   ""title"": ""string (spreadsheet title)"",
   ""headers"": [""string""],
   ""rows"": [[""string (ALL values must be strings, even numbers)""]]
-}}
+}}";
 
-CRITICAL: Every cell value in rows must be a JSON string, not a number. Use quotes around all values.";
+        var response = await _openAI.GetJsonCompletionAsync<ExcelDocResponse>(systemPrompt, userPrompt, "Excel Attachment", ct);
 
-        var response = await _openAI.GetJsonCompletionAsync<ExcelDocResponseRaw>(systemPrompt, userPrompt, "Excel Attachment", ct);
-
-        // Convert JsonElement rows to strings (handles both string and number values)
-        var rows = new List<List<string>>();
-        if (response?.Rows != null)
-        {
-            foreach (var row in response.Rows)
-            {
-                var stringRow = new List<string>();
-                foreach (var cell in row)
-                {
-                    // Handle both string and numeric JSON values
-                    stringRow.Add(cell.ValueKind == System.Text.Json.JsonValueKind.String
-                        ? cell.GetString() ?? ""
-                        : cell.ToString());
-                }
-                rows.Add(stringRow);
-            }
-        }
+        var rows = response?.Rows.Where(r => r.Count > 0).ToList() ?? new List<List<string>>();
 
         if (rows.Count == 0)
         {
@@ -1828,12 +1822,13 @@ Respond with JSON:
         }
     }
 
-    private class ImageSuggestionResponse
+    internal class ImageSuggestionResponse
     {
         [JsonPropertyName("shouldIncludeImage")]
         public bool ShouldIncludeImage { get; set; }
 
         [JsonPropertyName("imageDescription")]
+        [Description("What the image shows; empty when hasImage is false")]
         public string ImageDescription { get; set; } = string.Empty;
 
         [JsonPropertyName("imageContext")]
@@ -1919,27 +1914,34 @@ Respond with JSON:
         email.Attachments.Add(attachment);
     }
 
-    private class MeetingDetectionResponse
+    internal class MeetingDetectionResponse
     {
         [JsonPropertyName("hasMeeting")]
+        [Description("True if the email mentions a specific meeting, event or call that should have a calendar invite")]
         public bool HasMeeting { get; set; }
 
         [JsonPropertyName("meetingTitle")]
+        [Description("Title for the calendar invite")]
         public string? MeetingTitle { get; set; }
 
         [JsonPropertyName("meetingDescription")]
+        [Description("Brief description of the meeting")]
         public string? MeetingDescription { get; set; }
 
         [JsonPropertyName("location")]
+        [Description("Meeting location, or 'Virtual' or 'TBD'")]
         public string? Location { get; set; }
 
         [JsonPropertyName("suggestedDate")]
+        [Description("Date of the meeting as YYYY-MM-DD, based on context")]
         public string? SuggestedDate { get; set; }
 
         [JsonPropertyName("suggestedStartTime")]
+        [Description("Start time as HH:mm, 24-hour format")]
         public string? SuggestedStartTime { get; set; }
 
         [JsonPropertyName("durationMinutes")]
+        [Description("Meeting length in minutes (30, 60, 90, 120, etc.)")]
         public int DurationMinutes { get; set; }
     }
 
@@ -2003,129 +2005,146 @@ Respond with JSON:
         email.Attachments.Add(attachment);
     }
 
-    private class VoicemailScriptResponse
+    internal class VoicemailScriptResponse
     {
         [JsonPropertyName("shouldCreateVoicemail")]
+        [Description("False if a voicemail does not make sense")]
         public bool ShouldCreateVoicemail { get; set; }
 
         [JsonPropertyName("voicemailScript")]
+        [Description("The voicemail transcript, 40-80 words")]
         public string VoicemailScript { get; set; } = string.Empty;
 
         [JsonPropertyName("recipientName")]
+        [Description("Who the voicemail is for")]
         public string? RecipientName { get; set; }
     }
 
     // Response DTOs
-    private class ThreadApiResponse
+    internal class ThreadApiResponse
     {
         [JsonPropertyName("subject")]
+        [Description("Original email subject, not including RE: or FW:")]
         public string Subject { get; set; } = string.Empty;
 
         [JsonPropertyName("emails")]
+        [Description("The emails in this batch, in chronological order")]
         public List<EmailDto> Emails { get; set; } = new();
     }
 
-    private class EmailDto
+    internal class EmailDto
     {
         [JsonPropertyName("fromEmail")]
+        [Description("Sender email address; must be one of the character emails")]
         public string FromEmail { get; set; } = string.Empty;
 
         [JsonPropertyName("toEmails")]
+        [Description("Recipient email addresses; each must be one of the character emails")]
         public List<string> ToEmails { get; set; } = new();
 
         [JsonPropertyName("ccEmails")]
-        public List<string>? CcEmails { get; set; }
+        [Description("CC email addresses; may be an empty array")]
+        public List<string> CcEmails { get; set; } = new();
 
         [JsonPropertyName("sentDateTime")]
+        [Description("ISO 8601 date-time the email was sent")]
         public string SentDateTime { get; set; } = string.Empty;
 
         [JsonPropertyName("bodyPlain")]
+        [Description("Full email body including greeting and the sender's signature block; no quoted previous emails")]
         public string BodyPlain { get; set; } = string.Empty;
 
         [JsonPropertyName("isReply")]
+        [Description("True if this email is a reply")]
         public bool IsReply { get; set; }
 
         [JsonPropertyName("isForward")]
+        [Description("True if this email is a forward")]
         public bool IsForward { get; set; }
 
         [JsonPropertyName("replyToIndex")]
+        [Description("Index (0-based, within this batch) of the email being replied to or forwarded; -1 if none")]
         public int ReplyToIndex { get; set; } = -1;
 
         // Attachment planning fields - AI decides which emails get attachments
         [JsonPropertyName("hasDocument")]
+        [Description("True if this email has a document attachment")]
         public bool HasDocument { get; set; }
 
         [JsonPropertyName("documentType")]
+        [Description("word, excel or powerpoint; empty when hasDocument is false")]
         public string? DocumentType { get; set; } // "word", "excel", "powerpoint"
 
         [JsonPropertyName("documentDescription")]
+        [Description("What the document contains; empty when hasDocument is false")]
         public string? DocumentDescription { get; set; } // What the document is about
 
         [JsonPropertyName("hasImage")]
+        [Description("True if this email includes an image")]
         public bool HasImage { get; set; }
 
         [JsonPropertyName("imageDescription")]
+        [Description("What the image shows; empty when hasImage is false")]
         public string? ImageDescription { get; set; } // What the image shows
 
         [JsonPropertyName("isImageInline")]
+        [Description("True = image embedded in the email body, false = regular attachment")]
         public bool IsImageInline { get; set; } // true = inline in body, false = attachment
 
         [JsonPropertyName("hasVoicemail")]
+        [Description("True if a voicemail accompanies this email")]
         public bool HasVoicemail { get; set; }
 
         [JsonPropertyName("voicemailContext")]
+        [Description("What the voicemail is about; empty when hasVoicemail is false")]
         public string? VoicemailContext { get; set; } // Context for the voicemail
     }
 
-    private class WordDocResponse
+    internal class WordDocResponse
     {
         [JsonPropertyName("title")]
+        [Description("Document title")]
         public string Title { get; set; } = string.Empty;
 
         [JsonPropertyName("content")]
+        [Description("Full document content, paragraphs separated by double newlines")]
         public string Content { get; set; } = string.Empty;
     }
 
-    private class ExcelDocResponse
+    internal class ExcelDocResponse
     {
         [JsonPropertyName("title")]
+        [Description("Spreadsheet title")]
         public string Title { get; set; } = string.Empty;
 
         [JsonPropertyName("headers")]
+        [Description("Column headers (3-6 columns)")]
         public List<string> Headers { get; set; } = new();
 
         [JsonPropertyName("rows")]
+        [Description("Data rows; every cell is a string, including numbers (e.g. $1,234, 500, 12.5%)")]
         public List<List<string>> Rows { get; set; } = new();
     }
 
-    // Raw response that handles mixed types (strings and numbers) in Excel rows
-    private class ExcelDocResponseRaw
+    internal class PowerPointDocResponse
     {
         [JsonPropertyName("title")]
-        public string Title { get; set; } = string.Empty;
-
-        [JsonPropertyName("headers")]
-        public List<string> Headers { get; set; } = new();
-
-        [JsonPropertyName("rows")]
-        public List<List<System.Text.Json.JsonElement>> Rows { get; set; } = new();
-    }
-
-    private class PowerPointDocResponse
-    {
-        [JsonPropertyName("title")]
+        [Description("Presentation title")]
         public string Title { get; set; } = string.Empty;
 
         [JsonPropertyName("slides")]
+        [Description("Content slides")]
         public List<SlideDto> Slides { get; set; } = new();
     }
 
-    private class SlideDto
+    internal class SlideDto
     {
         [JsonPropertyName("slideTitle")]
+        [Description("Slide title")]
         public string SlideTitle { get; set; } = string.Empty;
 
         [JsonPropertyName("content")]
+        [Description("Bullet points or a brief paragraph")]
         public string Content { get; set; } = string.Empty;
     }
 }

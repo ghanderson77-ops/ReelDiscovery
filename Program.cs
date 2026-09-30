@@ -17,14 +17,6 @@ internal static class Program
             return; // User declined, exit application
         }
 
-        // Show telemetry opt-in dialog on first run
-        if (!TelemetryService.HasMadeTelemetryChoice())
-        {
-            using var telemetryDialog = new TelemetryOptInDialog();
-            telemetryDialog.ShowDialog();
-            TelemetryService.SetTelemetryEnabled(telemetryDialog.UserOptedIn);
-        }
-
         // Migrate legacy Base64 API key file to the DPAPI key store (D-09)
         try
         {
@@ -37,9 +29,6 @@ internal static class Program
                 $"Could not migrate the saved OpenAI API key: {ex.Message}\n\nYou can re-enter the key on the API Keys step.",
                 "ReelDiscovery", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
-
-        // Send launch event (only if user opted in)
-        _ = TelemetryService.SendLaunchEventAsync();
 
         Application.Run(new WizardForm());
     }

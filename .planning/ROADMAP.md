@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The user can pick Claude or OpenAI plus a model, and a structured (JSON-schema) request returns a valid typed result from either provider. Refusals, truncations and spend-limit errors show up as classified outcomes and are not retried blindly.
   4. Image generation works again on a gpt-image model. With Claude selected and no OpenAI key configured, images and voicemail are disabled and the user sees a clear notice.
   5. `dotnet test` runs a test project that passes, and the shared-Random and parallel-mutation bugs are fixed.
-**Plans**: 11 plans
+**Plans**: 13 plans (11 + 2 gap closure)
 
 Plans:
 - [x] 01-01-PLAN.md — Retarget to net10.0-windows, pin SDK, upgrade packages, xUnit test project + document regressions (Wave 1)
@@ -47,6 +47,8 @@ Plans:
 - [x] 01-09-PLAN.md — Media gating UI on Topic and Generation Config steps; remove Slack telemetry (D-16) (Wave 5)
 - [x] 01-10-PLAN.md — Port EmailGenerator to the gateway + media client, delete dead code (Wave 5)
 - [x] 01-11-PLAN.md — Fatal-stop/outcome UX, generator media guard, delete OpenAIService, phase gate (Wave 6)
+- [ ] 01-12-PLAN.md — Gap closure: classify provider/media transport timeouts (CR-01), stale key-test guard (CR-02) (Wave 1, gaps)
+- [ ] 01-13-PLAN.md — Gap closure: timeout-safe EmailGenerator + no silent success (CR-01), always-visible result + StepComplete status (WR-05), safe email distribution (WR-06) (Wave 1, gaps)
 **UI hint**: yes
 
 ### Phase 2: Case Scenario & Core Document

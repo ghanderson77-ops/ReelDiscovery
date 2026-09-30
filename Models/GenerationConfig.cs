@@ -18,6 +18,8 @@ public class GenerationConfig
     // Image generation settings
     public bool IncludeImages { get; set; } = false;
     public int ImagePercentage { get; set; } = 10; // Percentage of emails that get images (separate from document attachments)
+    public string ImageModel { get; set; } = "gpt-image-2.5-flare"; // gpt-image-1/1-mini shut down 2026-12-01
+    public string ImageQuality { get; set; } = "low"; // low | medium | high (~$0.006/image at low 1024x1024)
 
     // Calendar invite settings
     public bool IncludeCalendarInvites { get; set; } = true; // Auto-detect meetings in emails and attach .ics files

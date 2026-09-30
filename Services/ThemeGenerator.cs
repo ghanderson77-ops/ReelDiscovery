@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
 
@@ -6,6 +7,11 @@ namespace ReelDiscovery.Services;
 public class ThemeGenerator
 {
     private readonly OpenAIService _openAI;
+
+    /// <summary>
+    /// Top-level response types sent as strict JSON schemas (verified by tests).
+    /// </summary>
+    internal static IReadOnlyList<Type> SchemaTypes { get; } = new[] { typeof(ThemeApiResponse) };
 
     public ThemeGenerator(OpenAIService openAI)
     {
@@ -153,36 +159,44 @@ Respond with JSON:
         return color.ToUpperInvariant();
     }
 
-    private class ThemeApiResponse
+    internal class ThemeApiResponse
     {
         [JsonPropertyName("themes")]
+        [Description("One theme per organization")]
         public List<ThemeDto> Themes { get; set; } = new();
     }
 
-    private class ThemeDto
+    internal class ThemeDto
     {
         [JsonPropertyName("domain")]
+        [Description("The email domain")]
         public string Domain { get; set; } = string.Empty;
 
         [JsonPropertyName("organizationName")]
         public string OrganizationName { get; set; } = string.Empty;
 
         [JsonPropertyName("themeName")]
+        [Description("Descriptive name like 'Corporate Navy' or 'Tech Vibrant'")]
         public string ThemeName { get; set; } = string.Empty;
 
         [JsonPropertyName("primaryColor")]
+        [Description("RRGGBB (hex without #, main brand color)")]
         public string PrimaryColor { get; set; } = string.Empty;
 
         [JsonPropertyName("secondaryColor")]
+        [Description("RRGGBB (complementary color)")]
         public string SecondaryColor { get; set; } = string.Empty;
 
         [JsonPropertyName("accentColor")]
+        [Description("RRGGBB (highlight/emphasis color)")]
         public string AccentColor { get; set; } = string.Empty;
 
         [JsonPropertyName("headingFont")]
+        [Description("Font for titles/headings")]
         public string HeadingFont { get; set; } = string.Empty;
 
         [JsonPropertyName("bodyFont")]
+        [Description("Font for body text")]
         public string BodyFont { get; set; } = string.Empty;
     }
 

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
 
@@ -17,6 +18,11 @@ public class CharacterGenerator
     }
 
     private const int MaxCharactersPerBatch = 25;
+
+    /// <summary>
+    /// Top-level response types sent as strict JSON schemas (verified by tests).
+    /// </summary>
+    internal static IReadOnlyList<Type> SchemaTypes { get; } = new[] { typeof(CharacterApiResponse) };
 
     /// <summary>
     /// Assigns a TTS voice based on character gender (from AI) or inferred from name/personality.
@@ -341,7 +347,7 @@ Respond with JSON in this exact format:
                 Department = c.Department,
                 Organization = c.Organization,
                 PersonalityNotes = c.PersonalityNotes,
-                SignatureBlock = c.SignatureBlock ?? string.Empty,
+                SignatureBlock = c.SignatureBlock,
                 IsExternal = c.IsExternal,
                 VoiceId = AssignVoice(c.Gender, c.FirstName, c.PersonalityNotes)
             };
@@ -349,14 +355,11 @@ Respond with JSON in this exact format:
             result.Characters.Add(character);
 
             // Assign character to storylines
-            if (c.StorylineIndices != null)
+            foreach (var idx in c.StorylineIndices)
             {
-                foreach (var idx in c.StorylineIndices)
+                if (idx >= 0 && idx < storylines.Count)
                 {
-                    if (idx >= 0 && idx < storylines.Count)
-                    {
-                        storylines[idx].InvolvedCharacterIds.Add(character.Id);
-                    }
+                    storylines[idx].InvolvedCharacterIds.Add(character.Id);
                 }
             }
         }
@@ -365,19 +368,22 @@ Respond with JSON in this exact format:
     }
 
     // API Response DTOs
-    private class CharacterApiResponse
+    internal class CharacterApiResponse
     {
         [JsonPropertyName("primaryCompanyDomain")]
+        [Description("Email domain of the primary organization, e.g. dundermifflin.com")]
         public string PrimaryCompanyDomain { get; set; } = string.Empty;
 
         [JsonPropertyName("primaryCompanyName")]
+        [Description("Name of the primary organization, e.g. Dunder Mifflin Paper Company")]
         public string PrimaryCompanyName { get; set; } = string.Empty;
 
         [JsonPropertyName("characters")]
+        [Description("The generated characters")]
         public List<CharacterDto> Characters { get; set; } = new();
     }
 
-    private class CharacterDto
+    internal class CharacterDto
     {
         [JsonPropertyName("firstName")]
         public string FirstName { get; set; } = string.Empty;
@@ -386,30 +392,38 @@ Respond with JSON in this exact format:
         public string LastName { get; set; } = string.Empty;
 
         [JsonPropertyName("role")]
+        [Description("Job title")]
         public string Role { get; set; } = string.Empty;
 
         [JsonPropertyName("department")]
         public string Department { get; set; } = string.Empty;
 
         [JsonPropertyName("organization")]
+        [Description("Company name")]
         public string Organization { get; set; } = string.Empty;
 
         [JsonPropertyName("domain")]
+        [Description("Email domain for this character")]
         public string Domain { get; set; } = string.Empty;
 
         [JsonPropertyName("isExternal")]
+        [Description("True if not part of the primary company")]
         public bool IsExternal { get; set; }
 
         [JsonPropertyName("personalityNotes")]
+        [Description("2-3 sentences about personality, relationships, who they like/dislike, what triggers them")]
         public string PersonalityNotes { get; set; } = string.Empty;
 
         [JsonPropertyName("signatureBlock")]
+        [Description("Professional email signature with name, title, company, phone; use \\n for line breaks")]
         public string SignatureBlock { get; set; } = string.Empty;
 
         [JsonPropertyName("storylineIndices")]
+        [Description("Indices of the storylines this character is involved in")]
         public List<int> StorylineIndices { get; set; } = new();
 
         [JsonPropertyName("gender")]
+        [Description("male or female (for TTS voice selection)")]
         public string Gender { get; set; } = string.Empty;
     }
 }

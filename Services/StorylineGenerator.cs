@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
 
@@ -7,6 +8,11 @@ public class StorylineGenerator
 {
     private readonly OpenAIService _openAI;
     private const int MaxStorylinesPerBatch = 15;
+
+    /// <summary>
+    /// Top-level response types sent as strict JSON schemas (verified by tests).
+    /// </summary>
+    internal static IReadOnlyList<Type> SchemaTypes { get; } = new[] { typeof(StorylineApiResponse) };
 
     public StorylineGenerator(OpenAIService openAI)
     {
@@ -244,11 +250,11 @@ Respond with JSON in this exact format:
                 Title = s.Title,
                 Description = s.Description,
                 TimelineHint = s.TimelineHint,
-                SuggestedEmailCount = s.SuggestedEmailCount
+                SuggestedEmailCount = Math.Clamp(s.SuggestedEmailCount, 5, 20)
             });
         }
 
-        if (response.SuggestedDateRange != null)
+        if (!string.IsNullOrWhiteSpace(response.SuggestedDateRange.StartDate))
         {
             if (DateTime.TryParse(response.SuggestedDateRange.StartDate, out var start))
                 result.SuggestedStartDate = start;
@@ -261,42 +267,52 @@ Respond with JSON in this exact format:
     }
 
     // API Response DTOs
-    private class StorylineApiResponse
+    internal class StorylineApiResponse
     {
         [JsonPropertyName("storylines")]
+        [Description("The generated storylines")]
         public List<StorylineDto> Storylines { get; set; } = new();
 
         [JsonPropertyName("suggestedDateRange")]
-        public DateRangeDto? SuggestedDateRange { get; set; }
+        [Description("Suggested date range for the emails. Leave startDate and endDate as empty strings if a date range was not requested.")]
+        public DateRangeDto SuggestedDateRange { get; set; } = new();
     }
 
-    private class StorylineDto
+    internal class StorylineDto
     {
         [JsonPropertyName("title")]
+        [Description("Storyline title referencing the actual event from the source material")]
         public string Title { get; set; } = string.Empty;
 
         [JsonPropertyName("description")]
+        [Description("2-3 sentences: the conflict, who's against whom, and the emotional stakes")]
         public string Description { get; set; } = string.Empty;
 
         [JsonPropertyName("timelineHint")]
+        [Description("Timeline hint, e.g. 'Spans 2 weeks', 'Single day event'")]
         public string TimelineHint { get; set; } = string.Empty;
 
         [JsonPropertyName("suggestedEmailCount")]
+        [Description("Suggested number of emails, 5-20")]
         public int SuggestedEmailCount { get; set; }
 
         [JsonPropertyName("keyCharacterRoles")]
+        [Description("Roles of the key characters involved")]
         public List<string> KeyCharacterRoles { get; set; } = new();
     }
 
-    private class DateRangeDto
+    internal class DateRangeDto
     {
         [JsonPropertyName("reasoning")]
+        [Description("Explanation of why these dates were chosen")]
         public string Reasoning { get; set; } = string.Empty;
 
         [JsonPropertyName("startDate")]
+        [Description("Start date as YYYY-MM-DD, or empty string")]
         public string StartDate { get; set; } = string.Empty;
 
         [JsonPropertyName("endDate")]
+        [Description("End date as YYYY-MM-DD, or empty string")]
         public string EndDate { get; set; } = string.Empty;
     }
 }

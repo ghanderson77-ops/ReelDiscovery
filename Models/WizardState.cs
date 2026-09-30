@@ -83,14 +83,8 @@ public class WizardState
     public OpenAIMediaClient? CreateMediaClient() =>
         IsMediaAvailable ? new OpenAIMediaClient(OpenAIApiKey, Config.ImageModel, Config.ImageQuality) : null;
 
-    // Legacy single-key state (removed once the keys screen is rebuilt)
-    public string ApiKey { get; set; } = string.Empty;
-    public string SelectedModel { get; set; } = "gpt-4o-mini";
-    public bool ConnectionTested { get; set; }
-
     // Model Configurations
     public List<AIModelConfig> AvailableModelConfigs { get; set; } = AIModelConfig.GetDefaultModels();
-    public AIModelConfig? SelectedModelConfig => AvailableModelConfigs.FirstOrDefault(m => m.ModelId == SelectedModel);
 
     // Token Usage Tracking
     public TokenUsageTracker UsageTracker { get; } = new();
@@ -125,24 +119,11 @@ public class WizardState
     public List<EmailThread> GeneratedThreads { get; set; } = new();
     public GenerationResult? Result { get; set; }
 
-    // Helper to create OpenAI service with tracking
+    // Legacy OpenAI-only text path; deleted in plan 01-11 once all generators use CreateGateway()
     public Services.OpenAIService CreateOpenAIService()
     {
-        var modelConfig = SelectedModelConfig;
-        if (modelConfig != null)
-        {
-            return new Services.OpenAIService(ApiKey, modelConfig, UsageTracker);
-        }
-        return new Services.OpenAIService(ApiKey, SelectedModel);
+        var legacyModel = (TextProvider == LlmProviderKind.OpenAI ? VolumeModelConfig : null)
+            ?? AIModelConfig.GetTierDefault(AvailableModelConfigs, LlmProviderKind.OpenAI, LlmTier.Volume)!;
+        return new Services.OpenAIService(OpenAIApiKey, legacyModel, UsageTracker);
     }
-
-    // Legacy - Available OpenAI models (for backward compatibility)
-    public static readonly string[] AvailableModels = new[]
-    {
-        "gpt-4o",
-        "gpt-4o-mini",
-        "gpt-4-turbo",
-        "gpt-4",
-        "gpt-3.5-turbo"
-    };
 }

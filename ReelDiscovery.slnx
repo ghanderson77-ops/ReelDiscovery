@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="ReelDiscovery.csproj" />
+  <Project Path="ReelDiscovery.Tests/ReelDiscovery.Tests.csproj" />
 </Solution>

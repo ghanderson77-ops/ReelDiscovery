@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-07-PLAN.md
-last_updated: "2026-10-01T15:52:19.146Z"
+stopped_at: Completed 02-08-PLAN.md
+last_updated: "2026-10-01T16:01:56.875Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 22
-  completed_plans: 20
-  percent: 91
+  completed_plans: 21
+  percent: 95
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 2 (Case Scenario & Core Document) — EXECUTING
-Plan: 8 of 9
+Plan: 9 of 9
 Status: Ready to execute
 Last activity: 2026-10-01
 
@@ -71,6 +71,7 @@ Progress: [██████████] 100%
 | Phase 02 P04 | 12min | 2 tasks | 4 files |
 | Phase 02 P06 | 12min | 2 tasks | 3 files |
 | Phase 02 P07 | 9min | 2 tasks | 4 files |
+| Phase 02 P08 | 14min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,9 @@ Recent decisions affecting current work:
 - [02-07]: StatePreference is stored only when Court = State and a state is chosen; otherwise empty
 - [02-07]: Scenario TextBox is ReadOnly (not Disabled) during the name check so the text stays readable
 - [02-07]: Default complexity radio is checked only after all radios and the preset label exist (CheckedChanged reads them)
+- [02-08]: StepCoreDocument hides the empty state while a run is in progress, so the first run shows sections filling in
+- [02-08]: ApplyPendingEdit always normalizes editor text to the section's joined paragraphs (whitespace-only changes do not leave Apply enabled)
+- [02-08]: Retry Section runs GenerateSectionsAsync for all Pending/Failed sections; Regenerate Section (Ready) calls RegenerateSectionAsync with guidance
 
 ### Pending Todos
 
@@ -139,6 +143,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T15:52:19.140Z
-Stopped at: Completed 02-07-PLAN.md
+Last session: 2026-10-01T16:01:45.096Z
+Stopped at: Completed 02-08-PLAN.md
 Resume file: None

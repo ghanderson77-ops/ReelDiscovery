@@ -102,7 +102,7 @@ Plans:
 - [x] 03-13-PLAN.md — Cast tab (Wave 6)
 - [x] 03-14-PLAN.md — Key Facts tab (Wave 6)
 - [x] 03-15-PLAN.md — Canonical Values tab (Wave 6)
-- [ ] 03-16-PLAN.md — StepCaseGuide: runs, banner, Checks, autosave, Next gate (Wave 7)
+- [x] 03-16-PLAN.md — StepCaseGuide: runs, banner, Checks, autosave, Next gate (Wave 7)
 - [x] 03-17-PLAN.md — StepCaseSummary: exports, open/move folder (Wave 5)
 - [ ] 03-18-PLAN.md — WizardForm 5-step flow + close semantics; StepCoreDocument autosave/notice/alignment (Wave 8)
 - [ ] 03-19-PLAN.md — Describe the Case: Recent cases, Open/New Case (Wave 9)

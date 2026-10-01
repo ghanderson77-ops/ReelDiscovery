@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-15-PLAN.md
-last_updated: "2026-10-01T23:23:18.633Z"
+stopped_at: Completed 03-16-PLAN.md
+last_updated: "2026-10-01T23:53:56.191Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 38
-  percent: 90
+  completed_plans: 39
+  percent: 93
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 16 of 20
+Plan: 17 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [█████████░] 90%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -88,6 +88,7 @@ Progress: [█████████░] 90%
 | Phase 03 P13 | 14min | 2 tasks | 5 files |
 | Phase 03 P14 | 25min | 2 tasks | 4 files |
 | Phase 03 P15 | 12min | 2 tasks | 3 files |
+| Phase 03 P16 | 26min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -197,6 +198,17 @@ Recent decisions affecting current work:
 - [03-15]: Canonical values list in ID order; the Kind column stays at UI-SPEC 112 and ellipsizes 'Change order number' cleanly (full kind in the detail card)
 - [03-15]: Used in facts lists facts in timeline order as 'F-003  2024-03-18  {title}'; the Kind combo commits the enum name; Mark Reviewed keeps the selection
 - [03-15]: GUIDE-06 and GUIDE-08 marked Complete (registry shown and editable; ValuesTabPanel is hosted by the step shell in 03-16)
+- [03-16]: A tab shows its panel as soon as its part has entries (Cast: key characters), or is Ready even when empty; otherwise a state card (Writing / Waiting / Failed / Not written / No guide). Generating left over from a closed run counts as Not written
+- [03-16]: Unfinished parts = any part not Ready (every part when there is no guide). Issues with only failed details count as finished; Retry Issue Details covers them
+- [03-16]: Mid-run Checks show only findings about Ready parts, and issue / cast findings wait until the key facts are Ready (they mostly check links from facts)
+- [03-16]: The Checks list (152) folds to its caption line plus 'Make the window taller to see the list.' when it would leave the body under 300 logical px
+- [03-16]: The Checks grid draws its selection only while focused, so the first row never looks picked on entry
+- [03-16]: The banner row is Absolute, sized from the page width in SizeBanner (the AutoSize row measured the wrapping labels at zero width)
+- [03-16]: The generator's trailing 'Click Retry {Part}.' is stripped from failure reasons before the state card and status lines add their own instruction
+- [03-16]: Tab actions are hidden while a state card shows (the card carries the action); unparented tab actions are disposed with the step
+- [03-16]: Regenerate Cast/Facts/Values failure reads 'The {part} was/were not regenerated: ... The previous {entries} were kept.'; Retry Issue Details failure reads 'The issue details were not written: ... Click Retry Issue Details.'
+- [03-16]: Detail card minimum is 344 (UI-SPEC 320) so Delete Character and Regenerate Character sit 8 apart; Cast grid minimums are Name 96, Title 80, Organization 96, Tier 96 so the grid fits beside it with a vertical scrollbar
+- [03-16]: The wizard's 900x600 default window is too small for the Case Guide; 03-18 should open the case flow at about 1100x750 (deferred-items.md)
 
 ### Pending Todos
 
@@ -218,6 +230,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T23:23:12.974Z
-Stopped at: Completed 03-15-PLAN.md
+Last session: 2026-10-01T23:53:56.186Z
+Stopped at: Completed 03-16-PLAN.md
 Resume file: None

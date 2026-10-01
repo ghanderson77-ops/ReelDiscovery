@@ -8,3 +8,10 @@
 ## From 03-14
 
 - **LinkPicker long items:** `CheckedListBox` cannot ellipsize, so a cast item such as `CH-001  Maria Delgado — President, Brightline Glazing, LLC` is cut at the list's right edge in the 40% detail card. The id, name and " (did it)" suffix always show (the suffix is placed before " — " for this reason). A tooltip or owner-drawn ellipsis in `LinkPicker` would fix it; out of scope for the Facts tab.
+
+## From 03-16
+
+- **Wizard window too small for the Case Guide (recommend fixing in 03-18):** `WizardForm` opens at a 900x600 client, and its header band and nav bar take some of that, so the Case Guide gets less height than the 900x600 render. At 900x600 with the banner and a needs-review notice, the Key Facts detail card has only a few pixels left for fields (they scroll), and the Checks list folds to its caption line ("Make the window taller to see the list."). At 1100x750 everything fits. 03-18 (WizardForm case flow) should open the case flow at about 1100x750 logical, or maximized, and raise `MinimumSize`.
+- **Values grid at 900x600:** the Canonical Values columns (28 + 64 + 112 + 140 + 120 + 56 = 520) are wider than the grid beside the detail card, so the grid scrolls sideways at the minimum window. 03-15 exempted this in `ValuesPanelRenderTests`, but the UI-SPEC allows that only on Key Facts. 03-16 renders Values only at 1100x750.
+- **Tab filters on case switch:** `OnEnterStepAsync` resets the selected tab and the run state when a different case is bound, but the Cast (All/Key/Background) and Key Facts (All/Needs review) filters have no public reset. `SelectEntity` already clears a filter that hides the target, so this only affects which rows show first.
+- **Render-harness artifact (again):** in the full-step PNGs, the detail panel's native scrollbar (and a multiline field's scrollbar) can be painted past the detail card edge as a thin grey strip, and TextBox placeholder text is not drawn. Both come from `DrawToBitmap` (WM_PRINT ignores child clipping and does not paint placeholders). They do not occur at runtime.

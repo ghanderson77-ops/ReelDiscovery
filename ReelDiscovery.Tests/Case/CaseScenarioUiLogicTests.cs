@@ -10,8 +10,6 @@ public class CaseScenarioUiLogicTests
     [InlineData(EntityKind.Person, "Person")]
     [InlineData(EntityKind.Company, "Company")]
     [InlineData(EntityKind.Brand, "Brand")]
-    [InlineData(EntityKind.FictionalWorkCharacter, "Fictional character")]
-    [InlineData(EntityKind.FictionalWorkOrganization, "Fictional organization")]
     public void KindLabel_MapsEveryKind(EntityKind kind, string expected)
     {
         Assert.Equal(expected, EntityReviewDialog.KindLabel(kind));

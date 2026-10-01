@@ -56,15 +56,16 @@ public class StepCaseScenario : UserControl, IWizardStep
             Padding = new Padding(8)
         };
 
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));  // 0: Scenario label
+        // Fixed rows size to their content so they grow with DPI scaling and font size
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 0: Scenario label
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 1: Scenario input
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 2: Hint + counter
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));  // 3: Complexity label
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));  // 4: Complexity radios
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));  // 5: Preset summary
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));  // 6: Document and court label
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));  // 7: Document/court/state combos
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 8: Status
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 2: Hint + counter
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 3: Complexity label
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 4: Complexity radios
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 5: Preset summary
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 6: Document and court label
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 7: Document/court/state combos
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 8: Status
 
         mainLayout.Controls.Add(CreateCaptionLabel("Describe the dispute or investigation"), 0, 0);
 
@@ -93,13 +94,16 @@ public class StepCaseScenario : UserControl, IWizardStep
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 1,
-            Margin = new Padding(0)
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 4, 0, 0)
         };
         hintLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         hintLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         var lblHint = new Label
         {
             Text = "Name the parties, what went wrong, and roughly when. Real names will be checked and replaced.",
+            AutoSize = true,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = new Font("Segoe UI", 9F),
@@ -122,8 +126,9 @@ public class StepCaseScenario : UserControl, IWizardStep
         // Preset summary (created before the radios: their CheckedChanged updates it)
         _lblPresetSummary = new Label
         {
-            AutoSize = false,
+            AutoSize = true,
             Dock = DockStyle.Fill,
+            Margin = new Padding(3, 4, 3, 8),
             TextAlign = ContentAlignment.TopLeft,
             Font = new Font("Segoe UI", 9F),
             Text = ComplexityPreset.Get(ComplexityLevel.Standard).Summary
@@ -135,7 +140,9 @@ public class StepCaseScenario : UserControl, IWizardStep
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink
         };
         _rbSimple = CreateRadio("Simple");
         _rbStandard = CreateRadio("Standard");
@@ -154,7 +161,9 @@ public class StepCaseScenario : UserControl, IWizardStep
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink
         };
         _cmbDocument = CreateComboBox(180);
         _cmbDocument.Items.AddRange(new object[] { "Auto-detect", "Complaint", "Petition", "Investigation Memo" });
@@ -188,13 +197,17 @@ public class StepCaseScenario : UserControl, IWizardStep
             Dock = DockStyle.Fill,
             ColumnCount = 3,
             RowCount = 1,
-            Margin = new Padding(0)
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 4, 0, 0)
         };
         statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _lblStatus = new Label
         {
+            AutoSize = true,
+            MinimumSize = new Size(0, 20),
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = new Font("Segoe UI", 9F)
@@ -233,7 +246,8 @@ public class StepCaseScenario : UserControl, IWizardStep
     private Label CreateCaptionLabel(string text) => new()
     {
         Text = text,
-        Dock = DockStyle.Fill,
+        AutoSize = true,
+        Margin = new Padding(3, 8, 3, 4),
         TextAlign = ContentAlignment.BottomLeft,
         Font = new Font(this.Font, FontStyle.Bold)
     };

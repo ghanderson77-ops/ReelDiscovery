@@ -4,9 +4,7 @@ public enum EntityKind
 {
     Person,
     Company,
-    Brand,
-    FictionalWorkCharacter,
-    FictionalWorkOrganization
+    Brand
 }
 
 public class EntitySubstitution

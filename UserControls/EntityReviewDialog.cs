@@ -39,7 +39,8 @@ public class EntityReviewDialog : Form
         this.Text = "Real Names Found";
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.StartPosition = FormStartPosition.CenterParent;
-        this.ClientSize = new Size(720, 440);
+        // Pixel sizes are scaled to the display DPI; fonts in points already scale
+        this.ClientSize = new Size(LogicalToDeviceUnits(720), LogicalToDeviceUnits(440));
         this.MinimizeBox = false;
         this.MaximizeBox = false;
         this.ShowInTaskbar = false;
@@ -51,39 +52,49 @@ public class EntityReviewDialog : Form
             RowCount = 3,
             Padding = new Padding(8)
         };
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));  // 0: Warning banner
+        // Banner and button rows size to their content so text is never clipped at high DPI
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 0: Warning banner
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 1: Entity grid
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));  // 2: Buttons
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 2: Buttons
 
         // Warning banner
-        var banner = new Panel
+        var banner = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             BackColor = Color.FromArgb(255, 243, 205),
             BorderStyle = BorderStyle.FixedSingle,
-            Padding = new Padding(16, 8, 16, 8)
+            Padding = new Padding(16, 8, 16, 8),
+            Margin = new Padding(0, 0, 0, 8)
         };
+        banner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        banner.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 0: Headline
+        banner.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 1: Body
         var lblBody = new Label
         {
             Text = "Fictional substitutes will be used in every document and email. Uncheck a row to keep the real name.",
-            Dock = DockStyle.Top,
-            AutoSize = false,
-            Height = 20,
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            Margin = new Padding(0, 4, 0, 0),
+            // Wrap inside the dialog: client width minus layout padding, banner padding and border
+            MaximumSize = new Size(LogicalToDeviceUnits(720 - 16 - 32 - 4), 0),
             Font = new Font("Segoe UI", 9F),
             ForeColor = BannerTextColor
         };
         var lblHeadline = new Label
         {
             Text = $"Your scenario names {Entities.Count} real people or companies.",
-            Dock = DockStyle.Top,
-            AutoSize = false,
-            Height = 24,
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            Margin = new Padding(0),
             Font = new Font("Segoe UI", 12F, FontStyle.Bold),
             ForeColor = BannerTextColor
         };
-        // Dock.Top stacks in reverse add order: add body first so the headline sits above it
-        banner.Controls.Add(lblBody);
-        banner.Controls.Add(lblHeadline);
+        banner.Controls.Add(lblHeadline, 0, 0);
+        banner.Controls.Add(lblBody, 0, 1);
         mainLayout.Controls.Add(banner, 0, 0);
 
         // Entity grid
@@ -96,26 +107,28 @@ public class EntityReviewDialog : Form
             RowHeadersVisible = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             MultiSelect = false,
-            BackgroundColor = SystemColors.Window
+            BackgroundColor = SystemColors.Window,
+            // Header height follows the header font instead of a fixed pixel height
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
         };
         _gridEntities.Columns.Add(new DataGridViewCheckBoxColumn
         {
             Name = "colApply",
             HeaderText = "Use fictional name",
-            Width = 128
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.ColumnHeader
         });
         _gridEntities.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "colName",
             HeaderText = "Name found",
-            Width = 180,
+            Width = LogicalToDeviceUnits(180),
             ReadOnly = true
         });
         _gridEntities.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "colType",
             HeaderText = "Type",
-            Width = 136,
+            Width = LogicalToDeviceUnits(136),
             ReadOnly = true
         });
         _gridEntities.Columns.Add(new DataGridViewTextBoxColumn
@@ -146,12 +159,15 @@ public class EntityReviewDialog : Form
         var buttonPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft
+            FlowDirection = FlowDirection.RightToLeft,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 8, 0, 0)
         };
-        _btnBack = ButtonHelper.CreateButton("Back to Scenario", 140, 32, ButtonStyle.Default);
+        _btnBack = ButtonHelper.CreateButton("Back to Scenario", LogicalToDeviceUnits(140), LogicalToDeviceUnits(32), ButtonStyle.Default);
         _btnBack.DialogResult = DialogResult.Cancel;
-        _btnApply = ButtonHelper.CreateButton("Apply Substitutes", 140, 32, ButtonStyle.Primary);
-        _btnApply.Margin = new Padding(0, 0, 8, 0);
+        _btnApply = ButtonHelper.CreateButton("Apply Substitutes", LogicalToDeviceUnits(140), LogicalToDeviceUnits(32), ButtonStyle.Primary);
+        _btnApply.Margin = new Padding(3, 3, 8, 3);
         _btnApply.Click += BtnApply_Click;
         buttonPanel.Controls.Add(_btnBack);
         buttonPanel.Controls.Add(_btnApply);
@@ -273,8 +289,6 @@ public class EntityReviewDialog : Form
         EntityKind.Person => "Person",
         EntityKind.Company => "Company",
         EntityKind.Brand => "Brand",
-        EntityKind.FictionalWorkCharacter => "Fictional character",
-        EntityKind.FictionalWorkOrganization => "Fictional organization",
         _ => kind.ToString()
     };
 

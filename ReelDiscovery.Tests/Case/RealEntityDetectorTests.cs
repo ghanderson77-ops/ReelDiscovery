@@ -7,13 +7,13 @@ namespace ReelDiscovery.Tests.Case;
 
 public class RealEntityDetectorTests
 {
-    private const string Scenario = "Correspondence inspired by Breaking Bad: Walter White launders money through Los Pollos Hermanos.";
+    private const string Scenario = "Jeffrey Skilling pressures Arthur Andersen to sign off on the Q3 accounts.";
 
     private const string TwoEntitiesJson = """
         {
           "entities": [
-            { "name": "Walter White", "aliases": ["White", "Walt"], "kind": "Person", "reason": "Main character of Breaking Bad.", "suggestedSubstitute": "Hank Brennan" },
-            { "name": "Los Pollos Hermanos", "aliases": [], "kind": "FictionalWorkOrganization", "reason": "Restaurant chain from Breaking Bad.", "suggestedSubstitute": "El Sol Chicken" }
+            { "name": "Jeffrey Skilling", "aliases": ["Skilling", "Jeff"], "kind": "Person", "reason": "Former Enron chief executive.", "suggestedSubstitute": "Gregory Hollis" },
+            { "name": "Arthur Andersen", "aliases": ["Andersen"], "kind": "Company", "reason": "Real accounting firm.", "suggestedSubstitute": "Whitcombe Lyle LLP" }
           ]
         }
         """;
@@ -29,16 +29,16 @@ public class RealEntityDetectorTests
         Assert.Equal(2, result.Count);
         Assert.All(result, e => Assert.True(e.Apply));
 
-        Assert.Equal("Walter White", result[0].Original);
+        Assert.Equal("Jeffrey Skilling", result[0].Original);
         Assert.Equal(EntityKind.Person, result[0].Kind);
-        Assert.Equal(new[] { "White", "Walt" }, result[0].Aliases);
-        Assert.Equal("Hank Brennan", result[0].Substitute);
-        Assert.Equal("Main character of Breaking Bad.", result[0].Reason);
+        Assert.Equal(new[] { "Skilling", "Jeff" }, result[0].Aliases);
+        Assert.Equal("Gregory Hollis", result[0].Substitute);
+        Assert.Equal("Former Enron chief executive.", result[0].Reason);
 
-        Assert.Equal("Los Pollos Hermanos", result[1].Original);
-        Assert.Equal(EntityKind.FictionalWorkOrganization, result[1].Kind);
-        Assert.Empty(result[1].Aliases);
-        Assert.Equal("El Sol Chicken", result[1].Substitute);
+        Assert.Equal("Arthur Andersen", result[1].Original);
+        Assert.Equal(EntityKind.Company, result[1].Kind);
+        Assert.Equal(new[] { "Andersen" }, result[1].Aliases);
+        Assert.Equal("Whitcombe Lyle LLP", result[1].Substitute);
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public class RealEntityDetectorTests
         Assert.Equal(4000, request.MaxTokens);
         Assert.Contains(Scenario, request.UserPrompt);
         Assert.DoesNotContain(Scenario, request.SystemPrompt);
-        Assert.DoesNotContain("Walter White", request.SystemPrompt);
+        Assert.DoesNotContain("Jeffrey Skilling", request.SystemPrompt);
         CaseTestData.AssertNoJsonInstructions(request);
         Assert.DoesNotContain("json", request.SystemPrompt, StringComparison.OrdinalIgnoreCase);
     }
@@ -179,6 +179,26 @@ public class RealEntityDetectorTests
         cts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new RealEntityDetector(gateway).DetectAsync(Scenario, cts.Token));
+    }
+
+    [Fact]
+    public async Task Detect_SystemPrompt_ExcludesNamesThatExistOnlyInFiction()
+    {
+        // A scenario based on a TV show or film keeps its character and company names
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok("""{"entities":[]}"""));
+
+        await new RealEntityDetector(gateway).DetectAsync("Dunder Mifflin regional manager Michael Scott hides losses.");
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Contains("already fictional, so never list them", request.SystemPrompt);
+        Assert.DoesNotContain("every named character or organization taken from", request.SystemPrompt);
+    }
+
+    [Fact]
+    public void EntityKind_HasOnlyRealWorldKinds()
+    {
+        Assert.Equal(new[] { "Person", "Company", "Brand" }, Enum.GetNames<EntityKind>());
     }
 
     [Fact]

@@ -83,8 +83,8 @@ public class StepApiConfiguration : UserControl, IWizardStep
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 10: Pricing
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 11: Instructions
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));  // 12: Disclaimer
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));  // 13: Workflow header
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));  // 14: Workflow radios
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 13: Workflow header
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 14: Workflow radios
 
         // OpenAI section
         var openAIHeader = CreateSectionHeader("OpenAI");
@@ -214,7 +214,9 @@ public class StepApiConfiguration : UserControl, IWizardStep
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink
         };
         _rbCaseDriven = new RadioButton
         {

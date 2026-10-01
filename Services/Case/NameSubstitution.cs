@@ -47,7 +47,7 @@ public static partial class NameSubstitution
 
     private static string AliasTarget(EntitySubstitution entry, string original, string substitute, string alias)
     {
-        if (entry.Kind is EntityKind.Person or EntityKind.FictionalWorkCharacter)
+        if (entry.Kind is EntityKind.Person)
         {
             var originalTokens = original.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             var substituteTokens = substitute.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);

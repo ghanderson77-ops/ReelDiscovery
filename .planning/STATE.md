@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-10-01T20:26:05.260Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-10-01T20:35:00.861Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 26
-  percent: 62
+  completed_plans: 27
+  percent: 64
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 5 of 20
+Plan: 6 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [██████░░░░] 62%
+Progress: [██████░░░░] 64%
 
 ## Performance Metrics
 
@@ -77,6 +77,7 @@ Progress: [██████░░░░] 62%
 | Phase 03 P02 | 15min | 2 tasks | 8 files |
 | Phase 03 P03 | 12min | 2 tasks | 8 files |
 | Phase 03 P04 | 14min | 2 tasks | 5 files |
+| Phase 03 P05 | 22min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,9 @@ Recent decisions affecting current work:
 - [03-04]: The SaveAsync drain (lock, write, release) runs inside Task.Run so a UI-thread SaveNow/MoveFolder blocking on the writer lock cannot deadlock
 - [03-04]: MoveFolder holds the writer lock, drops any queued snapshot and replaces the recent entry; same-volume Directory.Move, cross-volume copy + delete
 - [03-04]: Reserved device names are checked on the base name before the first dot; leading dots are stripped so traversal collapses to a plain name
+- [03-05]: Cast and Key Facts exports put the title block on the first landscape page with the wide tables; profiles, background staff and the issue index stay portrait
+- [03-05]: Core document export reuses CoreDocumentAssembler caption/numbering/memo header/signature text; caption padding becomes a right tab stop, memo labels are tab-aligned
+- [03-05]: No page-number footer in the exports (PAGE fields would contradict the T-03-18 no-fields acceptance)
 
 ### Pending Todos
 
@@ -160,6 +164,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T20:25:47.550Z
-Stopped at: Completed 03-04-PLAN.md
+Last session: 2026-10-01T20:34:55.028Z
+Stopped at: Completed 03-05-PLAN.md
 Resume file: None

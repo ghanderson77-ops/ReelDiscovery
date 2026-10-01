@@ -306,6 +306,42 @@ internal static class CaseTestData
         return draft;
     }
 
+    /// <summary>
+    /// SampleGuidedDraft plus Harmon's counsel so CounselGaps is empty: CH-010 General Counsel at ORG-02, and law firm
+    /// ORG-04 (Thistle &amp; Bracken LLP, representing ORG-02) with partner CH-011 and associate CH-012. All three are
+    /// hand-edited so a cast regeneration keeps them without the model returning them.
+    /// </summary>
+    public static CaseDraft SampleCounselDraft()
+    {
+        var draft = SampleGuidedDraft();
+        var guide = draft.Guide!;
+
+        var firm = Organization("ORG-04", "Thistle & Bracken LLP", "Thistle & Bracken", OrganizationKind.LawFirm, "", "thistlebracken.com");
+        firm.RepresentsOrgIds.Add("ORG-02");
+        guide.Organizations.Add(firm);
+
+        var counsel = new[]
+        {
+            Member(guide, "CH-010", "Paul", "Novak", "General Counsel", "", "ORG-02", CastTier.Key, CastRole.InHouseCounsel,
+                "Harmon's general counsel who answered the demand letter.", "Brief and guarded; copies outside counsel."),
+            Member(guide, "CH-011", "Nora", "Quist", "Partner", "", "ORG-04", CastTier.Key, CastRole.OutsideCounsel,
+                "Outside counsel defending Harmon.", "Formal and concise."),
+            Member(guide, "CH-012", "Owen", "Hale", "Associate", "", "ORG-04", CastTier.Key, CastRole.OutsideCounsel,
+                "Associate reviewing Harmon's project records.", "Detailed and careful.")
+        };
+        foreach (var member in counsel)
+        {
+            member.IsUserEdited = true;
+            guide.Cast.Add(member);
+        }
+
+        // Key characters first, then background staff (the generator's cast order)
+        guide.Cast = guide.Cast.OrderBy(c => c.Tier == CastTier.Key ? 0 : 1).ThenBy(c => c.Id, StringComparer.Ordinal).ToList();
+        guide.IdCounters["ORG"] = 4;
+        guide.IdCounters["CH"] = 12;
+        return draft;
+    }
+
     private static CaseOrganization Organization(string id, string name, string shortName, OrganizationKind kind, string partyId, string domain) => new()
     {
         Id = id,

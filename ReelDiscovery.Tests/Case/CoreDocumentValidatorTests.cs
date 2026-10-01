@@ -338,6 +338,60 @@ public class CoreDocumentValidatorTests
     }
 
     [Fact]
+    public void PleadingWithNoCounts_IsError()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        draft.CoreDocument!.Counts.Clear();
+        draft.CoreDocument.Sections.RemoveAll(s => s.Kind == SectionKind.Count);
+
+        var issue = Assert.Single(Errors(CoreDocumentValidator.Validate(draft)));
+
+        Assert.Equal(IssueCategory.Structure, issue.Category);
+        Assert.Equal("The pleading has no causes of action. Regenerate the document.", issue.Message);
+    }
+
+    [Fact]
+    public void NoFactSubsections_IsError()
+    {
+        var draft = CaseTestData.SampleMemoDraft();
+        draft.CoreDocument!.FactPlan.Clear();
+        draft.CoreDocument.Sections.RemoveAll(s => s.Kind == SectionKind.FactualAllegations);
+
+        var issues = CoreDocumentValidator.Validate(draft);
+
+        var issue = Assert.Single(Errors(issues));
+        Assert.Equal("The document has no factual subsections. Regenerate the document.", issue.Message);
+        Assert.Contains(issues, i => i.Severity == IssueSeverity.Warning && i.Message == "The document has 0 factual subsections; the Simple preset expects 2.");
+    }
+
+    [Fact]
+    public void FactSubsectionsOutsidePreset_IsWarning()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        draft.Complexity = ComplexityLevel.Complex;
+        draft.CoreDocument!.SourceHash = draft.ComputeSourceHash();
+
+        var issues = CoreDocumentValidator.Validate(draft);
+
+        var issue = Assert.Single(issues, i => i.Message == "The document has 2 factual subsections; the Complex preset expects 6-8.");
+        Assert.Equal(IssueSeverity.Warning, issue.Severity);
+        Assert.Equal(IssueCategory.Preset, issue.Category);
+    }
+
+    [Fact]
+    public void ReadySectionWithNoText_IsError()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        Assert.True(CoreDocumentEditing.ApplyEdit(draft, "facts-1", "   "));
+
+        var issue = Assert.Single(Errors(CoreDocumentValidator.Validate(draft)));
+
+        Assert.Equal("facts-1", issue.SectionId);
+        Assert.Equal(IssueCategory.Structure, issue.Category);
+        Assert.Equal("The Subcontract is empty. Write it or click Regenerate Section.", issue.Message);
+    }
+
+    [Fact]
     public void MemoFindingsOutsidePreset_UsesFindingsNoun()
     {
         var draft = CaseTestData.SampleMemoDraft();

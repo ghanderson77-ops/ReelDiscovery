@@ -85,6 +85,13 @@ public static partial class CoreDocumentValidator
             AddRangeWarning(issues, doc.Counts.Count, "counts or issues", preset.CountsMin, preset.CountsMax, preset);
         else
             AddRangeWarning(issues, doc.Counts.Count, "findings", preset.FindingsMin, preset.FindingsMax, preset);
+        AddRangeWarning(issues, doc.FactPlan.Count, "factual subsections", preset.FactSubsectionsMin, preset.FactSubsectionsMax, preset);
+
+        // Structurally empty documents must not pass Finish (WR-03)
+        if (isPleading && doc.Counts.Count == 0)
+            issues.Add(Error(IssueCategory.Structure, string.Empty, "The pleading has no causes of action. Regenerate the document."));
+        if (doc.FactPlan.Count == 0)
+            issues.Add(Error(IssueCategory.Structure, string.Empty, "The document has no factual subsections. Regenerate the document."));
 
         ValidateTimeline(doc, preset, isPleading, issues);
         ValidateCourt(doc, isPleading, issues);
@@ -260,6 +267,8 @@ public static partial class CoreDocumentValidator
                 issues.Add(Error(IssueCategory.Structure, section.Id, $"{section.Heading} failed: {section.FailureMessage}"));
             else if (section.Status is SectionStatus.Pending or SectionStatus.Writing)
                 issues.Add(Error(IssueCategory.Structure, section.Id, $"{section.Heading} has not been written yet."));
+            else if (section.Status == SectionStatus.Ready && section.Paragraphs.Count == 0)
+                issues.Add(Error(IssueCategory.Structure, section.Id, $"{section.Heading} is empty. Write it or click Regenerate Section."));
         }
 
         var allReady = doc.Sections.Count > 0 && doc.Sections.All(s => s.Status == SectionStatus.Ready);

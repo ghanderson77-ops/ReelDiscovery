@@ -1,5 +1,6 @@
 using ReelDiscovery.Forms;
 using ReelDiscovery.Models;
+using ReelDiscovery.Models.Case;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Case;
@@ -57,7 +58,28 @@ public class WizardFlowTests
         Assert.True(validate >= 0, "BtnNext_Click must call ValidateStepAsync");
         Assert.True(close >= 0, "BtnNext_Click must close on Finish");
         Assert.True(validate < close, "ValidateStepAsync must run before this.Close()");
-        Assert.Contains("\"Close Case\"", body);
+
+        // The discard prompt lives in OnFormClosing so Finish, Cancel and the window X all ask (WR-08)
+        var closing = source.IndexOf("protected override void OnFormClosing", StringComparison.Ordinal);
+        Assert.True(closing >= 0, "OnFormClosing not found");
+        var closingBody = source[closing..];
+        Assert.Contains("\"Close Case\"", closingBody);
+        Assert.Contains("e.Cancel = true", closingBody);
+    }
+
+    [Fact]
+    public void HasUnsavedCase_CaseFlowWithScenarioOrDocument()
+    {
+        Assert.False(WizardForm.HasUnsavedCase(WizardFlow.CaseDriven, new CaseDraft()));
+        Assert.False(WizardForm.HasUnsavedCase(WizardFlow.CaseDriven, new CaseDraft { Scenario = "   " }));
+        Assert.True(WizardForm.HasUnsavedCase(WizardFlow.CaseDriven, new CaseDraft { Scenario = "A dispute." }));
+        Assert.True(WizardForm.HasUnsavedCase(WizardFlow.CaseDriven, new CaseDraft { CoreDocument = new CoreDocument() }));
+    }
+
+    [Fact]
+    public void HasUnsavedCase_LegacyFlow_NeverPrompts()
+    {
+        Assert.False(WizardForm.HasUnsavedCase(WizardFlow.Legacy, new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument() }));
     }
 
     private static string FindRepoRoot()

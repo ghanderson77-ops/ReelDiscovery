@@ -1,6 +1,7 @@
 using System.Reflection;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
+using ReelDiscovery.Models.Case;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Forms;
@@ -11,6 +12,7 @@ public partial class WizardForm : Form
     private readonly List<UserControl> _steps = new();
     private int _currentStepIndex = 0;
     private WizardFlow _builtFlow;
+    private bool _closeConfirmed;
 
     private Panel _contentPanel = null!;
     private Panel _navigationPanel = null!;
@@ -332,13 +334,8 @@ public partial class WizardForm : Form
 
         if (_currentStepIndex >= _steps.Count - 1)
         {
-            // Finish: the last step has validated (e.g. citation errors block closing)
-            if (_state.Flow == WizardFlow.CaseDriven &&
-                MessageBox.Show("This version does not save the case yet. Closing will discard the scenario and document. Close anyway?",
-                    "Close Case", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
-            {
-                return;
-            }
+            // Finish: the last step has validated (e.g. citation errors block closing).
+            // OnFormClosing asks before discarding the case, the same as for X and Cancel.
             this.Close();
             return;
         }
@@ -360,6 +357,14 @@ public partial class WizardForm : Form
 
     private void BtnCancel_Click(object? sender, EventArgs e)
     {
+        // Unsaved case work: OnFormClosing shows the specific discard prompt, so skip the generic one
+        FlushCurrentCaseStep();
+        if (HasUnsavedCase(_state.Flow, _state.Case))
+        {
+            this.Close();
+            return;
+        }
+
         if (MessageBox.Show("Are you sure you want to cancel?", "Confirm",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
         {
@@ -382,8 +387,46 @@ public partial class WizardForm : Form
         _btnCancel.Enabled = enabled;
     }
 
+    internal const string DiscardCaseMessage =
+        "This version does not save the case yet. Closing will discard the scenario and document. Close anyway?";
+
+    /// <summary>
+    /// True when closing would discard case-flow work (a typed scenario or a generated document) (WR-08).
+    /// </summary>
+    internal static bool HasUnsavedCase(WizardFlow flow, CaseDraft draft) =>
+        flow == WizardFlow.CaseDriven && draft != null
+        && (draft.CoreDocument != null || !string.IsNullOrWhiteSpace(draft.Scenario));
+
+    // Copies unsubmitted input (scenario text, a pending section edit) into the draft before the discard check
+    private void FlushCurrentCaseStep()
+    {
+        if (_state.Flow != WizardFlow.CaseDriven || _currentStepIndex < 0 || _currentStepIndex >= _steps.Count)
+            return;
+
+        // Both case steps complete OnLeaveStepAsync synchronously
+        if (_steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument) and IWizardStep step)
+            _ = step.OnLeaveStepAsync();
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        // Every close path (Finish, Cancel, window X) asks before discarding the case (WR-08)
+        if (e.CloseReason == CloseReason.UserClosing && !_closeConfirmed)
+        {
+            FlushCurrentCaseStep();
+            if (HasUnsavedCase(_state.Flow, _state.Case))
+            {
+                if (MessageBox.Show(DiscardCaseMessage, "Close Case", MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                {
+                    e.Cancel = true;
+                    base.OnFormClosing(e);
+                    return;
+                }
+                _closeConfirmed = true;
+            }
+        }
+
         _costUpdateTimer?.Stop();
         _costUpdateTimer?.Dispose();
         base.OnFormClosing(e);

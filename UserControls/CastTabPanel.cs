@@ -1,4 +1,5 @@
 using System.Globalization;
+using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Case;
@@ -31,6 +32,8 @@ public class CastTabPanel : GuideTabPanel
     private readonly ThemedButton _btnAll;
     private readonly ThemedButton _btnKey;
     private readonly ThemedButton _btnBackground;
+    private readonly ThemedButton _btnAddCharacter;
+    private readonly ThemedButton _btnRegenerateCast;
     private readonly Control[] _tabActions;
     private readonly Dictionary<TextBox, CastField> _textFields = new();
     private readonly Dictionary<Control, string> _fieldErrors = new();
@@ -72,13 +75,22 @@ public class CastTabPanel : GuideTabPanel
         AddHeaderControl(_btnAll);
         AddHeaderControl(_btnKey);
         AddHeaderControl(_btnBackground);
-        _tabActions = Array.Empty<Control>();
+        var buttonHeight = LogicalToDeviceUnits(34);
+        _btnAddCharacter = (ThemedButton)ButtonHelper.CreateButton("Add Character", 0, buttonHeight, ButtonStyle.Default);
+        _btnAddCharacter.Margin = new Padding(0);
+        _btnRegenerateCast = (ThemedButton)ButtonHelper.CreateButton("Regenerate Cast...", 0, buttonHeight, ButtonStyle.Default);
+        _btnRegenerateCast.Margin = new Padding(0);
+        _tabActions = new Control[] { _btnAddCharacter, _btnRegenerateCast };
 
         // Wire handlers only after every control exists
         _btnAll.Click += (s, e) => SetFilter(CastFilter.All);
         _btnKey.Click += (s, e) => SetFilter(CastFilter.Key);
         _btnBackground.Click += (s, e) => SetFilter(CastFilter.Background);
         Grid.CellEndEdit += Grid_CellEndEdit;
+        _btnAddCharacter.Click += BtnAddCharacter_Click;
+        _btnRegenerateCast.Click += BtnRegenerateCast_Click;
+        DeleteButton.Click += DeleteButton_Click;
+        RegenerateButton.Click += RegenerateButton_Click;
     }
 
     public override IReadOnlyList<Control> TabActions => _tabActions;
@@ -133,17 +145,20 @@ public class CastTabPanel : GuideTabPanel
 
     // ----- Grid -----
 
+    // Widths in logical px. ID and Tier are wider than the UI-SPEC 64 / 88: "CH-006" and "Background" plus the
+    // 15 px cell inset were cut off ("CH-0...", "Backgrou..."). The Fill minimums give back the difference so the
+    // columns still fit a 900x600 window without a horizontal scrollbar (28 + 72 + 112 + 92 + 92 + 100 = 496).
     protected override void BuildColumns()
     {
         GridStyle.AddDotColumn(Grid, this);
-        Grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Id", HeaderText = "ID", Width = LogicalToDeviceUnits(64), ReadOnly = true });
+        Grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Id", HeaderText = "ID", Width = LogicalToDeviceUnits(72), ReadOnly = true });
         Grid.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Name",
             HeaderText = "Name",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 30,
-            MinimumWidth = LogicalToDeviceUnits(120)
+            MinimumWidth = LogicalToDeviceUnits(112)
         });
         Grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -151,7 +166,7 @@ public class CastTabPanel : GuideTabPanel
             HeaderText = "Title",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 25,
-            MinimumWidth = LogicalToDeviceUnits(100)
+            MinimumWidth = LogicalToDeviceUnits(92)
         });
         Grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -159,11 +174,12 @@ public class CastTabPanel : GuideTabPanel
             HeaderText = "Organization",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 25,
-            MinimumWidth = LogicalToDeviceUnits(100),
+            MinimumWidth = LogicalToDeviceUnits(92),
             ReadOnly = true
         });
-        Grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Tier", HeaderText = "Tier", Width = LogicalToDeviceUnits(88), ReadOnly = true });
+        Grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Tier", HeaderText = "Tier", Width = LogicalToDeviceUnits(100), ReadOnly = true });
     }
+
 
     private CaseGuide? Guide => IsAttached ? Host.Draft.Guide : null;
 
@@ -233,11 +249,16 @@ public class CastTabPanel : GuideTabPanel
             return;
 
         CommitPendingEdits();
+        ApplyFilter(filter);
+        RefreshFromDraft();
+    }
+
+    private void ApplyFilter(CastFilter filter)
+    {
         _filter = filter;
         _btnAll.Selected = filter == CastFilter.All;
         _btnKey.Selected = filter == CastFilter.Key;
         _btnBackground.Selected = filter == CastFilter.Background;
-        RefreshFromDraft();
     }
 
     public override bool SelectEntity(string id)
@@ -246,10 +267,7 @@ public class CastTabPanel : GuideTabPanel
         var member = Member(id);
         if (member != null && !PassesFilter(member, _filter))
         {
-            _filter = CastFilter.All;
-            _btnAll.Selected = true;
-            _btnKey.Selected = false;
-            _btnBackground.Selected = false;
+            ApplyFilter(CastFilter.All);
             RefreshFromDraft();
         }
         return base.SelectEntity(id);
@@ -563,12 +581,7 @@ public class CastTabPanel : GuideTabPanel
         {
             // Background and key characters show different fields; keep the character visible under the filter
             if (!PassesFilter(member, _filter))
-            {
-                _filter = CastFilter.All;
-                _btnAll.Selected = true;
-                _btnKey.Selected = false;
-                _btnBackground.Selected = false;
-            }
+                ApplyFilter(CastFilter.All);
             Host.NotifyEdited(GuidePart.Cast);
             RefreshFromDraft();
             return;
@@ -631,6 +644,161 @@ public class CastTabPanel : GuideTabPanel
 
         if (resort)
             RequestRefresh();
+    }
+
+    // ----- Actions -----
+
+    private void BtnAddCharacter_Click(object? sender, EventArgs e)
+    {
+        if (!IsAttached || Host.IsBusy)
+            return;
+
+        CommitPendingEdits();
+        var member = CaseGuideEditing.AddCharacter(Host.Draft);
+        Host.NotifyEdited(GuidePart.Cast);
+        // New characters are key; a Background filter would hide it
+        if (!PassesFilter(member, _filter))
+            ApplyFilter(CastFilter.All);
+        RefreshFromDraft();
+        // SelectEntity focuses the first detail field (First name)
+        SelectEntity(member.Id);
+    }
+
+    private void DeleteButton_Click(object? sender, EventArgs e)
+    {
+        var id = SelectedId;
+        var member = Member(id);
+        if (!IsAttached || Host.IsBusy || id == null || member == null)
+            return;
+
+        var name = member.FullName;
+        var refs = CaseGuideEditing.FactsReferencing(Host.Draft, id);
+        var nextId = NeighborId(id);
+        var status = string.Empty;
+
+        if (refs.Count > 0)
+        {
+            using var dialog = new DeleteReferencesDialog(name, member.FirstName, id,
+                refs.Select(f => $"{f.Id}  {f.Date}  {f.Title}").ToList());
+            dialog.ShowDialog(FindForm());
+            if (IsDisposed)
+                return;
+
+            switch (dialog.Choice)
+            {
+                case DeleteChoice.DeleteOnly:
+                    CaseGuideEditing.DeleteCharacter(Host.Draft, id, removeFromFacts: false);
+                    status = CaseGuideUiText.DeletedWithLinksText(name, refs.Count, id);
+                    break;
+                case DeleteChoice.RemoveAndDelete:
+                    CaseGuideEditing.DeleteCharacter(Host.Draft, id, removeFromFacts: true);
+                    status = CaseGuideUiText.FactsMarkedForReviewText(refs.Count, name);
+                    break;
+                default:
+                    // Keep is the safe default (T-03-45)
+                    return;
+            }
+        }
+        else
+        {
+            var (title, text) = CaseGuideUiText.C4DeleteCharacter(name, id);
+            var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes || IsDisposed)
+                return;
+
+            CaseGuideEditing.DeleteCharacter(Host.Draft, id, removeFromFacts: false);
+        }
+
+        Host.NotifyEdited(GuidePart.Cast);
+        if (status.Length > 0)
+            Host.SetStatus(status, Theme.Warning);
+        RefreshFromDraft();
+        if (nextId != null && SelectEntity(nextId))
+            Grid.Focus();
+    }
+
+    /// <summary>
+    /// The row after the given one (or before it when it is last), so the selection stays in place after a delete.
+    /// </summary>
+    private string? NeighborId(string id)
+    {
+        var rows = Grid.Rows.Cast<DataGridViewRow>().ToList();
+        var index = rows.FindIndex(r => r.Tag as string == id);
+        if (index < 0)
+            return null;
+        if (index + 1 < rows.Count)
+            return rows[index + 1].Tag as string;
+        return index > 0 ? rows[index - 1].Tag as string : null;
+    }
+
+    private async void RegenerateButton_Click(object? sender, EventArgs e)
+    {
+        var id = SelectedId;
+        var member = Member(id);
+        if (!IsAttached || Host.IsBusy || id == null || member == null)
+            return;
+
+        CommitPendingEdits();
+        var wasEdited = member.IsUserEdited;
+        if (wasEdited)
+        {
+            var (title, text) = CaseGuideUiText.C3RegenerateEdited("Character", member.FullName);
+            var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes || IsDisposed)
+                return;
+        }
+
+        var before = Snapshot(member);
+        try
+        {
+            await Host.RegenerateEntryAsync(GuidePart.Cast, id, GuidanceBox.Text.Trim());
+        }
+        catch (Exception ex)
+        {
+            // The host reports its own failures; this only catches a fault before it could
+            if (!IsDisposed)
+                Host.SetStatus(ex.InnerException != null ? $"Error: {ex.Message} ({ex.InnerException.Message})" : $"Error: {ex.Message}", Theme.Danger);
+        }
+
+        if (IsDisposed)
+            return;
+
+        // Success clears the edited flag and rewrites the entry (host contract); failure keeps the old text and the guidance
+        var after = Member(id);
+        if (after != null && !after.IsUserEdited && (wasEdited || Snapshot(after) != before))
+            GuidanceBox.Clear();
+
+        // The rewritten entry may change its tier or any field, so build the card again
+        _builtId = null;
+        RefreshFromDraft();
+    }
+
+    private static string Snapshot(CastMember m) =>
+        string.Join("\u001f", m.FullName, m.Title, m.OrganizationId, m.Role, m.Tier, m.Email, m.ActiveFrom, m.ActiveTo,
+            m.Involvement, m.VoiceNote, m.SignatureStyle, m.Signature);
+
+    private async void BtnRegenerateCast_Click(object? sender, EventArgs e)
+    {
+        if (!IsAttached || Host.IsBusy)
+            return;
+
+        CommitPendingEdits();
+        try
+        {
+            await Host.RegenerateTabAsync(GuidePart.Cast);
+        }
+        catch (Exception ex)
+        {
+            // The host reports its own failures; this only catches a fault before it could
+            if (!IsDisposed)
+                Host.SetStatus(ex.InnerException != null ? $"Error: {ex.Message} ({ex.InnerException.Message})" : $"Error: {ex.Message}", Theme.Danger);
+        }
+
+        if (IsDisposed)
+            return;
+
+        _builtId = null;
+        RefreshFromDraft();
     }
 
     private void Defer(Action action)

@@ -863,7 +863,7 @@ public abstract class GuideTabPanel : UserControl
     {
         var left = CreateCombo(itemsLeft);
         var right = CreateCombo(itemsRight);
-        AddPair(captionLeft, left, left, captionRight, right, right);
+        AddPair(captionLeft, HostCombo(left), left, captionRight, HostCombo(right), right);
         return (left, right);
     }
 
@@ -936,8 +936,11 @@ public abstract class GuideTabPanel : UserControl
     {
         AddRow(CreateCaption(caption));
         var combo = CreateCombo(items);
-        AddRow(combo);
+        var host = HostCombo(combo);
+        host.Dock = DockStyle.Fill;
+        AddRow(host);
         var error = CreateErrorLabel();
+        _errorLabels[host] = error;
         _errorLabels[combo] = error;
         AddRow(error);
         return combo;
@@ -957,6 +960,60 @@ public abstract class GuideTabPanel : UserControl
         };
         combo.Items.AddRange(items.Cast<object>().ToArray());
         return combo;
+    }
+
+    /// <summary>
+    /// Puts a drop-down list in the same rounded 34-high border as the text fields, with its text on the
+    /// text fields' 10 px inner edge, so every field in the detail card shares one left edge and height.
+    /// </summary>
+    private CardPanel HostCombo(ComboBox combo)
+    {
+        var height = LogicalToDeviceUnits(34);
+        // The flat drop-down list draws its text 3 px in from its own edge
+        var left = LogicalToDeviceUnits(10) - LogicalToDeviceUnits(3);
+        var vertical = Math.Max(1, (height - combo.PreferredHeight) / 2);
+        var host = new CardPanel
+        {
+            Radius = Theme.Radius,
+            BorderColor = Theme.BorderStrong,
+            BackColor = Theme.Surface,
+            Height = height,
+            Margin = Padding.Empty,
+            Padding = new Padding(left, vertical, LogicalToDeviceUnits(4), 0)
+        };
+        combo.Dock = DockStyle.Fill;
+
+        // A disabled drop-down list paints a grey system frame inside the rounded border; while disabled
+        // (a run is active) the host shows the choice as plain text instead, like a read-only text field
+        var readOnlyText = new Label
+        {
+            // Top-docked and as far from the bottom border as the top padding: centered on the 34 px height,
+            // and the rounded border stays visible
+            Dock = DockStyle.Top,
+            Height = Math.Max(1, height - 2 * vertical),
+            AutoSize = false,
+            AutoEllipsis = true,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding = Padding.Empty,
+            UseMnemonic = false,
+            Font = _bodyFont,
+            ForeColor = Theme.Text,
+            BackColor = Theme.Surface,
+            Visible = false
+        };
+        host.Controls.Add(combo);
+        host.Controls.Add(readOnlyText);
+
+        // Wire handlers only after both controls exist
+        void Sync()
+        {
+            readOnlyText.Text = combo.Text;
+            readOnlyText.Visible = !combo.Enabled;
+            combo.Visible = combo.Enabled;
+        }
+        combo.EnabledChanged += (s, e) => Sync();
+        combo.SelectedIndexChanged += (s, e) => readOnlyText.Text = combo.Text;
+        return host;
     }
 
     /// <summary>

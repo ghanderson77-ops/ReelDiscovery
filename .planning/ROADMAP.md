@@ -87,7 +87,7 @@ Plans:
 **Plans**: 20 plans in 10 waves
 
 Plans:
-- [ ] 03-01-PLAN.md — Guide data model, case.json fields (version, case id, stage, guide, Normalize), preset numbers, SampleGuidedDraft fixture (Wave 1)
+- [x] 03-01-PLAN.md — Guide data model, case.json fields (version, case id, stage, guide, Normalize), preset numbers, SampleGuidedDraft fixture (Wave 1)
 - [ ] 03-02-PLAN.md — 144-DPI render harness + clipping detector; GridStyle, TextFieldHost, DrawStatusDot (Wave 1)
 - [ ] 03-03-PLAN.md — IdAllocator, IssueExtractor, EmailIdentity, SignatureBuilder, UsTimeZones (Wave 2)
 - [ ] 03-04-PLAN.md — CaseFolderNaming + CaseStore (atomic autosave, load, recent cases, move) on WizardState (Wave 2)
@@ -179,7 +179,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 |-------|----------------|--------|-----------|
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
-| 3. Case Guide | 0/TBD | Not started | - |
+| 3. Case Guide | 1/20 | In Progress|  |
 | 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |

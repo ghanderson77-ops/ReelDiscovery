@@ -329,7 +329,8 @@ public abstract class GuideTabPanel : UserControl
         DeleteButton = (ThemedButton)ButtonHelper.CreateButton($"Delete {_noun}", 0, buttonHeight, ButtonStyle.Default);
         DeleteButton.Margin = new Padding(0);
         RegenerateButton = (ThemedButton)ButtonHelper.CreateButton($"Regenerate {_noun}", 0, buttonHeight, ButtonStyle.Primary);
-        RegenerateButton.Margin = new Padding(0);
+        // 8 apart even when the narrow detail card leaves no space between the two buttons
+        RegenerateButton.Margin = new Padding(half, 0, 0, 0);
         if (_hasToolbar)
         {
             _detailLayout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Theme.Border, Margin = new Padding(0) }, 0, 3);
@@ -393,8 +394,9 @@ public abstract class GuideTabPanel : UserControl
 
     private void ApplyDetailMinimum()
     {
-        // The detail card never gets narrower than 320 (UI-SPEC): below that the grid card shrinks instead
-        var minimum = LogicalToDeviceUnits(320) + LogicalToDeviceUnits(Theme.SmallGap);
+        // The detail card never gets narrower than 344 (UI-SPEC says 320, but "Delete Character" and "Regenerate Character"
+        // need 309 plus the 32 card padding to sit 8 apart): below that the grid card shrinks instead
+        var minimum = LogicalToDeviceUnits(344) + LogicalToDeviceUnits(Theme.SmallGap);
         var narrow = _body.ClientSize.Width * 0.4 < minimum;
         if (narrow == _detailNarrow)
             return;

@@ -270,9 +270,9 @@ public partial class StepCaseGuide
         if (result.IsFatal)
             SetStatus(CaseGuideUiText.FatalText(result.FatalError), Theme.Danger);
         else if (result.RefusedPart is { } refused)
-            SetStatus(CaseGuideUiText.RefusedText(refused, result.RefusalMessage), Theme.Danger);
+            SetStatus(CaseGuideUiText.RefusedText(refused, ReasonWithoutRetryHint(result.RefusalMessage)), Theme.Danger);
         else if (result.PartsFailed.Count > 0)
-            SetStatus(failedText(result.PartsFailed[0], result.FailureMessage), Theme.Danger);
+            SetStatus(failedText(result.PartsFailed[0], ReasonWithoutRetryHint(result.FailureMessage)), Theme.Danger);
         else
             ReportReady();
     }

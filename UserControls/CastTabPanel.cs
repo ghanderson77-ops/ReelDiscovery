@@ -145,9 +145,11 @@ public class CastTabPanel : GuideTabPanel
 
     // ----- Grid -----
 
-    // Widths in logical px. ID and Tier are wider than the UI-SPEC 64 / 88: "CH-006" and "Background" plus the
-    // 15 px cell inset were cut off ("CH-0...", "Backgrou..."). The Fill minimums give back the difference so the
-    // columns still fit a 900x600 window without a horizontal scrollbar (28 + 72 + 112 + 92 + 92 + 100 = 496).
+    // Widths in logical px. ID is wider than the UI-SPEC 64 ("CH-006" plus the 15 px cell inset was cut off) and Tier
+    // is 96, not 88 ("Backgrou..."). The Fill minimums give back the difference so the columns fit beside the 344 detail
+    // card at 900x600 without a horizontal scrollbar, also when a real-sized cast shows the vertical scrollbar:
+    // 28 + 72 + 96 + 80 + 96 + 96 = 468, plus 17 for the scrollbar, inside the 490 grid. Organization keeps 96 so its
+    // header is never cut.
     protected override void BuildColumns()
     {
         GridStyle.AddDotColumn(Grid, this);
@@ -158,7 +160,7 @@ public class CastTabPanel : GuideTabPanel
             HeaderText = "Name",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 30,
-            MinimumWidth = LogicalToDeviceUnits(112)
+            MinimumWidth = LogicalToDeviceUnits(96)
         });
         Grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -166,7 +168,7 @@ public class CastTabPanel : GuideTabPanel
             HeaderText = "Title",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 25,
-            MinimumWidth = LogicalToDeviceUnits(92)
+            MinimumWidth = LogicalToDeviceUnits(80)
         });
         Grid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -174,10 +176,10 @@ public class CastTabPanel : GuideTabPanel
             HeaderText = "Organization",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 25,
-            MinimumWidth = LogicalToDeviceUnits(92),
+            MinimumWidth = LogicalToDeviceUnits(96),
             ReadOnly = true
         });
-        Grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Tier", HeaderText = "Tier", Width = LogicalToDeviceUnits(100), ReadOnly = true });
+        Grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Tier", HeaderText = "Tier", Width = LogicalToDeviceUnits(96), ReadOnly = true });
     }
 
 

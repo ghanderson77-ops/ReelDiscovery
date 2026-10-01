@@ -1,4 +1,5 @@
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Services.Case;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Case;
@@ -166,6 +167,65 @@ public class CaseGuideStepLogicTests
 
         Assert.Empty(StepCaseGuide.UnfinishedParts(draft));
     }
+
+    [Theory]
+    [InlineData("The response was cut off. Click Retry Key Facts.", "The response was cut off.")]
+    [InlineData("Details for 3 characters were not written. Click Retry Cast.", "Details for 3 characters were not written.")]
+    [InlineData("The request timed out. Click Retry Issue Details", "The request timed out.")]
+    [InlineData("The model declined.", "The model declined.")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    public void ReasonWithoutRetryHint_DropsTheGeneratorsTrailingHint(string? reason, string expected)
+    {
+        Assert.Equal(expected, StepCaseGuide.ReasonWithoutRetryHint(reason));
+    }
+
+    [Fact]
+    public void StateCard_FailedReason_SaysRetryOnce()
+    {
+        var body = CaseGuideUiText.StateCardText(GuidePart.Facts, GuideTabState.Failed,
+            StepCaseGuide.ReasonWithoutRetryHint("The response was cut off. Click Retry Key Facts.")).Body;
+
+        Assert.Equal("The response was cut off. Click Retry Key Facts to try again. Finished parts were kept.", body);
+    }
+
+    [Fact]
+    public void VisibleFindings_Idle_ShowsEverything()
+    {
+        var findings = SampleFindings();
+
+        Assert.Equal(findings.Count, StepCaseGuide.VisibleFindings(CaseTestData.SampleGuidedDraft(), findings, running: false).Count);
+    }
+
+    [Fact]
+    public void VisibleFindings_MidRunBeforeFacts_HidesGuideLevelAndLinkDependentFindings()
+    {
+        // Cast is writing: issue findings ("no fact is linked") wait for the facts; guide-level findings wait for the end
+        var draft = IssuesOnlyDraft();
+        draft.Guide!.CastState.Status = GuidePartStatus.Generating;
+
+        Assert.Empty(StepCaseGuide.VisibleFindings(draft, SampleFindings(), running: true));
+    }
+
+    [Fact]
+    public void VisibleFindings_MidRunAfterFacts_ShowsFinishedParts()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        draft.Guide!.ValuesState.Status = GuidePartStatus.Generating;
+
+        var visible = StepCaseGuide.VisibleFindings(draft, SampleFindings(), running: true);
+
+        Assert.Equal(new[] { GuideArea.Issues, GuideArea.Cast, GuideArea.Facts }, visible.Select(f => f.Area));
+    }
+
+    private static List<GuideFinding> SampleFindings() => new()
+    {
+        new GuideFinding { Area = GuideArea.Issues, EntityId = "ISS-01", Severity = IssueSeverity.Warning, Message = "No fact is linked to ISS-01." },
+        new GuideFinding { Area = GuideArea.Cast, EntityId = "CH-001", Severity = IssueSeverity.Warning, Message = "CH-001 acts in no fact." },
+        new GuideFinding { Area = GuideArea.Facts, EntityId = "F-002", Severity = IssueSeverity.Error, Message = "F-002 refers to CH-099." },
+        new GuideFinding { Area = GuideArea.Values, EntityId = "V-001", Severity = IssueSeverity.Warning, Message = "V-001 is unused." },
+        new GuideFinding { Area = GuideArea.Guide, EntityId = "ORG-02", Severity = IssueSeverity.Warning, Message = "No in-house counsel." }
+    };
 
     // Issues written, everything after them still pending and empty
     private static CaseDraft IssuesOnlyDraft()

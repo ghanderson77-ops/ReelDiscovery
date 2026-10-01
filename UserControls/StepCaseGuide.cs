@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
@@ -12,6 +13,10 @@ namespace ReelDiscovery.UserControls;
 /// </summary>
 public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
 {
+    // Least body height (logical) worth keeping the 152 Checks list for
+    private const int MinBodyHeight = 300;
+    private const string ChecksCollapsedText = "Make the window taller to see the list.";
+
     private WizardState _state = null!;
     private readonly Dictionary<GuidePart, GuideTabPanel> _panels = new();
     private readonly Dictionary<GuidePart, ThemedButton> _tabButtons = new();
@@ -21,6 +26,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     private Label _lblSubtitle = null!;
     private Button _btnResume = null!;
     private CardPanel _banner = null!;
+    private RowStyle _bannerRow = null!;
     private Label _lblBannerHeading = null!;
     private Label _lblBannerBody = null!;
     private FlowLayoutPanel _bannerButtons = null!;
@@ -41,6 +47,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     private Label _lblChecks = null!;
     private Label _lblNoChecks = null!;
     private Panel _checksGridHost = null!;
+    private TableLayoutPanel _checksCaptionLine = null!;
     private DataGridView _gridChecks = null!;
     private Label _lblStatus = null!;
     private SlimProgressBar _progress = null!;
@@ -53,6 +60,9 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     private GuidePart _selectedTab = GuidePart.Issues;
     private GuideTabPanel? _actionsOwner;
     private List<GuideFinding> _findings = new();
+    private bool _showBanner;
+    private bool _checksHasFindings;
+    private bool _checksShowsNoProblems;
 
     public string StepTitle => "Case Guide";
     public string NextButtonText => "Next >";
@@ -92,7 +102,9 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         };
         _root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));                                 // 0: Header
-        _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));                                 // 1: Banner
+        // Sized in SizeBanner from the page width: the wrapping text makes the card's own preferred size unusable
+        _bannerRow = new RowStyle(SizeType.Absolute, 0);
+        _root.RowStyles.Add(_bannerRow);                                                      // 1: Banner
         _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));                                 // 2: Tabs row
         _root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));                             // 3: Body
         _checksRow = new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(152));
@@ -166,8 +178,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
             BorderColor = Theme.Warning,
             BackColor = Theme.Surface,
             Padding = new Padding(pad),
-            // Anchored, not Fill: the AutoSize row then takes the height SizeBanner sets
-            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
+            Dock = DockStyle.Fill,
             Margin = new Padding(0, 0, 0, gap),
             Visible = false
         };
@@ -351,7 +362,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         checksLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         checksLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Caption line
         checksLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 1: Findings grid
-        var captionLine = new TableLayoutPanel
+        var captionLine = _checksCaptionLine = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
@@ -394,6 +405,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _checksGridHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6)), BackColor = Theme.Surface };
         _gridChecks = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true };
         GridStyle.Apply(_gridChecks, this);
+        SetChecksSelectionVisible(false);
         _gridChecks.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Severity",
@@ -475,7 +487,15 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _gridChecks.CellDoubleClick += (s, e) => NavigateToFinding(e.RowIndex);
         _gridChecks.KeyDown += GridChecks_KeyDown;
         _gridChecks.CellFormatting += GridChecks_CellFormatting;
-        _banner.SizeChanged += (s, e) => SizeBanner();
+        // The grid makes its first row current when it is first shown; the selection is drawn only while the
+        // grid has focus, so an unfocused Checks list never looks like something was picked
+        _gridChecks.Enter += (s, e) => SetChecksSelectionVisible(true);
+        _gridChecks.Leave += (s, e) => SetChecksSelectionVisible(false);
+        _root.SizeChanged += (s, e) =>
+        {
+            SizeBanner();
+            UpdateChecksLayout();
+        };
         _stateCard.Resize += (s, e) => CenterStateContent();
         _stateContent.SizeChanged += (s, e) => CenterStateContent();
     }
@@ -532,7 +552,8 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
 
     /// <summary>
     /// Findings shown in Checks: everything when idle; mid-run only those about finished parts, so unwritten
-    /// parts do not flood the list.
+    /// parts do not flood the list. Issue and cast findings mostly check links from the facts ("no fact is
+    /// linked to ISS-01"), so mid-run they wait until the key facts are written.
     /// </summary>
     public static List<GuideFinding> VisibleFindings(CaseDraft draft, IReadOnlyList<GuideFinding> findings, bool running)
     {
@@ -543,8 +564,21 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         if (guide == null)
             return new List<GuideFinding>();
 
-        return findings.Where(f => PartFor(f.Area) is { } part && guide.State(part).Status == GuidePartStatus.Ready).ToList();
+        var factsReady = guide.FactsState.Status == GuidePartStatus.Ready;
+        return findings.Where(f => PartFor(f.Area) is { } part
+            && guide.State(part).Status == GuidePartStatus.Ready
+            && (factsReady || part is not (GuidePart.Issues or GuidePart.Cast))).ToList();
     }
+
+    /// <summary>
+    /// A part's failure message without the generator's trailing "Click Retry {Part}." hint: the state card and
+    /// the status line add their own instruction, so the hint would otherwise appear twice.
+    /// </summary>
+    public static string ReasonWithoutRetryHint(string? reason) =>
+        TrailingRetryHint().Replace(reason ?? string.Empty, string.Empty).Trim();
+
+    [GeneratedRegex(@"\s*Click Retry [A-Za-z ]+\.?\s*$", RegexOptions.None, 200)]
+    private static partial Regex TrailingRetryHint();
 
     public static GuidePart? PartFor(GuideArea area) => area switch
     {
@@ -708,19 +742,24 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
             _btnReviewFacts.Enabled = !_isGenerating;
         }
 
+        _showBanner = show;
         if (_banner.Visible != show)
             _banner.Visible = show;
-        if (show)
-            SizeBanner();
+        SizeBanner();
     }
 
     private void SizeBanner()
     {
-        if (!_banner.Visible)
+        if (!_showBanner)
+        {
+            if (_bannerRow.Height != 0)
+                _bannerRow.Height = 0;
             return;
+        }
 
-        // The text wraps beside the buttons; the card is as tall as the taller of the two plus its padding
-        var inner = Math.Max(1, _banner.ClientSize.Width - _banner.Padding.Horizontal);
+        // The text wraps beside the buttons; the card is as tall as the taller of the two plus its padding.
+        // Measured from the page width (the banner spans the single root column), so it is right before the first layout
+        var inner = Math.Max(1, _root.ClientSize.Width - _banner.Margin.Horizontal - _banner.Padding.Horizontal);
         var buttons = _bannerButtons.GetPreferredSize(Size.Empty);
         var textWidth = Math.Max(1, inner - buttons.Width - _bannerButtons.Margin.Horizontal);
         if (_lblBannerHeading.MaximumSize.Width != textWidth)
@@ -730,13 +769,9 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
 
         var textHeight = _lblBannerHeading.GetPreferredSize(new Size(textWidth, 0)).Height + _lblBannerHeading.Margin.Vertical
             + _lblBannerBody.GetPreferredSize(new Size(textWidth, 0)).Height;
-        var height = Math.Max(textHeight, buttons.Height) + _banner.Padding.Vertical;
-        if (_banner.Height != height)
-        {
-            _banner.Height = height;
-            // The row is AutoSize: the root must lay out again to give the banner its new height
-            _root.PerformLayout();
-        }
+        var height = Math.Max(textHeight, buttons.Height) + _banner.Padding.Vertical + _banner.Margin.Vertical;
+        if (_bannerRow.Height != height)
+            _bannerRow.Height = height;
     }
 
     private void RefreshChecks()
@@ -760,15 +795,50 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         }
         _gridChecks.ClearSelection(); // Keep severity colors visible on the first row
 
-        var hasFindings = visible.Count > 0;
-        _checksGridHost.Visible = hasFindings;
-        // "No problems found" only when the whole guide was checked (not mid-run)
-        _lblNoChecks.Visible = !hasFindings && !_isGenerating && draft.Guide != null;
+        _checksHasFindings = visible.Count > 0;
+        _checksShowsNoProblems = !_checksHasFindings && !_isGenerating && draft.Guide != null;
+        UpdateChecksLayout();
+    }
 
-        // 152 with findings; one content-sized line without (leaves the body more room)
-        var sizeType = showCard && hasFindings ? SizeType.Absolute : SizeType.AutoSize;
+    /// <summary>
+    /// 152 with findings, one content-sized line without. When the window is too short for the list and a usable
+    /// body (MinBodyHeight), the card keeps only its caption line and says how to see the list, so the tab's
+    /// detail card never collapses into overlapping fields.
+    /// </summary>
+    private void UpdateChecksLayout()
+    {
+        if (_state == null)
+            return;
+
+        var collapse = _checksCard.Visible && _checksHasFindings && ChecksWouldCrowdBody();
+        _checksGridHost.Visible = _checksHasFindings && !collapse;
+        // 12 above and 8 below the caption over the list; a one-line card is balanced 12 / 12
+        var captionBottom = LogicalToDeviceUnits(_checksGridHost.Visible ? Theme.SmallGap : 12);
+        if (_checksCaptionLine.Margin.Bottom != captionBottom)
+            _checksCaptionLine.Margin = new Padding(_checksCaptionLine.Margin.Left, _checksCaptionLine.Margin.Top, _checksCaptionLine.Margin.Right, captionBottom);
+
+        // One line beside the caption: "No problems found..." (Success) or the collapsed-list hint (TextMuted)
+        var lineText = collapse ? ChecksCollapsedText : _checksShowsNoProblems ? CaseGuideUiText.NoChecksText : string.Empty;
+        _lblNoChecks.Text = lineText;
+        _lblNoChecks.ForeColor = collapse ? Theme.TextMuted : Theme.Success;
+        _lblNoChecks.Visible = lineText.Length > 0;
+
+        var sizeType = _checksCard.Visible && _checksHasFindings && !collapse ? SizeType.Absolute : SizeType.AutoSize;
         if (_checksRow.SizeType != sizeType)
             _checksRow.SizeType = sizeType;
+    }
+
+    // True when showing the 152 list would leave the body shorter than MinBodyHeight
+    private bool ChecksWouldCrowdBody()
+    {
+        var rows = _root.GetRowHeights();
+        if (rows.Length < 6 || _root.ClientSize.Height <= 0)
+            return false;
+
+        // The banner row is set by SizeBanner (current even before the next layout); the others do not depend on Checks
+        var bodyAndChecks = _root.ClientSize.Height - rows[0] - (int)_bannerRow.Height - rows[2] - rows[5];
+        // The row keeps its 152 height while it is AutoSize
+        return bodyAndChecks - (int)_checksRow.Height < LogicalToDeviceUnits(MinBodyHeight);
     }
 
     private void ShowSelectedTab()
@@ -786,7 +856,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
 
         if (state != null)
         {
-            var reason = Draft.Guide?.State(part).FailureMessage ?? string.Empty;
+            var reason = ReasonWithoutRetryHint(Draft.Guide?.State(part).FailureMessage);
             var content = CaseGuideUiText.StateCardText(part, state.Value, reason);
             _lblStateHeading.Text = content.Heading;
             _lblStateBody.Text = content.Body;
@@ -893,6 +963,12 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         // Enter navigates like a double-click instead of moving to the next row
         e.Handled = true;
         NavigateToFinding(_gridChecks.CurrentRow.Index);
+    }
+
+    private void SetChecksSelectionVisible(bool visible)
+    {
+        _gridChecks.DefaultCellStyle.SelectionBackColor = visible ? Theme.AccentSoft : Theme.Surface;
+        _gridChecks.Invalidate();
     }
 
     private void GridChecks_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)

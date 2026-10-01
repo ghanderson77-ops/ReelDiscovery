@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-17-PLAN.md
-last_updated: "2026-10-01T21:46:31.010Z"
+stopped_at: Completed 03-11-PLAN.md
+last_updated: "2026-10-01T22:04:26.877Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 34
-  percent: 81
+  completed_plans: 35
+  percent: 83
 ---
 
 # Project State
@@ -30,7 +30,7 @@ Plan: 13 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [████████░░] 81%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -84,6 +84,7 @@ Progress: [████████░░] 81%
 | Phase 03 P09 | 10min | 2 tasks | 5 files |
 | Phase 03 P10 | 8min | 2 tasks | 3 files |
 | Phase 03 P12 | 8min | 2 tasks | 8 files |
+| Phase 03 P11 | 35min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -169,6 +170,11 @@ Recent decisions affecting current work:
 - [03-10]: Fact refs resolve by ISS/CH id or exact cast full name; unknown refs dropped with MappingNotes; KnownByIds = ActorIds union knownBy; F-ids allocated in date order after Task.WhenAll
 - [03-10]: GenerateAsync skips Ready parts, stops at the first failed part or fatal, awaits partCompleted after each part (and after a cancelled part that changed Revision)
 - [03-10]: Canonical values merge duplicates by label+value (case-insensitive) and never change hand-edited values; first-generation paths send no existing entries (regeneration is 03-11)
+- [03-11]: Regenerate Cast = SyncOrganizations -> roster merge by existingId, then same full name (unmatched non-edited key people removed, citing facts flagged "{name} was removed from the cast.") -> one counsel top-up -> details -> per non-Individual organization background rewrite (old staff removed only when that call succeeds)
+- [03-11]: Shared MergeEntries: ids claimed once per response; hand-edited entries skipped with "Kept your edits to {name}." unless replaceEdited; unclaimed revisable entries removed
+- [03-11]: Tab regeneration failures before the merge leave entries untouched and restore the part status; hint "Click Regenerate {part} to try again."
+- [03-11]: RegenerateEntryAsync applies inside GuideStaleness.AbsorbHandEdit (downstream stays fresh; renames via SetCastField flag facts; fact changes flag values)
+- [03-11]: UpdateStaleAsync re-checks IsStale before each part; Issues via GenerateIssuesAsync (keeps ids/details), Cast/Facts/Values via RegenerateTabAsync(guidance "", replaceEdited false)
 - [03-12]: GridStyle header left padding is LDU(15) - 2 (GridStyle.HeaderTextMargin): DataGridViewColumnHeaderCell adds an unscaled 2 px text margin; right-aligned headers subtract it on the right
 - [03-12]: GuideTabPanel.BuildColumns runs from the base ctor (Grid + LDU only); the detail column switches to Absolute LDU(320)+LDU(8) when 40% is narrower; empty-detail text is padded to center on the grid's empty-text line
 - [03-12]: LinkPicker puts the locked suffix after the name (before " — "), lists locked then checked then the rest, and keeps dangling checked ids in CheckedIds
@@ -197,6 +203,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T21:46:31.005Z
-Stopped at: Completed 03-17-PLAN.md
+Last session: 2026-10-01T22:04:26.872Z
+Stopped at: Completed 03-11-PLAN.md
 Resume file: None

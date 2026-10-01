@@ -13,6 +13,8 @@ public class CaseSchemaTests
             data.Add(nameof(RealEntityDetector), type);
         foreach (var type in CoreDocumentGenerator.SchemaTypes)
             data.Add(nameof(CoreDocumentGenerator), type);
+        foreach (var type in CaseGuideGenerator.SchemaTypes)
+            data.Add(nameof(CaseGuideGenerator), type);
         return data;
     }
 

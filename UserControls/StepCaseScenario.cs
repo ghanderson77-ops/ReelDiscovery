@@ -306,7 +306,27 @@ public class StepCaseScenario : UserControl, IWizardStep
 
     public Task OnLeaveStepAsync()
     {
+        // Keep unsubmitted input when the user goes Back (CR-01). No validation or entity check here:
+        // EffectiveScenario and EntityCheckHash are untouched, so a changed text is re-checked on the next Next.
+        if (_state != null)
+            StoreInputs(_state.Case, _txtScenario.Text, SelectedLevel(), _cmbDocument.SelectedIndex, _cmbCourt.SelectedIndex, _cmbState.SelectedItem as string);
+
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Copies the raw scenario inputs into the draft. Never touches EffectiveScenario, Substitutions or EntityCheckHash.
+    /// </summary>
+    public static void StoreInputs(CaseDraft draft, string? scenario, ComplexityLevel level, int documentIndex, int courtIndex, string? selectedState)
+    {
+        draft.Scenario = scenario?.Trim() ?? string.Empty;
+        draft.Complexity = level;
+        draft.DocumentPreference = (DocumentTypePreference)Math.Max(0, documentIndex);
+        draft.CourtPreference = (CourtPreference)Math.Max(0, courtIndex);
+        var state = selectedState ?? AutoState;
+        draft.StatePreference = draft.CourtPreference == CourtPreference.State && state != AutoState
+            ? state
+            : string.Empty;
     }
 
     public async Task<bool> ValidateStepAsync()
@@ -320,14 +340,7 @@ public class StepCaseScenario : UserControl, IWizardStep
         }
 
         var draft = _state.Case;
-        draft.Scenario = text;
-        draft.Complexity = SelectedLevel();
-        draft.DocumentPreference = (DocumentTypePreference)Math.Max(0, _cmbDocument.SelectedIndex);
-        draft.CourtPreference = (CourtPreference)Math.Max(0, _cmbCourt.SelectedIndex);
-        var selectedState = _cmbState.SelectedItem as string ?? AutoState;
-        draft.StatePreference = draft.CourtPreference == CourtPreference.State && selectedState != AutoState
-            ? selectedState
-            : string.Empty;
+        StoreInputs(draft, text, SelectedLevel(), _cmbDocument.SelectedIndex, _cmbCourt.SelectedIndex, _cmbState.SelectedItem as string);
 
         // Unchanged scenario reuses the previous decisions with no LLM call (T-02-28)
         var hash = CaseDraft.ComputeHash(text);

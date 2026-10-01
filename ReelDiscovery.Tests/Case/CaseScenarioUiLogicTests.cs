@@ -80,6 +80,45 @@ public class CaseScenarioUiLogicTests
     }
 
     [Fact]
+    public void StoreInputs_KeepsUnsubmittedScenarioAndSettings()
+    {
+        var draft = new CaseDraft
+        {
+            EffectiveScenario = "Checked text",
+            EntityCheckHash = "abc",
+            Substitutions = new List<EntitySubstitution> { new() { Original = "Walter White", Substitute = "Hank Brennan", Apply = true } }
+        };
+
+        StepCaseScenario.StoreInputs(draft, "  Typed but not submitted.  ", ComplexityLevel.Complex,
+            (int)DocumentTypePreference.Petition, (int)CourtPreference.State, "Texas");
+
+        Assert.Equal("Typed but not submitted.", draft.Scenario);
+        Assert.Equal(ComplexityLevel.Complex, draft.Complexity);
+        Assert.Equal(DocumentTypePreference.Petition, draft.DocumentPreference);
+        Assert.Equal(CourtPreference.State, draft.CourtPreference);
+        Assert.Equal("Texas", draft.StatePreference);
+
+        // The entity check results are left alone so a changed scenario is re-checked on Next
+        Assert.Equal("Checked text", draft.EffectiveScenario);
+        Assert.Equal("abc", draft.EntityCheckHash);
+        Assert.Single(draft.Substitutions);
+    }
+
+    [Theory]
+    [InlineData((int)CourtPreference.State, "Auto")]
+    [InlineData((int)CourtPreference.Federal, "Texas")]
+    [InlineData((int)CourtPreference.State, null)]
+    public void StoreInputs_StateOnlyKeptForChosenStateCourt(int courtIndex, string? state)
+    {
+        var draft = new CaseDraft { StatePreference = "Ohio" };
+
+        StepCaseScenario.StoreInputs(draft, "Scenario", ComplexityLevel.Standard, -1, courtIndex, state);
+
+        Assert.Equal(string.Empty, draft.StatePreference);
+        Assert.Equal(DocumentTypePreference.Auto, draft.DocumentPreference);
+    }
+
+    [Fact]
     public void CounterText_FormatsWithThousandsSeparator()
     {
         Assert.Equal("1,234 / 8,000 characters", StepCaseScenario.CounterText(1234));

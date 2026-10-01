@@ -33,7 +33,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [x] **CASE-04**: System generates the appropriate core document: Complaint / Petition for civil disputes, Investigation Memo for criminal or regulatory scenarios
 - [x] **CASE-05**: Core document follows realistic structure (caption, parties, jurisdiction/venue, factual allegations, counts/causes of action, prayer for relief — or the memo equivalent) consistent with one chosen jurisdiction
 - [x] **CASE-06**: Core document does not cite invented case law (no-fabricated-citation policy, checked automatically)
-- [ ] **CASE-07**: User can review, edit, and regenerate the core document before continuing
+- [x] **CASE-07**: User can review, edit, and regenerate the core document before continuing
 
 ### Case Guide (Cast, Facts, Issues)
 
@@ -190,7 +190,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-04 | Phase 2 | Complete |
 | CASE-05 | Phase 2 | Complete |
 | CASE-06 | Phase 2 | Complete |
-| CASE-07 | Phase 2 | Pending |
+| CASE-07 | Phase 2 | Complete |
 | GUIDE-01 | Phase 3 | Pending |
 | GUIDE-02 | Phase 3 | Pending |
 | GUIDE-03 | Phase 3 | Pending |

@@ -72,7 +72,7 @@ Plans:
 - [x] 02-06-PLAN.md — CoreDocumentGenerator (outline, sections, citation retry, regenerate section) + CaseSchemaTests (Wave 3)
 - [x] 02-07-PLAN.md — StepCaseScenario, EntityReviewDialog, LoadingOverlay EntityCheck (Wave 3)
 - [x] 02-08-PLAN.md — StepCoreDocument (inline generation, editor, regenerate, issues, Finish gate) (Wave 4)
-- [ ] 02-09-PLAN.md — WizardForm flow switch, validated Finish + Close Case confirm, Workflow selector (Wave 5)
+- [x] 02-09-PLAN.md — WizardForm flow switch, validated Finish + Close Case confirm, Workflow selector (Wave 5)
 **UI hint**: yes
 
 ### Phase 3: Case Guide
@@ -156,7 +156,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
-| 2. Case Scenario & Core Document | 8/9 | In Progress|  |
+| 2. Case Scenario & Core Document | 9/9 | In Progress|  |
 | 3. Case Guide | 0/TBD | Not started | - |
 | 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |

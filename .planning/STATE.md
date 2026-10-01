@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 02-08-PLAN.md
-last_updated: "2026-10-01T16:01:56.875Z"
+status: verifying
+stopped_at: Completed 02-09-PLAN.md
+last_updated: "2026-10-01T16:07:59.441Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 22
-  completed_plans: 21
-  percent: 95
+  completed_plans: 22
+  percent: 100
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 
 Phase: 2 (Case Scenario & Core Document) — EXECUTING
 Plan: 9 of 9
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-01
 
 Progress: [██████████] 100%
@@ -72,6 +72,7 @@ Progress: [██████████] 100%
 | Phase 02 P06 | 12min | 2 tasks | 3 files |
 | Phase 02 P07 | 9min | 2 tasks | 4 files |
 | Phase 02 P08 | 14min | 2 tasks | 2 files |
+| Phase 02 P09 | 6min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,8 @@ Recent decisions affecting current work:
 - [02-08]: StepCoreDocument hides the empty state while a run is in progress, so the first run shows sections filling in
 - [02-08]: ApplyPendingEdit always normalizes editor text to the section's joined paragraphs (whitespace-only changes do not leave Apply enabled)
 - [02-08]: Retry Section runs GenerateSectionsAsync for all Pending/Failed sections; Regenerate Section (Ready) calls RegenerateSectionAsync with guidance
+- [02-09]: Wizard steps come from one StepTypesFor(flow) table; the API step is shared and later steps are disposed and rebuilt only when the flow changes on leaving step 0
+- [02-09]: Finish always runs the last step's ValidateStepAsync before closing; case-driven Finish adds the C6 'Close Case' confirm (default No)
 
 ### Pending Todos
 
@@ -143,6 +146,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T16:01:45.096Z
-Stopped at: Completed 02-08-PLAN.md
+Last session: 2026-10-01T16:07:59.378Z
+Stopped at: Completed 02-09-PLAN.md
 Resume file: None

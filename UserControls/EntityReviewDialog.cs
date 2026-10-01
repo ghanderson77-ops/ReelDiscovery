@@ -1,5 +1,6 @@
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.UserControls;
 
@@ -242,6 +243,15 @@ public class EntityReviewDialog : Form
             return;
         }
 
+        // A substitute that still contains the real name would be flagged as a leak in every section (WR-06)
+        var leaking = FindLeakingSubstitute(Entities);
+        if (leaking != null)
+        {
+            MessageBox.Show($"The substitute \"{leaking.Substitute}\" still contains the real name {leaking.Original} or one of its short forms. Enter a different fictional name.",
+                "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         var kept = Entities.Count(x => !x.Apply);
         if (kept > 0)
         {
@@ -276,4 +286,12 @@ public class EntityReviewDialog : Form
     /// </summary>
     public static EntitySubstitution? FindBlankSubstitute(IEnumerable<EntitySubstitution> entities) =>
         entities.FirstOrDefault(x => x.Apply && string.IsNullOrWhiteSpace(x.Substitute));
+
+    /// <summary>
+    /// First applied entity whose substitute contains its own original name or an alias, or null when all are valid.
+    /// </summary>
+    public static EntitySubstitution? FindLeakingSubstitute(IEnumerable<EntitySubstitution> entities) =>
+        entities.FirstOrDefault(x => x.Apply
+            && !string.IsNullOrWhiteSpace(x.Substitute)
+            && NameSubstitution.FindLeaks(x.Substitute, new[] { x }).Count > 0);
 }

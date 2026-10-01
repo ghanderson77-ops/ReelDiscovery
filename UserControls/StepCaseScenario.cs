@@ -26,6 +26,7 @@ public class StepCaseScenario : UserControl, IWizardStep
     private ComboBox _cmbCourt = null!;
     private ComboBox _cmbState = null!;
     private Label _lblStatus = null!;
+    private LinkLabel _lnkReviewNames = null!;
     private LoadingOverlay _loadingOverlay = null!;
     private bool _isChecking;
 
@@ -179,14 +180,35 @@ public class StepCaseScenario : UserControl, IWizardStep
         preferencePanel.Controls.Add(_cmbState);
         mainLayout.Controls.Add(preferencePanel, 0, 7);
 
-        // Status
+        // Status + "Review real names" link
+        var statusLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0)
+        };
+        statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _lblStatus = new Label
         {
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Font = new Font("Segoe UI", 9F)
         };
-        mainLayout.Controls.Add(_lblStatus, 0, 8);
+        // Reopens the substitution decisions without editing the scenario (WR-06)
+        _lnkReviewNames = new LinkLabel
+        {
+            Text = "Review real names",
+            AutoSize = true,
+            Anchor = AnchorStyles.Right,
+            Font = new Font("Segoe UI", 9F),
+            Visible = false
+        };
+        _lnkReviewNames.LinkClicked += (s, e) => ReviewRealNames();
+        statusLayout.Controls.Add(_lblStatus, 0, 0);
+        statusLayout.Controls.Add(_lnkReviewNames, 1, 0);
+        mainLayout.Controls.Add(statusLayout, 0, 8);
 
         _loadingOverlay = new LoadingOverlay(LoadingOverlay.LoadingType.EntityCheck);
 
@@ -271,7 +293,29 @@ public class StepCaseScenario : UserControl, IWizardStep
         _rbComplex.Enabled = enabled;
         _cmbDocument.Enabled = enabled;
         _cmbCourt.Enabled = enabled;
+        _lnkReviewNames.Enabled = enabled;
         UpdateStateComboEnabled();
+    }
+
+    private void UpdateReviewNamesLink()
+    {
+        _lnkReviewNames.Visible = _state != null && _state.Case.Substitutions.Count > 0;
+    }
+
+    private void ReviewRealNames()
+    {
+        var draft = _state?.Case;
+        if (draft == null || _isChecking || draft.Substitutions.Count == 0)
+            return;
+
+        using var dlg = new EntityReviewDialog(draft.Substitutions);
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        // EffectiveScenario is rebuilt from these decisions on Next; the unchanged hash skips a new LLM check
+        draft.Substitutions = dlg.Entities;
+        _lblStatus.Text = "Real-name decisions updated. Click Next to continue.";
+        _lblStatus.ForeColor = Color.Green;
     }
 
     public void BindState(WizardState state)
@@ -300,6 +344,7 @@ public class StepCaseScenario : UserControl, IWizardStep
 
         _lblPresetSummary.Text = ComplexityPreset.Get(SelectedLevel()).Summary;
         UpdateCounter();
+        UpdateReviewNamesLink();
         _txtScenario.Focus();
 
         return Task.CompletedTask;
@@ -394,6 +439,7 @@ public class StepCaseScenario : UserControl, IWizardStep
             {
                 _isChecking = false;
                 SetInputsEnabled(true);
+                UpdateReviewNamesLink();
                 _loadingOverlay.Hide();
                 StateChanged?.Invoke(this, EventArgs.Empty);
             }

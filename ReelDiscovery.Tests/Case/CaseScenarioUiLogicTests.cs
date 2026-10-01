@@ -58,6 +58,36 @@ public class CaseScenarioUiLogicTests
     }
 
     [Theory]
+    [InlineData("Walter White", "Walter White")]
+    [InlineData("Walter White", "Walter White Jr.")]
+    [InlineData("Walter White", "walter white")]
+    [InlineData("Walter White", "Hank White")]   // keeps the surname alias
+    [InlineData("Walter White", "Walt Brennan")] // keeps the nickname alias
+    public void FindLeakingSubstitute_RejectsSubstituteContainingRealName(string original, string substitute)
+    {
+        var entity = new EntitySubstitution
+        {
+            Original = original,
+            Aliases = new List<string> { "White", "Walt" },
+            Kind = EntityKind.Person,
+            Substitute = substitute,
+            Apply = true
+        };
+
+        Assert.Same(entity, EntityReviewDialog.FindLeakingSubstitute(new[] { entity }));
+    }
+
+    [Fact]
+    public void FindLeakingSubstitute_ValidOrKeptOrBlank_ReturnsNull()
+    {
+        var valid = new EntitySubstitution { Original = "Walter White", Aliases = new List<string> { "White" }, Substitute = "Hank Brennan", Apply = true };
+        var kept = new EntitySubstitution { Original = "Jesse Pinkman", Substitute = "Jesse Pinkman", Apply = false };
+        var blank = new EntitySubstitution { Original = "Gus Fring", Substitute = "", Apply = true };
+
+        Assert.Null(EntityReviewDialog.FindLeakingSubstitute(new[] { valid, kept, blank }));
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(7200)]
     public void CounterColor_AtOrBelowNinetyPercent_IsDimGray(int length)

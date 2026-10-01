@@ -52,6 +52,7 @@ public class CaseGuideValidatorTests
         Assert.Empty(Errors(findings));
         Assert.Equal(0, CaseGuideValidator.CountErrors(findings));
         Assert.True(CaseGuideValidator.CountWarnings(findings) > 0);
+        Assert.DoesNotContain(findings, f => f.Message.StartsWith("A check could not run", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -93,6 +94,7 @@ public class CaseGuideValidatorTests
         var findings = CaseGuideValidator.Validate(draft);
 
         Assert.NotNull(findings);
+        Assert.DoesNotContain(findings, f => f.Message.StartsWith("A check could not run", StringComparison.Ordinal));
     }
 
     [Fact]

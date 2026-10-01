@@ -185,6 +185,22 @@ public class CoreDocumentGeneratorTests
     }
 
     [Fact]
+    public async Task Prompts_KeepScenarioNames_IncludingNamesFromFictionalWorks()
+    {
+        // A scenario based on a TV show keeps its company and character names (UAT: The Office scenario was renamed)
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(CivilOutlineJson));
+
+        await new CoreDocumentGenerator(gateway).GenerateOutlineAsync(NewDraft());
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Contains("Keep every person, company and organization named in the scenario exactly as the scenario names them", request.SystemPrompt);
+        Assert.Contains("which are already fictional; never rename them", request.SystemPrompt);
+        Assert.DoesNotContain("Every person, company, law firm and judge must be fictional", request.SystemPrompt);
+        Assert.Contains("using the names the scenario gives", request.UserPrompt);
+    }
+
+    [Fact]
     public async Task Outline_MapsCivilFederal()
     {
         var (gateway, fake) = CaseTestData.CreateGateway();

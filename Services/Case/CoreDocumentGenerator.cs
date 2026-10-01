@@ -19,7 +19,7 @@ public class CoreDocumentGenerator
     private const int MaxParallelSections = 3;
 
     // Byte-stable for prompt caching: never interpolate run data into this text
-    private const string SystemPrompt = "You draft realistic United States legal documents for a fictional e-discovery training dataset. Every person, company, law firm and judge must be fictional; never use the name of a real person, company, law firm or judge. Do not cite any court decision, case name or reporter citation (for example Smith v. Jones or 531 U.S. 98). You may cite statutes, regulations and court rules by section number. Describe legal standards in plain words. Write each paragraph as plain prose without any paragraph number, letter or bullet, and never refer to other paragraphs by number. Keep one consistent court, jurisdiction and set of names throughout. For criminal or regulatory matters keep operational methods general and focus on who knew what, when, money flows and cover stories.";
+    private const string SystemPrompt = "You draft realistic United States legal documents for a fictional e-discovery training dataset. Keep every person, company and organization named in the scenario exactly as the scenario names them, including characters and companies from films, TV series, books or games, which are already fictional; never rename them. Invent names only for people, companies, law firms and counsel the scenario does not name, and make those invented names fictional. Never use the name of a real-world person, company, law firm or judge unless the user approved it. Do not cite any court decision, case name or reporter citation (for example Smith v. Jones or 531 U.S. 98). You may cite statutes, regulations and court rules by section number. Describe legal standards in plain words. Write each paragraph as plain prose without any paragraph number, letter or bullet, and never refer to other paragraphs by number. Keep one consistent court, jurisdiction and set of names throughout. For criminal or regulatory matters keep operational methods general and focus on who knew what, when, money flows and cover stories.";
 
     private readonly ILlmGateway _llm;
 
@@ -517,7 +517,7 @@ public class CoreDocumentGenerator
             sb.AppendLine($"The user has approved keeping these names exactly as written; use them unchanged as an exception to the fictional-names rule: {string.Join(", ", kept)}");
 
         sb.AppendLine();
-        sb.Append("Plan the document: classify the matter, choose one court and venue, list the parties with fictional names, the counts or issues, the timeline (filing or memo date after the timeline ends), the factual subsections in date order with a paragraph target each, and fictional counsel or memo author details.");
+        sb.Append("Plan the document: classify the matter, choose one court and venue, list the parties (using the names the scenario gives; invent fictional names only where it gives none), the counts or issues, the timeline (filing or memo date after the timeline ends), the factual subsections in date order with a paragraph target each, and fictional counsel or memo author details.");
 
         return sb.ToString();
     }
@@ -719,7 +719,7 @@ public class CoreDocumentGenerator
         public bool DemandsJuryTrial { get; set; }
 
         [JsonPropertyName("parties")]
-        [Description("Parties with fictional names")]
+        [Description("Parties, named as in the scenario; invented fictional names only where the scenario names none")]
         public List<PartyDto> Parties { get; set; } = new();
 
         [JsonPropertyName("counts")]
@@ -742,7 +742,7 @@ public class CoreDocumentGenerator
     internal class PartyDto
     {
         [JsonPropertyName("name")]
-        [Description("Full fictional legal name, e.g. Brightline Glazing, LLC")]
+        [Description("Full legal name as the scenario gives it, e.g. Brightline Glazing, LLC")]
         public string Name { get; set; } = string.Empty;
 
         [JsonPropertyName("shortName")]

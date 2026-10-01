@@ -16,12 +16,13 @@ public class CaseGuideDocxExporterTests
         return (errors, string.Join("\n", paragraphs));
     }
 
-    // Text with Break elements rendered as newlines
+    // Text with Break/TabChar elements rendered as newlines/tabs
     private static string ParagraphText(Paragraph paragraph) =>
         string.Concat(paragraph.Descendants().Select(e => e switch
         {
             Text t => t.Text,
             Break => "\n",
+            TabChar => "\t",
             _ => string.Empty
         }));
 
@@ -54,7 +55,8 @@ public class CaseGuideDocxExporterTests
         var (errors, text) = OpenAndValidate(CaseGuideDocxExporter.BuildCoreDocument(draft));
 
         Assert.Empty(errors.Select(e => e.Description + " @ " + e.Path?.XPath));
-        Assert.Contains("RE: " + draft.CoreDocument!.Memo.Re, text);
+        // Label and value are tab-aligned in Word
+        Assert.Contains("RE:\t" + draft.CoreDocument!.Memo.Re, text);
         Assert.Contains("EXECUTIVE SUMMARY", text);
         Assert.DoesNotContain("1. The task force", text);
     }

@@ -1,7 +1,24 @@
+using System.Runtime.CompilerServices;
+
 namespace ReelDiscovery.Helpers;
 
 public static class ButtonHelper
 {
+    // Flat buttons keep their BackColor when disabled, so a disabled Primary button looks clickable.
+    // The enabled colors are remembered per button and swapped for a muted palette while disabled.
+    private static readonly ConditionalWeakTable<Button, EnabledColors> _enabledColors = new();
+
+    private static readonly Color DisabledBack = Color.FromArgb(229, 229, 229);
+    private static readonly Color DisabledFore = Color.FromArgb(150, 150, 150);
+    private static readonly Color DisabledBorder = Color.FromArgb(210, 210, 210);
+
+    private sealed class EnabledColors
+    {
+        public Color Back;
+        public Color Fore;
+        public Color Border;
+    }
+
     /// <summary>
     /// Applies consistent modern styling to a button
     /// </summary>
@@ -45,6 +62,30 @@ public static class ButtonHelper
                 button.FlatAppearance.BorderColor = Color.FromArgb(180, 180, 180);
                 break;
         }
+
+        var colors = new EnabledColors
+        {
+            Back = button.BackColor,
+            Fore = button.ForeColor,
+            Border = button.FlatAppearance.BorderColor
+        };
+        if (!_enabledColors.TryGetValue(button, out _))
+        {
+            button.EnabledChanged += (s, e) => ApplyEnabledLook(button);
+        }
+        _enabledColors.AddOrUpdate(button, colors);
+        ApplyEnabledLook(button);
+    }
+
+    private static void ApplyEnabledLook(Button button)
+    {
+        if (!_enabledColors.TryGetValue(button, out var colors))
+            return;
+
+        button.BackColor = button.Enabled ? colors.Back : DisabledBack;
+        button.ForeColor = button.Enabled ? colors.Fore : DisabledFore;
+        button.FlatAppearance.BorderColor = button.Enabled ? colors.Border : DisabledBorder;
+        button.Cursor = button.Enabled ? Cursors.Hand : Cursors.Default;
     }
 
     /// <summary>

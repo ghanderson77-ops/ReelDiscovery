@@ -170,4 +170,50 @@ public class CoreDocumentUiLogicTests
     {
         Assert.Equal("Issues (1 errors, 2 warnings)", StepCoreDocument.IssuesCaption(new[] { Error(), Warning(), Warning() }));
     }
+
+    [Fact]
+    public void DocumentSubtitle_CollapsesWhitespace_AndTypeLabelIsSeparate()
+    {
+        var doc = CaseTestData.SampleMemoDraft().CoreDocument!;
+        doc.Memo.Organization = "Marwick Avelin  Cresswell LLP,\t outside counsel";
+
+        Assert.Equal("Investigation Memo", StepCoreDocument.DocumentTypeLabel(doc));
+        Assert.Equal("Marwick Avelin Cresswell LLP, outside counsel", StepCoreDocument.DocumentSubtitle(doc));
+    }
+
+    [Fact]
+    public void VisibleIssues_WhileGenerating_ShowsOnlyFinishedSections()
+    {
+        var doc = CaseTestData.SampleComplaintDraft().CoreDocument!;
+        var ready = doc.Sections[0];
+        var pending = doc.Sections[1];
+        ready.Status = SectionStatus.Ready;
+        pending.Status = SectionStatus.Pending;
+        var issues = new List<CoreDocumentIssue> { Error(ready.Id), Error(pending.Id), Warning(string.Empty) };
+
+        var running = StepCoreDocument.VisibleIssues(doc, issues, isGenerating: true);
+        var idle = StepCoreDocument.VisibleIssues(doc, issues, isGenerating: false);
+
+        Assert.Equal(ready.Id, Assert.Single(running).SectionId);
+        Assert.Equal(3, idle.Count);
+    }
+
+    [Theory]
+    [InlineData(SectionStatus.Writing, false, "Writing this section...")]
+    [InlineData(SectionStatus.Pending, true, "Not written yet. It will appear here when the generator reaches it.")]
+    [InlineData(SectionStatus.Pending, false, "Not written yet. Click Resume All to write it, or type the text here yourself.")]
+    [InlineData(SectionStatus.Ready, false, "")]
+    public void EditorPlaceholder_ExplainsUnwrittenSections(SectionStatus status, bool generating, string expected)
+    {
+        Assert.Equal(expected, StepCoreDocument.EditorPlaceholder(Section(status), generating));
+    }
+
+    [Fact]
+    public void EditorPlaceholder_Failed_IncludesReason()
+    {
+        var section = Section(SectionStatus.Failed);
+        section.FailureMessage = "The response was cut off";
+
+        Assert.Contains("The response was cut off", StepCoreDocument.EditorPlaceholder(section, false));
+    }
 }

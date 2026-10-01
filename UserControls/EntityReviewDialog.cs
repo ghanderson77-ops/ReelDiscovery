@@ -164,9 +164,9 @@ public class EntityReviewDialog : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Margin = new Padding(0, 8, 0, 0)
         };
-        _btnBack = ButtonHelper.CreateButton("Back to Scenario", LogicalToDeviceUnits(140), LogicalToDeviceUnits(32), ButtonStyle.Default);
+        _btnBack = ButtonHelper.CreateButton("Back to Scenario", 140, 32, ButtonStyle.Default);
         _btnBack.DialogResult = DialogResult.Cancel;
-        _btnApply = ButtonHelper.CreateButton("Apply Substitutes", LogicalToDeviceUnits(140), LogicalToDeviceUnits(32), ButtonStyle.Primary);
+        _btnApply = ButtonHelper.CreateButton("Apply Substitutes", 140, 32, ButtonStyle.Primary);
         _btnApply.Margin = new Padding(3, 3, 8, 3);
         _btnApply.Click += BtnApply_Click;
         buttonPanel.Controls.Add(_btnBack);

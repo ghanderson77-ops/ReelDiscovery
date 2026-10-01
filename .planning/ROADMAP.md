@@ -94,7 +94,7 @@ Plans:
 - [x] 03-05-PLAN.md — CaseGuideDocxExporter: core document, cast, key facts .docx (Wave 2)
 - [x] 03-06-PLAN.md — CaseGuideUiText copy helpers + ThemedDialog, Regenerate/Delete dialogs (Wave 2)
 - [x] 03-07-PLAN.md — GuideStaleness + CaseGuideEditing (Wave 3)
-- [ ] 03-08-PLAN.md — CanonicalValueScanner + CaseGuideValidator (Wave 4)
+- [x] 03-08-PLAN.md — CanonicalValueScanner + CaseGuideValidator (Wave 4)
 - [ ] 03-09-PLAN.md — CaseGuidePrompts + generator: issues and cast (roster, details, background) (Wave 4)
 - [ ] 03-10-PLAN.md — Generator: key facts, canonical values, GenerateAsync orchestration (Wave 5)
 - [ ] 03-11-PLAN.md — Generator: tab/entry regeneration and Update Guide (Wave 6)
@@ -179,7 +179,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 |-------|----------------|--------|-----------|
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
-| 3. Case Guide | 7/20 | In Progress|  |
+| 3. Case Guide | 8/20 | In Progress|  |
 | 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |

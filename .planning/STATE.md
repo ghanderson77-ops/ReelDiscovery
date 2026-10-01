@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-07-PLAN.md
-last_updated: "2026-10-01T20:53:32.565Z"
+stopped_at: Completed 03-08-PLAN.md
+last_updated: "2026-10-01T21:01:35.054Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 29
-  percent: 69
+  completed_plans: 30
+  percent: 71
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 8 of 20
+Plan: 9 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
@@ -78,6 +78,7 @@ Progress: [███████░░░] 69%
 | Phase 03 P03 | 12min | 2 tasks | 8 files |
 | Phase 03 P04 | 14min | 2 tasks | 5 files |
 | Phase 03 P05 | 22min | 2 tasks | 2 files |
+| Phase 03 P08 | 14min | 2 tasks | 4 files |
 | Phase 03 P06 | 25min | 2 tasks | 7 files |
 | Phase 03 P07 | 10min | 2 tasks | 4 files |
 
@@ -153,6 +154,10 @@ Recent decisions affecting current work:
 - [03-07]: Enum-valued guide edits accept names only; other input returns 'Choose a value from the list.'
 - [03-07]: Counsel sync runs on any identity change (name, organization or typed email) when the old full name matches Counsel.AttorneyName
 - [03-07]: Empty cast ActiveFrom/ActiveTo is allowed (unknown); empty fact Date is rejected; MarkReviewed bumps Revision without IsUserEdited
+- [03-08]: CaseGuideValidator leak findings use the entity id as {where}; organization findings use Area Guide with the ORG id as EntityId
+- [03-08]: Conflict findings (duplicate label, value under two labels, shared org domain) are reported once on the later entry; label conflicts compare exact trimmed text
+- [03-08]: Text-checked canonical value kinds (must appear in core doc or facts): Amount, InvoiceNumber, ChangeOrderNumber, ContractNumber, PurchaseOrder, AccountNumber
+- [03-08]: Missing/invalid active range is a validator Error for every cast member; inactive-actor checks skip invalid ranges
 
 ### Pending Todos
 
@@ -174,6 +179,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T20:53:26.608Z
-Stopped at: Completed 03-07-PLAN.md
+Last session: 2026-10-01T21:01:35.050Z
+Stopped at: Completed 03-08-PLAN.md
 Resume file: None

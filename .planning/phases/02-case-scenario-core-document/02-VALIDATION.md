@@ -2,7 +2,7 @@
 phase: 2
 slug: case-scenario-core-document
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-09-30
 ---
@@ -37,18 +37,29 @@ created: 2026-09-30
 
 ## Per-Task Verification Map
 
-Filled in by the planner/executor as task IDs are assigned. Requirement → test map (from 02-RESEARCH.md):
+Filter prefix: `dotnet test ReelDiscovery.slnx --filter "FullyQualifiedName~ReelDiscovery.Tests.Case.<Class>"`.
 
-| Requirement | Behavior | Test Type | Automated Command (filter) | File Exists | Status |
-|-------------|----------|-----------|----------------------------|-------------|--------|
-| CASE-01 | Scenario stored on CaseDraft; empty/over-length rejected | unit | `CaseDraftTests` | ❌ W0 | ⬜ pending |
-| CASE-02 | Presets strictly increase; outline prompt carries preset numbers | unit | `ComplexityPresetTests\|CoreDocumentValidatorTests` | ❌ W0 | ⬜ pending |
-| CASE-03 | Entity detection parse; safe substitution; leak scan | unit | `NameSubstitutionTests\|RealEntityDetectorTests` | ❌ W0 | ⬜ pending |
-| CASE-04 | Doc-type resolver (Complaint / Petition / Memo) | unit | `DocumentTypeResolverTests` | ❌ W0 | ⬜ pending |
-| CASE-05 | Assembler numbering, incorporation, caption, required sections, jurisdiction consistency | unit | `CoreDocumentAssemblerTests\|CoreDocumentValidatorTests` | ❌ W0 | ⬜ pending |
-| CASE-06 | Citation scanner corpus; one auto-regenerate on error citation | unit | `CitationScannerTests\|CoreDocumentGeneratorTests` | ❌ W0 | ⬜ pending |
-| CASE-07 | Section regenerate/edit semantics, revision counter | unit | `CoreDocumentGeneratorTests\|CoreDocumentEditingTests` | ❌ W0 | ⬜ pending |
-| cross | Strict schemas (≤16 union types); CaseDraft JSON round-trip; outcome handling | unit | `CaseSchemaTests\|CaseDraftSerializationTests` | ❌ W0 | ⬜ pending |
+| Task ID | Plan | Wave | Requirement | Behavior | Test Type | Automated Command (filter) | File Exists | Status |
+|---------|------|------|-------------|----------|-----------|----------------------------|-------------|--------|
+| 02-01-T1 | 01 | 1 | CASE-01, CASE-02 | Preset table strictly increases, summary copy; scenario empty/over-length rejected; source hash; TryParseExact dates; WizardState Flow/Case defaults | unit | `ComplexityPresetTests\|CaseDraftTests` | ❌ W0 (created by task) | ⬜ pending |
+| 02-01-T2 | 01 | 1 | cross | CaseDraft JSON round-trip with string enums (Phase 3 case.json readiness); CaseTestData fixtures | unit | `CaseDraftSerializationTests` | ❌ W0 (created by task) | ⬜ pending |
+| 02-02-T1 | 02 | 2 | CASE-06 | Citation scanner positive/negative corpus, own caption excluded | unit | `CitationScannerTests` | ❌ W0 | ⬜ pending |
+| 02-02-T2 | 02 | 2 | CASE-03 | Single-pass substitution, word boundary, possessive, surname case, no chains, leak scan | unit | `NameSubstitutionTests` | ❌ W0 | ⬜ pending |
+| 02-03-T1 | 03 | 2 | CASE-04, CASE-05 | Doc-type resolver matrix; required sections per type | unit | `DocumentTypeResolverTests\|CoreDocumentTemplatesTests` | ❌ W0 | ⬜ pending |
+| 02-03-T2 | 03 | 2 | CASE-05 | Numbering, incorporation 1..lastFact updates after edit, caption (no judge), memo header, signature, prayer letters | unit | `CoreDocumentAssemblerTests` | ❌ W0 | ⬜ pending |
+| 02-04-T1 | 04 | 3 | CASE-02, CASE-05, CASE-06 | Preset range warnings, missing/failed sections, timeline, jurisdiction consistency, citations, leaks, paragraph refs, stale hash | unit | `CoreDocumentValidatorTests` | ❌ W0 | ⬜ pending |
+| 02-04-T2 | 04 | 3 | CASE-07 | Paragraph split/join, ApplyEdit sets IsUserEdited and bumps Revision only on change | unit | `CoreDocumentEditingTests` | ❌ W0 | ⬜ pending |
+| 02-05-T1 | 05 | 2 | CASE-03 | Detector parse/dedupe, Story tier, scenario only in user prompt, refused/fatal propagate | unit | `RealEntityDetectorTests` | ❌ W0 | ⬜ pending |
+| 02-06-T1 | 06 | 3 | CASE-02, CASE-04 | Strict schemas (<=16 unions); outline prompt carries preset numbers, preferences, substitutions; outline mapping; refused outline | unit | `CaseSchemaTests\|CoreDocumentGeneratorTests` | ❌ W0 | ⬜ pending |
+| 02-06-T2 | 06 | 3 | CASE-05, CASE-06, CASE-07 | Sections Ready; leading numbers stripped; one citation retry; refused/truncated -> Failed; fatal stops and keeps; memo exec summary last; cancel; RegenerateSection replaces only target, keeps Id, uses edited text | unit | `CoreDocumentGeneratorTests` | ❌ W0 | ⬜ pending |
+| 02-07-T1 | 07 | 3 | CASE-03 | Entity dialog helpers (kind labels, aliases text, blank substitute); LoadingOverlay EntityCheck builds | unit + build | `CaseScenarioUiLogicTests` | ❌ W0 | ⬜ pending |
+| 02-07-T2 | 07 | 3 | CASE-01, CASE-02 | Scenario counter text/colors; step compiles with UI-SPEC copy (grep gates) | unit + build | `CaseScenarioUiLogicTests` | ❌ W0 | ⬜ pending |
+| 02-08-T1 | 08 | 4 | CASE-04, CASE-05, CASE-07 | Section suffix/color, document title, ready status, issues caption helpers | unit + build | `CoreDocumentUiLogicTests` | ❌ W0 | ⬜ pending |
+| 02-08-T2 | 08 | 4 | CASE-06, CASE-07 | Editing/regenerate/Finish gate wiring (grep gates) | build + suite | `ReelDiscovery.Tests.Case` (all) | n/a | ⬜ pending |
+| 02-09-T1 | 09 | 5 | CASE-01, CASE-07 | Flow step tables; Finish validates before close + C6 (source scan) | unit | `WizardFlowTests` | ❌ W0 | ⬜ pending |
+| 02-09-T2 | 09 | 5 | CASE-01 | Workflow radios on API step (grep gates); full suite green | build + suite | full `dotnet test ReelDiscovery.slnx` | n/a | ⬜ pending |
+
+Requirement coverage: CASE-01 (02-01, 02-07, 02-09), CASE-02 (02-01, 02-04, 02-06, 02-07), CASE-03 (02-02, 02-05, 02-07), CASE-04 (02-03, 02-06, 02-08), CASE-05 (02-03, 02-04, 02-06, 02-08), CASE-06 (02-02, 02-04, 02-06, 02-08), CASE-07 (02-04, 02-06, 02-08, 02-09).
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -77,11 +88,11 @@ No framework install needed.
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 60s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (each test file is created by the task that needs it; CaseTestData by 02-01-T2)
+- [x] No watch-mode flags
+- [x] Feedback latency < 60s
+- [x] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending

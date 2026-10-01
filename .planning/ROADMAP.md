@@ -61,7 +61,18 @@ Plans:
   3. A civil scenario produces a Complaint/Petition, and a criminal or regulatory scenario produces an Investigation Memo. Either one has the full realistic structure (caption, parties, jurisdiction/venue, numbered factual allegations, counts, prayer, or the memo equivalent) for one consistent jurisdiction.
   4. Generated documents contain no invented case-law citations, and an automatic check flags any that appear.
   5. The user can edit the core document or regenerate it (in whole or by section) before continuing.
-**Plans**: TBD
+**Plans**: 9 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Case domain model (CaseDraft, CoreDocument, sections, presets, substitutions), WizardFlow + WizardState.Case, CaseTestData scaffold, JSON round-trip (Wave 1)
+- [ ] 02-02-PLAN.md — CitationScanner (no case-law citations) + NameSubstitution (single-pass fictional names, leak scan) (Wave 2)
+- [ ] 02-03-PLAN.md — DocumentTypeResolver, CoreDocumentTemplates, CoreDocumentAssembler (code-owned numbering, caption, incorporation, memo header) (Wave 2)
+- [ ] 02-04-PLAN.md — CoreDocumentValidator + CoreDocumentEditing (Wave 3)
+- [ ] 02-05-PLAN.md — RealEntityDetector (Story-tier real-name pre-flight) (Wave 2)
+- [ ] 02-06-PLAN.md — CoreDocumentGenerator (outline, sections, citation retry, regenerate section) + CaseSchemaTests (Wave 3)
+- [ ] 02-07-PLAN.md — StepCaseScenario, EntityReviewDialog, LoadingOverlay EntityCheck (Wave 3)
+- [ ] 02-08-PLAN.md — StepCoreDocument (inline generation, editor, regenerate, issues, Finish gate) (Wave 4)
+- [ ] 02-09-PLAN.md — WizardForm flow switch, validated Finish + Close Case confirm, Workflow selector (Wave 5)
 **UI hint**: yes
 
 ### Phase 3: Case Guide
@@ -145,7 +156,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
-| 2. Case Scenario & Core Document | 0/TBD | Not started | - |
+| 2. Case Scenario & Core Document | 0/9 | Planned | - |
 | 3. Case Guide | 0/TBD | Not started | - |
 | 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |

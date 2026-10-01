@@ -42,8 +42,8 @@ public static partial class CoreDocumentEditing
         section.Paragraphs = paragraphs;
         section.IsUserEdited = true;
 
-        // The user wrote a failed section by hand
-        if (section.Status == SectionStatus.Failed && paragraphs.Count > 0)
+        // The user wrote a failed or unwritten section by hand: it counts as written (CR-02)
+        if ((section.Status is SectionStatus.Failed or SectionStatus.Pending) && paragraphs.Count > 0)
         {
             section.Status = SectionStatus.Ready;
             section.FailureMessage = string.Empty;

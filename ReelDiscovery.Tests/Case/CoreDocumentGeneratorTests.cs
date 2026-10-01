@@ -368,6 +368,33 @@ public class CoreDocumentGeneratorTests
     }
 
     [Fact]
+    public async Task GenerateSections_SkipsHandWrittenPendingSections()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(Paragraphs("Generated facts.")));
+        var draft = CaseTestData.SampleComplaintDraft();
+
+        // Loaded or legacy state: hand-written text on a section still marked Pending
+        var facts1 = draft.CoreDocument!.FindSection("facts-1")!;
+        facts1.Status = SectionStatus.Pending;
+        facts1.IsUserEdited = true;
+        facts1.Paragraphs = new List<string> { "My own words." };
+
+        var facts2 = draft.CoreDocument.FindSection("facts-2")!;
+        facts2.Status = SectionStatus.Failed;
+        facts2.Paragraphs = new List<string>();
+
+        var result = await new CoreDocumentGenerator(gateway).GenerateSectionsAsync(draft);
+
+        Assert.Single(fake.Requests);
+        Assert.Contains("Section: Unpaid Change Orders", fake.Requests[0].UserPrompt);
+        Assert.Equal(1, result.SectionsWritten);
+        Assert.Equal(new[] { "My own words." }, facts1.Paragraphs);
+        Assert.True(facts1.IsUserEdited);
+        Assert.Equal(new[] { "Generated facts." }, facts2.Paragraphs);
+    }
+
+    [Fact]
     public async Task GenerateSections_NoDocument_Throws()
     {
         var (gateway, _) = CaseTestData.CreateGateway();

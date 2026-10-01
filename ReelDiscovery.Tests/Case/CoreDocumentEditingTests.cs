@@ -94,4 +94,33 @@ public class CoreDocumentEditingTests
         Assert.Equal(SectionStatus.Ready, section.Status);
         Assert.Equal(string.Empty, section.FailureMessage);
     }
+
+    [Fact]
+    public void ApplyEdit_PendingSection_BecomesReadyAndPassesStructureCheck()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        var section = draft.CoreDocument!.FindSection("facts-2")!;
+        section.Status = SectionStatus.Pending;
+        section.Paragraphs = new List<string>();
+
+        Assert.True(CoreDocumentEditing.ApplyEdit(draft, "facts-2", "Hand-written paragraph."));
+
+        Assert.Equal(SectionStatus.Ready, section.Status);
+        Assert.True(section.IsUserEdited);
+        Assert.DoesNotContain(CoreDocumentValidator.Validate(draft),
+            i => i.SectionId == "facts-2" && i.Category == IssueCategory.Structure && i.Severity == IssueSeverity.Error);
+    }
+
+    [Fact]
+    public void ApplyEdit_PendingSectionClearedToEmpty_StaysPending()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        var section = draft.CoreDocument!.FindSection("facts-2")!;
+        section.Status = SectionStatus.Pending;
+        section.Paragraphs = new List<string> { "Old." };
+
+        Assert.True(CoreDocumentEditing.ApplyEdit(draft, "facts-2", "   "));
+
+        Assert.Equal(SectionStatus.Pending, section.Status);
+    }
 }

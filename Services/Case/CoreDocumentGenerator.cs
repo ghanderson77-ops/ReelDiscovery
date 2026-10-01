@@ -69,7 +69,7 @@ public class CoreDocumentGenerator
     }
 
     /// <summary>
-    /// Writes every Pending or Failed section (also serves Retry and resume): lead sections in order,
+    /// Writes every Pending or Failed section that holds no hand-written text (also serves Retry and resume): lead sections in order,
     /// counts/findings in parallel, then the tail, then the executive summary last.
     /// </summary>
     public async Task<CoreDocumentGenerationResult> GenerateSectionsAsync(CaseDraft draft, IProgress<string>? progress = null, CancellationToken ct = default)
@@ -79,7 +79,11 @@ public class CoreDocumentGenerator
 
         var result = new CoreDocumentGenerationResult();
         var preset = draft.Preset;
-        var todo = doc.Sections.Where(s => s.Status is SectionStatus.Pending or SectionStatus.Failed).ToList();
+        // Hand-written text is never overwritten by a resume or retry (CR-02); only Regenerate Section/All replace it
+        var todo = doc.Sections
+            .Where(s => s.Status is SectionStatus.Pending or SectionStatus.Failed)
+            .Where(s => !(s.IsUserEdited && s.Paragraphs.Count > 0))
+            .ToList();
         if (todo.Count == 0)
             return result;
 

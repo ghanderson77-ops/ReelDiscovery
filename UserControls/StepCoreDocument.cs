@@ -340,7 +340,8 @@ public class StepCoreDocument : UserControl, IWizardStep
         _lstSections.SelectedIndexChanged += LstSections_SelectedIndexChanged;
         _tabs.SelectedIndexChanged += (s, e) => RefreshPreview();
         _btnRegenerateAll.Click += BtnRegenerateAll_Click;
-        _btnGenerate.Click += async (s, e) => await RunGenerationAsync(fullRegenerate: true);
+        // An existing outline is resumed, never silently replaced (CR-02, WR-09); Regenerate All asks first
+        _btnGenerate.Click += async (s, e) => await RunGenerationAsync(fullRegenerate: _state?.Case.CoreDocument == null);
         _btnCancel.Click += BtnCancel_Click;
         _txtEditor.TextChanged += (s, e) => _btnApply.Enabled = !_isGenerating && _txtEditor.Text != _editorOriginalText;
         _txtEditor.Leave += (s, e) => ApplyPendingEdit();
@@ -424,6 +425,13 @@ public class StepCoreDocument : UserControl, IWizardStep
         return ($"Document ready with {errors} errors and {warnings} warnings. Review the Issues list.", Color.DarkOrange);
     }
 
+    /// <summary>
+    /// Empty state: no document, or nothing written yet and no text anywhere (never while a run is filling the list).
+    /// Hand-written text in a Pending section keeps the editor visible (CR-02).
+    /// </summary>
+    public static bool ShowsEmptyState(CoreDocument? doc, bool isGenerating) =>
+        !isGenerating && (doc == null || doc.Sections.All(s => s.Status == SectionStatus.Pending && s.Paragraphs.Count == 0));
+
     public static string IssuesCaption(IReadOnlyCollection<CoreDocumentIssue> issues) =>
         $"Issues ({CoreDocumentValidator.CountErrors(issues)} errors, {CoreDocumentValidator.CountWarnings(issues)} warnings)";
 
@@ -492,8 +500,7 @@ public class StepCoreDocument : UserControl, IWizardStep
 
         RefreshPreview();
 
-        // Empty state: no document, or nothing written yet (never while a run is filling the list)
-        _emptyPanel.Visible = !_isGenerating && (doc == null || doc.Sections.All(s => s.Status == SectionStatus.Pending));
+        _emptyPanel.Visible = ShowsEmptyState(doc, _isGenerating);
         _split.Visible = !_emptyPanel.Visible;
         if (_emptyPanel.Visible)
             CenterEmptyContent();
@@ -682,10 +689,11 @@ public class StepCoreDocument : UserControl, IWizardStep
                 RefreshAll();
             });
 
-            _lblStatus.Text = "Writing the outline...";
+            var writeOutline = fullRegenerate || _state.Case.CoreDocument == null;
+            _lblStatus.Text = writeOutline ? "Writing the outline..." : "Writing the remaining sections...";
             _lblStatus.ForeColor = Accent;
 
-            var result = fullRegenerate || _state.Case.CoreDocument == null
+            var result = writeOutline
                 ? await generator.GenerateAsync(_state.Case, progress, _cts.Token)
                 : await generator.GenerateSectionsAsync(_state.Case, progress, _cts.Token);
 

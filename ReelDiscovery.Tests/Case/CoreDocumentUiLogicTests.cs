@@ -107,6 +107,35 @@ public class CoreDocumentUiLogicTests
     }
 
     [Fact]
+    public void ShowsEmptyState_NoDocumentOrNothingWritten()
+    {
+        Assert.True(StepCoreDocument.ShowsEmptyState(null, isGenerating: false));
+        Assert.False(StepCoreDocument.ShowsEmptyState(null, isGenerating: true));
+
+        var doc = CaseTestData.SampleComplaintDraft().CoreDocument!;
+        foreach (var section in doc.Sections)
+        {
+            section.Status = SectionStatus.Pending;
+            section.Paragraphs = new List<string>();
+        }
+        Assert.True(StepCoreDocument.ShowsEmptyState(doc, isGenerating: false));
+    }
+
+    [Fact]
+    public void ShowsEmptyState_HandWrittenPendingText_KeepsEditorVisible()
+    {
+        var doc = CaseTestData.SampleComplaintDraft().CoreDocument!;
+        foreach (var section in doc.Sections)
+        {
+            section.Status = SectionStatus.Pending;
+            section.Paragraphs = new List<string>();
+        }
+        doc.Sections[0].Paragraphs = new List<string> { "Typed by hand." };
+
+        Assert.False(StepCoreDocument.ShowsEmptyState(doc, isGenerating: false));
+    }
+
+    [Fact]
     public void IssuesCaption_CountsBySeverity()
     {
         Assert.Equal("Issues (1 errors, 2 warnings)", StepCoreDocument.IssuesCaption(new[] { Error(), Warning(), Warning() }));

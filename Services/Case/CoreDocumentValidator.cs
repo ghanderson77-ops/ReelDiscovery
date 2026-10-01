@@ -340,15 +340,51 @@ public static partial class CoreDocumentValidator
                 issues.Add(Warning(IssueCategory.Structure, section.Id, "Refers to paragraph numbers, which change when sections are edited."));
         }
 
-        // Names outside the sections (caption, title, signature block)
-        var outlineText = string.Join("\n", doc.Parties.SelectMany(p => new[] { p.Name, p.ShortName })
-            .Append(doc.Title)
-            .Append(doc.Counsel?.FirmName)
-            .Append(doc.Counsel?.AttorneyName)
-            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        // Everything rendered outside the sections: caption, title, court, memo header, signature block (WR-02)
+        var outlineText = string.Join("\n", OutlineFields(doc).Where(s => !string.IsNullOrWhiteSpace(s)));
         AddLeaks(issues, OutlineSectionId, NameSubstitution.FindLeaks(outlineText, subs));
 
+        // Free-text outline lines that could carry a case citation
+        var citationText = string.Join("\n", new[] { doc.Title, doc.Memo?.Re }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        foreach (var finding in CitationScanner.Scan(citationText, ownPartyNames))
+        {
+            if (finding.Severity == CitationSeverity.Error)
+                issues.Add(Error(IssueCategory.Citation, OutlineSectionId, $"Case citation: \"{finding.Text}\""));
+            else
+                issues.Add(Warning(IssueCategory.Citation, OutlineSectionId, $"Possible case name or citation phrase: \"{finding.Text}\""));
+        }
+
         return issues;
+    }
+
+    private static IEnumerable<string?> OutlineFields(CoreDocument doc)
+    {
+        foreach (var party in doc.Parties)
+        {
+            yield return party.Name;
+            yield return party.ShortName;
+        }
+
+        yield return doc.Title;
+
+        var jurisdiction = doc.Jurisdiction;
+        yield return jurisdiction?.CourtName;
+        yield return jurisdiction?.District;
+        yield return jurisdiction?.VenueCity;
+
+        var counsel = doc.Counsel;
+        yield return counsel?.AttorneyName;
+        yield return counsel?.FirmName;
+        yield return counsel?.BarNumber;
+        yield return counsel?.Address;
+        yield return counsel?.Email;
+
+        var memo = doc.Memo;
+        yield return memo?.To;
+        yield return memo?.From;
+        yield return memo?.Cc;
+        yield return memo?.Re;
+        yield return memo?.Organization;
     }
 
     private static void AddLeaks(List<CoreDocumentIssue> issues, string sectionId, List<string> leaks)

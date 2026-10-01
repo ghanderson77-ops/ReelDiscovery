@@ -175,6 +175,57 @@ public class CoreDocumentValidatorTests
     }
 
     [Fact]
+    public void RealName_InMemoHeader_IsReported()
+    {
+        var draft = CaseTestData.SampleMemoDraft();
+        draft.Substitutions = new List<EntitySubstitution>
+        {
+            new() { Original = "Walter White", Substitute = "Hank Brennan", Kind = EntityKind.Person, Apply = true }
+        };
+        draft.CoreDocument!.Memo.From = "Walter White, Special Agent";
+
+        var issue = Assert.Single(Errors(CoreDocumentValidator.Validate(draft)));
+
+        Assert.Equal("outline", issue.SectionId);
+        Assert.Equal(IssueCategory.RealName, issue.Category);
+    }
+
+    [Theory]
+    [InlineData("court")]
+    [InlineData("district")]
+    [InlineData("address")]
+    [InlineData("organization")]
+    public void RealName_InOtherRenderedOutlineFields_IsReported(string field)
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        var doc = draft.CoreDocument!;
+        const string leak = "Acme Windows";
+        switch (field)
+        {
+            case "court": doc.Jurisdiction.CourtName += " (" + leak + ")"; break;
+            case "district": doc.Jurisdiction.District = leak + " District"; break;
+            case "address": doc.Counsel.Address = "1 " + leak + " Plaza, Chicago, Illinois"; break;
+            case "organization": doc.Memo.Organization = leak + " Compliance"; break;
+        }
+
+        var issues = CoreDocumentValidator.Validate(draft);
+
+        Assert.Contains(issues, i => i.SectionId == "outline" && i.Category == IssueCategory.RealName && i.Severity == IssueSeverity.Error);
+    }
+
+    [Fact]
+    public void ReporterCitation_InMemoRe_IsCitationError()
+    {
+        var draft = CaseTestData.SampleMemoDraft();
+        draft.CoreDocument!.Memo.Re = "Exposure under 531 U.S. 98";
+
+        var issue = Assert.Single(Errors(CoreDocumentValidator.Validate(draft)));
+
+        Assert.Equal("outline", issue.SectionId);
+        Assert.Equal(IssueCategory.Citation, issue.Category);
+    }
+
+    [Fact]
     public void FederalPleading_StateCourtName_IsError()
     {
         var draft = CaseTestData.SampleComplaintDraft();

@@ -8,7 +8,8 @@ namespace ReelDiscovery.Services.Case;
 
 /// <summary>
 /// Builds the case guide through the Story tier (D-03): issues extracted in code and enriched by one call (GUIDE-01),
-/// then the cast (GUIDE-02..04). Code owns every id, email address, phone and signature.
+/// then the cast (GUIDE-02..04), the dated key facts (GUIDE-05) and the canonical values (GUIDE-06).
+/// Code owns every id, link check, email address, phone and signature.
 /// </summary>
 public class CaseGuideGenerator
 {
@@ -29,13 +30,100 @@ public class CaseGuideGenerator
     /// </summary>
     internal static IReadOnlyList<Type> SchemaTypes { get; } = new[]
     {
-        typeof(IssueDetailsDto), typeof(CastRosterDto), typeof(CastDetailsDto), typeof(BackgroundStaffDto), typeof(FactBatchDto)
+        typeof(IssueDetailsDto), typeof(CastRosterDto), typeof(CastDetailsDto), typeof(BackgroundStaffDto), typeof(FactBatchDto), typeof(ValuesDto)
     };
 
     public CaseGuideGenerator(ILlmGateway llm)
     {
         _llm = llm;
     }
+
+    // ---------- Whole guide ----------
+
+    /// <summary>
+    /// Runs issues -> cast -> facts -> values (D-06): finished parts are skipped, the run stops at the first failed part or on a
+    /// fatal error, and <paramref name="partCompleted"/> is awaited after each part so the caller can autosave.
+    /// A user cancel propagates after the callback ran for any partial results.
+    /// </summary>
+    public async Task<CaseGuideGenerationResult> GenerateAsync(CaseDraft draft, IProgress<GuideProgress>? progress = null,
+        Func<GuidePart, Task>? partCompleted = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        var guide = draft.Guide ??= new CaseGuide();
+        var result = new CaseGuideGenerationResult();
+
+        try
+        {
+            foreach (var part in GuideStaleness.Order)
+            {
+                // Finished parts are skipped; Issues counts as finished even when its details failed
+                if (guide.State(part).Status == GuidePartStatus.Ready)
+                    continue;
+
+                // Every earlier part must be finished first
+                if (GuideStaleness.Order.TakeWhile(p => p != part).Any(p => guide.State(p).Status != GuidePartStatus.Ready))
+                    break;
+
+                var revision = draft.Revision;
+                var finished = false;
+                GuidePartResult partResult;
+                try
+                {
+                    partResult = await RunPartAsync(draft, part, progress, ct);
+                    finished = true;
+                }
+                finally
+                {
+                    // Autosave hook: after a finished or failed part, and after a cancelled part that kept partial results
+                    if (partCompleted != null && (finished || draft.Revision != revision))
+                        await partCompleted(part);
+                }
+
+                result.Notes.AddRange(partResult.Notes);
+                if (partResult.Succeeded)
+                {
+                    result.PartsWritten.Add(part);
+                    if (part == GuidePart.Issues && guide.IssueDetailsState.Status == GuidePartStatus.Failed)
+                        result.Notes.Add(guide.IssueDetailsState.FailureMessage);
+                }
+
+                if (partResult.IsFatal)
+                {
+                    result.FatalError = partResult.FatalError;
+                    break;
+                }
+
+                if (partResult.Succeeded)
+                    continue;
+
+                result.PartsFailed.Add(part);
+                result.FailureMessage = partResult.FailureMessage;
+                if (partResult.WasRefused)
+                {
+                    result.RefusedPart = part;
+                    result.RefusalMessage = partResult.FailureMessage;
+                }
+
+                break;
+            }
+        }
+        finally
+        {
+            if (result.PartsWritten.Count > 0)
+                draft.Revision++;
+        }
+
+        return result;
+    }
+
+    private Task<GuidePartResult> RunPartAsync(CaseDraft draft, GuidePart part, IProgress<GuideProgress>? progress, CancellationToken ct) => part switch
+    {
+        GuidePart.Issues => GenerateIssuesAsync(draft, progress, ct),
+        GuidePart.Cast => GenerateCastAsync(draft, progress, ct),
+        GuidePart.Facts => GenerateFactsAsync(draft, progress, ct),
+        GuidePart.Values => GenerateValuesAsync(draft, progress, ct),
+        _ => throw new ArgumentOutOfRangeException(nameof(part), part, "Unknown guide part")
+    };
 
     // ---------- Issues ----------
 
@@ -1227,6 +1315,184 @@ public class CaseGuideGenerator
         return ids;
     }
 
+    // ---------- Canonical values ----------
+
+    /// <summary>
+    /// One call for the canonical values registry, seeded with every amount and identifier the scanner finds in the
+    /// core document and the facts (GUIDE-06). Code assigns V-ids, checks fact links and merges duplicates. Cancellation propagates.
+    /// </summary>
+    public async Task<GuidePartResult> GenerateValuesAsync(CaseDraft draft, IProgress<GuideProgress>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        if (draft.CoreDocument == null)
+            throw new InvalidOperationException("Write the core document before building the case guide.");
+        var guide = draft.Guide ??= new CaseGuide();
+        var state = guide.ValuesState;
+        var result = new GuidePartResult { Part = GuidePart.Values };
+
+        if (guide.Facts.Count == 0)
+        {
+            result.FailureMessage = "Write the key facts before the canonical values.";
+            return result;
+        }
+
+        var scanned = ScanValues(draft);
+        state.Status = GuidePartStatus.Generating;
+        progress?.Report(new GuideProgress { Part = GuidePart.Values, Message = "Writing the canonical values..." });
+
+        try
+        {
+            var dto = (await _llm.GenerateAsync<ValuesDto>(new LlmRequest
+            {
+                Tier = LlmTier.Story,
+                OperationName = "Case Guide - Canonical values",
+                SystemPrompt = CaseGuidePrompts.SystemPrompt,
+                UserPrompt = CaseGuidePrompts.BuildValuesPrompt(draft, scanned, Array.Empty<CanonicalValue>()),
+                MaxOutputTokens = ValuesMaxOutputTokens
+            }, ct)).GetValueOrThrow();
+
+            if (MapValues(guide, dto))
+                draft.Revision++;
+
+            SetReady(state);
+            GuideStaleness.Stamp(draft, GuidePart.Values);
+            result.Succeeded = true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // User cancel: nothing written
+            state.Status = GuidePartStatus.Pending;
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // Not cancelled by the user: the request timed out
+            SetFailed(state, "The request timed out. Click Retry Canonical Values.");
+        }
+        catch (LlmCallException ex) when (ex.Result.IsFatal)
+        {
+            // Bad key or exhausted spend limit: stop the run
+            state.Status = GuidePartStatus.Pending;
+            result.FatalError = ex.Result.Message ?? ex.Message;
+        }
+        catch (LlmCallException ex)
+        {
+            result.WasRefused = ex.Result.Outcome == LlmOutcome.Refused;
+            SetFailed(state, DescribeOutcome(ex.Result, "Canonical Values"));
+        }
+        catch (Exception ex)
+        {
+            SetFailed(state, ex.Message);
+        }
+
+        if (state.Status == GuidePartStatus.Failed)
+            result.FailureMessage = state.FailureMessage;
+        return result;
+    }
+
+    // Amounts and identifiers in the core document, then in the facts; distinct by text in order of appearance
+    private static List<ScannedValue> ScanValues(CaseDraft draft)
+    {
+        var texts = draft.CoreDocument!.Sections
+            .Where(s => s != null)
+            .SelectMany(s => s.Paragraphs ?? new List<string>())
+            .Concat(draft.Guide!.Facts.Where(f => f != null).Select(f => f.Description));
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var hits = new List<ScannedValue>();
+        foreach (var text in texts)
+        {
+            foreach (var hit in CanonicalValueScanner.Scan(text))
+            {
+                if (seen.Add(hit.Text))
+                    hits.Add(hit);
+            }
+        }
+
+        return hits;
+    }
+
+    // Model output -> values; fact links are normalized and existence-checked, duplicates (same label and value) merged (T-03-34)
+    private static bool MapValues(CaseGuide guide, ValuesDto dto)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        var changed = false;
+
+        foreach (var item in dto.Values ?? new List<ValueDto>())
+        {
+            var text = Clean(item?.Value);
+            if (item == null || text.Length == 0)
+                continue;
+
+            var label = Clean(item.Label);
+            if (label.Length == 0)
+                label = text;
+
+            var notes = new List<string>();
+            var factIds = new List<string>();
+            foreach (var raw in item.FactIds ?? new List<string>())
+            {
+                var id = IdAllocator.Normalize(raw, IdAllocator.Fact);
+                if (id != null && guide.FindFact(id) != null)
+                {
+                    if (!factIds.Contains(id))
+                        factIds.Add(id);
+                }
+                else if (Clean(raw).Length > 0)
+                {
+                    notes.Add($"Dropped unknown fact {Clean(raw)}.");
+                }
+            }
+
+            // existingId is honoured only for an existing, not hand-edited value not already used in this response
+            var existingId = IdAllocator.Normalize(item.ExistingId, IdAllocator.Value);
+            var target = existingId != null && !used.Contains(existingId) ? guide.FindValue(existingId) : null;
+            if (target != null && !target.IsUserEdited)
+            {
+                target.Kind = item.Kind;
+                target.Label = label;
+                target.Value = text;
+                target.Description = Clean(item.Description);
+                target.FactIds = factIds;
+                target.MappingNotes = notes;
+                used.Add(target.Id);
+                changed = true;
+                continue;
+            }
+
+            var duplicate = guide.Values.FirstOrDefault(v => v != null
+                && string.Equals(v.Label, label, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(v.Value, text, StringComparison.OrdinalIgnoreCase));
+            if (duplicate != null)
+            {
+                // Hand-edited values are never changed by the model
+                if (duplicate.IsUserEdited)
+                    continue;
+
+                duplicate.FactIds = duplicate.FactIds.Union(factIds).ToList();
+                duplicate.MappingNotes = duplicate.MappingNotes.Union(notes).ToList();
+                changed = true;
+                continue;
+            }
+
+            var value = new CanonicalValue
+            {
+                Id = IdAllocator.Next(guide, IdAllocator.Value),
+                Kind = item.Kind,
+                Label = label,
+                Value = text,
+                Description = Clean(item.Description),
+                FactIds = factIds,
+                MappingNotes = notes
+            };
+            guide.Values.Add(value);
+            used.Add(value.Id);
+            changed = true;
+        }
+
+        return changed;
+    }
+
     private sealed class FactUnit
     {
         public FactUnit(string key, FactSubsectionPlan plan, string from, string to, int target)
@@ -1479,6 +1745,40 @@ public class CaseGuideGenerator
         [Description("Hot, Key or Supporting")]
         public FactSignificance Significance { get; set; }
     }
+
+    internal class ValuesDto
+    {
+        [JsonPropertyName("values")]
+        [Description("Every amount, number and name the facts rely on")]
+        public List<ValueDto> Values { get; set; } = new();
+    }
+
+    internal class ValueDto
+    {
+        [JsonPropertyName("existingId")]
+        [Description("ID of the existing value this revises, e.g. V-004; empty string for a new value")]
+        public string ExistingId { get; set; } = string.Empty;
+
+        [JsonPropertyName("kind")]
+        [Description("Amount, InvoiceNumber, ChangeOrderNumber, ContractNumber, PurchaseOrder, DocumentTitle, ProjectName, AccountNumber, Address or Other")]
+        public ValueKind Kind { get; set; }
+
+        [JsonPropertyName("label")]
+        [Description("Short label, e.g. Change Order 7 amount")]
+        public string Label { get; set; } = string.Empty;
+
+        [JsonPropertyName("value")]
+        [Description("Exact text a document or email would use, e.g. $184,250.00")]
+        public string Value { get; set; } = string.Empty;
+
+        [JsonPropertyName("description")]
+        [Description("One sentence on what the value is")]
+        public string Description { get; set; } = string.Empty;
+
+        [JsonPropertyName("factIds")]
+        [Description("Fact IDs that use this value, e.g. F-003")]
+        public List<string> FactIds { get; set; } = new();
+    }
 }
 
 public class GuideProgress
@@ -1509,5 +1809,30 @@ public class GuidePartResult
     /// <summary>
     /// Mapping notes (ignored ids, dropped people, defaulted dates).
     /// </summary>
+    public List<string> Notes { get; set; } = new();
+}
+
+/// <summary>
+/// Outcome of a whole-guide run (GenerateAsync): parts written and failed, a fatal stop or a refusal, and mapping notes.
+/// </summary>
+public class CaseGuideGenerationResult
+{
+    public List<GuidePart> PartsWritten { get; set; } = new();
+    public List<GuidePart> PartsFailed { get; set; } = new();
+
+    /// <summary>
+    /// Non-empty when a bad key or exhausted spend limit stopped the run.
+    /// </summary>
+    public string FatalError { get; set; } = string.Empty;
+
+    public bool IsFatal => FatalError.Length > 0;
+
+    /// <summary>
+    /// The part the model declined to write, when the run stopped on a refusal.
+    /// </summary>
+    public GuidePart? RefusedPart { get; set; }
+
+    public string RefusalMessage { get; set; } = string.Empty;
+    public string FailureMessage { get; set; } = string.Empty;
     public List<string> Notes { get; set; } = new();
 }

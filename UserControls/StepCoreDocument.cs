@@ -62,6 +62,10 @@ public class StepCoreDocument : UserControl, IWizardStep
     private string _declinedStaleHash = string.Empty;
 
     public string StepTitle => "Review Core Document";
+
+    /// <summary>True while a document or section run is writing (the shell asks before closing, C12).</summary>
+    public bool IsGenerating => _isGenerating;
+
     public bool CanMoveNext => !_isGenerating && _state?.Case.CoreDocument != null;
     public bool CanMoveBack => !_isGenerating;
 

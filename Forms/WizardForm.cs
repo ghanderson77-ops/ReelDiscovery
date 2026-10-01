@@ -2,6 +2,7 @@ using System.Reflection;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Services.Case;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Forms;
@@ -32,6 +33,35 @@ public partial class WizardForm : Form
         LoadSteps();
         InitializeCostTracker();
         LoadIcon();
+    }
+
+    // Case Guide needs room for its grid beside the detail card (03-16): open at about 1100x750 logical
+    private static readonly Size PreferredClientSize = new(1100, 750);
+    private static readonly Size MinimumClientSize = new(1000, 700);
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        ApplyWindowSize();
+    }
+
+    /// <summary>
+    /// Sizes the window from logical units at the current DPI, clamped to the screen's working area.
+    /// </summary>
+    private void ApplyWindowSize()
+    {
+        var area = Screen.FromControl(this).WorkingArea;
+        var chrome = Size - ClientSize;
+        Size Clamp(Size logicalClient) => new(
+            Math.Min(area.Width, LogicalToDeviceUnits(logicalClient.Width) + chrome.Width),
+            Math.Min(area.Height, LogicalToDeviceUnits(logicalClient.Height) + chrome.Height));
+
+        MinimumSize = Clamp(MinimumClientSize);
+        Size = Clamp(PreferredClientSize);
+        if (StartPosition == FormStartPosition.CenterScreen)
+        {
+            Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
+        }
     }
 
     private void LoadIcon()
@@ -220,12 +250,38 @@ public partial class WizardForm : Form
     /// </summary>
     internal static IReadOnlyList<Type> StepTypesFor(WizardFlow flow) =>
         flow == WizardFlow.CaseDriven
-            ? new[] { typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument) }
+            ? new[]
+            {
+                typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide), typeof(StepCaseSummary)
+            }
             : new[]
             {
                 typeof(StepApiConfiguration), typeof(StepTopicInput), typeof(StepStorylines), typeof(StepCharacters),
                 typeof(StepGenerationConfig), typeof(StepGeneration), typeof(StepComplete)
             };
+
+    /// <summary>
+    /// The step that shows a case at the given stage. Unknown values (a hand-edited case.json) open the scenario (T-03-60).
+    /// </summary>
+    internal static Type StepTypeForStage(CaseStage stage) => stage switch
+    {
+        CaseStage.CoreDocument => typeof(StepCoreDocument),
+        CaseStage.CaseGuide => typeof(StepCaseGuide),
+        CaseStage.Summary => typeof(StepCaseSummary),
+        _ => typeof(StepCaseScenario)
+    };
+
+    /// <summary>
+    /// Opens the step for a case stage (D-11). Does nothing when that step is not in the current flow.
+    /// </summary>
+    public void NavigateToStage(CaseStage stage)
+    {
+        // Map by step type, never by index: Phase 4 inserts steps before the summary
+        var type = StepTypeForStage(stage);
+        var index = _steps.FindIndex(s => s.GetType() == type);
+        if (index > 0)
+            ShowStep(index);
+    }
 
     private void LoadSteps()
     {
@@ -362,9 +418,8 @@ public partial class WizardForm : Form
 
     private void BtnCancel_Click(object? sender, EventArgs e)
     {
-        // Unsaved case work: OnFormClosing shows the specific discard prompt, so skip the generic one
-        FlushCurrentCaseStep();
-        if (HasUnsavedCase(_state.Flow, _state.Case))
+        // Case flow: OnFormClosing saves and asks only when something would be lost (D-10)
+        if (_state.Flow == WizardFlow.CaseDriven)
         {
             this.Close();
             return;
@@ -392,44 +447,123 @@ public partial class WizardForm : Form
         _btnCancel.Enabled = enabled;
     }
 
-    internal const string DiscardCaseMessage =
-        "This version does not save the case yet. Closing will discard the scenario and document. Close anyway?";
+    internal enum CloseDecision
+    {
+        CloseNow,
+        AskUnsavedScenario,
+        AskFailedSave,
+        AskDuringRun
+    }
 
     /// <summary>
-    /// True when closing would discard case-flow work (a typed scenario or a generated document) (WR-08).
+    /// What closing the window should do after the current step was flushed and the case saved (D-10, C10-C12).
+    /// A running generation asks first; a typed scenario with no core document yet asks (it has no folder);
+    /// a failed save asks; everything else closes without a prompt.
     /// </summary>
-    internal static bool HasUnsavedCase(WizardFlow flow, CaseDraft draft) =>
-        flow == WizardFlow.CaseDriven && draft != null
-        && (draft.CoreDocument != null || !string.IsNullOrWhiteSpace(draft.Scenario));
-
-    // Copies unsubmitted input (scenario text, a pending section edit) into the draft before the discard check
-    private void FlushCurrentCaseStep()
+    internal static CloseDecision DecideClose(WizardFlow flow, CaseDraft draft, bool runActive, bool saveSucceeded)
     {
-        if (_state.Flow != WizardFlow.CaseDriven || _currentStepIndex < 0 || _currentStepIndex >= _steps.Count)
-            return;
+        if (flow != WizardFlow.CaseDriven || draft == null)
+            return CloseDecision.CloseNow;
+        if (runActive)
+            return CloseDecision.AskDuringRun;
 
-        // Both case steps complete OnLeaveStepAsync synchronously
-        if (_steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument) and IWizardStep step)
+        if (draft.CoreDocument == null && string.IsNullOrEmpty(draft.FolderPath))
+            return string.IsNullOrWhiteSpace(draft.Scenario) ? CloseDecision.CloseNow : CloseDecision.AskUnsavedScenario;
+
+        return saveSucceeded ? CloseDecision.CloseNow : CloseDecision.AskFailedSave;
+    }
+
+    /// <summary>
+    /// Copies unsubmitted input (scenario text, a pending edit) into the draft, then saves case.json synchronously.
+    /// Returns false only when a save was attempted and failed.
+    /// </summary>
+    private bool FlushCurrentCaseStep()
+    {
+        if (_state.Flow != WizardFlow.CaseDriven)
+            return true;
+
+        // Every case step commits its pending edits synchronously before its first await
+        if (_currentStepIndex >= 0 && _currentStepIndex < _steps.Count
+            && _steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument or StepCaseGuide or StepCaseSummary) and IWizardStep step)
+        {
             _ = step.OnLeaveStepAsync();
+        }
+
+        if (!CaseStore.CanSave(_state.Case))
+            return true;
+
+        return _state.CaseStore.SaveNow(_state.Case);
+    }
+
+    private bool IsRunActive()
+    {
+        if (_currentStepIndex < 0 || _currentStepIndex >= _steps.Count)
+            return false;
+
+        return _steps[_currentStepIndex] is StepCoreDocument { IsGenerating: true } or StepCaseGuide { IsGenerating: true };
+    }
+
+    // Disposing the running step cancels its token, so no further calls are billed (WR-07, T-03-61)
+    private void StopActiveRun()
+    {
+        if (_currentStepIndex >= 0 && _currentStepIndex < _steps.Count)
+            _steps[_currentStepIndex].Dispose();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        // Every close path (Finish, Cancel, window X) asks before discarding the case (WR-08)
-        if (e.CloseReason == CloseReason.UserClosing && !_closeConfirmed)
+        // Closing never discards a saved case: flush and save, and ask only when work would be lost (D-10, T-03-59)
+        if (!_closeConfirmed && _state.Flow == WizardFlow.CaseDriven)
         {
-            FlushCurrentCaseStep();
-            if (HasUnsavedCase(_state.Flow, _state.Case))
+            var runActive = IsRunActive();
+            var saveOk = FlushCurrentCaseStep();
+            var decision = DecideClose(_state.Flow, _state.Case, runActive, saveOk);
+
+            if (e.CloseReason == CloseReason.UserClosing)
             {
-                if (MessageBox.Show(DiscardCaseMessage, "Close Case", MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                if (decision == CloseDecision.AskDuringRun)
                 {
-                    e.Cancel = true;
-                    base.OnFormClosing(e);
-                    return;
+                    var (runTitle, runText) = CaseGuideUiText.C12CloseDuringRun();
+                    if (MessageBox.Show(this, runText, runTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                            MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    {
+                        e.Cancel = true;
+                        base.OnFormClosing(e);
+                        return;
+                    }
+
+                    StopActiveRun();
+                    saveOk = !CaseStore.CanSave(_state.Case) || _state.CaseStore.SaveNow(_state.Case);
+                    decision = DecideClose(_state.Flow, _state.Case, runActive: false, saveOk);
                 }
-                _closeConfirmed = true;
+
+                if (decision == CloseDecision.AskUnsavedScenario)
+                {
+                    // C11 ("Close Case"): a typed scenario has no folder until its core document exists (D-09)
+                    var (title, text) = CaseGuideUiText.C11CloseUnsavedScenario();
+                    if (MessageBox.Show(this, text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                            MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    {
+                        e.Cancel = true;
+                        base.OnFormClosing(e);
+                        return;
+                    }
+                }
+                else if (decision == CloseDecision.AskFailedSave)
+                {
+                    var lastSaved = _state.CaseStore.LastSavedUtc?.ToLocalTime();
+                    var (title, text) = CaseGuideUiText.C10CloseAfterFailedSave(_state.CaseStore.LastSaveError, lastSaved);
+                    if (MessageBox.Show(this, text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                            MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    {
+                        e.Cancel = true;
+                        base.OnFormClosing(e);
+                        return;
+                    }
+                }
             }
+
+            _closeConfirmed = true;
         }
 
         _costUpdateTimer?.Stop();

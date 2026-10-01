@@ -86,6 +86,8 @@ public class WizardFlowTests
         Assert.True(closing >= 0, "OnFormClosing not found");
         var closingBody = source[closing..];
         Assert.Contains("\"Close Case\"", closingBody);
+        Assert.Contains("C11CloseUnsavedScenario", closingBody);
+        Assert.Equal("Close Case", CaseGuideUiText.C11CloseUnsavedScenario().Title);
         Assert.Contains("e.Cancel = true", closingBody);
         Assert.Contains("CaseStore.SaveNow", source);
     }

@@ -867,6 +867,18 @@ public abstract class GuideTabPanel : UserControl
         return (left, right);
     }
 
+    /// <summary>
+    /// A text field and a drop-down list side by side (50/50, 8 apart), e.g. Date + Significance.
+    /// </summary>
+    protected (CardPanel Left, ComboBox Right) AddPairedTextAndCombo(string captionLeft, TextBox left,
+        string captionRight, IEnumerable<string> itemsRight)
+    {
+        var leftHost = TextFieldHost.Create(this, left);
+        var right = CreateCombo(itemsRight);
+        AddPair(captionLeft, leftHost, left, captionRight, HostCombo(right), right);
+        return (leftHost, right);
+    }
+
     private void AddPair(string captionLeft, Control leftHost, Control left, string captionRight, Control rightHost, Control right)
     {
         var halfGap = LogicalToDeviceUnits(Theme.SmallGap) / 2;

@@ -849,6 +849,26 @@ public abstract class GuideTabPanel : UserControl
     /// </summary>
     protected (CardPanel Left, CardPanel Right) AddPairedTextFields(string captionLeft, TextBox left, string captionRight, TextBox right)
     {
+        var leftHost = TextFieldHost.Create(this, left);
+        var rightHost = TextFieldHost.Create(this, right);
+        AddPair(captionLeft, leftHost, left, captionRight, rightHost, right);
+        return (leftHost, rightHost);
+    }
+
+    /// <summary>
+    /// Two drop-down list fields side by side (50/50, 8 apart), e.g. Role + Tier.
+    /// </summary>
+    protected (ComboBox Left, ComboBox Right) AddPairedCombos(string captionLeft, IEnumerable<string> itemsLeft,
+        string captionRight, IEnumerable<string> itemsRight)
+    {
+        var left = CreateCombo(itemsLeft);
+        var right = CreateCombo(itemsRight);
+        AddPair(captionLeft, left, left, captionRight, right, right);
+        return (left, right);
+    }
+
+    private void AddPair(string captionLeft, Control leftHost, Control left, string captionRight, Control rightHost, Control right)
+    {
         var halfGap = LogicalToDeviceUnits(Theme.SmallGap) / 2;
         var topMargin = Fields.Controls.Count == 0 ? 0 : LogicalToDeviceUnits(12);
         var pair = new TableLayoutPanel
@@ -867,8 +887,6 @@ public abstract class GuideTabPanel : UserControl
         pair.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 1: Fields
         pair.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 2: Validation messages
 
-        var leftHost = TextFieldHost.Create(this, left);
-        var rightHost = TextFieldHost.Create(this, right);
         var column = 0;
         foreach (var (caption, host, box) in new[] { (captionLeft, leftHost, left), (captionRight, rightHost, right) })
         {
@@ -909,7 +927,6 @@ public abstract class GuideTabPanel : UserControl
                 error.MaximumSize = new Size(Math.Max(1, pair.Width / 2 - halfGap), 0);
         };
         AddRow(pair);
-        return (leftHost, rightHost);
     }
 
     /// <summary>
@@ -918,6 +935,16 @@ public abstract class GuideTabPanel : UserControl
     protected ComboBox AddCombo(string caption, IEnumerable<string> items)
     {
         AddRow(CreateCaption(caption));
+        var combo = CreateCombo(items);
+        AddRow(combo);
+        var error = CreateErrorLabel();
+        _errorLabels[combo] = error;
+        AddRow(error);
+        return combo;
+    }
+
+    private ComboBox CreateCombo(IEnumerable<string> items)
+    {
         var combo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
@@ -929,10 +956,6 @@ public abstract class GuideTabPanel : UserControl
             Margin = new Padding(0)
         };
         combo.Items.AddRange(items.Cast<object>().ToArray());
-        AddRow(combo);
-        var error = CreateErrorLabel();
-        _errorLabels[combo] = error;
-        AddRow(error);
         return combo;
     }
 

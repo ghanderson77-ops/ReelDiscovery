@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Ai;
@@ -17,6 +18,9 @@ public class CaseGuideGenerator
     public const int BackgroundMaxOutputTokens = 8_000;
     public const int MaxParallelCalls = 3;
     public const int MaxDetailsPerCall = 10;
+    public const int FactsMaxOutputTokens = 16_000;
+    public const int ValuesMaxOutputTokens = 12_000;
+    public const int MaxFactsPerCall = 30;
 
     private readonly ILlmGateway _llm;
 
@@ -25,7 +29,7 @@ public class CaseGuideGenerator
     /// </summary>
     internal static IReadOnlyList<Type> SchemaTypes { get; } = new[]
     {
-        typeof(IssueDetailsDto), typeof(CastRosterDto), typeof(CastDetailsDto), typeof(BackgroundStaffDto)
+        typeof(IssueDetailsDto), typeof(CastRosterDto), typeof(CastDetailsDto), typeof(BackgroundStaffDto), typeof(FactBatchDto)
     };
 
     public CaseGuideGenerator(ILlmGateway llm)
@@ -188,7 +192,7 @@ public class CaseGuideGenerator
 
         using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var semaphore = new SemaphoreSlim(MaxParallelCalls, MaxParallelCalls);
-        var run = new CastRun(runCts, semaphore, ct);
+        var run = new UnitRun(runCts, semaphore, ct, "Cast");
 
         try
         {
@@ -569,7 +573,7 @@ public class CaseGuideGenerator
         counsel.Email = member.Email;
     }
 
-    private async Task<bool> WriteDetailsAsync(CaseDraft draft, GuidePartResult result, CastRun run, IProgress<GuideProgress>? progress)
+    private async Task<bool> WriteDetailsAsync(CaseDraft draft, GuidePartResult result, UnitRun run, IProgress<GuideProgress>? progress)
     {
         var guide = draft.Guide!;
         var doc = draft.CoreDocument!;
@@ -666,7 +670,7 @@ public class CaseGuideGenerator
         result.Notes.Add($"{member.Id} {member.FullName}: invalid active dates; used the case timeline {start} to {end}.");
     }
 
-    private async Task<bool> WriteBackgroundAsync(CaseDraft draft, GuidePartResult result, CastRun run, IProgress<GuideProgress>? progress)
+    private async Task<bool> WriteBackgroundAsync(CaseDraft draft, GuidePartResult result, UnitRun run, IProgress<GuideProgress>? progress)
     {
         var guide = draft.Guide!;
         var doc = draft.CoreDocument!;
@@ -776,7 +780,7 @@ public class CaseGuideGenerator
             .ToList();
     }
 
-    private GuidePartResult FinishCast(CaseDraft draft, GuidePartResult result, CastRun run, string rosterError, bool rosterRefused, bool changed)
+    private GuidePartResult FinishCast(CaseDraft draft, GuidePartResult result, UnitRun run, string rosterError, bool rosterRefused, bool changed)
     {
         var guide = draft.Guide!;
         var state = guide.CastState;
@@ -839,7 +843,7 @@ public class CaseGuideGenerator
     /// One bounded call: waits for a slot, skips when a fatal error already stopped the run, and classifies the outcome.
     /// Throws only when the user cancels.
     /// </summary>
-    private async Task<UnitOutcome<T>> RunUnitAsync<T>(LlmRequest request, CastRun run, Action? onStart = null) where T : class
+    private async Task<UnitOutcome<T>> RunUnitAsync<T>(LlmRequest request, UnitRun run, Action? onStart = null) where T : class
     {
         await run.Semaphore.WaitAsync(run.UserToken);
         try
@@ -867,7 +871,7 @@ public class CaseGuideGenerator
         catch (OperationCanceledException)
         {
             // Run not cancelled: the request timed out
-            return new UnitOutcome<T> { Error = "The request timed out. Click Retry Cast." };
+            return new UnitOutcome<T> { Error = $"The request timed out. Click Retry {run.Label}." };
         }
         catch (LlmCallException ex) when (ex.Result.IsFatal)
         {
@@ -877,7 +881,7 @@ public class CaseGuideGenerator
         }
         catch (LlmCallException ex)
         {
-            return new UnitOutcome<T> { Error = DescribeOutcome(ex.Result, "Cast"), Refused = ex.Result.Outcome == LlmOutcome.Refused };
+            return new UnitOutcome<T> { Error = DescribeOutcome(ex.Result, run.Label), Refused = ex.Result.Outcome == LlmOutcome.Refused };
         }
         catch (Exception ex)
         {
@@ -896,17 +900,23 @@ public class CaseGuideGenerator
         public bool Refused { get; set; }
     }
 
-    private sealed class CastRun
+    private sealed class UnitRun
     {
         private readonly object _lock = new();
         private string _fatalError = string.Empty;
 
-        public CastRun(CancellationTokenSource cts, SemaphoreSlim semaphore, CancellationToken userToken)
+        public UnitRun(CancellationTokenSource cts, SemaphoreSlim semaphore, CancellationToken userToken, string label)
         {
             Cts = cts;
             Semaphore = semaphore;
             UserToken = userToken;
+            Label = label;
         }
+
+        /// <summary>
+        /// Part name used in failure messages ("Click Retry {Label}.").
+        /// </summary>
+        public string Label { get; }
 
         public CancellationTokenSource Cts { get; }
         public SemaphoreSlim Semaphore { get; }
@@ -933,6 +943,310 @@ public class CaseGuideGenerator
 
             Cts.Cancel();
         }
+    }
+
+    // ---------- Key facts ----------
+
+    /// <summary>
+    /// One call per core-document fact section (split by date when a section needs more than MaxFactsPerCall facts), at most
+    /// MaxParallelCalls in flight. Code checks every link and assigns F-ids in date order. Finished sections are skipped on Retry.
+    /// Cancellation propagates after the finished sections are merged.
+    /// </summary>
+    public async Task<GuidePartResult> GenerateFactsAsync(CaseDraft draft, IProgress<GuideProgress>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        if (draft.CoreDocument == null)
+            throw new InvalidOperationException("Write the core document before building the case guide.");
+        var guide = draft.Guide ??= new CaseGuide();
+        var state = guide.FactsState;
+        var result = new GuidePartResult { Part = GuidePart.Facts };
+
+        if (guide.CastState.Status != GuidePartStatus.Ready || guide.Cast.Count == 0)
+        {
+            result.FailureMessage = "Write the cast before the key facts.";
+            return result;
+        }
+
+        var all = PlanFactUnits(draft);
+        if (all.Count == 0)
+        {
+            SetFailed(state, "The core document has no fact sections.");
+            result.FailureMessage = state.FailureMessage;
+            return result;
+        }
+
+        var units = all.Where(u => !state.CompletedUnits.Contains(u.Key)).ToList();
+        state.Status = GuidePartStatus.Generating;
+
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var semaphore = new SemaphoreSlim(MaxParallelCalls, MaxParallelCalls);
+        var run = new UnitRun(runCts, semaphore, ct, "Key Facts");
+
+        // Tasks return DTOs only; prompts are built here, before any merge
+        var tasks = units.Select((unit, i) => RunUnitAsync<FactBatchDto>(new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = $"Case Guide - Facts ({unit.Plan.Heading})",
+            SystemPrompt = CaseGuidePrompts.SystemPrompt,
+            UserPrompt = CaseGuidePrompts.BuildFactsPrompt(draft, unit.Plan, unit.From, unit.To, unit.Target, Array.Empty<KeyFact>()),
+            MaxOutputTokens = FactsMaxOutputTokens
+        }, run, () => progress?.Report(new GuideProgress
+        {
+            Part = GuidePart.Facts,
+            Message = $"Writing the key facts: {unit.Plan.Heading} ({i + 1} of {units.Count})...",
+            Done = i,
+            Total = units.Count
+        }))).ToList();
+
+        var changed = false;
+        try
+        {
+            try
+            {
+                await Task.WhenAll(tasks);
+            }
+            finally
+            {
+                // Merge once on the calling thread: generator tests have no SynchronizationContext, so lambdas run on pool threads (RESEARCH Pattern 5)
+                changed = MergeFacts(guide, units, tasks);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // User cancel: finished sections are kept for Retry
+            state.Status = GuidePartStatus.Pending;
+            if (changed)
+                draft.Revision++;
+            throw;
+        }
+
+        if (changed)
+            draft.Revision++;
+
+        var outcomes = tasks.Where(t => t.IsCompletedSuccessfully).Select(t => t.Result).ToList();
+        result.WasRefused = outcomes.Any(o => o.Refused);
+
+        if (run.IsFatal)
+        {
+            // Bad key or exhausted spend limit: finished sections are kept
+            state.Status = GuidePartStatus.Pending;
+            result.FatalError = run.FatalError;
+            return result;
+        }
+
+        if (all.All(u => state.CompletedUnits.Contains(u.Key)))
+        {
+            SetReady(state);
+            state.CompletedUnits.Clear();
+            GuideStaleness.Stamp(draft, GuidePart.Facts);
+            result.Succeeded = true;
+            return result;
+        }
+
+        var errors = outcomes.Where(o => o.Value == null && o.Error.Length > 0).Select(o => o.Error).ToList();
+        var first = errors.FirstOrDefault() ?? "Some periods were not written. Click Retry Key Facts.";
+        var message = errors.Count > 1 ? $"{errors.Count} periods were not written: {first}" : first;
+        SetFailed(state, message);
+        result.FailureMessage = message;
+        return result;
+    }
+
+    /// <summary>
+    /// Fact calls for the preset's target count: the midpoint of FactsMin..FactsMax spread over the fact sections by
+    /// TargetParagraphs (largest remainder, at least 2 each); a section above MaxFactsPerCall is split into equal date ranges.
+    /// </summary>
+    internal static List<(FactSubsectionPlan Plan, string From, string To, int Target)> PlanFactCalls(CaseDraft draft) =>
+        PlanFactUnits(draft).Select(u => (u.Plan, u.From, u.To, u.Target)).ToList();
+
+    private static List<FactUnit> PlanFactUnits(CaseDraft draft)
+    {
+        var doc = draft.CoreDocument ?? throw new InvalidOperationException("Write the core document before building the case guide.");
+        var preset = draft.Preset;
+        var plans = (doc.FactPlan ?? new List<FactSubsectionPlan>()).Where(p => p != null && !string.IsNullOrEmpty(p.Id)).ToList();
+        var units = new List<FactUnit>();
+        if (plans.Count == 0)
+            return units;
+
+        var targets = Distribute((preset.FactsMin + preset.FactsMax) / 2, plans.Select(p => Math.Max(0, p.TargetParagraphs)).ToList());
+        for (var i = 0; i < plans.Count; i++)
+        {
+            var plan = plans[i];
+            var target = Math.Max(2, targets[i]);
+            if (target <= MaxFactsPerCall)
+            {
+                units.Add(new FactUnit(plan.Id, plan, plan.StartDate, plan.EndDate, target));
+                continue;
+            }
+
+            if (!CaseDraft.TryParseDate(plan.StartDate, out var start) || !CaseDraft.TryParseDate(plan.EndDate, out var end) || end < start)
+            {
+                // No usable date range to split: one call at the per-call cap
+                units.Add(new FactUnit(plan.Id, plan, plan.StartDate, plan.EndDate, MaxFactsPerCall));
+                continue;
+            }
+
+            var parts = (target + MaxFactsPerCall - 1) / MaxFactsPerCall;
+            var shares = Distribute(target, Enumerable.Repeat(1, parts).ToList());
+            var days = (end - start).Days;
+            for (var k = 0; k < parts; k++)
+            {
+                var from = k == 0 ? start : start.AddDays(days * k / parts + 1);
+                var to = k == parts - 1 ? end : start.AddDays(days * (k + 1) / parts);
+                if (from > to)
+                    from = to;
+                units.Add(new FactUnit($"{plan.Id}#{k + 1}", plan, FormatDate(from), FormatDate(to), shares[k]));
+            }
+        }
+
+        return units;
+    }
+
+    // Largest remainder: integer shares of total proportional to the weights (equal shares when every weight is 0)
+    private static List<int> Distribute(int total, List<int> weights)
+    {
+        if (weights.Sum() <= 0)
+            weights = weights.Select(_ => 1).ToList();
+
+        var sum = weights.Sum();
+        var exact = weights.Select(w => (double)total * w / sum).ToList();
+        var shares = exact.Select(e => (int)Math.Floor(e)).ToList();
+        var left = total - shares.Sum();
+        foreach (var i in Enumerable.Range(0, weights.Count).OrderByDescending(i => exact[i] - shares[i]).ThenBy(i => i).Take(left))
+            shares[i]++;
+
+        return shares;
+    }
+
+    private static string FormatDate(DateTime date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    // Maps every finished unit, allocates F-ids in date order and keeps guide.Facts sorted; true when anything changed
+    private static bool MergeFacts(CaseGuide guide, List<FactUnit> units, List<Task<UnitOutcome<FactBatchDto>>> tasks)
+    {
+        var added = new List<(KeyFact Fact, DateTime Date, int Unit, int Seq)>();
+        var completed = false;
+
+        for (var i = 0; i < tasks.Count; i++)
+        {
+            if (!tasks[i].IsCompletedSuccessfully || tasks[i].Result.Value is not { } batch)
+                continue;
+
+            var seq = 0;
+            foreach (var dto in batch.Facts ?? new List<FactDto>())
+            {
+                var fact = MapFact(guide, dto, units[i].Plan.Id);
+                if (fact != null)
+                    added.Add((fact, SortDate(fact.Date), i, seq++));
+            }
+
+            if (!guide.FactsState.CompletedUnits.Contains(units[i].Key))
+                guide.FactsState.CompletedUnits.Add(units[i].Key);
+            completed = true;
+        }
+
+        foreach (var item in added.OrderBy(a => a.Date).ThenBy(a => a.Unit).ThenBy(a => a.Seq))
+        {
+            item.Fact.Id = IdAllocator.Next(guide, IdAllocator.Fact);
+            guide.Facts.Add(item.Fact);
+        }
+
+        if (added.Count > 0)
+            guide.Facts = guide.Facts.OrderBy(f => SortDate(f.Date)).ThenBy(f => IdNumber(f.Id)).ToList();
+
+        return completed;
+    }
+
+    // Undated or malformed dates sort last
+    private static DateTime SortDate(string? date) => CaseDraft.TryParseDate(date, out var d) ? d : DateTime.MaxValue;
+
+    // Model output -> fact; unknown issue and character references are dropped with mapping notes (T-03-34)
+    private static KeyFact? MapFact(CaseGuide guide, FactDto? dto, string sectionId)
+    {
+        if (dto == null)
+            return null;
+
+        var title = Clean(dto.Title);
+        var description = Clean(dto.Description);
+        if (title.Length == 0 && description.Length == 0)
+            return null;
+
+        var fact = new KeyFact
+        {
+            Date = Clean(dto.Date),
+            Title = title,
+            Description = description,
+            Significance = dto.Significance,
+            SourceSectionId = sectionId
+        };
+
+        foreach (var raw in dto.IssueIds ?? new List<string>())
+        {
+            var id = IdAllocator.Normalize(raw, IdAllocator.Issue);
+            if (id != null && guide.FindIssue(id) != null)
+            {
+                if (!fact.IssueIds.Contains(id))
+                    fact.IssueIds.Add(id);
+            }
+            else if (Clean(raw).Length > 0)
+            {
+                fact.MappingNotes.Add($"Dropped unknown issue {Clean(raw)}.");
+            }
+        }
+
+        fact.ActorIds = ResolveCast(guide, dto.ActorIds, fact.MappingNotes);
+        // Actors always know (Phase 5 knowledge gating)
+        fact.KnownByIds = fact.ActorIds.Union(ResolveCast(guide, dto.KnownByIds, fact.MappingNotes)).ToList();
+
+        if (!CaseDraft.TryParseDate(fact.Date, out _))
+            fact.MappingNotes.Add($"The date \"{fact.Date}\" is not YYYY-MM-DD.");
+
+        fact.MappingNotes = fact.MappingNotes.Distinct(StringComparer.Ordinal).ToList();
+        return fact;
+    }
+
+    // CH id (normalized, must exist) or an exact full name
+    private static List<string> ResolveCast(CaseGuide guide, List<string>? refs, List<string> notes)
+    {
+        var ids = new List<string>();
+        foreach (var raw in refs ?? new List<string>())
+        {
+            var text = Clean(raw);
+            if (text.Length == 0)
+                continue;
+
+            var member = guide.FindCast(IdAllocator.Normalize(text, IdAllocator.Character)) ?? FindByName(guide, text);
+            if (member == null)
+            {
+                notes.Add($"Dropped unknown character {text}.");
+                continue;
+            }
+
+            if (!ids.Contains(member.Id))
+                ids.Add(member.Id);
+        }
+
+        return ids;
+    }
+
+    private sealed class FactUnit
+    {
+        public FactUnit(string key, FactSubsectionPlan plan, string from, string to, int target)
+        {
+            Key = key;
+            Plan = plan;
+            From = from;
+            To = to;
+            Target = target;
+        }
+
+        /// <summary>
+        /// CompletedUnits key: the section id, or "{id}#{k}" for one date slice of a split section.
+        /// </summary>
+        public string Key { get; }
+
+        public FactSubsectionPlan Plan { get; }
+        public string From { get; }
+        public string To { get; }
+        public int Target { get; }
     }
 
     // ---------- Shared helpers ----------
@@ -1122,6 +1436,48 @@ public class CaseGuideGenerator
         [JsonPropertyName("activeTo")]
         [Description("YYYY-MM-DD")]
         public string ActiveTo { get; set; } = string.Empty;
+    }
+
+    internal class FactBatchDto
+    {
+        [JsonPropertyName("facts")]
+        [Description("Dated facts for this period, in date order")]
+        public List<FactDto> Facts { get; set; } = new();
+    }
+
+    internal class FactDto
+    {
+        [JsonPropertyName("existingId")]
+        [Description("ID of the existing fact this revises, e.g. F-012; empty string for a new fact")]
+        public string ExistingId { get; set; } = string.Empty;
+
+        [JsonPropertyName("date")]
+        [Description("YYYY-MM-DD")]
+        public string Date { get; set; } = string.Empty;
+
+        [JsonPropertyName("title")]
+        [Description("Short headline, at most 12 words")]
+        public string Title { get; set; } = string.Empty;
+
+        [JsonPropertyName("description")]
+        [Description("One to three sentences stating what happened as established fact: who did what, who knew, amounts")]
+        public string Description { get; set; } = string.Empty;
+
+        [JsonPropertyName("issueIds")]
+        [Description("Issue IDs from the list, e.g. ISS-01")]
+        public List<string> IssueIds { get; set; } = new();
+
+        [JsonPropertyName("actorIds")]
+        [Description("Cast IDs of the people who did it, e.g. CH-003")]
+        public List<string> ActorIds { get; set; } = new();
+
+        [JsonPropertyName("knownByIds")]
+        [Description("Cast IDs of everyone else who knew about it at the time")]
+        public List<string> KnownByIds { get; set; } = new();
+
+        [JsonPropertyName("significance")]
+        [Description("Hot, Key or Supporting")]
+        public FactSignificance Significance { get; set; }
     }
 }
 

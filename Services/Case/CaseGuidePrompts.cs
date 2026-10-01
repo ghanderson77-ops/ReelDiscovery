@@ -211,6 +211,122 @@ public static class CaseGuidePrompts
     }
 
     /// <summary>
+    /// One fact section (or one date slice of it): its paragraphs, every issue, the compact cast and the target count (GUIDE-05, D-02).
+    /// <paramref name="existing"/> lists this unit's current facts for regeneration; hand-edited ones are listed as keep-exactly.
+    /// </summary>
+    internal static string BuildFactsPrompt(CaseDraft draft, FactSubsectionPlan plan, string from, string to, int target, IReadOnlyList<KeyFact> existing, string guidance = "")
+    {
+        var doc = RequireDocument(draft);
+        var guide = draft.Guide ?? new CaseGuide();
+        var sb = new StringBuilder();
+
+        AppendDocumentHeader(sb, doc);
+        AppendTimeline(sb, doc);
+        sb.AppendLine();
+
+        sb.AppendLine(doc.DocumentType == CoreDocumentType.InvestigationMemo ? "Findings:" : "Counts:");
+        foreach (var count in doc.Counts.Where(c => c != null))
+            sb.AppendLine($"{count.Number}. {count.Title}: {count.Summary}");
+        sb.AppendLine();
+
+        sb.AppendLine($"Section: {plan.Heading} ({plan.StartDate} to {plan.EndDate})");
+        if (!string.IsNullOrWhiteSpace(plan.Focus))
+            sb.AppendLine($"Focus: {plan.Focus.Trim()}");
+        var paragraphs = doc.FindSection(plan.Id)?.Paragraphs ?? new List<string>();
+        sb.AppendLine("Section text:");
+        sb.AppendLine(Cap(string.Join("\n\n", paragraphs.Where(p => !string.IsNullOrWhiteSpace(p))), IssueSourceMaxChars));
+        sb.AppendLine();
+
+        sb.AppendLine("Issues:");
+        foreach (var issue in guide.Issues.Where(i => i != null))
+            sb.AppendLine($"{issue.Id} | {issue.Title} | {(issue.Description.Length > 0 ? issue.Description : issue.Summary)}");
+        sb.AppendLine();
+
+        sb.AppendLine("Cast:");
+        foreach (var member in guide.Cast.Where(c => c != null))
+            sb.AppendLine($"{member.Id} | {member.FullName} | {member.Title} | {OrgName(guide, member.OrganizationId)} | active {member.ActiveFrom} to {member.ActiveTo}");
+
+        AppendExisting(sb, "facts", existing.Where(f => f != null).Select(f => (f.IsUserEdited, $"{f.Id} | {f.Date} | {f.Title}")));
+
+        sb.AppendLine();
+        sb.AppendLine($"Write about {target} facts dated {from} to {to}, drawn from this section and consistent with the whole document.");
+        sb.AppendLine("State each fact as what happened: who did it, who knew about it and when, and the amounts involved.");
+        sb.AppendLine("For each fact give the date (YYYY-MM-DD), a short title, a 1-3 sentence description, the issue IDs it supports, the IDs of the people who did it, the IDs of everyone else who knew about it at the time, and its significance (Hot, Key or Supporting).");
+        sb.AppendLine("Refer to issues and people only by the IDs listed above.");
+        AppendNameRules(sb, draft);
+        AppendGuidance(sb, guidance);
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The canonical values registry: every fact, plus the amounts and identifiers the scanner found (GUIDE-06).
+    /// </summary>
+    internal static string BuildValuesPrompt(CaseDraft draft, IReadOnlyList<ScannedValue> scanned, IReadOnlyList<CanonicalValue> existing, string guidance = "")
+    {
+        var doc = RequireDocument(draft);
+        var guide = draft.Guide ?? new CaseGuide();
+        var sb = new StringBuilder();
+
+        AppendDocumentHeader(sb, doc);
+        sb.AppendLine();
+
+        sb.AppendLine("Key facts:");
+        foreach (var fact in guide.Facts.Where(f => f != null))
+            sb.AppendLine($"{fact.Id} | {fact.Date} | {fact.Title} | {fact.Description}");
+        sb.AppendLine();
+
+        var factText = string.Join("\n\n", doc.Sections
+            .Where(s => s != null && s.Kind == SectionKind.FactualAllegations)
+            .Select(s => $"== {s.Heading} ==\n" + string.Join("\n\n", s.Paragraphs)));
+        if (factText.Length > 0)
+        {
+            sb.AppendLine("Fact sections of the document:");
+            sb.AppendLine(Cap(factText, IssueSourceMaxChars));
+            sb.AppendLine();
+        }
+
+        var hits = scanned.Where(s => s != null && !string.IsNullOrWhiteSpace(s.Text)).Select(s => s.Text.Trim()).ToList();
+        if (hits.Count > 0)
+            sb.AppendLine($"These amounts and identifiers appear in the document; register each one exactly as written: {string.Join(", ", hits)}");
+
+        AppendExisting(sb, "values", existing.Where(v => v != null).Select(v => (v.IsUserEdited, $"{v.Id} | {v.Label} | {v.Value}")));
+
+        sb.AppendLine();
+        sb.AppendLine("Register every amount, invoice number, change-order number, contract number, purchase order, account number, document title, project name and address the facts rely on. Use the exact text a document or email would use (for example $184,250.00). Give each a short label and link it to the fact IDs that use it.");
+        sb.AppendLine($"Kinds: {string.Join(", ", Enum.GetNames<ValueKind>())}");
+        sb.AppendLine("Refer to facts only by the IDs listed above.");
+        AppendNameRules(sb, draft);
+        AppendGuidance(sb, guidance);
+
+        return sb.ToString();
+    }
+
+    // Current entries for regeneration; hand-edited ones must come back unchanged (D-19)
+    private static void AppendExisting(StringBuilder sb, string noun, IEnumerable<(bool IsUserEdited, string Line)> entries)
+    {
+        var list = entries.ToList();
+        var editable = list.Where(e => !e.IsUserEdited).Select(e => e.Line).ToList();
+        var kept = list.Where(e => e.IsUserEdited).Select(e => e.Line).ToList();
+
+        if (editable.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"Existing {noun} (revise by existingId; return new {noun} with an empty existingId):");
+            foreach (var line in editable)
+                sb.AppendLine(line);
+        }
+
+        if (kept.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Keep exactly; do not return these:");
+            foreach (var line in kept)
+                sb.AppendLine(line);
+        }
+    }
+
+    /// <summary>
     /// Last date of the story: filing date, else memo date, else timeline end (yyyy-MM-dd; may be empty).
     /// </summary>
     internal static string StoryEnd(CoreDocument doc)

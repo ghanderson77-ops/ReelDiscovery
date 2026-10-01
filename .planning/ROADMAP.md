@@ -68,7 +68,7 @@ Plans:
 - [x] 02-02-PLAN.md — CitationScanner (no case-law citations) + NameSubstitution (single-pass fictional names, leak scan) (Wave 2)
 - [x] 02-03-PLAN.md — DocumentTypeResolver, CoreDocumentTemplates, CoreDocumentAssembler (code-owned numbering, caption, incorporation, memo header) (Wave 2)
 - [ ] 02-04-PLAN.md — CoreDocumentValidator + CoreDocumentEditing (Wave 3)
-- [ ] 02-05-PLAN.md — RealEntityDetector (Story-tier real-name pre-flight) (Wave 2)
+- [x] 02-05-PLAN.md — RealEntityDetector (Story-tier real-name pre-flight) (Wave 2)
 - [ ] 02-06-PLAN.md — CoreDocumentGenerator (outline, sections, citation retry, regenerate section) + CaseSchemaTests (Wave 3)
 - [ ] 02-07-PLAN.md — StepCaseScenario, EntityReviewDialog, LoadingOverlay EntityCheck (Wave 3)
 - [ ] 02-08-PLAN.md — StepCoreDocument (inline generation, editor, regenerate, issues, Finish gate) (Wave 4)

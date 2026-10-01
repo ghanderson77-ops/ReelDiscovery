@@ -276,4 +276,350 @@ public class CoreDocumentGeneratorTests
         Assert.Equal(LlmOutcome.Refused, ex.Result.Outcome);
         Assert.Single(fake.Requests);
     }
+
+    // ---------- Sections ----------
+
+    private static readonly string[] ComplaintOrder = { "nature-of-action", "parties", "jurisdiction", "facts-1", "facts-2", "count-1", "prayer" };
+
+    private static string Paragraphs(params string[] paragraphs) =>
+        "{ \"paragraphs\": [" + string.Join(", ", paragraphs.Select(p => "\"" + p + "\"")) + "] }";
+
+    private static (LlmGateway Gateway, FakeLlmProvider Fake) CivilGateway(params LlmProviderResponse[] sectionResponses)
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(CivilOutlineJson));
+        foreach (var response in sectionResponses)
+            fake.Responses.Enqueue(response);
+        if (sectionResponses.Length == 0)
+            fake.Responses.Enqueue(FakeLlmProvider.Ok(SectionJson));
+        return (gateway, fake);
+    }
+
+    [Fact]
+    public async Task Generate_Complaint_AllSectionsReady()
+    {
+        var (gateway, fake) = CivilGateway();
+        var draft = NewDraft();
+
+        var result = await new CoreDocumentGenerator(gateway).GenerateAsync(draft);
+
+        Assert.NotNull(draft.CoreDocument);
+        Assert.Equal(ComplaintOrder, draft.CoreDocument!.Sections.Select(s => s.Id));
+        Assert.All(draft.CoreDocument.Sections, s =>
+        {
+            Assert.Equal(SectionStatus.Ready, s.Status);
+            Assert.Equal(2, s.Paragraphs.Count);
+            Assert.Equal(string.Empty, s.FailureMessage);
+        });
+        Assert.Equal(7, result.SectionsWritten);
+        Assert.Equal(0, result.SectionsFailed);
+        Assert.False(result.IsFatal);
+        Assert.Equal(2, draft.Revision);
+        Assert.Equal(8, fake.Requests.Count);
+        Assert.All(fake.Requests.Skip(1), r =>
+        {
+            Assert.Equal(12_000, r.MaxTokens);
+            Assert.Equal("claude-story", r.ModelId);
+            CaseTestData.AssertNoJsonInstructions(r);
+        });
+    }
+
+    [Fact]
+    public async Task Generate_ReportsProgress()
+    {
+        var (gateway, _) = CivilGateway();
+        var progress = new CaseTestData.SyncProgress<string>();
+
+        await new CoreDocumentGenerator(gateway).GenerateAsync(NewDraft(), progress);
+
+        Assert.Equal("Writing the outline...", progress.Reports[0]);
+        Assert.Contains("Outline ready: 7 sections", progress.Reports);
+        Assert.Contains("Writing The Subcontract (1 of 2 fact sections)...", progress.Reports);
+        Assert.Contains("Writing Count I of I...", progress.Reports);
+        Assert.Contains("Writing PRAYER FOR RELIEF...", progress.Reports);
+    }
+
+    [Fact]
+    public async Task GenerateSections_RetryBumpsRevision()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(Paragraphs("Rewritten unpaid change order facts.")));
+        var draft = CaseTestData.SampleComplaintDraft();
+        var facts2 = draft.CoreDocument!.FindSection("facts-2")!;
+        facts2.Status = SectionStatus.Failed;
+        facts2.FailureMessage = "The response was cut off. Click Retry Section.";
+
+        var generator = new CoreDocumentGenerator(gateway);
+        var result = await generator.GenerateSectionsAsync(draft);
+
+        Assert.Single(fake.Requests);
+        Assert.Contains("Section: Unpaid Change Orders", fake.Requests[0].UserPrompt);
+        Assert.Equal(1, result.SectionsWritten);
+        Assert.Equal(SectionStatus.Ready, facts2.Status);
+        Assert.Equal(string.Empty, facts2.FailureMessage);
+        Assert.Equal(new[] { "Rewritten unpaid change order facts." }, facts2.Paragraphs);
+        Assert.Equal(2, draft.Revision);
+
+        var again = await generator.GenerateSectionsAsync(draft);
+
+        Assert.Single(fake.Requests);
+        Assert.Equal(0, again.SectionsWritten);
+        Assert.Equal(2, draft.Revision);
+    }
+
+    [Fact]
+    public async Task GenerateSections_NoDocument_Throws()
+    {
+        var (gateway, _) = CaseTestData.CreateGateway();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new CoreDocumentGenerator(gateway).GenerateSectionsAsync(NewDraft()));
+    }
+
+    [Fact]
+    public async Task Generate_SectionPromptsNameCharacterRange()
+    {
+        var (gateway, fake) = CivilGateway();
+
+        await new CoreDocumentGenerator(gateway).GenerateAsync(NewDraft());
+
+        var parties = fake.Requests.Single(r => r.UserPrompt.Contains("Section: PARTIES"));
+        Assert.Contains("about 6-10 named individuals", parties.UserPrompt);
+        var facts = fake.Requests.Where(r => r.UserPrompt.Contains("Section: The Subcontract") || r.UserPrompt.Contains("Section: Unpaid Change Orders")).ToList();
+        Assert.Equal(2, facts.Count);
+        Assert.All(facts, r => Assert.Contains("about 6-10 named individuals", r.UserPrompt));
+
+        var (memoGateway, memoFake) = CaseTestData.CreateGateway();
+        memoFake.Responses.Enqueue(FakeLlmProvider.Ok(CriminalOutlineJson));
+        memoFake.Responses.Enqueue(FakeLlmProvider.Ok(SectionJson));
+
+        await new CoreDocumentGenerator(memoGateway).GenerateAsync(NewDraft());
+
+        var keyIndividuals = memoFake.Requests.Single(r => r.UserPrompt.Contains("Section: KEY INDIVIDUALS AND ENTITIES"));
+        Assert.Contains("about 6-10 named individuals", keyIndividuals.UserPrompt);
+    }
+
+    [Fact]
+    public async Task Generate_StripsLeadingNumbers()
+    {
+        var (gateway, _) = CivilGateway(FakeLlmProvider.Ok(Paragraphs("1. The plaintiff is a company.", "2) It sued.", "   ")));
+        var draft = NewDraft();
+
+        await new CoreDocumentGenerator(gateway).GenerateAsync(draft);
+
+        Assert.Equal(new[] { "The plaintiff is a company.", "It sued." }, draft.CoreDocument!.Sections[0].Paragraphs);
+    }
+
+    [Fact]
+    public async Task Generate_CitationRetry()
+    {
+        var (gateway, fake) = CivilGateway(
+            FakeLlmProvider.Ok(Paragraphs("Harmon breached the subcontract. See 531 U.S. 98 (2000).")),
+            FakeLlmProvider.Ok(SectionJson));
+        var draft = NewDraft();
+
+        await new CoreDocumentGenerator(gateway).GenerateAsync(draft);
+
+        Assert.Contains("531 U.S. 98", fake.Requests[2].UserPrompt);
+        Assert.Contains("Rewrite the section without", fake.Requests[2].UserPrompt);
+        Assert.StartsWith(fake.Requests[1].UserPrompt, fake.Requests[2].UserPrompt);
+        Assert.DoesNotContain(draft.CoreDocument!.Sections[0].Paragraphs, p => p.Contains("531 U.S."));
+        Assert.Equal(9, fake.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Generate_CitationRetry_StillDirty()
+    {
+        var dirty = Paragraphs("Harmon breached the subcontract. See 531 U.S. 98 (2000).");
+        var (gateway, fake) = CivilGateway(
+            FakeLlmProvider.Ok(dirty),
+            FakeLlmProvider.Ok(dirty),
+            FakeLlmProvider.Ok(SectionJson));
+        var draft = NewDraft();
+
+        await new CoreDocumentGenerator(gateway).GenerateAsync(draft);
+
+        var nature = draft.CoreDocument!.Sections[0];
+        Assert.Equal(SectionStatus.Ready, nature.Status);
+        Assert.Contains(nature.Paragraphs, p => p.Contains("531 U.S. 98"));
+        Assert.Contains("Section: PARTIES", fake.Requests[3].UserPrompt);
+        Assert.Equal(9, fake.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Generate_SectionRefused_MarksFailed()
+    {
+        var (gateway, _) = CivilGateway(FakeLlmProvider.Refused("I won't write that."), FakeLlmProvider.Ok(SectionJson));
+        var draft = NewDraft();
+
+        var result = await new CoreDocumentGenerator(gateway).GenerateAsync(draft);
+
+        var nature = draft.CoreDocument!.Sections[0];
+        Assert.Equal(SectionStatus.Failed, nature.Status);
+        Assert.StartsWith("The model declined", nature.FailureMessage);
+        Assert.Empty(nature.Paragraphs);
+        Assert.All(draft.CoreDocument.Sections.Skip(1), s => Assert.Equal(SectionStatus.Ready, s.Status));
+        Assert.Equal(1, result.SectionsFailed);
+        Assert.Equal(6, result.SectionsWritten);
+        Assert.False(result.IsFatal);
+    }
+
+    [Fact]
+    public async Task Generate_SectionTruncated_MarksFailed()
+    {
+        var (gateway, fake) = CivilGateway(
+            FakeLlmProvider.Ok(SectionJson),
+            FakeLlmProvider.Truncated(),
+            FakeLlmProvider.Truncated(),
+            FakeLlmProvider.Ok(SectionJson));
+        var draft = NewDraft();
+
+        var result = await new CoreDocumentGenerator(gateway).GenerateAsync(draft);
+
+        var parties = draft.CoreDocument!.FindSection("parties")!;
+        Assert.Equal(SectionStatus.Failed, parties.Status);
+        Assert.Equal("The response was cut off. Click Retry Section.", parties.FailureMessage);
+        Assert.Equal(1, result.SectionsFailed);
+        Assert.Equal(6, result.SectionsWritten);
+        Assert.Equal(9, fake.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Generate_FatalStopsAndKeeps()
+    {
+        var (gateway, fake) = CivilGateway(
+            FakeLlmProvider.Ok(SectionJson),
+            FakeLlmProvider.Failed(LlmFailureKind.SpendLimit, "Spend limit reached"));
+        var draft = NewDraft();
+
+        var result = await new CoreDocumentGenerator(gateway).GenerateAsync(draft);
+
+        Assert.True(result.IsFatal);
+        Assert.Contains("Spend limit reached", result.FatalError);
+        var sections = draft.CoreDocument!.Sections;
+        Assert.Equal(SectionStatus.Ready, sections[0].Status);
+        Assert.All(sections.Skip(1), s => Assert.Equal(SectionStatus.Pending, s.Status));
+        Assert.Equal(3, fake.Requests.Count);
+        Assert.Equal(1, result.SectionsWritten);
+        Assert.Equal(0, result.SectionsFailed);
+        Assert.Equal(2, draft.Revision);
+    }
+
+    [Fact]
+    public async Task Generate_MemoExecutiveSummaryLast()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(CriminalOutlineJson));
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(SectionJson));
+        var draft = NewDraft();
+
+        var result = await new CoreDocumentGenerator(gateway).GenerateAsync(draft);
+
+        Assert.Equal(9, result.SectionsWritten);
+        Assert.Contains("Section: EXECUTIVE SUMMARY", fake.Requests[^1].UserPrompt);
+        Assert.Contains("Section: BACKGROUND", fake.Requests[1].UserPrompt);
+        Assert.Contains("Memo: TO AUSA Rachel Kim", fake.Requests[1].UserPrompt);
+        Assert.Equal("exec-summary", draft.CoreDocument!.Sections[0].Id);
+    }
+
+    [Fact]
+    public async Task Generate_SectionPromptContainsPriorText()
+    {
+        var (gateway, fake) = CivilGateway(
+            FakeLlmProvider.Ok(SectionJson),
+            FakeLlmProvider.Ok(SectionJson),
+            FakeLlmProvider.Ok(SectionJson),
+            FakeLlmProvider.Ok(Paragraphs("On January 9, 2024 Dana Ortiz countersigned the subcontract.")),
+            FakeLlmProvider.Ok(SectionJson));
+
+        await new CoreDocumentGenerator(gateway).GenerateAsync(NewDraft());
+
+        var facts2 = fake.Requests.Single(r => r.UserPrompt.Contains("Section: Unpaid Change Orders"));
+        Assert.Contains("On January 9, 2024 Dana Ortiz countersigned the subcontract.", facts2.UserPrompt);
+        Assert.Contains("== The Subcontract ==", facts2.UserPrompt);
+        Assert.Contains("(nothing written yet)", fake.Requests[1].UserPrompt);
+    }
+
+    [Fact]
+    public async Task Generate_CancelPropagates()
+    {
+        var (gateway, fake) = CivilGateway();
+        using var cts = new CancellationTokenSource();
+        fake.OnSend = i =>
+        {
+            if (i == 2)
+                cts.Cancel();
+        };
+        var draft = NewDraft();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new CoreDocumentGenerator(gateway).GenerateAsync(draft, null, cts.Token));
+
+        var sections = draft.CoreDocument!.Sections;
+        Assert.Equal(SectionStatus.Ready, sections[0].Status);
+        Assert.All(sections.Skip(1), s => Assert.Equal(SectionStatus.Pending, s.Status));
+        Assert.Equal(2, draft.Revision);
+    }
+
+    // ---------- Regenerate ----------
+
+    [Fact]
+    public async Task Regenerate_ReplacesOnlyTarget()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(Paragraphs("On March 3, 2024 the parties met at the site.", "Harmon promised payment at that meeting.")));
+        var draft = CaseTestData.SampleComplaintDraft();
+        var doc = draft.CoreDocument!;
+        var facts1 = doc.FindSection("facts-1")!;
+        facts1.Paragraphs = new List<string> { "EDITED FACT" };
+        facts1.IsUserEdited = true;
+        var facts2 = doc.FindSection("facts-2")!;
+        facts2.IsUserEdited = true;
+        var index = doc.Sections.IndexOf(facts2);
+        var before = doc.Sections.Where(s => s.Id != "facts-2").ToDictionary(s => s.Id, s => string.Join("|", s.Paragraphs));
+
+        await new CoreDocumentGenerator(gateway).RegenerateSectionAsync(draft, "facts-2", "add the March 3 site meeting");
+
+        Assert.Same(facts2, doc.Sections[index]);
+        Assert.Equal("facts-2", facts2.Id);
+        Assert.Equal(new[] { "On March 3, 2024 the parties met at the site.", "Harmon promised payment at that meeting." }, facts2.Paragraphs);
+        Assert.Equal(SectionStatus.Ready, facts2.Status);
+        Assert.False(facts2.IsUserEdited);
+        Assert.True(facts1.IsUserEdited);
+        foreach (var section in doc.Sections.Where(s => s.Id != "facts-2"))
+            Assert.Equal(before[section.Id], string.Join("|", section.Paragraphs));
+        Assert.Equal(2, draft.Revision);
+
+        var prompt = Assert.Single(fake.Requests).UserPrompt;
+        Assert.Contains("EDITED FACT", prompt);
+        Assert.Contains("Harmon refused to pay the invoices and offered no legitimate reason for withholding payment.", prompt);
+        Assert.Contains("Current text of this section (rewrite it):", prompt);
+        Assert.Contains("Guidance from the user: add the March 3 site meeting", prompt);
+    }
+
+    [Fact]
+    public async Task Regenerate_Failure_KeepsOldText()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Refused("No."));
+        var draft = CaseTestData.SampleComplaintDraft();
+        var facts2 = draft.CoreDocument!.FindSection("facts-2")!;
+        var oldText = facts2.Paragraphs.ToList();
+
+        await Assert.ThrowsAsync<LlmCallException>(() => new CoreDocumentGenerator(gateway).RegenerateSectionAsync(draft, "facts-2", ""));
+
+        Assert.Equal(oldText, facts2.Paragraphs);
+        Assert.Equal(SectionStatus.Ready, facts2.Status);
+        Assert.Equal(1, draft.Revision);
+    }
+
+    [Fact]
+    public async Task Regenerate_UnknownId_Throws()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            new CoreDocumentGenerator(gateway).RegenerateSectionAsync(CaseTestData.SampleComplaintDraft(), "facts-9", ""));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            new CoreDocumentGenerator(gateway).RegenerateSectionAsync(NewDraft(), "facts-1", ""));
+        Assert.Empty(fake.Requests);
+    }
 }

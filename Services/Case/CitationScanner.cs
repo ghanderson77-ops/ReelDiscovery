@@ -102,19 +102,23 @@ public static partial class CitationScanner
     // Pitfall 4: the document's own caption must never block Finish.
     private static bool IsOwnCaption(string left, string right, IReadOnlyCollection<string> parties)
     {
-        var normalizedParties = (parties ?? Array.Empty<string>())
-            .Select(Normalize)
-            .Where(p => p.Length > 0)
+        var partyTokens = (parties ?? Array.Empty<string>())
+            .Select(Tokens)
+            .Where(t => t.Count > 0)
             .ToList();
 
-        return SideMatches(Normalize(left), normalizedParties) && SideMatches(Normalize(right), normalizedParties);
+        return SideMatches(Tokens(left), partyTokens) && SideMatches(Tokens(right), partyTokens);
     }
 
-    private static bool SideMatches(string side, List<string> normalizedParties)
+    private static HashSet<string> Tokens(string s) =>
+        new(Normalize(s ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
+
+    // Whole-token comparison (WR-10): "Ace" must not match inside "Grace", nor "Gold" inside "Goldberg"
+    private static bool SideMatches(HashSet<string> side, List<HashSet<string>> partyTokens)
     {
-        if (side.Length == 0)
+        if (side.Count == 0)
             return true;
 
-        return normalizedParties.Any(p => p.Contains(side, StringComparison.Ordinal) || side.Contains(p, StringComparison.Ordinal));
+        return partyTokens.Any(p => side.IsSubsetOf(p) || p.IsSubsetOf(side));
     }
 }

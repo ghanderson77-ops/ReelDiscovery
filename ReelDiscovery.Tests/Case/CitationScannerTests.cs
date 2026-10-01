@@ -67,6 +67,29 @@ public class CitationScannerTests
         Assert.Empty(CitationScanner.Scan(text, OwnParties));
     }
 
+    [Theory]
+    [InlineData("Brightline v. Harmon")]
+    [InlineData("Brightline Glazing v. Harmon Builders")]
+    public void OwnCaption_ShortOrFullNames_NoFindings(string text)
+    {
+        var parties = new[] { "Brightline Glazing, LLC", "Brightline", "Harmon Builders, Inc.", "Harmon" };
+
+        Assert.Empty(CitationScanner.Scan(text, parties));
+    }
+
+    [Theory]
+    [InlineData("as in Grace v. Pace, the duty")]
+    [InlineData("as in Goldberg v. Pace, the duty")]
+    public void ShortPartyNameInsideOtherWord_IsNotOwnCaption(string text)
+    {
+        // Short names "Ace" and "Gold" must not hide a real case name by substring match (WR-10)
+        var parties = new[] { "Ace Glass, LLC", "Ace", "Gold Coast Builders, Inc.", "Gold" };
+
+        var finding = Assert.Single(CitationScanner.Scan(text, parties));
+        Assert.Equal("CaseName", finding.Kind);
+        Assert.Equal(CitationSeverity.Warning, finding.Severity);
+    }
+
     [Fact]
     public void Findings_OrderedByIndex()
     {

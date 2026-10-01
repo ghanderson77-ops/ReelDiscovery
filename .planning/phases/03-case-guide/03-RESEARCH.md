@@ -615,19 +615,19 @@ Anthropic structured outputs allow `minItems` only 0 or 1, and no numeric or str
 | A10 | OpenAI strict-mode limits (≈5,000 properties, nesting depth ≈10, ≈1,000 enum values) are far above these DTOs | Standard Stack | Very low; the DTOs are small |
 | A11 | Time zone derived from the organization's US state (fixed table) is adequate for Phase 4 | Pattern 3 | Multi-state orgs get one zone; editable later |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Do counsel count toward the preset's key-character range?**
    - What we know: the core document prompt asked for "about N named individuals (officers, employees, counsel, agents...)". D-15 adds required counsel.
-   - Recommendation: count non-counsel only (A2). Confirm during UI-SPEC / plan check.
+   - **RESOLVED:** counsel are added on top; the preset key range counts only Key characters with Role Party or Staff. Implemented in 03-08 (validator rule 18) and the roster prompt in 03-09 ("{min}-{max} key people who are not counsel").
 2. **Email domains for individuals and government bodies** (A3, A4).
-   - Recommendation: individual → affiliated business domain if named, else `{last}{first initial}.com`-style personal domain. Agencies → `.gov`. Low impact; editable per row.
+   - **RESOLVED:** individual parties get a personal-style `{last}family.com` domain (e.g. `walter.white@whitefamily.com`); government agencies get `.gov`; other organizations use their ShortName (else Name) + `.com`. Implemented in 03-03 (`EmailIdentity.DomainFor`) and used by 03-09 `SyncOrganizations`.
 3. **Where does "change location" (D-09) live?**
-   - Recommendation: a "Move case folder..." button on Case Summary (and the folder path shown on the Case Guide subtitle). `Directory.Move` on the same volume, copy + delete across volumes. Update recent.json. Handle "folder open in Explorer" `IOException` with a retry message.
+   - **RESOLVED:** a "Move Case Folder..." button on Case Summary only (UI-SPEC U16); the folder path also shows in the Case Guide subtitle. `CaseStore.MoveFolder` (03-04) does `Directory.Move` on the same volume, copy + delete across volumes, and updates recent.json; the button and C7 confirmation are in 03-17.
 4. **Should the Case Guide block Next on Errors?**
-   - Recommendation: yes, the same as Phase 2 (Errors block, Warnings ask). Orphans and actor-range violations would break Phase 4.
+   - **RESOLVED:** yes, the same as Phase 2: Errors block (M2), unfinished parts block (M1), Warnings ask with default No (M3). Copy and decision logic in 03-06 (`CaseGuideUiText.NextGateDecision`), applied in 03-16 (`StepCaseGuide.ValidateStepAsync`).
 5. **Issue enrichment call: required or optional?**
-   - Recommendation: include it (one cheap call; feeds KEY-* review protocol). On failure, issues still exist and "Retry" is shown on the Issues tab.
+   - **RESOLVED:** included as one Story-tier call after deterministic extraction; on failure the issues still exist, `IssueDetailsState` is Failed and the Issues tab shows "Retry Issue Details". Implemented in 03-09 (`GenerateIssuesAsync`, `RetryIssueDetailsAsync`) and 03-12 (`IssuesTabPanel` tab action).
 
 ## Environment Availability
 

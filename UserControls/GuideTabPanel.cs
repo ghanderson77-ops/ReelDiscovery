@@ -379,6 +379,7 @@ public abstract class GuideTabPanel : UserControl
 
         // Wire handlers only after every control exists (handlers read other controls)
         _body.SizeChanged += (s, e) => ApplyDetailMinimum();
+        header.SizeChanged += (s, e) => AlignEmptyDetail(header.Height);
         _fieldsPanel.ClientSizeChanged += (s, e) => SyncFieldsWidth();
         Fields.SizeChanged += (s, e) => SyncWrapLabels();
         Grid.CellPainting += Grid_CellPainting;
@@ -403,6 +404,15 @@ public abstract class GuideTabPanel : UserControl
         _body.ColumnStyles[0] = narrow ? new ColumnStyle(SizeType.Percent, 100) : new ColumnStyle(SizeType.Percent, 60);
         _body.ColumnStyles[1] = narrow ? new ColumnStyle(SizeType.Absolute, minimum) : new ColumnStyle(SizeType.Percent, 40);
         _body.ResumeLayout(true);
+    }
+
+    private void AlignEmptyDetail(int headerHeight)
+    {
+        // Center the "Select ..." text on the same line as the grid's empty text, which is centered below
+        // the grid card header (1 px card padding + header + 1 px divider, 6 px grid bottom inset)
+        var top = Math.Max(0, 1 + headerHeight - LogicalToDeviceUnits(6));
+        if (_emptyDetailLabel.Padding.Top != top)
+            _emptyDetailLabel.Padding = new Padding(0, top, 0, 0);
     }
 
     private void SyncFieldsWidth()
@@ -785,6 +795,20 @@ public abstract class GuideTabPanel : UserControl
         var value = CreateWrapLabel(text, _bodyFont, Theme.Text, new Padding(0));
         AddRow(value);
         return value;
+    }
+
+    /// <summary>
+    /// Read-only list field: caption above one wrapping label per line, 4 apart, so a wrapped line
+    /// never reads as a new entry. Shows "—" when there are no lines.
+    /// </summary>
+    protected void AddCaptionedLines(string caption, IEnumerable<string> lines)
+    {
+        AddRow(CreateCaption(caption));
+        var items = lines.Where(l => !string.IsNullOrWhiteSpace(l)).ToList();
+        if (items.Count == 0)
+            items.Add("—");
+        for (var i = 0; i < items.Count; i++)
+            AddRow(CreateWrapLabel(items[i], _bodyFont, Theme.Text, new Padding(0, i == 0 ? 0 : LogicalToDeviceUnits(4), 0, 0)));
     }
 
     /// <summary>

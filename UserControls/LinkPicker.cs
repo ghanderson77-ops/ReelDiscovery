@@ -160,8 +160,14 @@ public class LinkPicker : UserControl
 
     private string DisplayText(LinkItem item)
     {
-        var text = $"{item.Id}  {item.Text}";
-        return _locked.Contains(item.Id) ? text + _lockedSuffix : text;
+        if (!_locked.Contains(item.Id))
+            return $"{item.Id}  {item.Text}";
+
+        // The suffix follows the name (the part before " — "), so a narrow list never cuts it off
+        var dash = item.Text.IndexOf(" — ", StringComparison.Ordinal);
+        return dash > 0
+            ? $"{item.Id}  {item.Text[..dash]}{_lockedSuffix}{item.Text[dash..]}"
+            : $"{item.Id}  {item.Text}{_lockedSuffix}";
     }
 
     private void Rebuild()
@@ -172,8 +178,8 @@ public class LinkPicker : UserControl
             .Where(x => filter.Length == 0
                 || x.item.Id.Contains(filter, StringComparison.OrdinalIgnoreCase)
                 || x.item.Text.Contains(filter, StringComparison.OrdinalIgnoreCase))
-            // Checked first, then the original order
-            .OrderBy(x => _checked.Contains(x.item.Id) ? 0 : 1)
+            // Locked first (e.g. the people who did it), then the other checked items, then the original order
+            .OrderBy(x => _locked.Contains(x.item.Id) ? 0 : _checked.Contains(x.item.Id) ? 1 : 2)
             .ThenBy(x => x.index)
             .Select(x => x.item)
             .ToList();

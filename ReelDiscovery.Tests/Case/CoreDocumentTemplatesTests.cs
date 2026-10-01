@@ -8,7 +8,7 @@ public class CoreDocumentTemplatesTests
     [Fact]
     public void Complaint_SpecsMatchSampleSections()
     {
-        var doc = CaseTestData.SampleComplaintDraft().CoreDocument;
+        var doc = CaseTestData.SampleComplaintDraft().CoreDocument!;
 
         var specs = CoreDocumentTemplates.GetSectionSpecs(doc);
 
@@ -25,7 +25,7 @@ public class CoreDocumentTemplatesTests
     [Fact]
     public void Memo_SpecsMatchSampleSections()
     {
-        var doc = CaseTestData.SampleMemoDraft().CoreDocument;
+        var doc = CaseTestData.SampleMemoDraft().CoreDocument!;
 
         var specs = CoreDocumentTemplates.GetSectionSpecs(doc);
 
@@ -40,7 +40,7 @@ public class CoreDocumentTemplatesTests
     [Fact]
     public void Petition_SpecsHaveTexasStyleSections()
     {
-        var doc = CaseTestData.SampleComplaintDraft().CoreDocument;
+        var doc = CaseTestData.SampleComplaintDraft().CoreDocument!;
         doc.DocumentType = CoreDocumentType.Petition;
 
         var specs = CoreDocumentTemplates.GetSectionSpecs(doc);
@@ -54,7 +54,7 @@ public class CoreDocumentTemplatesTests
     [Fact]
     public void TargetParagraphs_CountsBoundedAndFactsClamped()
     {
-        var doc = CaseTestData.SampleComplaintDraft().CoreDocument;
+        var doc = CaseTestData.SampleComplaintDraft().CoreDocument!;
         doc.FactPlan[0].TargetParagraphs = 1;
         doc.FactPlan[1].TargetParagraphs = 100;
 
@@ -69,7 +69,7 @@ public class CoreDocumentTemplatesTests
     [Fact]
     public void TargetParagraphs_FactsWithinRangeKept()
     {
-        var doc = CaseTestData.SampleComplaintDraft().CoreDocument;
+        var doc = CaseTestData.SampleComplaintDraft().CoreDocument!;
         doc.FactPlan[0].TargetParagraphs = 12;
 
         var specs = CoreDocumentTemplates.GetSectionSpecs(doc);

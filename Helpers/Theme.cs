@@ -57,4 +57,21 @@ public static class Theme
         path.CloseFigure();
         return path;
     }
+
+    /// <summary>
+    /// Paints an 8 px status dot at Content x (15 logical px inset), vertically centered in the cell.
+    /// </summary>
+    public static void DrawStatusDot(Graphics g, Rectangle cell, Color color, Control owner)
+    {
+        var diameter = owner.LogicalToDeviceUnits(8);
+        var x = cell.X + owner.LogicalToDeviceUnits(15);
+        var y = cell.Y + (cell.Height - diameter) / 2;
+        var previous = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var brush = new SolidBrush(color))
+        {
+            g.FillEllipse(brush, x, y, diameter, diameter);
+        }
+        g.SmoothingMode = previous;
+    }
 }

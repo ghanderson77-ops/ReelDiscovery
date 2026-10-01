@@ -938,16 +938,4 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
             toggle.Selected = p == selectedTab;
         RefreshAll();
     }
-
-    public Task OnEnterStepAsync() => Task.CompletedTask; // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    public Task OnLeaveStepAsync() => Task.CompletedTask; // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    public Task<bool> ValidateStepAsync() => Task.FromResult(true); // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    public Task RegenerateEntryAsync(GuidePart part, string entityId, string guidance) => Task.CompletedTask; // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    public Task RegenerateTabAsync(GuidePart part) => Task.CompletedTask; // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    public Task RetryIssueDetailsAsync() => Task.CompletedTask; // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    private void QueueSave() { } // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    private Task GenerateOrResumeAsync() => Task.CompletedTask; // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    private Task UpdateGuideAsync() => Task.CompletedTask; // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    private void DismissStaleBanner() { } // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
-    private void BtnCancel_Click(object? sender, EventArgs e) { } // Task 1 stub; replaced in StepCaseGuide.Run.cs (03-16 Task 2)
 }

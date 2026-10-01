@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-10-01T15:35:30.335Z"
+last_updated: "2026-10-01T15:47:06.857Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 22
-  completed_plans: 18
-  percent: 82
+  completed_plans: 19
+  percent: 86
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 2 (Case Scenario & Core Document) — EXECUTING
-Plan: 6 of 9
+Plan: 7 of 9
 Status: Ready to execute
 Last activity: 2026-10-01
 
@@ -69,6 +69,7 @@ Progress: [██████████] 100%
 | Phase 02 P03 | 10min | 2 tasks | 6 files |
 | Phase 02 P05 | 5min | 1 tasks | 2 files |
 | Phase 02 P04 | 12min | 2 tasks | 4 files |
+| Phase 02 P06 | 12min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -111,6 +112,8 @@ Recent decisions affecting current work:
 - [02-05]: RealEntityDetector drops blank/duplicate names (first wins, case-insensitive) and cleans aliases in code; LlmCallException propagates to the UI boundary
 - [02-04]: Memo date earlier than timeline end warns 'The timeline ends after the memo date.'; blank timeline dates reported as yyyy-MM-dd errors
 - [02-04]: ApplyEdit on a Failed section with non-empty text sets Status Ready and clears FailureMessage
+- [02-06]: One linked runCts spans all section phases so a fatal Auth/SpendLimit stops in-flight and later section calls uniformly
+- [02-06]: Retry of Failed/Pending sections sends no old text; only RegenerateSectionAsync sends currentText + guidance
 
 ### Pending Todos
 
@@ -132,6 +135,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T15:35:30.329Z
+Last session: 2026-10-01T15:47:00.819Z
 Stopped at: Completed 02-04-PLAN.md
 Resume file: None

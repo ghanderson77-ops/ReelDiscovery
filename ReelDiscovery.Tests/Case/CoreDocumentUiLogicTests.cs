@@ -156,6 +156,16 @@ public class CoreDocumentUiLogicTests
     }
 
     [Fact]
+    public void EmptyStateBody_ExplainsCancelOrStop()
+    {
+        Assert.StartsWith("Click Generate Document to draft", StepCoreDocument.EmptyStateBody(hasOutline: false, reason: null));
+        Assert.Equal("Generation cancelled. The outline was kept. Click Generate Document to write the sections.",
+            StepCoreDocument.EmptyStateBody(hasOutline: true, reason: "Generation cancelled."));
+        Assert.Equal("Generation stopped: Spend limit reached. Click Generate Document to try again.",
+            StepCoreDocument.EmptyStateBody(hasOutline: false, reason: "Generation stopped: Spend limit reached."));
+    }
+
+    [Fact]
     public void IssuesCaption_CountsBySeverity()
     {
         Assert.Equal("Issues (1 errors, 2 warnings)", StepCoreDocument.IssuesCaption(new[] { Error(), Warning(), Warning() }));

@@ -685,6 +685,26 @@ public class StepCoreDocument : UserControl, IWizardStep
         _lblStatus.ForeColor = color;
     }
 
+    // Explains a cancelled or stopped run in the empty state instead of the first-run copy (WR-09)
+    private void SetEmptyBody(string reason)
+    {
+        if (IsDisposed)
+            return;
+
+        _lblEmptyBody.Text = EmptyStateBody(_state.Case.CoreDocument != null, reason);
+    }
+
+    public static string EmptyStateBody(bool hasOutline, string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return DefaultEmptyBody;
+
+        var next = hasOutline
+            ? "The outline was kept. Click Generate Document to write the sections."
+            : "Click Generate Document to try again.";
+        return $"{reason} {next}";
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -758,6 +778,7 @@ public class StepCoreDocument : UserControl, IWizardStep
             if (result.IsFatal)
             {
                 SetStatus(FatalText(result.FatalError), Color.Red);
+                SetEmptyBody($"Generation stopped: {result.FatalError}. Fix the problem on the API Configuration step.");
             }
             else if (failed != null)
             {
@@ -772,6 +793,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         catch (OperationCanceledException)
         {
             SetStatus(CancelledText, Color.DarkOrange);
+            SetEmptyBody("Generation cancelled.");
         }
         catch (LlmCallException ex) when (ex.Result.Outcome == LlmOutcome.Refused)
         {
@@ -784,6 +806,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         catch (LlmCallException ex) when (ex.Result.IsFatal)
         {
             SetStatus(FatalText(ex.Result.Message ?? ex.Message), Color.Red);
+            SetEmptyBody($"Generation stopped: {ex.Result.Message ?? ex.Message}. Fix the problem on the API Configuration step.");
         }
         catch (Exception ex)
         {

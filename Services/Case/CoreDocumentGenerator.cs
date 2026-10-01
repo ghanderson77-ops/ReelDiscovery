@@ -827,7 +827,7 @@ public class CoreDocumentGenerator
         public string Address { get; set; } = string.Empty;
 
         [JsonPropertyName("email")]
-        [Description("Attorney email at an .example domain")]
+        [Description("Attorney email at the law firm's own .com domain (never a reserved .example domain)")]
         public string Email { get; set; } = string.Empty;
     }
 

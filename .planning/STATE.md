@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-09-PLAN.md
-last_updated: "2026-10-01T21:14:38.077Z"
+stopped_at: Completed 03-10-PLAN.md
+last_updated: "2026-10-01T21:24:51.480Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 31
-  percent: 74
+  completed_plans: 32
+  percent: 76
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 10 of 20
+Plan: 11 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [███████░░░] 69%
+Progress: [████████░░] 76%
 
 ## Performance Metrics
 
@@ -82,6 +82,7 @@ Progress: [███████░░░] 69%
 | Phase 03 P06 | 25min | 2 tasks | 7 files |
 | Phase 03 P07 | 10min | 2 tasks | 4 files |
 | Phase 03 P09 | 10min | 2 tasks | 5 files |
+| Phase 03 P10 | 8min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -163,6 +164,10 @@ Recent decisions affecting current work:
 - [03-09]: Counsel top-up runs only right after a roster call (never on resume), at most once; CounselGaps mirrors validator rule 17
 - [03-09]: Signing attorney seeded as Partner at the counsel firm (created if missing, representing Plaintiff/Complainant orgs); memo author seeded from Memo.From
 - [03-09]: Parallel guide units return DTOs; the guide is merged on the calling thread after Task.WhenAll (finally block keeps finished units on user cancel)
+- [03-10]: Fact target = preset midpoint spread by TargetParagraphs (largest remainder, min 2); sections above 30 facts split into equal date slices; CompletedUnits keys are the section id or {id}#{k}
+- [03-10]: Fact refs resolve by ISS/CH id or exact cast full name; unknown refs dropped with MappingNotes; KnownByIds = ActorIds union knownBy; F-ids allocated in date order after Task.WhenAll
+- [03-10]: GenerateAsync skips Ready parts, stops at the first failed part or fatal, awaits partCompleted after each part (and after a cancelled part that changed Revision)
+- [03-10]: Canonical values merge duplicates by label+value (case-insensitive) and never change hand-edited values; first-generation paths send no existing entries (regeneration is 03-11)
 
 ### Pending Todos
 
@@ -184,6 +189,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T21:14:38.072Z
-Stopped at: Completed 03-09-PLAN.md
+Last session: 2026-10-01T21:24:39.802Z
+Stopped at: Completed 03-10-PLAN.md
 Resume file: None

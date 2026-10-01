@@ -12,8 +12,30 @@ public class WizardFlowTests
     public void CaseDriven_StepTypes()
     {
         Assert.Equal(
-            new[] { typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument) },
+            new[]
+            {
+                typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
+                typeof(StepCaseSummary)
+            },
             WizardForm.StepTypesFor(WizardFlow.CaseDriven));
+    }
+
+    [Theory]
+    [InlineData(CaseStage.Described, typeof(StepCaseScenario))]
+    [InlineData(CaseStage.CoreDocument, typeof(StepCoreDocument))]
+    [InlineData(CaseStage.CaseGuide, typeof(StepCaseGuide))]
+    [InlineData(CaseStage.Summary, typeof(StepCaseSummary))]
+    public void StepTypeForStage_MapsEveryStage(CaseStage stage, Type expected)
+    {
+        Assert.Equal(expected, WizardForm.StepTypeForStage(stage));
+        Assert.Contains(expected, WizardForm.StepTypesFor(WizardFlow.CaseDriven));
+    }
+
+    [Fact]
+    public void StepTypeForStage_UnknownValue_FallsBackToScenario()
+    {
+        // A tampered case.json stage never opens an arbitrary step (T-03-60)
+        Assert.Equal(typeof(StepCaseScenario), WizardForm.StepTypeForStage((CaseStage)99));
     }
 
     [Fact]
@@ -65,21 +87,65 @@ public class WizardFlowTests
         var closingBody = source[closing..];
         Assert.Contains("\"Close Case\"", closingBody);
         Assert.Contains("e.Cancel = true", closingBody);
+        Assert.Contains("CaseStore.SaveNow", source);
     }
 
     [Fact]
-    public void HasUnsavedCase_CaseFlowWithScenarioOrDocument()
+    public void FormClosing_SavesInsteadOfDiscarding()
     {
-        Assert.False(WizardForm.HasUnsavedCase(WizardFlow.CaseDriven, new CaseDraft()));
-        Assert.False(WizardForm.HasUnsavedCase(WizardFlow.CaseDriven, new CaseDraft { Scenario = "   " }));
-        Assert.True(WizardForm.HasUnsavedCase(WizardFlow.CaseDriven, new CaseDraft { Scenario = "A dispute." }));
-        Assert.True(WizardForm.HasUnsavedCase(WizardFlow.CaseDriven, new CaseDraft { CoreDocument = new CoreDocument() }));
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "Forms", "WizardForm.cs"));
+        Assert.DoesNotContain("This version does not save the case yet", source);
+        var closing = source.IndexOf("protected override void OnFormClosing", StringComparison.Ordinal);
+        Assert.Contains("CaseStore.SaveNow", source);
+        Assert.True(closing >= 0);
     }
 
     [Fact]
-    public void HasUnsavedCase_LegacyFlow_NeverPrompts()
+    public void DecideClose_LegacyFlow_ClosesNow()
     {
-        Assert.False(WizardForm.HasUnsavedCase(WizardFlow.Legacy, new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument() }));
+        var draft = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument() };
+        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(WizardFlow.Legacy, draft, runActive: false, saveSucceeded: false));
+    }
+
+    [Fact]
+    public void DecideClose_EmptyDraft_ClosesNow()
+    {
+        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(WizardFlow.CaseDriven, new CaseDraft(), false, true));
+        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(WizardFlow.CaseDriven, new CaseDraft { Scenario = "   " }, false, true));
+    }
+
+    [Fact]
+    public void DecideClose_TypedScenarioWithoutFolder_AsksC11()
+    {
+        var draft = new CaseDraft { Scenario = "A dispute." };
+        Assert.Equal(WizardForm.CloseDecision.AskUnsavedScenario, WizardForm.DecideClose(WizardFlow.CaseDriven, draft, false, true));
+    }
+
+    [Fact]
+    public void DecideClose_SavedCase_ClosesWithoutPrompt()
+    {
+        var draft = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument(), FolderPath = @"C:\Cases\A" };
+        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(WizardFlow.CaseDriven, draft, false, saveSucceeded: true));
+    }
+
+    [Fact]
+    public void DecideClose_FailedSave_AsksC10()
+    {
+        var draft = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument(), FolderPath = @"C:\Cases\A" };
+        Assert.Equal(WizardForm.CloseDecision.AskFailedSave, WizardForm.DecideClose(WizardFlow.CaseDriven, draft, false, saveSucceeded: false));
+
+        // A core document whose folder could not be created is a failed save too
+        var unsaved = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument() };
+        Assert.Equal(WizardForm.CloseDecision.AskFailedSave, WizardForm.DecideClose(WizardFlow.CaseDriven, unsaved, false, saveSucceeded: false));
+    }
+
+    [Fact]
+    public void DecideClose_RunActive_TakesPrecedence()
+    {
+        var saved = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument(), FolderPath = @"C:\Cases\A" };
+        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(WizardFlow.CaseDriven, saved, runActive: true, saveSucceeded: true));
+        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(WizardFlow.CaseDriven, saved, runActive: true, saveSucceeded: false));
+        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(WizardFlow.CaseDriven, new CaseDraft { Scenario = "A dispute." }, runActive: true, saveSucceeded: true));
     }
 
     private static string FindRepoRoot()

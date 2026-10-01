@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-10-PLAN.md
-last_updated: "2026-10-01T21:24:51.480Z"
+stopped_at: Completed 03-12-PLAN.md
+last_updated: "2026-10-01T21:37:29.892Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 32
-  percent: 76
+  completed_plans: 33
+  percent: 79
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 11 of 20
+Plan: 12 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
@@ -83,6 +83,7 @@ Progress: [████████░░] 76%
 | Phase 03 P07 | 10min | 2 tasks | 4 files |
 | Phase 03 P09 | 10min | 2 tasks | 5 files |
 | Phase 03 P10 | 8min | 2 tasks | 3 files |
+| Phase 03 P12 | 8min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,10 @@ Recent decisions affecting current work:
 - [03-10]: Fact refs resolve by ISS/CH id or exact cast full name; unknown refs dropped with MappingNotes; KnownByIds = ActorIds union knownBy; F-ids allocated in date order after Task.WhenAll
 - [03-10]: GenerateAsync skips Ready parts, stops at the first failed part or fatal, awaits partCompleted after each part (and after a cancelled part that changed Revision)
 - [03-10]: Canonical values merge duplicates by label+value (case-insensitive) and never change hand-edited values; first-generation paths send no existing entries (regeneration is 03-11)
+- [03-12]: GridStyle header left padding is LDU(15) - 2 (GridStyle.HeaderTextMargin): DataGridViewColumnHeaderCell adds an unscaled 2 px text margin; right-aligned headers subtract it on the right
+- [03-12]: GuideTabPanel.BuildColumns runs from the base ctor (Grid + LDU only); the detail column switches to Absolute LDU(320)+LDU(8) when 40% is narrower; empty-detail text is padded to center on the grid's empty-text line
+- [03-12]: LinkPicker puts the locked suffix after the name (before " — "), lists locked then checked then the rest, and keeps dangling checked ids in CheckedIds
+- [03-12]: GUIDE-01/GUIDE-08 left Pending: 03-12 is display/editing infrastructure; the editable Cast/Facts tabs and step shell come in 03-13..03-16
 
 ### Pending Todos
 
@@ -189,6 +194,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T21:24:39.802Z
-Stopped at: Completed 03-10-PLAN.md
+Last session: 2026-10-01T21:37:29.888Z
+Stopped at: Completed 03-12-PLAN.md
 Resume file: None

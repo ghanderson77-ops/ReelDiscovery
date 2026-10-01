@@ -98,7 +98,7 @@ Plans:
 - [x] 03-09-PLAN.md — CaseGuidePrompts + generator: issues and cast (roster, details, background) (Wave 4)
 - [x] 03-10-PLAN.md — Generator: key facts, canonical values, GenerateAsync orchestration (Wave 5)
 - [ ] 03-11-PLAN.md — Generator: tab/entry regeneration and Update Guide (Wave 6)
-- [ ] 03-12-PLAN.md — IGuideHost, GuideTabPanel base, Issues tab, LinkPicker (Wave 5)
+- [x] 03-12-PLAN.md — IGuideHost, GuideTabPanel base, Issues tab, LinkPicker (Wave 5)
 - [ ] 03-13-PLAN.md — Cast tab (Wave 6)
 - [ ] 03-14-PLAN.md — Key Facts tab (Wave 6)
 - [ ] 03-15-PLAN.md — Canonical Values tab (Wave 6)

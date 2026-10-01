@@ -854,7 +854,7 @@ public class CoreDocumentGenerator
         public string Re { get; set; } = string.Empty;
 
         [JsonPropertyName("organization")]
-        [Description("Organization issuing the memo")]
+        [Description("Name of the organization issuing the memo only, e.g. Thistle Bracken Advisory LLP; no description or other text")]
         public string Organization { get; set; } = string.Empty;
     }
 

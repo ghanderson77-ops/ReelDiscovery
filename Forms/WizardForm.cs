@@ -92,12 +92,13 @@ public partial class WizardForm : Form
     private void InitializeWizardUI()
     {
         // Step indicator panel at top
+        var margin = LogicalToDeviceUnits(Theme.PageMargin);
         _stepIndicatorPanel = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 60,
+            Height = LogicalToDeviceUnits(64),
             BackColor = Color.FromArgb(45, 45, 48),
-            Padding = new Padding(20, 10, 20, 10)
+            Padding = new Padding(margin, LogicalToDeviceUnits(12), margin, LogicalToDeviceUnits(12))
         };
 
         _lblStepTitle = new Label
@@ -113,7 +114,7 @@ public partial class WizardForm : Form
         var costPanel = new Panel
         {
             Dock = DockStyle.Right,
-            Width = 320,
+            Width = LogicalToDeviceUnits(320),
             BackColor = Color.FromArgb(60, 60, 65),
             Padding = new Padding(10, 5, 10, 5)
         };
@@ -161,43 +162,47 @@ public partial class WizardForm : Form
         };
         _footerPanel.Controls.Add(lblFooter);
 
-        // Navigation panel at bottom
-        _navigationPanel = new Panel
+        // Navigation bar: Cancel on the left, Back / Next on the right, on the same page margin as the content
+        var navigation = new TableLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = 60,
-            Padding = new Padding(20, 10, 20, 10)
+            ColumnCount = 4,
+            RowCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Background,
+            Padding = new Padding(margin, LogicalToDeviceUnits(Theme.Gap), margin, LogicalToDeviceUnits(Theme.Gap))
         };
+        navigation.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // 0: Cancel
+        navigation.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); // 1: Spacer
+        navigation.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // 2: Back
+        navigation.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // 3: Next
+        _navigationPanel = navigation;
 
-        _btnCancel = ButtonHelper.CreateButton("Cancel", 100, 35, ButtonStyle.Default);
-        _btnCancel.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+        var buttonWidth = LogicalToDeviceUnits(96);
+        var buttonHeight = LogicalToDeviceUnits(34);
+        _btnCancel = ButtonHelper.CreateButton("Cancel", buttonWidth, buttonHeight, ButtonStyle.Default);
+        _btnCancel.Margin = new Padding(0);
         _btnCancel.Click += BtnCancel_Click;
 
-        _btnBack = ButtonHelper.CreateButton("< Back", 100, 35, ButtonStyle.Secondary);
-        _btnBack.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        _btnBack = ButtonHelper.CreateButton("< Back", buttonWidth, buttonHeight, ButtonStyle.Default);
+        _btnBack.Margin = new Padding(0, 0, LogicalToDeviceUnits(Theme.SmallGap), 0);
         _btnBack.Click += BtnBack_Click;
 
-        _btnNext = ButtonHelper.CreateButton("Next >", 100, 35, ButtonStyle.Primary);
-        _btnNext.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+        _btnNext = ButtonHelper.CreateButton("Next >", buttonWidth, buttonHeight, ButtonStyle.Primary);
+        _btnNext.Margin = new Padding(0);
         _btnNext.Click += BtnNext_Click;
 
-        _navigationPanel.Controls.Add(_btnCancel);
-        _navigationPanel.Controls.Add(_btnBack);
-        _navigationPanel.Controls.Add(_btnNext);
+        navigation.Controls.Add(_btnCancel, 0, 0);
+        navigation.Controls.Add(_btnBack, 2, 0);
+        navigation.Controls.Add(_btnNext, 3, 0);
 
-        // Position buttons
-        _navigationPanel.Resize += (s, e) =>
-        {
-            _btnCancel.Location = new Point(20, 12);
-            _btnNext.Location = new Point(_navigationPanel.Width - _btnNext.Width - 20, 12);
-            _btnBack.Location = new Point(_btnNext.Left - _btnBack.Width - 10, 12);
-        };
-
-        // Content panel in center
+        // Content panel in center: steps sit on the same page margin as the navigation bar
         _contentPanel = new Panel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(15, 10, 15, 10)
+            BackColor = Theme.Background,
+            Padding = new Padding(margin, margin, margin, 0)
         };
 
         // Add panels in correct docking order:

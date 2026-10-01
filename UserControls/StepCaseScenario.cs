@@ -46,14 +46,15 @@ public class StepCaseScenario : UserControl, IWizardStep
 
     private void InitializeUI()
     {
-        this.Padding = new Padding(20);
+        // The wizard shell supplies the page margin, so content lines up with the navigation bar
+        this.Padding = new Padding(0);
 
         var mainLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 9,
-            Padding = new Padding(8)
+            Padding = new Padding(0)
         };
 
         // Fixed rows size to their content so they grow with DPI scaling and font size
@@ -79,14 +80,25 @@ public class StepCaseScenario : UserControl, IWizardStep
             AcceptsReturn = true,
             // Default 32,767 would silently truncate pastes; cap enforced in validation
             MaxLength = 0,
-            Font = new Font("Segoe UI", 10F)
+            BorderStyle = BorderStyle.None,
+            Font = Theme.EditorFont(),
+            ForeColor = Theme.Text,
+            BackColor = Theme.Surface
         };
         _txtScenario.TextChanged += (s, e) =>
         {
             UpdateCounter();
             StateChanged?.Invoke(this, EventArgs.Empty);
         };
-        mainLayout.Controls.Add(_txtScenario, 0, 1);
+        // Borderless editor inside a rounded card, matching the core document editor
+        var scenarioCard = new CardPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(LogicalToDeviceUnits(Theme.CardPadding), LogicalToDeviceUnits(12), LogicalToDeviceUnits(6), LogicalToDeviceUnits(12)),
+            Margin = new Padding(0)
+        };
+        scenarioCard.Controls.Add(_txtScenario);
+        mainLayout.Controls.Add(scenarioCard, 0, 1);
 
         // Hint + counter
         var hintLayout = new TableLayoutPanel

@@ -216,4 +216,36 @@ public class CoreDocumentUiLogicTests
 
         Assert.Contains("The response was cut off", StepCoreDocument.EditorPlaceholder(section, false));
     }
+
+    [Fact]
+    public void DocumentSubtitle_Memo_KeepsOnlyTheOrganizationSentence()
+    {
+        var doc = CaseTestData.SampleMemoDraft().CoreDocument!;
+        doc.Memo.Organization = "Thistle Bracken Advisory Law, retained by Dunder Mifflin. The memorandum will contain approximately 110 paragraphs.";
+
+        Assert.Equal("Thistle Bracken Advisory Law, retained by Dunder Mifflin", StepCoreDocument.DocumentSubtitle(doc));
+    }
+
+    [Fact]
+    public void DocumentSubtitle_KeepsAbbreviations()
+    {
+        var memo = CaseTestData.SampleMemoDraft().CoreDocument!;
+        memo.Memo.Organization = "Acme Inc. Internal Audit";
+        var complaint = CaseTestData.SampleComplaintDraft().CoreDocument!;
+        complaint.Jurisdiction.CourtName = "U.S. District Court. Northern District";
+
+        Assert.Equal("Acme Inc. Internal Audit", StepCoreDocument.DocumentSubtitle(memo));
+        Assert.Equal("U.S. District Court. Northern District", StepCoreDocument.DocumentSubtitle(complaint));
+    }
+
+    [Fact]
+    public void ReadyStatus_Memo_CountsAllParagraphs()
+    {
+        var draft = CaseTestData.SampleMemoDraft();
+        var expected = draft.CoreDocument!.Sections.Sum(s => s.Paragraphs.Count);
+
+        var (text, _) = StepCoreDocument.ReadyStatus(draft, Array.Empty<CoreDocumentIssue>());
+
+        Assert.Equal($"Document ready: {draft.CoreDocument.Sections.Count} sections, {expected} paragraphs.", text);
+    }
 }

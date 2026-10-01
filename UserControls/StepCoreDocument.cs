@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
@@ -12,7 +13,7 @@ namespace ReelDiscovery.UserControls;
 /// </summary>
 public class StepCoreDocument : UserControl, IWizardStep
 {
-    private static readonly Color Accent = Color.FromArgb(0, 120, 215);
+    private static readonly Color Accent = Theme.Accent;
     private const string EmDash = "—";
     private const string DefaultEmptyBody = "Click Generate Document to draft the complaint, petition or investigation memo from your scenario.";
     private const string CancelledText = "Generation cancelled. Completed sections were kept.";
@@ -23,11 +24,14 @@ public class StepCoreDocument : UserControl, IWizardStep
     private Button _btnRegenerateAll = null!;
     private Button _btnResumeAll = null!;
     private Panel _bodyHost = null!;
-    private SplitContainer _split = null!;
+    private CardPanel _issuesCard = null!;
+    private RowStyle _issuesRow = null!;
+    private TableLayoutPanel _bodyLayout = null!;
+    private Label _lblSectionsCount = null!;
     private ListBox _lstSections = null!;
-    private TabControl _tabs = null!;
-    private TabPage _tabSection = null!;
-    private TabPage _tabFull = null!;
+    private ThemedButton _btnShowSection = null!;
+    private ThemedButton _btnShowFull = null!;
+    private Panel _editorHost = null!;
     private Label _lblSectionHeading = null!;
     private Label _lblSectionHint = null!;
     private TextBox _txtEditor = null!;
@@ -39,17 +43,18 @@ public class StepCoreDocument : UserControl, IWizardStep
     private DataGridView _gridIssues = null!;
     private Label _lblNoIssues = null!;
     private Label _lblStatus = null!;
-    private ProgressBar _progress = null!;
+    private SlimProgressBar _progress = null!;
     private Button _btnCancel = null!;
-    private Panel _emptyPanel = null!;
+    private CardPanel _emptyPanel = null!;
     private FlowLayoutPanel _emptyContent = null!;
     private Label _lblEmptyHeading = null!;
     private Label _lblEmptyBody = null!;
+    private SlimProgressBar _emptyBusyBar = null!;
     private Button _btnGenerate = null!;
 
     private CancellationTokenSource? _cts;
     private bool _isGenerating;
-    private bool _splitterInitialized;
+    private bool _showFull;
     private bool _suppressSelection;
     private List<CoreDocumentIssue> _issues = new();
     private string _editorSectionId = string.Empty;
@@ -72,24 +77,29 @@ public class StepCoreDocument : UserControl, IWizardStep
 
     private void InitializeUI()
     {
-        this.Padding = new Padding(20);
+        // Content aligns with the wizard's page margin (the shell supplies it)
+        this.Padding = new Padding(0);
+        this.BackColor = Theme.Background;
+        var gap = LogicalToDeviceUnits(Theme.Gap);
+        var pad = LogicalToDeviceUnits(Theme.CardPadding);
+        var buttonHeight = LogicalToDeviceUnits(34);
 
         var mainLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 5,
-            Padding = new Padding(8)
+            RowCount = 4,
+            Padding = new Padding(0),
+            BackColor = Theme.Background
         };
-
-        // Pixel sizes are scaled to the display DPI (fonts in points already scale); content rows size themselves
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                            // 0: Header
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));                        // 1: Sections + editor
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                            // 2: Issues caption
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(148))); // 3: Issues grid
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                            // 4: Progress strip
+        _issuesRow = new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(184));
+        mainLayout.RowStyles.Add(_issuesRow);                                                 // 2: Issues card
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                            // 3: Status strip
 
-        // Header: document type (title) and court or memo author (subtitle) + Resume All / Regenerate All
+        // ----- Header: document type + court or memo author, actions on the right -----
         var headerLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -97,7 +107,7 @@ public class StepCoreDocument : UserControl, IWizardStep
             RowCount = 2,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(8))
+            Margin = new Padding(0, 0, 0, gap)
         };
         headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -112,7 +122,8 @@ public class StepCoreDocument : UserControl, IWizardStep
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.BottomLeft,
             Margin = new Padding(0),
-            Font = new Font("Segoe UI", 12F, FontStyle.Bold)
+            Font = Theme.TitleFont(),
+            ForeColor = Theme.Text
         };
         _lblTitle.Height = _lblTitle.PreferredHeight;
         _lblSubtitle = new Label
@@ -122,8 +133,8 @@ public class StepCoreDocument : UserControl, IWizardStep
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Padding(0, LogicalToDeviceUnits(2), 0, 0),
-            Font = new Font("Segoe UI", 9F),
-            ForeColor = Color.DimGray
+            Font = Theme.BodyFont(),
+            ForeColor = Theme.TextMuted
         };
         _lblSubtitle.Height = _lblSubtitle.PreferredHeight;
 
@@ -133,14 +144,14 @@ public class StepCoreDocument : UserControl, IWizardStep
             WrapContents = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            Margin = new Padding(LogicalToDeviceUnits(8), 0, 0, 0)
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(gap, 0, 0, 0)
         };
         // Writes every unwritten section (resume after cancel or a fatal stop); shown only when some remain
-        _btnResumeAll = ButtonHelper.CreateButton("Resume All", 110, 32, ButtonStyle.Default);
-        _btnResumeAll.Margin = new Padding(0, 0, LogicalToDeviceUnits(8), 0);
+        _btnResumeAll = ButtonHelper.CreateButton("Resume All", 0, buttonHeight, ButtonStyle.Default);
+        _btnResumeAll.Margin = new Padding(0, 0, LogicalToDeviceUnits(Theme.SmallGap), 0);
         _btnResumeAll.Visible = false;
-        _btnRegenerateAll = ButtonHelper.CreateButton("Regenerate All", 120, 32, ButtonStyle.Default);
+        _btnRegenerateAll = ButtonHelper.CreateButton("Regenerate All", 0, buttonHeight, ButtonStyle.Default);
         _btnRegenerateAll.Margin = new Padding(0);
         headerButtons.Controls.Add(_btnResumeAll);
         headerButtons.Controls.Add(_btnRegenerateAll);
@@ -151,75 +162,126 @@ public class StepCoreDocument : UserControl, IWizardStep
         headerLayout.SetRowSpan(headerButtons, 2);
         mainLayout.Controls.Add(headerLayout, 0, 0);
 
-        // Body host: split view and empty state share row 1
-        _bodyHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
+        // ----- Body: Sections card | editor card (or the full-width empty / outline state) -----
+        _bodyHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0), BackColor = Theme.Background };
 
-        // SplitterDistance is set on first layout (setting it before the control has a width throws)
-        _split = new SplitContainer
+        _bodyLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Orientation = Orientation.Vertical,
-            SplitterWidth = LogicalToDeviceUnits(8),
-            // The editor gets the extra width when the window grows
-            FixedPanel = FixedPanel.Panel1
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0),
+            BackColor = Theme.Background
         };
-        _split.Layout += (s, e) => InitializeSplitter();
-        _split.Panel2.SizeChanged += (s, e) =>
-            _lblSectionHint?.MaximumSize = new Size(Math.Max(0, _split.Panel2.Width - LogicalToDeviceUnits(32)), 0);
-        _split.SizeChanged += (s, e) => InitializeSplitter();
+        _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
+        _bodyLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        // Section list (owner-drawn: heading + colored status suffix)
+        // Sections card
+        var sectionsCard = new CardPanel { Dock = DockStyle.Fill, Padding = new Padding(1), Margin = new Padding(0, 0, gap / 2, 0) };
+        var sectionsLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0) };
+        sectionsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Card header
+        sectionsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 1: Section list
+        var sectionsHeader = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(pad, LogicalToDeviceUnits(14), pad, LogicalToDeviceUnits(10)),
+            Margin = new Padding(0)
+        };
+        sectionsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        sectionsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        sectionsHeader.Controls.Add(new Label { Text = "Sections", AutoSize = true, Font = Theme.LabelFont(), ForeColor = Theme.Text, Margin = new Padding(0) }, 0, 0);
+        _lblSectionsCount = new Label { AutoSize = true, Font = Theme.SmallFont(), ForeColor = Theme.TextMuted, Anchor = AnchorStyles.Right, Margin = new Padding(0) };
+        sectionsHeader.Controls.Add(_lblSectionsCount, 1, 0);
+        sectionsLayout.Controls.Add(sectionsHeader, 0, 0);
+
+        // Section list (owner-drawn rows: status dot, heading, status on the right)
         _lstSections = new ListBox
         {
             Dock = DockStyle.Fill,
             DrawMode = DrawMode.OwnerDrawFixed,
-            ItemHeight = LogicalToDeviceUnits(26),
-            Font = new Font("Segoe UI", 9F),
-            BackColor = SystemColors.Window,
-            IntegralHeight = false
+            ItemHeight = LogicalToDeviceUnits(36),
+            Font = Theme.BodyFont(),
+            BackColor = Theme.Surface,
+            ForeColor = Theme.Text,
+            BorderStyle = BorderStyle.None,
+            IntegralHeight = false,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6))
         };
-        _split.Panel1.Controls.Add(_lstSections);
+        sectionsLayout.Controls.Add(_lstSections, 0, 1);
+        sectionsCard.Controls.Add(sectionsLayout);
+        _bodyLayout.Controls.Add(sectionsCard, 0, 0);
 
-        // Tabs: Section editor + Full Document preview
-        _tabs = new TabControl { Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9F) };
-        _tabSection = new TabPage("Section");
-        _tabFull = new TabPage("Full Document");
+        // Editor card
+        var editorCard = new CardPanel { Dock = DockStyle.Fill, Padding = new Padding(pad), Margin = new Padding(gap / 2, 0, 0, 0) };
+        var editorLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, BackColor = Theme.Surface, Margin = new Padding(0) };
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                          // 0: Heading + view toggle
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                          // 1: Hint for unwritten sections
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));                      // 2: Editor or full preview
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(1))); // 3: Divider
+        editorLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                          // 4: Toolbar
 
-        var sectionLayout = new TableLayoutPanel
+        var editorHeader = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 4,
-            Padding = new Padding(4)
+            ColumnCount = 2,
+            RowCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(Theme.SmallGap))
         };
-        sectionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Section heading
-        sectionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 1: Hint for unwritten sections
-        sectionLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 2: Editor
-        sectionLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 3: Editor toolbar
-
+        editorHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        editorHeader.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _lblSectionHeading = new Label
         {
             Dock = DockStyle.Fill,
             AutoEllipsis = true,
             TextAlign = ContentAlignment.MiddleLeft,
-            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(4)),
-            Font = new Font("Segoe UI", 12F, FontStyle.Bold)
+            Margin = new Padding(0),
+            Font = Theme.HeadingFont(),
+            ForeColor = Theme.Text
         };
         _lblSectionHeading.Height = _lblSectionHeading.PreferredHeight;
-        sectionLayout.Controls.Add(_lblSectionHeading, 0, 0);
+        editorHeader.Controls.Add(_lblSectionHeading, 0, 0);
+
+        // Section / Full document view toggle
+        var toggle = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(gap, 0, 0, 0),
+            BackColor = Theme.Surface
+        };
+        _btnShowSection = (ThemedButton)ButtonHelper.CreateButton("Section", 0, buttonHeight, ButtonStyle.Toggle);
+        _btnShowSection.Margin = new Padding(0, 0, LogicalToDeviceUnits(4), 0);
+        _btnShowSection.Selected = true;
+        _btnShowFull = (ThemedButton)ButtonHelper.CreateButton("Full document", 0, buttonHeight, ButtonStyle.Toggle);
+        _btnShowFull.Margin = new Padding(0);
+        toggle.Controls.Add(_btnShowSection);
+        toggle.Controls.Add(_btnShowFull);
+        editorHeader.Controls.Add(toggle, 1, 0);
+        editorLayout.Controls.Add(editorHeader, 0, 0);
 
         // Explains an empty editor (writing, not written yet, failed); hidden once the section has text
         _lblSectionHint = new Label
         {
             AutoSize = true,
             Dock = DockStyle.Fill,
-            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6)),
-            Font = new Font("Segoe UI", 9F),
-            ForeColor = Color.DimGray,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(Theme.SmallGap)),
+            Font = Theme.BodyFont(),
+            ForeColor = Theme.TextMuted,
             Visible = false
         };
-        sectionLayout.Controls.Add(_lblSectionHint, 0, 1);
+        editorLayout.Controls.Add(_lblSectionHint, 0, 1);
 
+        _editorHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0), BackColor = Theme.Surface };
         _txtEditor = new TextBox
         {
             Dock = DockStyle.Fill,
@@ -227,12 +289,33 @@ public class StepCoreDocument : UserControl, IWizardStep
             ScrollBars = ScrollBars.Vertical,
             WordWrap = true,
             AcceptsReturn = true,
+            BorderStyle = BorderStyle.None,
             // Default 32,767 would silently truncate long sections
             MaxLength = 0,
-            Font = new Font("Segoe UI", 10F),
-            Enabled = false
+            Font = Theme.EditorFont(),
+            ForeColor = Theme.Text,
+            BackColor = Theme.Surface,
+            ReadOnly = true
         };
-        sectionLayout.Controls.Add(_txtEditor, 0, 2);
+        _txtPreview = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            ReadOnly = true,
+            ScrollBars = ScrollBars.Vertical,
+            WordWrap = true,
+            BorderStyle = BorderStyle.None,
+            MaxLength = 0,
+            Font = Theme.EditorFont(),
+            ForeColor = Theme.Text,
+            BackColor = Theme.Surface,
+            Visible = false
+        };
+        _editorHost.Controls.Add(_txtEditor);
+        _editorHost.Controls.Add(_txtPreview);
+        editorLayout.Controls.Add(_editorHost, 0, 2);
+
+        editorLayout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Theme.Border, Margin = new Padding(0) }, 0, 3);
 
         // Toolbar: Apply Edits | guidance (stretches) | Regenerate Section
         var toolbar = new TableLayoutPanel
@@ -242,96 +325,112 @@ public class StepCoreDocument : UserControl, IWizardStep
             RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Margin = new Padding(0, LogicalToDeviceUnits(4), 0, 0)
+            Margin = new Padding(0, LogicalToDeviceUnits(12), 0, 0),
+            BackColor = Theme.Surface
         };
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _btnApply = ButtonHelper.CreateButton("Apply Edits", 100, 32, ButtonStyle.Default);
+        _btnApply = ButtonHelper.CreateButton("Apply Edits", 0, buttonHeight, ButtonStyle.Default);
         _btnApply.Margin = new Padding(0);
         _btnApply.Enabled = false;
+        _btnRegenerateSection = ButtonHelper.CreateButton("Regenerate Section", 0, buttonHeight, ButtonStyle.Primary);
+        _btnRegenerateSection.Margin = new Padding(0);
+        _btnRegenerateSection.Enabled = false;
+
+        // Guidance box: borderless TextBox inside a rounded border matching the buttons' height
         _txtGuidance = new TextBox
         {
             Dock = DockStyle.Fill,
-            Font = new Font("Segoe UI", 10F),
-            PlaceholderText = "Optional guidance for Regenerate, e.g. add the March 3 site meeting",
-            Margin = new Padding(LogicalToDeviceUnits(8), LogicalToDeviceUnits(3), LogicalToDeviceUnits(8), 0)
+            BorderStyle = BorderStyle.None,
+            Font = Theme.BodyFont(),
+            ForeColor = Theme.Text,
+            BackColor = Theme.Surface,
+            PlaceholderText = "Optional guidance for Regenerate Section, e.g. add the March 3 site meeting"
         };
-        _btnRegenerateSection = ButtonHelper.CreateButton("Regenerate Section", 150, 32, ButtonStyle.Primary);
-        _btnRegenerateSection.Margin = new Padding(0);
-        _btnRegenerateSection.Enabled = false;
-        toolbar.Controls.Add(_btnApply, 0, 0);
-        toolbar.Controls.Add(_txtGuidance, 1, 0);
-        toolbar.Controls.Add(_btnRegenerateSection, 2, 0);
-        sectionLayout.Controls.Add(toolbar, 0, 3);
-        _tabSection.Controls.Add(sectionLayout);
-
-        _txtPreview = new TextBox
+        var guidanceHost = new CardPanel
         {
             Dock = DockStyle.Fill,
-            Multiline = true,
-            ReadOnly = true,
-            ScrollBars = ScrollBars.Vertical,
-            WordWrap = true,
-            MaxLength = 0,
-            Font = new Font("Segoe UI", 10F),
-            BackColor = SystemColors.Window
+            Radius = Theme.Radius,
+            BorderColor = Theme.BorderStrong,
+            Margin = new Padding(LogicalToDeviceUnits(Theme.SmallGap), 0, LogicalToDeviceUnits(Theme.SmallGap), 0)
         };
-        _tabFull.Controls.Add(_txtPreview);
+        var guidanceVertical = Math.Max(LogicalToDeviceUnits(4), (_btnApply.Height - _txtGuidance.PreferredHeight) / 2);
+        guidanceHost.Padding = new Padding(LogicalToDeviceUnits(10), guidanceVertical, LogicalToDeviceUnits(10), 0);
+        guidanceHost.Height = _btnApply.Height;
+        guidanceHost.Controls.Add(_txtGuidance);
 
-        _tabs.TabPages.Add(_tabSection);
-        _tabs.TabPages.Add(_tabFull);
-        _split.Panel2.Controls.Add(_tabs);
-        _bodyHost.Controls.Add(_split);
+        toolbar.Controls.Add(_btnApply, 0, 0);
+        toolbar.Controls.Add(guidanceHost, 1, 0);
+        toolbar.Controls.Add(_btnRegenerateSection, 2, 0);
+        editorLayout.Controls.Add(toolbar, 0, 4);
+        editorCard.Controls.Add(editorLayout);
+        _bodyLayout.Controls.Add(editorCard, 1, 0);
+        _bodyHost.Controls.Add(_bodyLayout);
 
-        // Empty state (cancelled/fatal before any section was written, or refused)
-        _emptyPanel = new Panel { Dock = DockStyle.Fill, Visible = false };
+        // Full-width state card: no document yet, a stopped run, or the outline being written
+        _emptyPanel = new CardPanel { Dock = DockStyle.Fill, Visible = false };
         _emptyContent = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Surface
         };
         _lblEmptyHeading = new Label
         {
             Text = "No core document yet",
             AutoSize = true,
-            Font = new Font("Segoe UI", 12F, FontStyle.Bold),
-            Margin = new Padding(0, 0, 0, 8)
+            Font = Theme.HeadingFont(),
+            ForeColor = Theme.Text,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(Theme.SmallGap))
         };
         _lblEmptyBody = new Label
         {
             Text = DefaultEmptyBody,
             AutoSize = true,
             MaximumSize = new Size(LogicalToDeviceUnits(520), 0),
-            Font = new Font("Segoe UI", 9F),
-            Margin = new Padding(0, 0, 0, 16)
+            Font = Theme.BodyFont(),
+            ForeColor = Theme.TextMuted,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(20))
         };
-        _btnGenerate = ButtonHelper.CreateButton("Generate Document", 160, 32, ButtonStyle.Primary);
+        _emptyBusyBar = new SlimProgressBar
+        {
+            Width = LogicalToDeviceUnits(360),
+            Height = LogicalToDeviceUnits(6),
+            Marquee = true,
+            Visible = false,
+            Margin = new Padding(0, LogicalToDeviceUnits(4), 0, LogicalToDeviceUnits(8))
+        };
+        _btnGenerate = ButtonHelper.CreateButton("Generate Document", 0, buttonHeight, ButtonStyle.Primary);
+        _btnGenerate.Margin = new Padding(0);
         _emptyContent.Controls.Add(_lblEmptyHeading);
         _emptyContent.Controls.Add(_lblEmptyBody);
+        _emptyContent.Controls.Add(_emptyBusyBar);
         _emptyContent.Controls.Add(_btnGenerate);
         _emptyPanel.Controls.Add(_emptyContent);
-        _emptyPanel.Resize += (s, e) => CenterEmptyContent();
-        _emptyContent.SizeChanged += (s, e) => CenterEmptyContent();
         _bodyHost.Controls.Add(_emptyPanel);
 
         mainLayout.Controls.Add(_bodyHost, 0, 1);
 
-        // Issues caption
+        // ----- Issues card -----
+        var issuesCard = new CardPanel { Dock = DockStyle.Fill, Padding = new Padding(1), Margin = new Padding(0, gap, 0, 0) };
+        _issuesCard = issuesCard;
+        var issuesLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Theme.Surface, Margin = new Padding(0) };
+        issuesLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Caption
+        issuesLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 1: Grid or no-issues text
         _lblIssues = new Label
         {
             Text = "Issues",
             AutoSize = true,
-            Margin = new Padding(0, LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(4)),
-            TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 9F, FontStyle.Bold)
+            Margin = new Padding(pad - 1, LogicalToDeviceUnits(12), pad, LogicalToDeviceUnits(8)),
+            Font = Theme.LabelFont(),
+            ForeColor = Theme.Text
         };
-        mainLayout.Controls.Add(_lblIssues, 0, 2);
+        issuesLayout.Controls.Add(_lblIssues, 0, 0);
 
-        // Issues grid (or the no-issues label)
-        var issuesHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
+        var issuesHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6)), BackColor = Theme.Surface };
         _gridIssues = new DataGridView
         {
             Dock = DockStyle.Fill,
@@ -339,19 +438,30 @@ public class StepCoreDocument : UserControl, IWizardStep
             AutoGenerateColumns = false,
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
+            AllowUserToResizeRows = false,
             RowHeadersVisible = false,
             MultiSelect = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            BackgroundColor = SystemColors.Window,
-            BorderStyle = BorderStyle.FixedSingle,
+            BackgroundColor = Theme.Surface,
+            BorderStyle = BorderStyle.None,
             CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-            GridColor = Color.FromArgb(224, 224, 224),
-            ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
+            GridColor = Theme.Border,
+            EnableHeadersVisualStyles = false,
+            ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
             ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
-            Font = new Font("Segoe UI", 9F)
+            Font = Theme.BodyFont()
         };
-        _gridIssues.Columns.Add(new DataGridViewTextBoxColumn { Name = "Severity", HeaderText = "Severity", Width = LogicalToDeviceUnits(80) });
-        _gridIssues.Columns.Add(new DataGridViewTextBoxColumn { Name = "Section", HeaderText = "Section", Width = LogicalToDeviceUnits(220) });
+        _gridIssues.ColumnHeadersDefaultCellStyle.BackColor = Theme.SurfaceMuted;
+        _gridIssues.ColumnHeadersDefaultCellStyle.ForeColor = Theme.TextMuted;
+        _gridIssues.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.SurfaceMuted;
+        _gridIssues.ColumnHeadersDefaultCellStyle.Font = Theme.SmallFont();
+        _gridIssues.ColumnHeadersDefaultCellStyle.Padding = new Padding(pad - 4, LogicalToDeviceUnits(6), 0, LogicalToDeviceUnits(6));
+        _gridIssues.DefaultCellStyle.Padding = new Padding(pad - 4, 0, 0, 0);
+        _gridIssues.DefaultCellStyle.SelectionBackColor = Theme.AccentSoft;
+        _gridIssues.DefaultCellStyle.SelectionForeColor = Theme.Text;
+        _gridIssues.RowTemplate.Height = LogicalToDeviceUnits(32);
+        _gridIssues.Columns.Add(new DataGridViewTextBoxColumn { Name = "Severity", HeaderText = "Severity", Width = LogicalToDeviceUnits(96) });
+        _gridIssues.Columns.Add(new DataGridViewTextBoxColumn { Name = "Section", HeaderText = "Section", Width = LogicalToDeviceUnits(240) });
         _gridIssues.Columns.Add(new DataGridViewTextBoxColumn
         {
             Name = "Issue",
@@ -363,15 +473,18 @@ public class StepCoreDocument : UserControl, IWizardStep
             Text = "No issues found. No case-law citations or real names detected.",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.TopLeft,
-            Font = new Font("Segoe UI", 9F),
-            ForeColor = Color.Green,
+            Padding = new Padding(pad - 1, 0, pad, 0),
+            Font = Theme.BodyFont(),
+            ForeColor = Theme.Success,
             Visible = false
         };
         issuesHost.Controls.Add(_gridIssues);
         issuesHost.Controls.Add(_lblNoIssues);
-        mainLayout.Controls.Add(issuesHost, 0, 3);
+        issuesLayout.Controls.Add(issuesHost, 0, 1);
+        issuesCard.Controls.Add(issuesLayout);
+        mainLayout.Controls.Add(issuesCard, 0, 2);
 
-        // Progress strip: status + progress bar + cancel (bar and cancel only while generating)
+        // ----- Status strip: status + progress bar + cancel (bar and cancel only while generating) -----
         var progressStrip = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -379,42 +492,43 @@ public class StepCoreDocument : UserControl, IWizardStep
             RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Margin = new Padding(0, LogicalToDeviceUnits(8), 0, 0)
+            Margin = new Padding(0, LogicalToDeviceUnits(12), 0, 0)
         };
         progressStrip.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         progressStrip.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         progressStrip.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _btnCancel = ButtonHelper.CreateButton("Cancel Generation", 0, buttonHeight, ButtonStyle.Danger);
+        _btnCancel.Margin = new Padding(0);
+        _btnCancel.Visible = false;
         _lblStatus = new Label
         {
             Dock = DockStyle.Fill,
-            MinimumSize = new Size(0, LogicalToDeviceUnits(32)),
+            MinimumSize = new Size(0, _btnCancel.Height),
             AutoEllipsis = true,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 9F)
+            Margin = new Padding(0),
+            Font = Theme.BodyFont()
         };
-        _progress = new ProgressBar
+        _progress = new SlimProgressBar
         {
-            Width = LogicalToDeviceUnits(200),
-            Height = LogicalToDeviceUnits(16),
-            Style = ProgressBarStyle.Continuous,
-            Anchor = AnchorStyles.Left,
-            Margin = new Padding(LogicalToDeviceUnits(8), 0, LogicalToDeviceUnits(8), 0),
+            Width = LogicalToDeviceUnits(220),
+            Height = LogicalToDeviceUnits(6),
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
+            Margin = new Padding(gap, 0, gap, 0),
             Visible = false
         };
-        _btnCancel = ButtonHelper.CreateButton("Cancel Generation", 140, 32, ButtonStyle.Danger);
-        _btnCancel.Margin = new Padding(0);
-        _btnCancel.Visible = false;
         progressStrip.Controls.Add(_lblStatus, 0, 0);
         progressStrip.Controls.Add(_progress, 1, 0);
         progressStrip.Controls.Add(_btnCancel, 2, 0);
-        mainLayout.Controls.Add(progressStrip, 0, 4);
+        mainLayout.Controls.Add(progressStrip, 0, 3);
 
         this.Controls.Add(mainLayout);
 
         // Wire handlers only after every control exists (handlers read other controls)
         _lstSections.DrawItem += LstSections_DrawItem;
         _lstSections.SelectedIndexChanged += LstSections_SelectedIndexChanged;
-        _tabs.SelectedIndexChanged += (s, e) => RefreshPreview();
+        _btnShowSection.Click += (s, e) => SetPreviewMode(false);
+        _btnShowFull.Click += (s, e) => SetPreviewMode(true);
         _btnRegenerateAll.Click += BtnRegenerateAll_Click;
         _btnResumeAll.Click += async (s, e) => await RunGenerationAsync(fullRegenerate: false);
         // An existing outline is resumed, never silently replaced (CR-02, WR-09); Regenerate All asks first
@@ -425,19 +539,24 @@ public class StepCoreDocument : UserControl, IWizardStep
         _btnApply.Click += (s, e) => ApplyPendingEdit();
         _btnRegenerateSection.Click += async (s, e) => await RegenerateSelectedSectionAsync();
         _gridIssues.CellDoubleClick += GridIssues_CellDoubleClick;
+        editorCard.SizeChanged += (s, e) =>
+            _lblSectionHint.MaximumSize = new Size(Math.Max(0, editorCard.Width - 2 * pad), 0);
+        _emptyPanel.Resize += (s, e) => CenterEmptyContent();
+        _emptyContent.SizeChanged += (s, e) => CenterEmptyContent();
     }
 
-    private void InitializeSplitter()
+    private void SetPreviewMode(bool showFull)
     {
-        var minList = LogicalToDeviceUnits(200);
-        if (_splitterInitialized || _split.Width < minList * 3)
-            return;
+        if (showFull && !_showFull)
+            ApplyPendingEdit();
 
-        // About 30% for the section list, kept between 240 and 380 logical pixels
-        _splitterInitialized = true;
-        _split.Panel1MinSize = minList;
-        _split.Panel2MinSize = minList;
-        _split.SplitterDistance = Math.Clamp(_split.Width * 3 / 10, LogicalToDeviceUnits(240), LogicalToDeviceUnits(380));
+        _showFull = showFull;
+        _btnShowSection.Selected = !showFull;
+        _btnShowFull.Selected = showFull;
+        _txtPreview.Visible = showFull;
+        _txtEditor.Visible = !showFull;
+        _lblSectionHint.Visible = !showFull && _lblSectionHint.Text.Length > 0;
+        RefreshPreview();
     }
 
     private void CenterEmptyContent()
@@ -496,7 +615,17 @@ public class StepCoreDocument : UserControl, IWizardStep
         var detail = doc.DocumentType == CoreDocumentType.InvestigationMemo
             ? doc.Memo.Organization
             : doc.Jurisdiction.CourtName;
-        return string.Join(' ', (detail ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        var text = string.Join(' ', (detail ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+        // A model sometimes runs on past the memo author's name ("..., retained by X. The memorandum will contain ..."):
+        // keep the first sentence. Abbreviations such as "Inc." or "U.S." are not sentence ends.
+        if (doc.DocumentType == CoreDocumentType.InvestigationMemo)
+        {
+            var sentenceEnd = Regex.Match(text, @"(?<=[A-Za-z]{4})\. (?=[A-Z])", RegexOptions.None, TimeSpan.FromMilliseconds(200));
+            if (sentenceEnd.Success)
+                return text[..sentenceEnd.Index];
+        }
+        return text;
     }
 
     /// <summary>
@@ -529,6 +658,13 @@ public class StepCoreDocument : UserControl, IWizardStep
         {
             var doc = draft.CoreDocument;
             var sections = doc?.Sections.Count ?? 0;
+            // Memo paragraphs are not numbered, so count all of them
+            if (doc?.DocumentType == CoreDocumentType.InvestigationMemo)
+            {
+                var memoParagraphs = doc.Sections.Sum(sec => sec.Paragraphs.Count);
+                return ($"Document ready: {sections} sections, {memoParagraphs} paragraphs.", Color.Green);
+            }
+
             var paragraphs = doc == null ? 0 : CoreDocumentAssembler.CountNumberedParagraphs(doc);
             return ($"Document ready: {sections} sections, {paragraphs} numbered paragraphs.", Color.Green);
         }
@@ -627,12 +763,35 @@ public class StepCoreDocument : UserControl, IWizardStep
 
         RefreshPreview();
 
-        _emptyPanel.Visible = ShowsEmptyState(doc, _isGenerating);
-        _split.Visible = !_emptyPanel.Visible;
+        // Full-width state card: no document, a stopped run, or the outline still being written
+        var writingOutline = _isGenerating && (doc == null || doc.Sections.Count == 0);
+        _emptyPanel.Visible = writingOutline || ShowsEmptyState(doc, _isGenerating);
+        _bodyLayout.Visible = !_emptyPanel.Visible;
+        _emptyBusyBar.Visible = writingOutline;
+        _btnGenerate.Visible = !writingOutline;
+        if (writingOutline)
+        {
+            _lblEmptyHeading.Text = "Writing the outline...";
+            _lblEmptyBody.Text = "Planning the parties, court, timeline and sections. The sections appear here as soon as the outline is ready, usually within a minute.";
+        }
+        else if (_lblEmptyHeading.Text != "No core document yet")
+        {
+            _lblEmptyHeading.Text = "No core document yet";
+        }
         if (_emptyPanel.Visible)
             CenterEmptyContent();
 
+        var total = doc?.Sections.Count ?? 0;
+        var written = doc?.Sections.Count(sec => sec.Status == SectionStatus.Ready) ?? 0;
+        _lblSectionsCount.Text = total == 0 ? string.Empty : $"{written} of {total} written";
+
         _btnRegenerateAll.Enabled = !_isGenerating && doc != null;
+        _btnRegenerateAll.Visible = doc != null;
+
+        // The issues card appears once there is a document to check
+        var showIssues = !_emptyPanel.Visible;
+        _issuesCard.Visible = showIssues;
+        _issuesRow.Height = showIssues ? LogicalToDeviceUnits(184) : 0;
 
         // Hidden in the empty state: its Generate Document button already resumes
         _btnResumeAll.Visible = !_emptyPanel.Visible && HasUnfinishedSections(doc);
@@ -650,7 +809,7 @@ public class StepCoreDocument : UserControl, IWizardStep
 
     private void RefreshPreview()
     {
-        if (_tabs.SelectedTab != _tabFull)
+        if (!_showFull)
             return;
 
         var doc = _state?.Case.CoreDocument;
@@ -665,34 +824,75 @@ public class StepCoreDocument : UserControl, IWizardStep
         var section = (CoreDocumentSection)_lstSections.Items[e.Index];
         var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
         var font = e.Font ?? _lstSections.Font;
+        var g = e.Graphics;
+        var bounds = e.Bounds;
 
-        using (var background = new SolidBrush(selected ? Accent : _lstSections.BackColor))
+        using (var background = new SolidBrush(selected ? Theme.AccentSoft : Theme.Surface))
         {
-            e.Graphics.FillRectangle(background, e.Bounds);
+            g.FillRectangle(background, bounds);
         }
-
-        const TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-            TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
-        var textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y, Math.Max(0, e.Bounds.Width - 4), e.Bounds.Height);
-        var heading = section.Heading;
-        TextRenderer.DrawText(e.Graphics, heading, font, textBounds,
-            selected ? Color.White : SystemColors.ControlText, flags | TextFormatFlags.EndEllipsis);
+        if (selected)
+        {
+            using var bar = new SolidBrush(Theme.Accent);
+            g.FillRectangle(bar, bounds.X, bounds.Y, LogicalToDeviceUnits(3), bounds.Height);
+        }
 
         var sectionIssues = IssuesFor(section.Id);
-        var suffix = SectionSuffix(section, sectionIssues);
-        if (suffix.Length > 0)
+        var pad = LogicalToDeviceUnits(Theme.CardPadding);
+
+        // Status dot
+        var dot = LogicalToDeviceUnits(8);
+        var dotRect = new Rectangle(bounds.X + pad, bounds.Y + (bounds.Height - dot) / 2, dot, dot);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (var dotBrush = new SolidBrush(StatusDotColor(section, sectionIssues)))
         {
-            var headingWidth = TextRenderer.MeasureText(e.Graphics, heading, font, Size.Empty, flags).Width;
-            var suffixBounds = new Rectangle(textBounds.X + headingWidth, textBounds.Y,
-                textBounds.Width - headingWidth, textBounds.Height);
-            if (suffixBounds.Width > 0)
-            {
-                TextRenderer.DrawText(e.Graphics, suffix, font, suffixBounds,
-                    selected ? Color.White : SectionSuffixColor(section, sectionIssues), flags | TextFormatFlags.EndEllipsis);
-            }
+            g.FillEllipse(dotBrush, dotRect);
+        }
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.Default;
+
+        const TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+            TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
+
+        // Status text, right-aligned
+        var status = StatusLabel(SectionSuffix(section, sectionIssues));
+        var statusWidth = 0;
+        if (status.Length > 0)
+        {
+            using var small = Theme.SmallFont();
+            // A little slack so the measured text is never ellipsized when drawn
+            statusWidth = TextRenderer.MeasureText(g, status, small, Size.Empty, flags & ~TextFormatFlags.EndEllipsis).Width + LogicalToDeviceUnits(4);
+            var statusBounds = new Rectangle(bounds.Right - pad - statusWidth, bounds.Y, statusWidth, bounds.Height);
+            var statusColor = section.Status == SectionStatus.Pending ? Theme.TextMuted : SectionSuffixColor(section, sectionIssues);
+            TextRenderer.DrawText(g, status, small, statusBounds, statusColor, flags | TextFormatFlags.Right);
         }
 
-        e.DrawFocusRectangle();
+        // Heading fills the space between the dot and the status
+        var textLeft = dotRect.Right + LogicalToDeviceUnits(10);
+        var textRight = bounds.Right - pad - (statusWidth > 0 ? statusWidth + LogicalToDeviceUnits(12) : 0);
+        var headingBounds = new Rectangle(textLeft, bounds.Y, Math.Max(0, textRight - textLeft), bounds.Height);
+        TextRenderer.DrawText(g, section.Heading, font, headingBounds, selected ? Theme.Accent : Theme.Text, flags | TextFormatFlags.Left);
+    }
+
+    /// <summary>
+    /// Status dot: green when written cleanly, blue while writing, grey when pending, red on failure or errors, amber on warnings.
+    /// </summary>
+    public static Color StatusDotColor(CoreDocumentSection s, IReadOnlyCollection<CoreDocumentIssue> sectionIssues) => s.Status switch
+    {
+        SectionStatus.Writing => Theme.Accent,
+        SectionStatus.Pending => Theme.BorderStrong,
+        SectionStatus.Failed => Theme.Danger,
+        _ when sectionIssues.Any(i => i.Severity == IssueSeverity.Error) => Theme.Danger,
+        _ when sectionIssues.Count > 0 => Theme.Warning,
+        _ => Theme.Success
+    };
+
+    /// <summary>
+    /// Row status text from the list suffix: " — 2 issues" becomes "2 issues", " — pending" becomes "Pending".
+    /// </summary>
+    public static string StatusLabel(string suffix)
+    {
+        var text = suffix.Trim().TrimStart('—').Trim();
+        return text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
     }
 
     private void LstSections_SelectedIndexChanged(object? sender, EventArgs e)
@@ -761,7 +961,7 @@ public class StepCoreDocument : UserControl, IWizardStep
     private void SetSectionHint(string text)
     {
         _lblSectionHint.Text = text;
-        _lblSectionHint.Visible = text.Length > 0;
+        _lblSectionHint.Visible = text.Length > 0 && !_showFull;
     }
 
     private void UpdateEditorEnabled()
@@ -769,9 +969,9 @@ public class StepCoreDocument : UserControl, IWizardStep
         var hasSection = !string.IsNullOrEmpty(_editorSectionId);
         // Sections can be read while a run writes; editing waits until it finishes
         _lstSections.Enabled = true;
-        _txtEditor.Enabled = hasSection;
-        _txtEditor.ReadOnly = _isGenerating;
-        _txtEditor.BackColor = SystemColors.Window;
+        _txtEditor.Enabled = true;
+        _txtEditor.ReadOnly = _isGenerating || !hasSection;
+        _txtEditor.BackColor = Theme.Surface;
         _txtGuidance.Enabled = !_isGenerating && hasSection;
         _btnRegenerateSection.Enabled = !_isGenerating && hasSection;
         _btnApply.Enabled = !_isGenerating && hasSection && _txtEditor.Text != _editorOriginalText;
@@ -849,6 +1049,7 @@ public class StepCoreDocument : UserControl, IWizardStep
     {
         _isGenerating = busy;
         _progress.Visible = busy;
+        _progress.Marquee = busy;
         _btnCancel.Visible = busy;
         _btnCancel.Enabled = busy;
         UpdateEditorEnabled();
@@ -879,7 +1080,7 @@ public class StepCoreDocument : UserControl, IWizardStep
                 var doc = _state.Case.CoreDocument;
                 var max = Math.Max(1, doc?.Sections.Count ?? 1);
                 var ready = doc?.Sections.Count(s => s.Status == SectionStatus.Ready) ?? 0;
-                _progress.Value = 0;
+                _progress.Marquee = doc == null || doc.Sections.Count == 0;
                 _progress.Maximum = max;
                 _progress.Value = Math.Min(max, ready);
                 RefreshAll();
@@ -1054,7 +1255,7 @@ public class StepCoreDocument : UserControl, IWizardStep
             return;
 
         _lstSections.SelectedIndex = index; // Applies pending edits, then loads the section
-        _tabs.SelectedTab = _tabSection;
+        SetPreviewMode(false);
         _txtEditor.Focus();
     }
 

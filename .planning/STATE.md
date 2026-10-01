@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-11-PLAN.md
-last_updated: "2026-10-01T22:04:26.877Z"
+stopped_at: Completed 03-13-PLAN.md
+last_updated: "2026-10-01T22:19:48.093Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 35
-  percent: 83
+  completed_plans: 36
+  percent: 86
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 13 of 20
+Plan: 14 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -85,6 +85,7 @@ Progress: [████████░░] 83%
 | Phase 03 P10 | 8min | 2 tasks | 3 files |
 | Phase 03 P12 | 8min | 2 tasks | 8 files |
 | Phase 03 P11 | 35min | 2 tasks | 6 files |
+| Phase 03 P13 | 14min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -179,6 +180,10 @@ Recent decisions affecting current work:
 - [03-12]: GuideTabPanel.BuildColumns runs from the base ctor (Grid + LDU only); the detail column switches to Absolute LDU(320)+LDU(8) when 40% is narrower; empty-detail text is padded to center on the grid's empty-text line
 - [03-12]: LinkPicker puts the locked suffix after the name (before " — "), lists locked then checked then the rest, and keeps dangling checked ids in CheckedIds
 - [03-12]: GUIDE-01/GUIDE-08 left Pending: 03-12 is display/editing infrastructure; the editable Cast/Facts tabs and step shell come in 03-13..03-16
+- [03-13]: Cast grid ID 72 / Tier 100 (UI-SPEC 64/88 cut off CH-006 and Background); Fill minimums Name 112, Title 92, Organization 92 keep 900x600 free of a horizontal scrollbar
+- [03-13]: GuideTabPanel combos (AddCombo, AddPairedCombos) sit in the text fields' rounded 34 px border with text on the 10 px inner edge; a disabled combo is shown as a plain label (no grey system frame)
+- [03-13]: Grid Name edits commit as CastField.FullName (atomic split at the last space); detail fields rebuild only when the character or tier changes, combo commits are deferred with BeginInvoke
+- [03-13]: GUIDE-08/GUIDE-09 left Pending: the Facts/Values tabs and the step shell (stale banner) come in 03-14..03-16; GUIDE-02/03/04 marked Complete (generation done earlier, now visible in the Cast tab)
 - [03-17]: Case Summary Finish/Back are disabled while an export or folder move runs (CanMoveNext = !_busy)
 - [03-17]: Export All stops at the first failure and keeps written documents; an open-in-Word target is detected via sharing/lock HResults or a FileShare.None probe
 - [03-17]: Data labels use UseMnemonic = false so "&" renders (Key Facts & Events, case titles, paths); Last saved falls back to case.json write time
@@ -203,6 +208,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T22:04:26.872Z
-Stopped at: Completed 03-11-PLAN.md
+Last session: 2026-10-01T22:19:42.392Z
+Stopped at: Completed 03-13-PLAN.md
 Resume file: None

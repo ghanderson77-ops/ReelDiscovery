@@ -38,9 +38,9 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Case Guide (Cast, Facts, Issues)
 
 - [ ] **GUIDE-01**: System extracts an issue list (allegations/counts) with stable IDs from the core document
-- [ ] **GUIDE-02**: System generates a Cast of Key Characters with stable IDs: name, title, organization, email address, active date range, summary of key involvement
-- [ ] **GUIDE-03**: Cast includes counsel characters (in-house and outside) so privileged communications can exist
-- [ ] **GUIDE-04**: Cast includes ancillary (non-key) characters per organization for non-relevant and background traffic
+- [x] **GUIDE-02**: System generates a Cast of Key Characters with stable IDs: name, title, organization, email address, active date range, summary of key involvement
+- [x] **GUIDE-03**: Cast includes counsel characters (in-house and outside) so privileged communications can exist
+- [x] **GUIDE-04**: Cast includes ancillary (non-key) characters per organization for non-relevant and background traffic
 - [ ] **GUIDE-05**: System generates a Summary of Key Facts & Events as a dated timeline with stable IDs, each fact linked to one or more issues, the actors involved, and who knew about it
 - [ ] **GUIDE-06**: System maintains a registry of canonical values (amounts, invoice/change-order numbers, document titles, project names) that all generated content must use
 - [ ] **GUIDE-07**: A deterministic validator checks the guide for consistency (dates within range, facts reference existing cast/issues, no orphan IDs)
@@ -192,9 +192,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CASE-06 | Phase 2 | Complete |
 | CASE-07 | Phase 2 | Complete |
 | GUIDE-01 | Phase 3 | Pending |
-| GUIDE-02 | Phase 3 | Pending |
-| GUIDE-03 | Phase 3 | Pending |
-| GUIDE-04 | Phase 3 | Pending |
+| GUIDE-02 | Phase 3 | Complete |
+| GUIDE-03 | Phase 3 | Complete |
+| GUIDE-04 | Phase 3 | Complete |
 | GUIDE-05 | Phase 3 | Pending |
 | GUIDE-06 | Phase 3 | Pending |
 | GUIDE-07 | Phase 3 | Pending |

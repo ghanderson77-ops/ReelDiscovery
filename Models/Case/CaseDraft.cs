@@ -27,6 +27,7 @@ public enum CourtPreference
 public class CaseDraft
 {
     public const int MaxScenarioLength = 8_000;
+    public const int CurrentFormatVersion = 1;
 
     // Shared with Phase 3 case.json; enums as strings
     public static readonly JsonSerializerOptions JsonOptions = new()
@@ -35,6 +36,16 @@ public class CaseDraft
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() }
     };
+
+    public int FormatVersion { get; set; } = CurrentFormatVersion;
+    public Guid CaseId { get; set; } = Guid.NewGuid();
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Furthest wizard stage reached; only ever moves forward (AdvanceStage).
+    /// </summary>
+    public CaseStage Stage { get; set; } = CaseStage.Described;
 
     public string Scenario { get; set; } = string.Empty;
 
@@ -56,6 +67,14 @@ public class CaseDraft
     /// </summary>
     public int Revision { get; set; }
 
+    public CaseGuide? Guide { get; set; }
+
+    /// <summary>
+    /// Case folder on disk; set by the case store when loading or saving, never written into case.json.
+    /// </summary>
+    [JsonIgnore]
+    public string FolderPath { get; set; } = string.Empty;
+
     [JsonIgnore]
     public ComplexityPreset Preset => ComplexityPreset.Get(Complexity);
 
@@ -64,6 +83,59 @@ public class CaseDraft
     public static CaseDraft FromJson(string json) =>
         JsonSerializer.Deserialize<CaseDraft>(json, JsonOptions)
         ?? throw new InvalidOperationException("The case draft file is empty.");
+
+    public void AdvanceStage(CaseStage stage)
+    {
+        if (stage > Stage)
+            Stage = stage;
+    }
+
+    /// <summary>
+    /// Repairs a draft loaded from untrusted case.json: null lists, strings and sub-objects become empty values (IN-03); never throws.
+    /// </summary>
+    public void Normalize()
+    {
+        Scenario ??= string.Empty;
+        EffectiveScenario ??= string.Empty;
+        StatePreference ??= string.Empty;
+        EntityCheckHash ??= string.Empty;
+        Substitutions = CaseGuide.CleanList(Substitutions);
+        foreach (var substitution in Substitutions)
+        {
+            substitution.Original ??= string.Empty;
+            substitution.Aliases = CaseGuide.CleanStrings(substitution.Aliases);
+            substitution.Reason ??= string.Empty;
+            substitution.Substitute ??= string.Empty;
+        }
+
+        if (CoreDocument != null)
+        {
+            var doc = CoreDocument;
+            doc.Jurisdiction ??= new();
+            doc.Counsel ??= new();
+            doc.Memo ??= new();
+            doc.Title ??= string.Empty;
+            doc.FilingDate ??= string.Empty;
+            doc.TimelineStart ??= string.Empty;
+            doc.TimelineEnd ??= string.Empty;
+            doc.SourceHash ??= string.Empty;
+            doc.Parties = CaseGuide.CleanList(doc.Parties);
+            doc.Counts = CaseGuide.CleanList(doc.Counts);
+            foreach (var count in doc.Counts)
+                count.AgainstPartyIds = CaseGuide.CleanStrings(count.AgainstPartyIds);
+            doc.FactPlan = CaseGuide.CleanList(doc.FactPlan);
+            doc.Sections = CaseGuide.CleanList(doc.Sections);
+            foreach (var section in doc.Sections)
+                section.Paragraphs = CaseGuide.CleanStrings(section.Paragraphs);
+        }
+
+        Guide?.Normalize();
+
+        if (FormatVersion <= 0)
+            FormatVersion = CurrentFormatVersion;
+        if (CaseId == Guid.Empty)
+            CaseId = Guid.NewGuid();
+    }
 
     /// <summary>
     /// Returns the UI-SPEC validation message, or null when the scenario is acceptable.

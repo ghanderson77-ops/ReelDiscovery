@@ -26,6 +26,17 @@ public class ComplexityPreset
     public int CountsMax { get; set; }
     public int CharactersMin { get; set; }
     public int CharactersMax { get; set; }
+
+    /// <summary>
+    /// Background staff generated per organization (D-13).
+    /// </summary>
+    public int BackgroundPerOrg { get; set; }
+
+    /// <summary>
+    /// Key fact target range for the case guide timeline.
+    /// </summary>
+    public int FactsMin { get; set; }
+    public int FactsMax { get; set; }
     public int TimelineMonthsMin { get; set; }
     public int TimelineMonthsMax { get; set; }
     public int FactSubsectionsMin { get; set; }
@@ -53,7 +64,7 @@ public class ComplexityPreset
 
     public static string FormatRange(int min, int max) => min == max ? $"{min}" : $"{min}-{max}";
 
-    // Research table values (assumption A1); every range strictly increases from Simple to Complex
+    // Research table values (assumption A1); BackgroundPerOrg is a single number per level; every range strictly increases from Simple to Complex
     public static ComplexityPreset Get(ComplexityLevel level) => level switch
     {
         ComplexityLevel.Simple => new ComplexityPreset
@@ -62,6 +73,8 @@ public class ComplexityPreset
             PartiesMin = 2, PartiesMax = 2,
             CountsMin = 1, CountsMax = 2,
             CharactersMin = 6, CharactersMax = 10,
+            BackgroundPerOrg = 3,
+            FactsMin = 12, FactsMax = 20,
             TimelineMonthsMin = 3, TimelineMonthsMax = 6,
             FactSubsectionsMin = 2, FactSubsectionsMax = 2,
             ParagraphsMin = 40, ParagraphsMax = 70,
@@ -75,6 +88,8 @@ public class ComplexityPreset
             PartiesMin = 3, PartiesMax = 4,
             CountsMin = 3, CountsMax = 4,
             CharactersMin = 12, CharactersMax = 20,
+            BackgroundPerOrg = 6,
+            FactsMin = 30, FactsMax = 50,
             TimelineMonthsMin = 9, TimelineMonthsMax = 18,
             FactSubsectionsMin = 3, FactSubsectionsMax = 4,
             ParagraphsMin = 90, ParagraphsMax = 140,
@@ -88,6 +103,8 @@ public class ComplexityPreset
             PartiesMin = 5, PartiesMax = 7,
             CountsMin = 5, CountsMax = 7,
             CharactersMin = 25, CharactersMax = 40,
+            BackgroundPerOrg = 10,
+            FactsMin = 70, FactsMax = 110,
             TimelineMonthsMin = 24, TimelineMonthsMax = 48,
             FactSubsectionsMin = 6, FactSubsectionsMax = 8,
             ParagraphsMin = 180, ParagraphsMax = 260,

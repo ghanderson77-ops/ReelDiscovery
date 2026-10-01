@@ -601,4 +601,368 @@ public class CaseGuideRegenerationTests
 
         Assert.Equal(before, GuideJson(draft));
     }
+
+    // ---------- Single-entry regeneration ----------
+
+    internal static string CastEntryJson(string first, string last, string title, string voiceNote = "Cautious in writing; confirms every change by email.", string style = "Short") =>
+        $$"""{ "firstName": "{{first}}", "lastName": "{{last}}", "title": "{{title}}", "summary": "{{first}} {{last}} ran the glazing work and documented every change order.", "activeFrom": "2024-01-10", "activeTo": "2024-08-01", "voiceNote": "{{voiceNote}}", "signatureStyle": "{{style}}" }""";
+
+    internal const string FactEntryJson = """
+        { "date": "2024-03-19", "title": "Harmon signs Change Order 7", "description": "Lisa Chen signed Change Order 7 for $184,250.00.", "issueIds": ["ISS-1", "ISS-09"], "actorIds": ["CH-004", "CH-099"], "knownByIds": ["CH-003"], "significance": "Hot" }
+        """;
+
+    internal const string ValueEntryJson = """
+        { "kind": "Amount", "label": "Change Order 7 approved amount", "value": "$184,250.00", "description": "Amount Harmon approved in writing.", "factIds": ["F-3", "F-77"] }
+        """;
+
+    [Fact]
+    public async Task RegenEntry_Cast()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var guide = draft.Guide!;
+        guide.FindFact("F-004")!.Description += " Tom Becker signed off the work.";
+        var tom = guide.FindCast("CH-002")!;
+        tom.IsUserEdited = true;
+        tom.DetailsPending = true;
+        var revision = draft.Revision;
+        var (inner, fake) = Gateway(FakeLlmProvider.Ok(CastEntryJson("Tom", "Brecker", "Senior Project Manager")));
+        var gateway = new RecordingGateway(inner);
+
+        await new CaseGuideGenerator(gateway).RegenerateEntryAsync(draft, GuidePart.Cast, "CH-002", "make him more cautious in writing");
+
+        var request = Assert.Single(gateway.Requests);
+        Assert.Equal("Case Guide - Character CH-002", request.OperationName);
+        Assert.Equal(LlmTier.Story, request.Tier);
+        Assert.Equal(CaseGuideGenerator.EntryMaxOutputTokens, request.MaxOutputTokens);
+        var prompt = fake.Requests[0].UserPrompt;
+        Assert.Contains("CH-002 | Tom Becker | Project Manager", prompt);
+        Assert.Contains("Ran the Lakeview Tower glazing work and negotiated Change Order 7 in the field.", prompt);
+        Assert.Contains("ISS-01 | Breach of Contract", prompt);
+        Assert.Contains("F-002 | 2024-02-12 | Harmon confirms the change order procedure", prompt);
+        Assert.Contains("F-004 | 2024-04-22 | Brightline completes the changed work", prompt);
+        Assert.DoesNotContain("F-001 |", prompt);
+        Assert.Contains("Guidance from the user: make him more cautious in writing", prompt);
+
+        Assert.Same(tom, guide.FindCast("CH-002"));
+        Assert.Equal("Tom Brecker", tom.FullName);
+        Assert.Equal("Senior Project Manager", tom.Title);
+        Assert.Equal("Tom Brecker ran the glazing work and documented every change order.", tom.Involvement);
+        Assert.Equal("2024-01-10", tom.ActiveFrom);
+        Assert.Equal("2024-08-01", tom.ActiveTo);
+        Assert.Equal("Cautious in writing; confirms every change by email.", tom.VoiceNote);
+        Assert.Equal(SignatureStyle.Short, tom.SignatureStyle);
+        Assert.Equal("tom.brecker@brightline.com", tom.Email);
+        Assert.Contains("Tom Brecker", tom.Signature);
+        Assert.False(tom.IsUserEdited);
+        Assert.False(tom.DetailsPending);
+
+        // The rename reaches the facts that cite him (CaseGuideEditing.SetCastField side effects)
+        var fact = guide.FindFact("F-004")!;
+        Assert.Contains("Tom Brecker signed off the work.", fact.Description);
+        Assert.True(fact.NeedsReview);
+        Assert.Equal("Tom Brecker was changed after it was written.", fact.ReviewReason);
+        Assert.False(guide.FindFact("F-001")!.NeedsReview);
+        Assert.True(draft.Revision > revision);
+    }
+
+    [Fact]
+    public async Task RegenEntry_Background()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var (gateway, _) = Gateway(FakeLlmProvider.Ok(CastEntryJson("Priya", "Nair", "Senior Accounts Payable Specialist", style: "Full")));
+
+        await new CaseGuideGenerator(gateway).RegenerateEntryAsync(draft, GuidePart.Cast, "CH-008", "");
+
+        var priya = draft.Guide!.FindCast("CH-008")!;
+        Assert.Equal("Senior Accounts Payable Specialist", priya.Title);
+        Assert.Equal(CastTier.Background, priya.Tier);
+        Assert.Equal(string.Empty, priya.VoiceNote);
+        Assert.Equal(string.Empty, priya.Signature);
+    }
+
+    [Fact]
+    public async Task RegenEntry_Fact()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var guide = draft.Guide!;
+        StampAll(draft);
+        var fact = guide.FindFact("F-003")!;
+        fact.NeedsReview = true;
+        fact.ReviewReason = "Lisa Chen was changed after it was written.";
+        fact.IsUserEdited = true;
+        var (inner, fake) = Gateway(FakeLlmProvider.Ok(FactEntryJson));
+        var gateway = new RecordingGateway(inner);
+
+        await new CaseGuideGenerator(gateway).RegenerateEntryAsync(draft, GuidePart.Facts, "F-003", "say who signed it");
+
+        Assert.Equal("Case Guide - Fact F-003", Assert.Single(gateway.Requests).OperationName);
+        var prompt = fake.Requests[0].UserPrompt;
+        Assert.Contains("F-003 | 2024-03-18 | Harmon approves Change Order 7", prompt);
+        Assert.Contains("Harmon approved Change Order 7 in writing for $184,250.00", prompt);
+        Assert.Contains("CH-004 | Lisa Chen | Project Executive", prompt);
+        Assert.Contains("Guidance from the user: say who signed it", prompt);
+
+        Assert.Same(fact, guide.FindFact("F-003"));
+        Assert.Equal("2024-03-19", fact.Date);
+        Assert.Equal("Harmon signs Change Order 7", fact.Title);
+        Assert.Equal(FactSignificance.Hot, fact.Significance);
+        Assert.Equal(new[] { "ISS-01" }, fact.IssueIds);
+        Assert.Equal(new[] { "CH-004" }, fact.ActorIds);
+        Assert.Equal(new[] { "CH-004", "CH-003" }, fact.KnownByIds);
+        Assert.Contains("Dropped unknown issue ISS-09.", fact.MappingNotes);
+        Assert.Contains("Dropped unknown character CH-099.", fact.MappingNotes);
+        Assert.Equal("facts-2", fact.SourceSectionId);
+        Assert.False(fact.NeedsReview);
+        Assert.Equal(string.Empty, fact.ReviewReason);
+        Assert.False(fact.IsUserEdited);
+
+        // Values citing the fact are asked to be reviewed, like a hand edit
+        Assert.True(guide.FindValue("V-001")!.NeedsReview);
+        Assert.False(GuideStaleness.IsStale(draft, GuidePart.Values));
+    }
+
+    [Fact]
+    public async Task RegenEntry_Value()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var value = draft.Guide!.FindValue("V-001")!;
+        value.IsUserEdited = true;
+        var (inner, fake) = Gateway(FakeLlmProvider.Ok(ValueEntryJson));
+        var gateway = new RecordingGateway(inner);
+
+        await new CaseGuideGenerator(gateway).RegenerateEntryAsync(draft, GuidePart.Values, "V-001", "");
+
+        Assert.Equal("Case Guide - Value V-001", Assert.Single(gateway.Requests).OperationName);
+        Assert.Contains("V-001 | Amount | Change Order 7 amount | $184,250.00", fake.Requests[0].UserPrompt);
+        Assert.Contains("F-003 | 2024-03-18 | Harmon approves Change Order 7", fake.Requests[0].UserPrompt);
+        Assert.Same(value, draft.Guide.FindValue("V-001"));
+        Assert.Equal("Change Order 7 approved amount", value.Label);
+        Assert.Equal("Amount Harmon approved in writing.", value.Description);
+        Assert.Equal(new[] { "F-003" }, value.FactIds);
+        Assert.Contains("Dropped unknown fact F-77.", value.MappingNotes);
+        Assert.False(value.IsUserEdited);
+    }
+
+    public static TheoryData<GuidePart, string> EntryCases() => new()
+    {
+        { GuidePart.Cast, "CH-002" },
+        { GuidePart.Facts, "F-003" },
+        { GuidePart.Values, "V-001" }
+    };
+
+    [Theory]
+    [MemberData(nameof(EntryCases))]
+    public async Task RegenEntry_Failure_KeepsOld(GuidePart part, string id)
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var before = draft.ToJson();
+        var (gateway, _) = Gateway(FakeLlmProvider.Refused("I won't rewrite that."));
+
+        var ex = await Assert.ThrowsAsync<LlmCallException>(() => new CaseGuideGenerator(gateway).RegenerateEntryAsync(draft, part, id, "anything"));
+
+        Assert.Equal(LlmOutcome.Refused, ex.Result.Outcome);
+        Assert.Equal(before, draft.ToJson());
+    }
+
+    [Theory]
+    [InlineData(GuidePart.Cast, "CH-099")]
+    [InlineData(GuidePart.Facts, "F-099")]
+    [InlineData(GuidePart.Values, "V-099")]
+    [InlineData(GuidePart.Issues, "ISS-01")]
+    public async Task RegenEntry_UnknownId(GuidePart part, string id)
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var (gateway, fake) = Gateway(FakeLlmProvider.Ok("{}"));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => new CaseGuideGenerator(gateway).RegenerateEntryAsync(draft, part, id, ""));
+        Assert.Empty(fake.Requests);
+    }
+
+    // ---------- Update Guide ----------
+
+    // Facts responses that return the current facts by id (F-005 omitted: hand-edited in the tests that use it)
+    private static LlmProviderResponse[] KeepFactsResponses() => new[]
+    {
+        FakeLlmProvider.Ok(FactsJson(
+            FactJson("2024-01-15", "Subcontract signed for Lakeview Tower", actors: "\"CH-001\", \"CH-003\"", existingId: "F-001"),
+            FactJson("2024-02-12", "Harmon confirms the change order procedure", actors: "\"CH-002\"", existingId: "F-002"))),
+        FakeLlmProvider.Ok(FactsJson(
+            FactJson("2024-03-18", "Harmon approves Change Order 7", actors: "\"CH-002\"", existingId: "F-003"),
+            FactJson("2024-04-22", "Brightline completes the changed work", actors: "\"CH-002\"", existingId: "F-004"),
+            FactJson("2024-06-20", "Harmon refuses to pay", actors: "\"CH-003\"", existingId: "F-006")))
+    };
+
+    private static LlmProviderResponse KeepValuesResponse() => FakeLlmProvider.Ok(ValuesJson(
+        ValueJson("V-001", "Amount", "Change Order 7 amount", "$184,250.00", "\"F-003\""),
+        ValueJson("V-004", "InvoiceNumber", "Unpaid invoice", "INV-2024-118", "\"F-005\"")));
+
+    private static LlmProviderResponse[] CastResponses(string roster, int background) =>
+        new[] { FakeLlmProvider.Ok(roster), FakeLlmProvider.Ok(DetailsJson()) }
+            .Concat(Enumerable.Range(0, background).Select(_ => FakeLlmProvider.Ok(BackgroundJson)))
+            .ToArray();
+
+    [Fact]
+    public async Task UpdateStale_OnlyStaleInOrder()
+    {
+        var draft = CaseTestData.SampleCounselDraft();
+        var guide = draft.Guide!;
+        guide.FindCast("CH-001")!.IsUserEdited = true;
+        guide.FindFact("F-005")!.IsUserEdited = true;
+        StampAll(draft);
+        draft.CoreDocument!.Sections[0].Paragraphs[0] += " The project opened late as a result.";
+        Assert.Equal(GuideStaleness.Order, GuideStaleness.StaleParts(draft));
+
+        var responses = CastResponses(Roster(BasePeople()), background: 4).Concat(KeepFactsResponses()).Append(KeepValuesResponse()).ToArray();
+        var (gateway, fake) = Gateway(responses);
+        var completed = new List<GuidePart>();
+
+        var result = await new CaseGuideGenerator(gateway).UpdateStaleAsync(draft, null, part =>
+        {
+            completed.Add(part);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(GuideStaleness.Order, completed);
+        Assert.Equal(GuideStaleness.Order, result.PartsWritten);
+        Assert.Empty(result.PartsFailed);
+        Assert.Equal(responses.Length, fake.Requests.Count);
+        // Issues were re-extracted with their details: no issue request
+        Assert.True(IsRosterRequest(fake.Requests[0]));
+        Assert.True(IsFactsRequest(fake.Requests[6]));
+        Assert.True(IsValuesRequest(fake.Requests[^1]));
+
+        Assert.Equal("ISS-01", Assert.Single(guide.Issues).Id);
+        Assert.True(guide.FindCast("CH-001")!.IsUserEdited);
+        Assert.Equal("President", guide.FindCast("CH-001")!.Title);
+        Assert.True(guide.FindFact("F-005")!.IsUserEdited);
+        Assert.Empty(GuideStaleness.StaleParts(draft));
+    }
+
+    [Fact]
+    public async Task UpdateStale_PartyRenameAndAdd()
+    {
+        var draft = CaseTestData.SampleCounselDraft();
+        StampAll(draft);
+        var doc = draft.CoreDocument!;
+        doc.Parties[1].Name = "Harmon Construction Group, Inc.";
+        doc.Parties.Add(new CaseParty
+        {
+            Id = "party-3",
+            Name = "Walter White",
+            ShortName = "White",
+            Role = PartyRole.Defendant,
+            EntityType = "individual",
+            Domicile = "Chicago, Illinois",
+            Description = "Personal guarantor of Harmon's obligations."
+        });
+
+        var people = BasePeople();
+        people.Add(Person("", "Ada", "Okafor", "Partner", "Okafor & Lind LLP", "OutsideCounsel"));
+        people.Add(Person("", "Ben", "Lind", "Associate", "Okafor & Lind LLP", "OutsideCounsel"));
+        var roster = Roster(people, Firm("Okafor & Lind LLP", "Okafor & Lind", "ORG-05"));
+        var responses = CastResponses(roster, background: 5).Concat(KeepFactsResponses()).Append(KeepValuesResponse()).ToArray();
+        var (gateway, fake) = Gateway(responses);
+
+        var result = await new CaseGuideGenerator(gateway).UpdateStaleAsync(draft);
+
+        Assert.Equal(GuideStaleness.Order, result.PartsWritten);
+        Assert.Equal(responses.Length, fake.Requests.Count);
+        var guide = draft.Guide!;
+        Assert.Equal("Harmon Construction Group, Inc.", guide.FindOrganization("ORG-02")!.Name);
+        var white = guide.Organizations.Single(o => o.PartyId == "party-3");
+        Assert.Equal(OrganizationKind.Individual, white.Kind);
+        var findings = CaseGuideValidator.Validate(draft);
+        Assert.DoesNotContain(findings, f => f.Severity == IssueSeverity.Error && f.Message.Contains("has no organization"));
+        Assert.DoesNotContain(findings, f => f.Message.Contains("name differs from party"));
+    }
+
+    [Fact]
+    public async Task UpdateStale_SkipsFresh()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        StampAll(draft);
+        draft.Guide!.FindFact("F-006")!.Description += " Harmon cited no defect.";
+        Assert.Equal(new[] { GuidePart.Values }, GuideStaleness.StaleParts(draft));
+        var (gateway, fake) = Gateway(KeepValuesResponse());
+
+        var result = await new CaseGuideGenerator(gateway).UpdateStaleAsync(draft);
+
+        var request = Assert.Single(fake.Requests);
+        Assert.True(IsValuesRequest(request));
+        Assert.Equal(new[] { GuidePart.Values }, result.PartsWritten);
+        Assert.Empty(GuideStaleness.StaleParts(draft));
+    }
+
+    [Fact]
+    public async Task UpdateStale_StopsOnFailure()
+    {
+        var draft = CaseTestData.SampleCounselDraft();
+        StampAll(draft);
+        draft.CoreDocument!.Sections[0].Paragraphs[0] += " The project opened late as a result.";
+        var (gateway, fake) = Gateway(FakeLlmProvider.Refused("I won't rewrite the cast."));
+        var completed = new List<GuidePart>();
+
+        var result = await new CaseGuideGenerator(gateway).UpdateStaleAsync(draft, null, part =>
+        {
+            completed.Add(part);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(new[] { GuidePart.Issues }, result.PartsWritten);
+        Assert.Equal(new[] { GuidePart.Cast }, result.PartsFailed);
+        Assert.Equal(GuidePart.Cast, result.RefusedPart);
+        Assert.Equal("The model declined: I won't rewrite the cast.", result.FailureMessage);
+        Assert.Equal(new[] { GuidePart.Issues, GuidePart.Cast }, completed);
+        Assert.Single(fake.Requests);
+        Assert.DoesNotContain(fake.Requests, IsFactsRequest);
+        Assert.True(GuideStaleness.IsStale(draft, GuidePart.Facts));
+    }
+
+    [Fact]
+    public async Task UpdateStale_NothingStale()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        StampAll(draft);
+        var revision = draft.Revision;
+        var (gateway, fake) = Gateway(FakeLlmProvider.Ok("{}"));
+        var completed = new List<GuidePart>();
+
+        var result = await new CaseGuideGenerator(gateway).UpdateStaleAsync(draft, null, part =>
+        {
+            completed.Add(part);
+            return Task.CompletedTask;
+        });
+
+        Assert.Empty(fake.Requests);
+        Assert.Empty(result.PartsWritten);
+        Assert.Empty(result.PartsFailed);
+        Assert.Empty(completed);
+        Assert.Equal(revision, draft.Revision);
+    }
+
+    /// <summary>
+    /// Records the LlmRequest (tier, operation name, max tokens) before passing it to the real gateway.
+    /// </summary>
+    internal sealed class RecordingGateway : ILlmGateway
+    {
+        private readonly ILlmGateway _inner;
+
+        public RecordingGateway(ILlmGateway inner)
+        {
+            _inner = inner;
+        }
+
+        public List<LlmRequest> Requests { get; } = new();
+
+        public LlmProviderKind Provider => _inner.Provider;
+
+        public ReelDiscovery.Models.AIModelConfig ResolveModel(LlmTier tier) => _inner.ResolveModel(tier);
+
+        public Task<LlmResult<T>> GenerateAsync<T>(LlmRequest request, CancellationToken ct = default) where T : class
+        {
+            lock (Requests)
+                Requests.Add(new LlmRequest { Tier = request.Tier, OperationName = request.OperationName, SystemPrompt = request.SystemPrompt, UserPrompt = request.UserPrompt, MaxOutputTokens = request.MaxOutputTokens });
+            return _inner.GenerateAsync<T>(request, ct);
+        }
+    }
 }

@@ -332,7 +332,7 @@ public static partial class CaseGuideEditing
         counsel.Email = member.Email;
     }
 
-    private static List<string> FlagReferencingFacts(CaseDraft draft, CastMember member, string oldName)
+    internal static List<string> FlagReferencingFacts(CaseDraft draft, CastMember member, string oldName)
     {
         var newName = member.FullName;
         var renamed = oldName.Length > 0 && oldName != newName;
@@ -524,7 +524,7 @@ public static partial class CaseGuideEditing
     }
 
     // Canonical values citing an edited fact may no longer match its text (W3)
-    private static void FlagValues(CaseGuide guide, string factId, string reason)
+    internal static void FlagValues(CaseGuide guide, string factId, string reason)
     {
         foreach (var value in guide.Values.Where(v => v.FactIds.Contains(factId)))
         {

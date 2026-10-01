@@ -216,7 +216,7 @@ public class CaseGuideRegenerationTests
         Assert.Equal("President", maria.Title);
         Assert.True(maria.IsUserEdited);
         Assert.Contains("Kept your edits to Maria Delgado.", result.Notes);
-        Assert.Null(guide.FindCast("CH-013"));
+        Assert.Equal(10, guide.Cast.Count(c => c.Tier == CastTier.Key));
         Assert.DoesNotContain(fake.Requests.Where(IsDetailsRequest), r => r.UserPrompt.Contains("CH-001 |"));
     }
 

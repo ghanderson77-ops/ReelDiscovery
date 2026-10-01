@@ -248,7 +248,7 @@ public class CaseGuideGenerator
         {
             if (ex.Result.Outcome == LlmOutcome.Refused)
                 result.WasRefused = true;
-            SetFailed(state, DescribeOutcome(ex.Result, "Issue Details"));
+            SetFailed(state, DescribeOutcome(ex.Result, RetryHint("Issue Details")));
         }
         catch (Exception ex)
         {
@@ -280,7 +280,7 @@ public class CaseGuideGenerator
 
         using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var semaphore = new SemaphoreSlim(MaxParallelCalls, MaxParallelCalls);
-        var run = new UnitRun(runCts, semaphore, ct, "Cast");
+        var run = new UnitRun(runCts, semaphore, ct, RetryHint("Cast"));
 
         try
         {
@@ -305,25 +305,7 @@ public class CaseGuideGenerator
                 SeedAuthor(draft);
                 changed = true;
 
-                var gaps = CounselGaps(draft);
-                if (gaps.Count > 0)
-                {
-                    var topUp = await RunUnitAsync<CastRosterDto>(new LlmRequest
-                    {
-                        Tier = LlmTier.Story,
-                        OperationName = "Case Guide - Counsel top-up",
-                        SystemPrompt = CaseGuidePrompts.SystemPrompt,
-                        UserPrompt = CaseGuidePrompts.BuildCounselTopUpPrompt(draft, gaps),
-                        MaxOutputTokens = RosterMaxOutputTokens
-                    }, run);
-
-                    // Never loops: remaining gaps surface as validator warnings
-                    if (topUp.Value != null)
-                        MapRoster(draft, topUp.Value, result);
-                    else if (topUp.Error.Length > 0)
-                        result.Notes.Add($"Counsel top-up failed: {topUp.Error}");
-                }
-
+                await TopUpCounselAsync(draft, result, run);
                 SyncCounsel(draft);
                 if (run.IsFatal)
                     return FinishCast(draft, result, run, string.Empty, false, changed);
@@ -443,10 +425,74 @@ public class CaseGuideGenerator
     private static HashSet<string> TakenDomains(CaseGuide guide) =>
         new(guide.Organizations.Where(o => !string.IsNullOrEmpty(o.Domain)).Select(o => o.Domain.ToLowerInvariant()), StringComparer.OrdinalIgnoreCase);
 
+    // At most one counsel top-up per run (W2)
+    private async Task TopUpCounselAsync(CaseDraft draft, GuidePartResult result, UnitRun run)
+    {
+        var gaps = CounselGaps(draft);
+        if (gaps.Count == 0)
+            return;
+
+        var topUp = await RunUnitAsync<CastRosterDto>(new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = "Case Guide - Counsel top-up",
+            SystemPrompt = CaseGuidePrompts.SystemPrompt,
+            UserPrompt = CaseGuidePrompts.BuildCounselTopUpPrompt(draft, gaps),
+            MaxOutputTokens = RosterMaxOutputTokens
+        }, run);
+
+        // Never loops: remaining gaps surface as validator warnings
+        if (topUp.Value != null)
+            MapRoster(draft, topUp.Value, result);
+        else if (topUp.Error.Length > 0)
+            result.Notes.Add($"Counsel top-up failed: {topUp.Error}");
+    }
+
     // Model output -> organizations and key characters; code assigns every id, email and phone (T-03-30)
     private static void MapRoster(CaseDraft draft, CastRosterDto dto, GuidePartResult result)
     {
         var guide = draft.Guide!;
+        MapOrganizations(guide, dto, result);
+
+        foreach (var person in dto.People ?? new List<RosterPersonDto>())
+        {
+            if (person == null)
+                continue;
+
+            // Existing characters are never duplicated
+            if (guide.FindCast(IdAllocator.Normalize(person.ExistingId, IdAllocator.Character)) != null)
+                continue;
+
+            AddRosterPerson(draft, person, result);
+        }
+    }
+
+    // A new key character from a roster entry; skipped when the name is already in the cast, dropped with a note when the organization is unknown
+    private static void AddRosterPerson(CaseDraft draft, RosterPersonDto person, GuidePartResult result)
+    {
+        var guide = draft.Guide!;
+        var first = Clean(person.FirstName);
+        var last = Clean(person.LastName);
+        var fullName = RosterName(person);
+        if (fullName.Length == 0 || FindByName(guide, fullName) != null)
+            return;
+
+        var org = ResolveOrganization(guide, person.OrganizationRef);
+        if (org == null)
+        {
+            result.Notes.Add($"Dropped {fullName}: unknown organization {Clean(person.OrganizationRef)}.");
+            return;
+        }
+
+        AddKeyMember(draft, first, last, Clean(person.Title), org, person.Role, Clean(person.Involvement));
+    }
+
+    private static string RosterName(RosterPersonDto person) =>
+        string.Join(" ", new[] { Clean(person.FirstName), Clean(person.LastName) }.Where(s => s.Length > 0));
+
+    // New organizations from a roster response (matched by name first), then their represented organizations
+    private static void MapOrganizations(CaseGuide guide, CastRosterDto dto, GuidePartResult result)
+    {
         var taken = TakenDomains(guide);
         var pendingRefs = new List<(CaseOrganization Org, List<string> Refs)>();
 
@@ -491,32 +537,6 @@ public class CaseGuideGenerator
                 if (target.Id != org.Id && !org.RepresentsOrgIds.Contains(target.Id))
                     org.RepresentsOrgIds.Add(target.Id);
             }
-        }
-
-        foreach (var person in dto.People ?? new List<RosterPersonDto>())
-        {
-            if (person == null)
-                continue;
-
-            var first = Clean(person.FirstName);
-            var last = Clean(person.LastName);
-            var fullName = string.Join(" ", new[] { first, last }.Where(s => s.Length > 0));
-            if (fullName.Length == 0)
-                continue;
-
-            var org = ResolveOrganization(guide, person.OrganizationRef);
-            if (org == null)
-            {
-                result.Notes.Add($"Dropped {fullName}: unknown organization {Clean(person.OrganizationRef)}.");
-                continue;
-            }
-
-            // Existing characters are never duplicated
-            if (guide.FindCast(IdAllocator.Normalize(person.ExistingId, IdAllocator.Character)) != null
-                || guide.Cast.Any(c => string.Equals(c.FullName, fullName, StringComparison.OrdinalIgnoreCase)))
-                continue;
-
-            AddKeyMember(draft, first, last, Clean(person.Title), org, person.Role, Clean(person.Involvement));
         }
     }
 
@@ -959,7 +979,7 @@ public class CaseGuideGenerator
         catch (OperationCanceledException)
         {
             // Run not cancelled: the request timed out
-            return new UnitOutcome<T> { Error = $"The request timed out. Click Retry {run.Label}." };
+            return new UnitOutcome<T> { Error = $"The request timed out. {run.RetryHint}" };
         }
         catch (LlmCallException ex) when (ex.Result.IsFatal)
         {
@@ -969,7 +989,7 @@ public class CaseGuideGenerator
         }
         catch (LlmCallException ex)
         {
-            return new UnitOutcome<T> { Error = DescribeOutcome(ex.Result, run.Label), Refused = ex.Result.Outcome == LlmOutcome.Refused };
+            return new UnitOutcome<T> { Error = DescribeOutcome(ex.Result, run.RetryHint), Refused = ex.Result.Outcome == LlmOutcome.Refused };
         }
         catch (Exception ex)
         {
@@ -993,18 +1013,18 @@ public class CaseGuideGenerator
         private readonly object _lock = new();
         private string _fatalError = string.Empty;
 
-        public UnitRun(CancellationTokenSource cts, SemaphoreSlim semaphore, CancellationToken userToken, string label)
+        public UnitRun(CancellationTokenSource cts, SemaphoreSlim semaphore, CancellationToken userToken, string retryHint)
         {
             Cts = cts;
             Semaphore = semaphore;
             UserToken = userToken;
-            Label = label;
+            RetryHint = retryHint;
         }
 
         /// <summary>
-        /// Part name used in failure messages ("Click Retry {Label}.").
+        /// Last sentence of failure messages, e.g. "Click Retry Cast.".
         /// </summary>
-        public string Label { get; }
+        public string RetryHint { get; }
 
         public CancellationTokenSource Cts { get; }
         public SemaphoreSlim Semaphore { get; }
@@ -1068,7 +1088,7 @@ public class CaseGuideGenerator
 
         using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var semaphore = new SemaphoreSlim(MaxParallelCalls, MaxParallelCalls);
-        var run = new UnitRun(runCts, semaphore, ct, "Key Facts");
+        var run = new UnitRun(runCts, semaphore, ct, RetryHint("Key Facts"));
 
         // Tasks return DTOs only; prompts are built here, before any merge
         var tasks = units.Select((unit, i) => RunUnitAsync<FactBatchDto>(new LlmRequest
@@ -1378,7 +1398,7 @@ public class CaseGuideGenerator
         catch (LlmCallException ex)
         {
             result.WasRefused = ex.Result.Outcome == LlmOutcome.Refused;
-            SetFailed(state, DescribeOutcome(ex.Result, "Canonical Values"));
+            SetFailed(state, DescribeOutcome(ex.Result, RetryHint("Canonical Values")));
         }
         catch (Exception ex)
         {
@@ -1420,29 +1440,14 @@ public class CaseGuideGenerator
 
         foreach (var item in dto.Values ?? new List<ValueDto>())
         {
-            var text = Clean(item?.Value);
-            if (item == null || text.Length == 0)
+            var mapped = item == null ? null : MapValue(guide, item.Kind, item.Label, item.Value, item.Description, item.FactIds);
+            if (item == null || mapped == null)
                 continue;
 
-            var label = Clean(item.Label);
-            if (label.Length == 0)
-                label = text;
-
-            var notes = new List<string>();
-            var factIds = new List<string>();
-            foreach (var raw in item.FactIds ?? new List<string>())
-            {
-                var id = IdAllocator.Normalize(raw, IdAllocator.Fact);
-                if (id != null && guide.FindFact(id) != null)
-                {
-                    if (!factIds.Contains(id))
-                        factIds.Add(id);
-                }
-                else if (Clean(raw).Length > 0)
-                {
-                    notes.Add($"Dropped unknown fact {Clean(raw)}.");
-                }
-            }
+            var text = mapped.Value;
+            var label = mapped.Label;
+            var notes = mapped.MappingNotes;
+            var factIds = mapped.FactIds;
 
             // existingId is honoured only for an existing, not hand-edited value not already used in this response
             var existingId = IdAllocator.Normalize(item.ExistingId, IdAllocator.Value);
@@ -1493,6 +1498,38 @@ public class CaseGuideGenerator
         return changed;
     }
 
+    // Model output -> unsaved value (no id); fact links normalized and existence-checked; null when the value text is empty
+    private static CanonicalValue? MapValue(CaseGuide guide, ValueKind kind, string? label, string? value, string? description, List<string>? factRefs)
+    {
+        var text = Clean(value);
+        if (text.Length == 0)
+            return null;
+
+        var mapped = new CanonicalValue
+        {
+            Kind = kind,
+            Label = Clean(label).Length > 0 ? Clean(label) : text,
+            Value = text,
+            Description = Clean(description)
+        };
+
+        foreach (var raw in factRefs ?? new List<string>())
+        {
+            var id = IdAllocator.Normalize(raw, IdAllocator.Fact);
+            if (id != null && guide.FindFact(id) != null)
+            {
+                if (!mapped.FactIds.Contains(id))
+                    mapped.FactIds.Add(id);
+            }
+            else if (Clean(raw).Length > 0)
+            {
+                mapped.MappingNotes.Add($"Dropped unknown fact {Clean(raw)}.");
+            }
+        }
+
+        return mapped;
+    }
+
     private sealed class FactUnit
     {
         public FactUnit(string key, FactSubsectionPlan plan, string from, string to, int target)
@@ -1515,6 +1552,617 @@ public class CaseGuideGenerator
         public int Target { get; }
     }
 
+    // ---------- Tab regeneration (D-19, GUIDE-08) ----------
+
+    /// <summary>
+    /// Rewrites the Cast, Facts or Values tab with optional guidance. Entries the model returns by existingId keep their ids,
+    /// entries it leaves out are removed, and hand-edited entries are kept unless <paramref name="replaceEdited"/> is set.
+    /// A failed call leaves the tab's entries untouched; a user cancel propagates. Issues are re-extracted, not regenerated.
+    /// </summary>
+    public async Task<GuidePartResult> RegenerateTabAsync(CaseDraft draft, GuidePart part, string guidance, bool replaceEdited,
+        IProgress<GuideProgress>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        if (part is not (GuidePart.Cast or GuidePart.Facts or GuidePart.Values))
+            throw new ArgumentException("Only the Cast, Key Facts and Canonical Values tabs can be regenerated.", nameof(part));
+        if (draft.CoreDocument == null)
+            throw new InvalidOperationException("Write the core document before building the case guide.");
+
+        draft.Guide ??= new CaseGuide();
+        guidance ??= string.Empty;
+
+        return part switch
+        {
+            GuidePart.Cast => await RegenerateCastAsync(draft, guidance, replaceEdited, progress, ct),
+            GuidePart.Facts => await RegenerateFactsAsync(draft, guidance, replaceEdited, progress, ct),
+            _ => await RegenerateValuesAsync(draft, guidance, replaceEdited, progress, ct)
+        };
+    }
+
+    // Whole Cast tab: organizations re-synced from the parties, key roster merged, counsel topped up, details written,
+    // and every non-individual organization's non-edited background staff rewritten (D-19)
+    private async Task<GuidePartResult> RegenerateCastAsync(CaseDraft draft, string guidance, bool replaceEdited,
+        IProgress<GuideProgress>? progress, CancellationToken ct)
+    {
+        var guide = draft.Guide!;
+        var state = guide.CastState;
+        var result = new GuidePartResult { Part = GuidePart.Cast };
+
+        // Renamed or added parties follow the core document; ids and domains are kept
+        var synced = SyncOrganizations(draft).Count > 0;
+
+        var previous = state.Status;
+        state.Status = GuidePartStatus.Generating;
+        state.CompletedUnits.Clear();
+
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var semaphore = new SemaphoreSlim(MaxParallelCalls, MaxParallelCalls);
+        var run = new UnitRun(runCts, semaphore, ct, RegenerateHint("Cast"));
+        var merged = false;
+        var backgroundErrors = new List<string>();
+
+        try
+        {
+            progress?.Report(new GuideProgress { Part = GuidePart.Cast, Message = "Regenerating the cast: key characters..." });
+
+            var roster = await RunUnitAsync<CastRosterDto>(new LlmRequest
+            {
+                Tier = LlmTier.Story,
+                OperationName = "Case Guide - Cast roster",
+                SystemPrompt = CaseGuidePrompts.SystemPrompt,
+                UserPrompt = CaseGuidePrompts.BuildRosterPrompt(draft, guidance, replaceEdited),
+                MaxOutputTokens = RosterMaxOutputTokens
+            }, run);
+
+            if (roster.Value == null)
+            {
+                // Nothing merged: the cast stays exactly as it was
+                state.Status = previous;
+                if (synced)
+                    draft.Revision++;
+                result.FatalError = run.FatalError;
+                result.WasRefused = roster.Refused;
+                result.FailureMessage = roster.Error;
+                return result;
+            }
+
+            MergeRoster(draft, roster.Value, replaceEdited, result);
+            merged = true;
+            SeedAuthor(draft);
+            await TopUpCounselAsync(draft, result, run);
+            SyncCounsel(draft);
+
+            if (!run.IsFatal)
+                await WriteDetailsAsync(draft, result, run, progress);
+            if (!run.IsFatal)
+                await RewriteBackgroundAsync(draft, guidance, replaceEdited, result, backgroundErrors, run, progress);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // User cancel: an untouched cast keeps its status; a merged roster finishes through Retry Cast
+            state.Status = merged ? GuidePartStatus.Pending : previous;
+            if (merged)
+                OrderCast(guide);
+            if (merged || synced)
+                draft.Revision++;
+            throw;
+        }
+
+        OrderCast(guide);
+        draft.Revision++;
+
+        if (run.IsFatal)
+        {
+            // Bad key or exhausted spend limit: the merged roster is kept and finishes through Retry Cast
+            state.Status = GuidePartStatus.Pending;
+            result.FatalError = run.FatalError;
+            return result;
+        }
+
+        var details = guide.Cast.Count(c => c.Tier == CastTier.Key && c.DetailsPending);
+        if (details > 0)
+        {
+            var message = $"Details for {details} characters were not written. {RetryHint("Cast")}";
+            SetFailed(state, message);
+            result.FailureMessage = message;
+            return result;
+        }
+
+        SetReady(state);
+        GuideStaleness.Stamp(draft, GuidePart.Cast);
+
+        // A failed background call kept that organization's old staff; the cast is still complete
+        result.Succeeded = backgroundErrors.Count == 0;
+        if (!result.Succeeded)
+            result.FailureMessage = $"Background staff for {backgroundErrors.Count} organizations were not rewritten: {backgroundErrors[0]}";
+        return result;
+    }
+
+    // Key roster merge: matched people updated in place (DetailsPending), new people added, non-edited people left out removed
+    private static void MergeRoster(CaseDraft draft, CastRosterDto dto, bool replaceEdited, GuidePartResult result)
+    {
+        var guide = draft.Guide!;
+        MapOrganizations(guide, dto, result);
+
+        var people = (dto.People ?? new List<RosterPersonDto>()).Where(p => p != null && RosterName(p).Length > 0).ToList();
+        var removed = MergeEntries(
+            guide.Cast.Where(c => c != null && c.Tier == CastTier.Key).ToList(),
+            people,
+            replaceEdited,
+            IdAllocator.Character,
+            c => c.Id,
+            c => c.IsUserEdited,
+            c => c.FullName,
+            p => p.ExistingId,
+            (p, c) => string.Equals(c.FullName, RosterName(p), StringComparison.OrdinalIgnoreCase),
+            (member, person) => UpdateKeyMember(draft, member, person),
+            person => AddRosterPerson(draft, person, result),
+            result.Notes);
+
+        foreach (var member in removed)
+            RemoveCastMember(guide, member);
+    }
+
+    private static void UpdateKeyMember(CaseDraft draft, CastMember member, RosterPersonDto person)
+    {
+        var guide = draft.Guide!;
+        var oldName = member.FullName;
+        var oldOrg = member.OrganizationId;
+
+        member.FirstName = Clean(person.FirstName);
+        member.LastName = Clean(person.LastName);
+        if (Clean(person.Title).Length > 0)
+            member.Title = Clean(person.Title);
+        // An unknown organization reference keeps the current organization
+        member.OrganizationId = ResolveOrganization(guide, person.OrganizationRef)?.Id ?? member.OrganizationId;
+        member.Role = person.Role;
+        if (Clean(person.Involvement).Length > 0)
+            member.Involvement = Clean(person.Involvement);
+        member.IsUserEdited = false;
+        member.DetailsPending = true;
+
+        if (member.FullName == oldName && member.OrganizationId == oldOrg)
+            return;
+
+        CaseGuideEditing.RefreshIdentity(draft, member);
+        if (member.FullName != oldName)
+            CaseGuideEditing.FlagReferencingFacts(draft, member, oldName);
+    }
+
+    // Removes a character; the facts that cited them lose the link and need review
+    private static void RemoveCastMember(CaseGuide guide, CastMember member)
+    {
+        guide.Cast.Remove(member);
+
+        foreach (var fact in guide.Facts.Where(f => f != null && (f.ActorIds.Contains(member.Id) || f.KnownByIds.Contains(member.Id))))
+        {
+            fact.ActorIds.RemoveAll(id => id == member.Id);
+            fact.KnownByIds.RemoveAll(id => id == member.Id);
+            fact.NeedsReview = true;
+            fact.ReviewReason = $"{member.FullName} was removed from the cast.";
+        }
+    }
+
+    // Every non-individual organization: replace its revisable background staff, keeping hand-edited staff (D-13, D-19)
+    private async Task RewriteBackgroundAsync(CaseDraft draft, string guidance, bool replaceEdited, GuidePartResult result,
+        List<string> errors, UnitRun run, IProgress<GuideProgress>? progress)
+    {
+        var guide = draft.Guide!;
+        var doc = draft.CoreDocument!;
+        var plans = new List<(CaseOrganization Org, List<CastMember> Replace, int Count)>();
+
+        foreach (var org in guide.Organizations.Where(o => o != null && o.Kind != OrganizationKind.Individual))
+        {
+            var staff = guide.Cast.Where(c => c.Tier == CastTier.Background && c.OrganizationId == org.Id).ToList();
+            var kept = staff.Where(c => c.IsUserEdited && !replaceEdited).ToList();
+            foreach (var member in kept)
+                AddKeptNote(result.Notes, member.FullName);
+
+            var replace = staff.Except(kept).ToList();
+            var count = draft.Preset.BackgroundPerOrg - kept.Count;
+            if (count > 0)
+            {
+                plans.Add((org, replace, count));
+                continue;
+            }
+
+            // Enough hand-edited staff: the rest are removed without a call
+            foreach (var member in replace)
+                RemoveCastMember(guide, member);
+        }
+
+        var tasks = plans.Select((plan, i) => RunUnitAsync<BackgroundStaffDto>(new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = "Case Guide - Background staff",
+            SystemPrompt = CaseGuidePrompts.SystemPrompt,
+            UserPrompt = CaseGuidePrompts.BuildBackgroundPrompt(draft, plan.Org, plan.Count, guidance),
+            MaxOutputTokens = BackgroundMaxOutputTokens
+        }, run, () => progress?.Report(new GuideProgress
+        {
+            Part = GuidePart.Cast,
+            Message = $"Regenerating the cast: background staff for {plan.Org.Name} ({i + 1} of {plans.Count})...",
+            Done = i,
+            Total = plans.Count
+        }))).ToList();
+
+        // Throws only on a user cancel; then no organization's staff are replaced
+        await Task.WhenAll(tasks);
+
+        // Old staff are replaced only for organizations whose call succeeded; ids are allocated in organization order
+        var start = doc.TimelineStart;
+        var end = CaseGuidePrompts.StoryEnd(doc);
+        for (var i = 0; i < tasks.Count; i++)
+        {
+            var unit = tasks[i].Result;
+            if (unit.Refused)
+                result.WasRefused = true;
+            if (unit.Value == null)
+            {
+                if (unit.Error.Length > 0)
+                    errors.Add(unit.Error);
+                continue;
+            }
+
+            foreach (var member in plans[i].Replace)
+                RemoveCastMember(guide, member);
+            MapBackground(draft, plans[i].Org, plans[i].Count, unit.Value, start, end, result);
+        }
+    }
+
+    // Key facts: every fact unit is rerun with its current facts; merges happen on this thread after all calls finish
+    private async Task<GuidePartResult> RegenerateFactsAsync(CaseDraft draft, string guidance, bool replaceEdited,
+        IProgress<GuideProgress>? progress, CancellationToken ct)
+    {
+        var guide = draft.Guide!;
+        var state = guide.FactsState;
+        var result = new GuidePartResult { Part = GuidePart.Facts };
+
+        if (guide.CastState.Status != GuidePartStatus.Ready || guide.Cast.Count == 0)
+        {
+            result.FailureMessage = "Write the cast before the key facts.";
+            return result;
+        }
+
+        var units = PlanFactUnits(draft);
+        if (units.Count == 0)
+        {
+            result.FailureMessage = "The core document has no fact sections.";
+            return result;
+        }
+
+        var existing = FactsByUnit(guide, units);
+        var previous = state.Status;
+        state.Status = GuidePartStatus.Generating;
+
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var semaphore = new SemaphoreSlim(MaxParallelCalls, MaxParallelCalls);
+        var run = new UnitRun(runCts, semaphore, ct, RegenerateHint("Key Facts"));
+
+        var tasks = units.Select((unit, i) => RunUnitAsync<FactBatchDto>(new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = $"Case Guide - Facts ({unit.Plan.Heading})",
+            SystemPrompt = CaseGuidePrompts.SystemPrompt,
+            UserPrompt = CaseGuidePrompts.BuildFactsPrompt(draft, unit.Plan, unit.From, unit.To, unit.Target, existing[i], guidance, replaceEdited),
+            MaxOutputTokens = FactsMaxOutputTokens
+        }, run, () => progress?.Report(new GuideProgress
+        {
+            Part = GuidePart.Facts,
+            Message = $"Regenerating the key facts: {unit.Plan.Heading} ({i + 1} of {units.Count})...",
+            Done = i,
+            Total = units.Count
+        }))).ToList();
+
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // User cancel: nothing is merged
+            state.Status = previous;
+            throw;
+        }
+
+        // Units that failed keep their current facts
+        if (MergeRegeneratedFacts(guide, units, existing, tasks, replaceEdited, result))
+            draft.Revision++;
+
+        var outcomes = tasks.Select(t => t.Result).ToList();
+        result.WasRefused = outcomes.Any(o => o.Refused);
+
+        if (run.IsFatal)
+        {
+            state.Status = previous;
+            result.FatalError = run.FatalError;
+            return result;
+        }
+
+        var errors = outcomes.Where(o => o.Value == null && o.Error.Length > 0).Select(o => o.Error).ToList();
+        if (outcomes.All(o => o.Value != null))
+        {
+            SetReady(state);
+            state.CompletedUnits.Clear();
+            GuideStaleness.Stamp(draft, GuidePart.Facts);
+            result.Succeeded = true;
+            return result;
+        }
+
+        state.Status = previous;
+        var first = errors.FirstOrDefault() ?? $"Some periods were not rewritten. {RegenerateHint("Key Facts")}";
+        result.FailureMessage = errors.Distinct(StringComparer.Ordinal).Count() > 1 ? $"{errors.Count} periods were not rewritten: {first}" : first;
+        return result;
+    }
+
+    // Each current fact belongs to the unit for its section (and date slice); facts from sections no longer planned are left alone
+    private static List<List<KeyFact>> FactsByUnit(CaseGuide guide, List<FactUnit> units)
+    {
+        var lists = units.Select(_ => new List<KeyFact>()).ToList();
+        foreach (var fact in guide.Facts.Where(f => f != null))
+        {
+            var candidates = Enumerable.Range(0, units.Count).Where(i => units[i].Plan.Id == fact.SourceSectionId).ToList();
+            if (candidates.Count == 0)
+                continue;
+
+            var index = candidates.FirstOrDefault(i => InRange(fact.Date, units[i].From, units[i].To), candidates[0]);
+            lists[index].Add(fact);
+        }
+
+        return lists;
+    }
+
+    private static bool InRange(string date, string from, string to) =>
+        CaseDraft.TryParseDate(date, out var d) && CaseDraft.TryParseDate(from, out var f) && CaseDraft.TryParseDate(to, out var t)
+        && d >= f && d <= t;
+
+    // Merges every successful unit; new facts get F-ids in date order, removed facts are dropped from the values' links
+    private static bool MergeRegeneratedFacts(CaseGuide guide, List<FactUnit> units, List<List<KeyFact>> existing, List<Task<UnitOutcome<FactBatchDto>>> tasks,
+        bool replaceEdited, GuidePartResult result)
+    {
+        var added = new List<(KeyFact Fact, DateTime Date, int Unit, int Seq)>();
+        var removed = new List<KeyFact>();
+        var changed = false;
+
+        for (var i = 0; i < tasks.Count; i++)
+        {
+            if (tasks[i].Result.Value is not { } batch)
+                continue;
+
+            var unit = i;
+            var sectionId = units[i].Plan.Id;
+            var items = (batch.Facts ?? new List<FactDto>())
+                .Select(dto => (Dto: dto, Fact: MapFact(guide, dto, sectionId)))
+                .Where(x => x.Fact != null)
+                .Select(x => (x.Dto, Fact: x.Fact!))
+                .ToList();
+
+            removed.AddRange(MergeEntries(
+                existing[i],
+                items,
+                replaceEdited,
+                IdAllocator.Fact,
+                f => f.Id,
+                f => f.IsUserEdited,
+                f => f.Id,
+                x => x.Dto.ExistingId,
+                null,
+                (target, x) => CopyFact(target, x.Fact),
+                x => added.Add((x.Fact, SortDate(x.Fact.Date), unit, added.Count)),
+                result.Notes));
+            changed = true;
+        }
+
+        foreach (var fact in removed)
+        {
+            guide.Facts.Remove(fact);
+            foreach (var value in guide.Values.Where(v => v != null))
+                value.FactIds.RemoveAll(id => id == fact.Id);
+        }
+
+        foreach (var item in added.OrderBy(a => a.Date).ThenBy(a => a.Unit).ThenBy(a => a.Seq))
+        {
+            item.Fact.Id = IdAllocator.Next(guide, IdAllocator.Fact);
+            guide.Facts.Add(item.Fact);
+        }
+
+        if (changed)
+            guide.Facts = guide.Facts.OrderBy(f => SortDate(f.Date)).ThenBy(f => IdNumber(f.Id)).ToList();
+
+        return changed;
+    }
+
+    private static void CopyFact(KeyFact target, KeyFact source)
+    {
+        target.Date = source.Date;
+        target.Title = source.Title;
+        target.Description = source.Description;
+        target.IssueIds = source.IssueIds;
+        target.ActorIds = source.ActorIds;
+        target.KnownByIds = source.KnownByIds;
+        target.Significance = source.Significance;
+        target.MappingNotes = source.MappingNotes;
+        target.IsUserEdited = false;
+        target.NeedsReview = false;
+        target.ReviewReason = string.Empty;
+    }
+
+    // Canonical values: one call with the current values; merged only after a successful response
+    private async Task<GuidePartResult> RegenerateValuesAsync(CaseDraft draft, string guidance, bool replaceEdited,
+        IProgress<GuideProgress>? progress, CancellationToken ct)
+    {
+        var guide = draft.Guide!;
+        var state = guide.ValuesState;
+        var result = new GuidePartResult { Part = GuidePart.Values };
+
+        if (guide.Facts.Count == 0)
+        {
+            result.FailureMessage = "Write the key facts before the canonical values.";
+            return result;
+        }
+
+        var scanned = ScanValues(draft);
+        var previous = state.Status;
+        state.Status = GuidePartStatus.Generating;
+        progress?.Report(new GuideProgress { Part = GuidePart.Values, Message = "Regenerating the canonical values..." });
+
+        try
+        {
+            var dto = (await _llm.GenerateAsync<ValuesDto>(new LlmRequest
+            {
+                Tier = LlmTier.Story,
+                OperationName = "Case Guide - Canonical values",
+                SystemPrompt = CaseGuidePrompts.SystemPrompt,
+                UserPrompt = CaseGuidePrompts.BuildValuesPrompt(draft, scanned, guide.Values, guidance, replaceEdited),
+                MaxOutputTokens = ValuesMaxOutputTokens
+            }, ct)).GetValueOrThrow();
+
+            MergeRegeneratedValues(guide, dto, replaceEdited, result);
+            SetReady(state);
+            GuideStaleness.Stamp(draft, GuidePart.Values);
+            draft.Revision++;
+            result.Succeeded = true;
+            return result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // User cancel: nothing merged
+            state.Status = previous;
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // Not cancelled by the user: the request timed out
+            result.FailureMessage = $"The request timed out. {RegenerateHint("Values")}";
+        }
+        catch (LlmCallException ex) when (ex.Result.IsFatal)
+        {
+            // Bad key or exhausted spend limit
+            result.FatalError = ex.Result.Message ?? ex.Message;
+        }
+        catch (LlmCallException ex)
+        {
+            result.WasRefused = ex.Result.Outcome == LlmOutcome.Refused;
+            result.FailureMessage = DescribeOutcome(ex.Result, RegenerateHint("Values"));
+        }
+
+        // Failure: the values stay as they were
+        state.Status = previous;
+        return result;
+    }
+
+    private static void MergeRegeneratedValues(CaseGuide guide, ValuesDto dto, bool replaceEdited, GuidePartResult result)
+    {
+        var items = (dto.Values ?? new List<ValueDto>())
+            .Where(v => v != null)
+            .Select(v => (Dto: v, Value: MapValue(guide, v.Kind, v.Label, v.Value, v.Description, v.FactIds)))
+            .Where(x => x.Value != null)
+            .Select(x => (x.Dto, Value: x.Value!))
+            .ToList();
+
+        var removed = MergeEntries(
+            guide.Values.Where(v => v != null).ToList(),
+            items,
+            replaceEdited,
+            IdAllocator.Value,
+            v => v.Id,
+            v => v.IsUserEdited,
+            v => v.Label,
+            x => x.Dto.ExistingId,
+            (x, v) => SameValue(v, x.Value),
+            (target, x) => CopyValue(target, x.Value),
+            x => AddOrMergeValue(guide, x.Value),
+            result.Notes);
+
+        foreach (var value in removed)
+            guide.Values.Remove(value);
+    }
+
+    private static bool SameValue(CanonicalValue a, CanonicalValue b) =>
+        string.Equals(a.Label, b.Label, StringComparison.OrdinalIgnoreCase) && string.Equals(a.Value, b.Value, StringComparison.OrdinalIgnoreCase);
+
+    private static void CopyValue(CanonicalValue target, CanonicalValue source)
+    {
+        target.Kind = source.Kind;
+        target.Label = source.Label;
+        target.Value = source.Value;
+        target.Description = source.Description;
+        target.FactIds = source.FactIds;
+        target.MappingNotes = source.MappingNotes;
+        target.IsUserEdited = false;
+        target.NeedsReview = false;
+        target.ReviewReason = string.Empty;
+    }
+
+    // A repeated label + value in the same response merges into the entry already written
+    private static void AddOrMergeValue(CaseGuide guide, CanonicalValue value)
+    {
+        var duplicate = guide.Values.FirstOrDefault(v => v != null && SameValue(v, value));
+        if (duplicate != null)
+        {
+            duplicate.FactIds = duplicate.FactIds.Union(value.FactIds).ToList();
+            duplicate.MappingNotes = duplicate.MappingNotes.Union(value.MappingNotes).ToList();
+            return;
+        }
+
+        value.Id = IdAllocator.Next(guide, IdAllocator.Value);
+        guide.Values.Add(value);
+    }
+
+    /// <summary>
+    /// Shared D-19 merge. An item whose existingId (or same-entry match) names a revisable entry not yet claimed in this response
+    /// updates it in place; one naming a protected (hand-edited) entry is skipped with a note; anything else is created.
+    /// Returns the revisable entries the response did not claim, for the caller to remove.
+    /// </summary>
+    private static List<TEntity> MergeEntries<TEntity, TItem>(IReadOnlyList<TEntity> current, IEnumerable<TItem> items, bool replaceEdited,
+        string prefix, Func<TEntity, string> idOf, Func<TEntity, bool> isEdited, Func<TEntity, string> nameOf,
+        Func<TItem, string?> existingIdOf, Func<TItem, TEntity, bool>? sameEntry,
+        Action<TEntity, TItem> update, Action<TItem> create, List<string> notes)
+        where TEntity : class
+    {
+        var revisable = current.Where(e => replaceEdited || !isEdited(e)).ToList();
+        var kept = current.Where(e => !replaceEdited && isEdited(e)).ToList();
+        var claimed = new HashSet<TEntity>(ReferenceEqualityComparer.Instance);
+
+        foreach (var item in items)
+        {
+            // Ids are claimed once per response; an id used twice or an unknown id gets a new entry (T-03-38)
+            var id = IdAllocator.Normalize(existingIdOf(item), prefix);
+            var target = id == null ? null : revisable.FirstOrDefault(e => idOf(e) == id && !claimed.Contains(e));
+            var keptEntry = id == null ? null : kept.FirstOrDefault(e => idOf(e) == id);
+
+            if (target == null && keptEntry == null && sameEntry != null)
+            {
+                target = revisable.FirstOrDefault(e => !claimed.Contains(e) && sameEntry(item, e));
+                keptEntry = target == null ? kept.FirstOrDefault(e => sameEntry(item, e)) : null;
+            }
+
+            if (target != null)
+            {
+                claimed.Add(target);
+                update(target, item);
+            }
+            else if (keptEntry != null)
+            {
+                // Hand edits are never overwritten by the model (T-03-37)
+                AddKeptNote(notes, nameOf(keptEntry));
+            }
+            else
+            {
+                create(item);
+            }
+        }
+
+        return revisable.Where(e => !claimed.Contains(e)).ToList();
+    }
+
+    private static void AddKeptNote(List<string> notes, string name)
+    {
+        var note = $"Kept your edits to {name}.";
+        if (!notes.Contains(note))
+            notes.Add(note);
+    }
+
     // ---------- Shared helpers ----------
 
     private static void SetReady(GuidePartState state)
@@ -1530,11 +2178,16 @@ public class CaseGuideGenerator
         state.FailureMessage = message;
     }
 
-    private static string DescribeOutcome(LlmResult result, string part) => result.Outcome switch
+    private static string RetryHint(string part) => $"Click Retry {part}.";
+
+    // Regeneration failures leave the tab as it was, so the hint names the regenerate action
+    private static string RegenerateHint(string part) => $"Click Regenerate {part} to try again.";
+
+    private static string DescribeOutcome(LlmResult result, string retryHint) => result.Outcome switch
     {
         LlmOutcome.Refused => $"The model declined: {result.Message}",
-        LlmOutcome.Truncated => $"The response was cut off. Click Retry {part}.",
-        LlmOutcome.Invalid => $"The response could not be read. Click Retry {part}.",
+        LlmOutcome.Truncated => $"The response was cut off. {retryHint}",
+        LlmOutcome.Invalid => $"The response could not be read. {retryHint}",
         _ => $"{result.FailureKind}: {result.Message}"
     };
 

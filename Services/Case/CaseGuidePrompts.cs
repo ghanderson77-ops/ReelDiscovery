@@ -75,7 +75,11 @@ public static class CaseGuidePrompts
         return sb.ToString();
     }
 
-    internal static string BuildRosterPrompt(CaseDraft draft, string guidance = "")
+    /// <summary>
+    /// Roster call. When the guide already has key characters (Regenerate Cast), they are listed by id for revision;
+    /// hand-edited ones are listed as keep-exactly unless <paramref name="replaceEdited"/> (D-19).
+    /// </summary>
+    internal static string BuildRosterPrompt(CaseDraft draft, string guidance = "", bool replaceEdited = false)
     {
         var doc = RequireDocument(draft);
         var guide = draft.Guide ?? new CaseGuide();
@@ -92,12 +96,10 @@ public static class CaseGuidePrompts
             sb.AppendLine($"- {party.Name} ({party.ShortName}), {party.Role}, {party.EntityType}, {party.Domicile}: {party.Description}");
 
         var existing = guide.Cast.Where(c => c != null && c.Tier == CastTier.Key).ToList();
-        if (existing.Count > 0)
-        {
-            sb.AppendLine("Characters already in the cast (do not repeat them):");
-            foreach (var member in existing)
-                sb.AppendLine(CastLine(guide, member));
-        }
+        AppendExisting(sb, "Current roster (revise by existingId; leave existingId empty for new people):",
+            existing.Select(m => (m.IsUserEdited && !replaceEdited, RosterLine(m))));
+        if (existing.Any(m => !m.IsUserEdited || replaceEdited))
+            sb.AppendLine("Return the whole revised roster: the current people you keep, with their existingId, and any new people. People you leave out are removed.");
 
         sb.AppendLine();
         sb.AppendLine("Document:");
@@ -164,7 +166,7 @@ public static class CaseGuidePrompts
         return sb.ToString();
     }
 
-    internal static string BuildBackgroundPrompt(CaseDraft draft, CaseOrganization org, int count)
+    internal static string BuildBackgroundPrompt(CaseDraft draft, CaseOrganization org, int count, string guidance = "")
     {
         var doc = RequireDocument(draft);
         var guide = draft.Guide ?? new CaseGuide();
@@ -178,6 +180,7 @@ public static class CaseGuidePrompts
             $"Give each a realistic title, department, a one-line role, and active dates inside {doc.TimelineStart} to {StoryEnd(doc)}. " +
             $"Do not reuse these names: {(names.Count == 0 ? "(none)" : string.Join(", ", names))}.");
         AppendNameRules(sb, draft);
+        AppendGuidance(sb, guidance);
 
         return sb.ToString();
     }
@@ -214,7 +217,7 @@ public static class CaseGuidePrompts
     /// One fact section (or one date slice of it): its paragraphs, every issue, the compact cast and the target count (GUIDE-05, D-02).
     /// <paramref name="existing"/> lists this unit's current facts for regeneration; hand-edited ones are listed as keep-exactly.
     /// </summary>
-    internal static string BuildFactsPrompt(CaseDraft draft, FactSubsectionPlan plan, string from, string to, int target, IReadOnlyList<KeyFact> existing, string guidance = "")
+    internal static string BuildFactsPrompt(CaseDraft draft, FactSubsectionPlan plan, string from, string to, int target, IReadOnlyList<KeyFact> existing, string guidance = "", bool replaceEdited = false)
     {
         var doc = RequireDocument(draft);
         var guide = draft.Guide ?? new CaseGuide();
@@ -246,7 +249,8 @@ public static class CaseGuidePrompts
         foreach (var member in guide.Cast.Where(c => c != null))
             sb.AppendLine($"{member.Id} | {member.FullName} | {member.Title} | {OrgName(guide, member.OrganizationId)} | active {member.ActiveFrom} to {member.ActiveTo}");
 
-        AppendExisting(sb, "facts", existing.Where(f => f != null).Select(f => (f.IsUserEdited, $"{f.Id} | {f.Date} | {f.Title}")));
+        AppendExisting(sb, "Existing facts (revise by existingId; return new facts with an empty existingId):",
+            existing.Where(f => f != null).Select(f => (f.IsUserEdited && !replaceEdited, $"{f.Id} | {f.Date} | {f.Title}")));
 
         sb.AppendLine();
         sb.AppendLine($"Write about {target} facts dated {from} to {to}, drawn from this section and consistent with the whole document.");
@@ -262,7 +266,7 @@ public static class CaseGuidePrompts
     /// <summary>
     /// The canonical values registry: every fact, plus the amounts and identifiers the scanner found (GUIDE-06).
     /// </summary>
-    internal static string BuildValuesPrompt(CaseDraft draft, IReadOnlyList<ScannedValue> scanned, IReadOnlyList<CanonicalValue> existing, string guidance = "")
+    internal static string BuildValuesPrompt(CaseDraft draft, IReadOnlyList<ScannedValue> scanned, IReadOnlyList<CanonicalValue> existing, string guidance = "", bool replaceEdited = false)
     {
         var doc = RequireDocument(draft);
         var guide = draft.Guide ?? new CaseGuide();
@@ -290,7 +294,8 @@ public static class CaseGuidePrompts
         if (hits.Count > 0)
             sb.AppendLine($"These amounts and identifiers appear in the document; register each one exactly as written: {string.Join(", ", hits)}");
 
-        AppendExisting(sb, "values", existing.Where(v => v != null).Select(v => (v.IsUserEdited, $"{v.Id} | {v.Label} | {v.Value}")));
+        AppendExisting(sb, "Existing values (revise by existingId; return new values with an empty existingId):",
+            existing.Where(v => v != null).Select(v => (v.IsUserEdited && !replaceEdited, $"{v.Id} | {v.Label} | {v.Value}")));
 
         sb.AppendLine();
         sb.AppendLine("Register every amount, invoice number, change-order number, contract number, purchase order, account number, document title, project name and address the facts rely on. Use the exact text a document or email would use (for example $184,250.00). Give each a short label and link it to the fact IDs that use it.");
@@ -302,17 +307,17 @@ public static class CaseGuidePrompts
         return sb.ToString();
     }
 
-    // Current entries for regeneration; hand-edited ones must come back unchanged (D-19)
-    private static void AppendExisting(StringBuilder sb, string noun, IEnumerable<(bool IsUserEdited, string Line)> entries)
+    // Current entries for regeneration; protected (hand-edited) ones must come back unchanged (D-19)
+    private static void AppendExisting(StringBuilder sb, string header, IEnumerable<(bool IsProtected, string Line)> entries)
     {
         var list = entries.ToList();
-        var editable = list.Where(e => !e.IsUserEdited).Select(e => e.Line).ToList();
-        var kept = list.Where(e => e.IsUserEdited).Select(e => e.Line).ToList();
+        var editable = list.Where(e => !e.IsProtected).Select(e => e.Line).ToList();
+        var kept = list.Where(e => e.IsProtected).Select(e => e.Line).ToList();
 
         if (editable.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine($"Existing {noun} (revise by existingId; return new {noun} with an empty existingId):");
+            sb.AppendLine(header);
             foreach (var line in editable)
                 sb.AppendLine(line);
         }
@@ -352,6 +357,10 @@ public static class CaseGuidePrompts
         foreach (var org in guide.Organizations.Where(o => o != null))
             sb.AppendLine($"{org.Id} | {org.Name} | {org.Kind} | {org.Location}");
     }
+
+    // "CH-001 | Maria Delgado | President | ORG-01 | Party | involvement"
+    private static string RosterLine(CastMember member) =>
+        $"{member.Id} | {member.FullName} | {member.Title} | {member.OrganizationId} | {member.Role} | {member.Involvement}";
 
     private static string CastLine(CaseGuide guide, CastMember member) =>
         $"{member.Id} | {member.FullName} | {member.Title} | {OrgName(guide, member.OrganizationId)} | {member.Role} | {member.Involvement}";

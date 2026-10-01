@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
@@ -143,6 +145,7 @@ public class StepCaseSummary : UserControl, IWizardStep
             Text = "Case Summary",
             AutoSize = false,
             AutoEllipsis = true,
+            UseMnemonic = false, // Every data label here may contain "&" (case titles, paths, "Key Facts & Events")
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.BottomLeft,
             Margin = new Padding(0),
@@ -155,6 +158,7 @@ public class StepCaseSummary : UserControl, IWizardStep
             Text = Subtitle,
             AutoSize = false,
             AutoEllipsis = true,
+            UseMnemonic = false,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Padding(0, LogicalToDeviceUnits(2), 0, 0),
@@ -211,6 +215,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         {
             AutoSize = false,
             AutoEllipsis = true,
+            UseMnemonic = false,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0),
@@ -222,6 +227,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         {
             AutoSize = false,
             AutoEllipsis = true,
+            UseMnemonic = false,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, LogicalToDeviceUnits(2), 0, 0),
@@ -319,6 +325,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         {
             AutoSize = false,
             AutoEllipsis = true,
+            UseMnemonic = false,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, LogicalToDeviceUnits(12), 0, 0),
@@ -334,6 +341,7 @@ public class StepCaseSummary : UserControl, IWizardStep
             Text = ClosingHint,
             AutoSize = false,
             AutoEllipsis = true,
+            UseMnemonic = false,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, LogicalToDeviceUnits(8), 0, 0),
@@ -348,6 +356,15 @@ public class StepCaseSummary : UserControl, IWizardStep
         // Wire handlers only after every control exists (handlers read other controls)
         foreach (var row in rows)
             row.Dot.Paint += (s, e) => PaintDot(row, e);
+        foreach (var kind in ExportKinds)
+        {
+            var row = _exportRows[kind];
+            row.Export!.Click += async (s, e) => await ExportOneAsync(kind);
+            row.Open!.Click += (s, e) => OpenExport(kind);
+        }
+        _btnExportAll.Click += async (s, e) => await ExportAllAsync();
+        _btnOpenFolder.Click += (s, e) => OpenCaseFolder();
+        _btnMoveFolder.Click += async (s, e) => await MoveCaseFolderAsync();
     }
 
     private Panel Divider() => new() { Dock = DockStyle.Fill, Height = 1, BackColor = Theme.Border, Margin = new Padding(0) };
@@ -431,6 +448,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         {
             AutoSize = false,
             AutoEllipsis = true,
+            UseMnemonic = false,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Padding(0, top, 0, 0),
@@ -585,15 +603,284 @@ public class StepCaseSummary : UserControl, IWizardStep
         RefreshAll();
     }
 
-    public Task OnEnterStepAsync()
+    public async Task OnEnterStepAsync()
     {
+        _failedExports.Clear();
+        if (!string.IsNullOrWhiteSpace(_state.PendingNotice))
+        {
+            SetStatus(_state.PendingNotice, Theme.Success);
+            _state.PendingNotice = string.Empty;
+        }
+        else
+        {
+            SetStatus(string.Empty, Theme.TextMuted);
+        }
+
+        Draft.AdvanceStage(CaseStage.Summary);
         RefreshAll();
-        return Task.CompletedTask;
+
+        if (CaseStore.CanSave(Draft))
+        {
+            var saved = await _state.CaseStore.SaveAsync(Draft);
+            if (IsDisposed)
+                return;
+            if (!saved)
+                SetStatus(CaseGuideUiText.SaveFailedText(_state.CaseStore.LastSaveError), Theme.Danger);
+        }
+
+        RefreshAll();
     }
 
     public Task OnLeaveStepAsync() => Task.CompletedTask;
 
-    public Task<bool> ValidateStepAsync() => Task.FromResult(true);
+    /// <summary>
+    /// Finish: flush the save and close with no prompt (D-10); WizardForm does the closing.
+    /// </summary>
+    public async Task<bool> ValidateStepAsync()
+    {
+        if (_busy)
+            return false;
+
+        if (CaseStore.CanSave(Draft))
+        {
+            await _state.CaseStore.SaveAsync(Draft);
+            if (!IsDisposed)
+                RefreshAll();
+        }
+        return true;
+    }
+
+    // ----- Actions -----
+
+    private async Task ExportOneAsync(CaseExportKind kind)
+    {
+        if (_busy)
+            return;
+
+        SetBusy(true);
+        try
+        {
+            if (await ExportAsync(kind) && !IsDisposed)
+                SetStatus(CaseGuideUiText.ExportedCountText(1), Theme.Success);
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+                RefreshAll();
+            }
+        }
+    }
+
+    private async Task ExportAllAsync()
+    {
+        if (_busy)
+            return;
+
+        SetBusy(true);
+        try
+        {
+            var exported = 0;
+            foreach (var kind in ExportKinds)
+            {
+                // The first failure is reported and the rest are skipped; earlier successes stay on disk
+                if (!await ExportAsync(kind) || IsDisposed)
+                    return;
+                exported++;
+            }
+            SetStatus(CaseGuideUiText.ExportedCountText(exported), Theme.Success);
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+                RefreshAll();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds one .docx from the in-memory draft and writes it atomically into the case folder.
+    /// Reports failures on the status strip and the row's dot; returns true on success.
+    /// </summary>
+    private async Task<bool> ExportAsync(CaseExportKind kind)
+    {
+        var noun = CaseGuideDocxExporter.DocumentNoun(kind);
+        var fileName = string.Empty;
+        try
+        {
+            var folder = _state.CaseStore.EnsureFolder(Draft);
+            fileName = ExportFileName(kind, folder);
+            SetStatus(CaseGuideUiText.ExportingText(noun), Theme.TextMuted);
+
+            // Built on the UI thread so the export is a consistent snapshot of the draft
+            var bytes = CaseGuideDocxExporter.Build(Draft, kind);
+            var path = Path.Combine(folder, fileName);
+            await CaseStore.WriteAtomicAsync(path, bytes);
+            if (IsDisposed)
+                return false;
+
+            _failedExports.Remove(kind);
+            RefreshAll();
+            return true;
+        }
+        catch (Exception ex) when (IsFileOpenElsewhere(ex, fileName))
+        {
+            return ExportFailed(kind, CaseGuideUiText.ExportFileOpenText(fileName));
+        }
+        catch (Exception ex)
+        {
+            // UI boundary: any export failure (I/O, access, missing guide, OpenXml) is shown, never thrown
+            return ExportFailed(kind, CaseGuideUiText.ExportFailedText(noun, ex.Message));
+        }
+    }
+
+    private bool ExportFailed(CaseExportKind kind, string message)
+    {
+        if (IsDisposed)
+            return false;
+        _failedExports.Add(kind);
+        RefreshAll();
+        SetStatus(message, Theme.Danger);
+        return false;
+    }
+
+    // Word holds an open .docx with a sharing lock: the replace fails with a sharing/lock violation or access denied
+    private bool IsFileOpenElsewhere(Exception ex, string fileName)
+    {
+        const int SharingViolation = unchecked((int)0x80070020);
+        const int LockViolation = unchecked((int)0x80070021);
+        if (ex is IOException io && (io.HResult == SharingViolation || io.HResult == LockViolation))
+            return true;
+        if (ex is not UnauthorizedAccessException || string.IsNullOrEmpty(fileName) || CaseFolder.Length == 0)
+            return false;
+
+        var path = Path.Combine(CaseFolder, fileName);
+        if (!File.Exists(path))
+            return false;
+        try
+        {
+            using var probe = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            return false;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Read-only or no permission: a real access problem, not an open file
+            return false;
+        }
+    }
+
+    private void OpenExport(CaseExportKind kind)
+    {
+        var folder = CaseFolder;
+        if (folder.Length == 0)
+            return;
+
+        var fileName = ExportFileName(kind, folder);
+        var path = Path.Combine(folder, fileName);
+        if (!File.Exists(path))
+        {
+            RefreshAll();
+            return;
+        }
+
+        try
+        {
+            // Opens the .docx this step just wrote; the path is built from the verified case folder
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            SetStatus($"Could not open {fileName}: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
+        }
+    }
+
+    private void OpenCaseFolder()
+    {
+        var folder = CaseFolder;
+        if (folder.Length == 0 || !Directory.Exists(folder))
+        {
+            RefreshAll();
+            return;
+        }
+
+        try
+        {
+            // Never shell-execute a path read from case.json (ASVS V12)
+            Process.Start("explorer.exe", "\"" + Path.GetFullPath(folder) + "\"");
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            SetStatus($"Could not open the case folder: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
+        }
+    }
+
+    private async Task MoveCaseFolderAsync()
+    {
+        if (_busy)
+            return;
+
+        var folder = CaseFolder;
+        if (folder.Length == 0)
+        {
+            RefreshAll();
+            return;
+        }
+
+        string chosen;
+        using (var dialog = new FolderBrowserDialog
+        {
+            Description = "Choose where to move the case folder",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = true
+        })
+        {
+            if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+                return;
+            chosen = dialog.SelectedPath;
+        }
+
+        var target = Path.Combine(chosen, Path.GetFileName(folder.TrimEnd('\\', '/')));
+        var (title, text) = CaseGuideUiText.C7MoveFolder(CaseGuideUiText.DisplayPath(target, MyDocuments));
+        if (MessageBox.Show(this, text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            return;
+
+        SetBusy(true);
+        try
+        {
+            var store = _state.CaseStore;
+            var draft = Draft;
+            // A cross-volume move copies files; keep the UI responsive (every action is disabled meanwhile)
+            var newFolder = await Task.Run(() => store.MoveFolder(draft, chosen));
+            if (IsDisposed)
+                return;
+
+            await store.SaveAsync(draft);
+            if (IsDisposed)
+                return;
+
+            SetStatus(CaseGuideUiText.MovedText(CaseGuideUiText.DisplayPath(newFolder, MyDocuments)), Theme.Success);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            if (!IsDisposed)
+                SetStatus(CaseGuideUiText.MoveFailedText(ex.Message), Theme.Danger);
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+                RefreshAll();
+            }
+        }
+    }
 
     protected override void Dispose(bool disposing)
     {

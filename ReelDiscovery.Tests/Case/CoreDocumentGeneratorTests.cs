@@ -201,6 +201,20 @@ public class CoreDocumentGeneratorTests
     }
 
     [Fact]
+    public async Task SystemPrompt_TakesAFirmPosition()
+    {
+        // UAT: the memo hedged every finding ("does not establish", "remains unconfirmed")
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(CivilOutlineJson));
+
+        await new CoreDocumentGenerator(gateway).GenerateOutlineAsync(NewDraft());
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Contains("Take a firm position", request.SystemPrompt);
+        Assert.Contains("Do not hedge", request.SystemPrompt);
+    }
+
+    [Fact]
     public async Task Outline_MapsCivilFederal()
     {
         var (gateway, fake) = CaseTestData.CreateGateway();

@@ -68,10 +68,16 @@ public class CaseDraftSerializationTests
     [Fact]
     public void Computed_NotSerialized()
     {
-        var json = CaseTestData.SampleComplaintDraft().ToJson();
+        var draft = CaseTestData.SampleComplaintDraft();
+        var json = draft.ToJson();
 
         Assert.DoesNotContain("\"Preset\"", json);
-        Assert.DoesNotContain("\"Summary\"", json);
+        Assert.DoesNotContain("\"MemoParagraphsMin\"", json);
+
+        // CaseCount.Summary is real data; the computed ComplexityPreset.Summary must not appear
+        var summaryKeys = json.Split("\"Summary\"").Length - 1;
+        Assert.Equal(draft.CoreDocument!.Counts.Count, summaryKeys);
+        Assert.DoesNotContain(draft.Preset.Summary, json);
     }
 
     [Fact]

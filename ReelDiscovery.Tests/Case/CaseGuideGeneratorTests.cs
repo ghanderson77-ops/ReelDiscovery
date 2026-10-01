@@ -1293,6 +1293,306 @@ public class CaseGuideGeneratorTests
         Assert.Equal(6, draft.Guide.Facts.Select(f => f.Id).Distinct().Count());
     }
 
+    // ---------- Canonical values ----------
+
+    private const string ValuesJson = """
+        {
+          "values": [
+            { "existingId": "", "kind": "Amount", "label": "Change Order 7 amount", "value": " $184,250.00 ", "description": "Amount Harmon approved for Change Order 7.", "factIds": ["F-1", "F-99"] },
+            { "existingId": "", "kind": "ChangeOrderNumber", "label": "Change order number", "value": "CO-007", "description": "Number of the approved change order.", "factIds": ["F-003"] },
+            { "existingId": "", "kind": "Amount", "label": "change order 7 amount", "value": "$184,250.00", "description": "Same amount again.", "factIds": ["F-005"] }
+          ]
+        }
+        """;
+
+    // SampleGuidedDraft with issues, cast and facts Ready and no values; F-004 mentions CO-007
+    private static CaseDraft ValuesReadyDraft()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var guide = draft.Guide!;
+        guide.Values.Clear();
+        guide.IdCounters["V"] = 0;
+        guide.ValuesState = new GuidePartState();
+        guide.FindFact("F-004")!.Description += " The work was priced under CO-007.";
+        return draft;
+    }
+
+    private static bool IsValuesRequest(LlmProviderRequest r) => r.UserPrompt.Contains("Register every amount");
+
+    [Fact]
+    public async Task ValuesPrompt()
+    {
+        var (inner, fake) = Gateway(FakeLlmProvider.Ok(ValuesJson));
+        var gateway = new RecordingGateway(inner);
+        var draft = ValuesReadyDraft();
+        var progress = new CaseTestData.SyncProgress<GuideProgress>();
+
+        await new CaseGuideGenerator(gateway).GenerateValuesAsync(draft, progress);
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Contains("F-001 | 2024-01-15 | Subcontract signed for Lakeview Tower | Brightline and Harmon signed the glazing subcontract", request.UserPrompt);
+        Assert.Contains("These amounts and identifiers appear in the document; register each one exactly as written: $184,250.00, CO-007, INV-2024-118", request.UserPrompt);
+        Assert.Contains("Register every amount, invoice number, change-order number, contract number, purchase order, account number, document title, project name and address the facts rely on.", request.UserPrompt);
+        Assert.Contains("Kinds: Amount, InvoiceNumber, ChangeOrderNumber", request.UserPrompt);
+        Assert.Contains("Keep every name the document uses exactly as written", request.UserPrompt);
+        Assert.Equal(12_000, request.MaxTokens);
+        Assert.Equal(CaseGuidePrompts.SystemPrompt, request.SystemPrompt);
+        CaseTestData.AssertNoJsonInstructions(request);
+        Assert.Equal("Case Guide - Canonical values", gateway.Requests[0].OperationName);
+        Assert.Equal(LlmTier.Story, gateway.Requests[0].Tier);
+        Assert.Contains(progress.Reports, p => p.Message == "Writing the canonical values...");
+    }
+
+    [Fact]
+    public void ValuesPrompt_ExistingAndHandEdited()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var values = draft.Guide!.Values;
+        values[1].IsUserEdited = true;
+
+        var prompt = CaseGuidePrompts.BuildValuesPrompt(draft, new List<ScannedValue>(), values, "add the retainage");
+
+        Assert.Contains("Existing values (revise by existingId; return new values with an empty existingId):", prompt);
+        Assert.Contains("V-001 | Change Order 7 amount | $184,250.00", prompt);
+        Assert.Matches(@"Keep exactly; do not return these:\s*\r?\nV-002 \| Change order number \| CO-007", prompt);
+        Assert.DoesNotContain("These amounts and identifiers appear", prompt);
+        Assert.Contains("Guidance from the user: add the retainage", prompt);
+    }
+
+    [Fact]
+    public async Task Values_Map()
+    {
+        var (gateway, _) = Gateway(FakeLlmProvider.Ok(ValuesJson));
+        var draft = ValuesReadyDraft();
+
+        await new CaseGuideGenerator(gateway).GenerateValuesAsync(draft);
+
+        var values = draft.Guide!.Values;
+        Assert.Equal(2, values.Count);
+        var amount = values[0];
+        Assert.Equal("V-001", amount.Id);
+        Assert.Equal(ValueKind.Amount, amount.Kind);
+        Assert.Equal("Change Order 7 amount", amount.Label);
+        Assert.Equal("$184,250.00", amount.Value);
+        Assert.Equal("Amount Harmon approved for Change Order 7.", amount.Description);
+        // Duplicate label + value merged with the fact ids unioned
+        Assert.Equal(new[] { "F-001", "F-005" }, amount.FactIds);
+        Assert.Contains("Dropped unknown fact F-99.", amount.MappingNotes);
+
+        var number = values[1];
+        Assert.Equal("V-002", number.Id);
+        Assert.Equal(ValueKind.ChangeOrderNumber, number.Kind);
+        Assert.Equal("CO-007", number.Value);
+        Assert.Equal(new[] { "F-003" }, number.FactIds);
+    }
+
+    [Fact]
+    public async Task Values_Ready()
+    {
+        var (gateway, _) = Gateway(FakeLlmProvider.Ok(ValuesJson));
+        var draft = ValuesReadyDraft();
+        var revision = draft.Revision;
+
+        var result = await new CaseGuideGenerator(gateway).GenerateValuesAsync(draft);
+
+        var guide = draft.Guide!;
+        Assert.True(result.Succeeded);
+        Assert.Equal(GuidePart.Values, result.Part);
+        Assert.Equal(GuidePartStatus.Ready, guide.ValuesState.Status);
+        Assert.Equal(GuideStaleness.BasisFor(draft, GuidePart.Values), guide.ValuesState.BasisHash);
+        Assert.True(draft.Revision > revision);
+    }
+
+    [Fact]
+    public async Task Values_NoFacts()
+    {
+        var (gateway, fake) = Gateway(FakeLlmProvider.Ok(ValuesJson));
+        var draft = FactsReadyDraft();
+
+        var result = await new CaseGuideGenerator(gateway).GenerateValuesAsync(draft);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Write the key facts before the canonical values.", result.FailureMessage);
+        Assert.Empty(fake.Requests);
+    }
+
+    [Fact]
+    public async Task Values_Refused()
+    {
+        var (gateway, _) = Gateway(FakeLlmProvider.Refused("No values."));
+        var draft = ValuesReadyDraft();
+
+        var result = await new CaseGuideGenerator(gateway).GenerateValuesAsync(draft);
+
+        Assert.False(result.Succeeded);
+        Assert.True(result.WasRefused);
+        Assert.Equal(GuidePartStatus.Failed, draft.Guide!.ValuesState.Status);
+        Assert.Equal("The model declined: No values.", result.FailureMessage);
+        Assert.Empty(draft.Guide.Values);
+    }
+
+    // ---------- GenerateAsync ----------
+
+    private const string FactsSection1Json = """{ "facts": [ { "existingId": "", "date": "2024-01-15", "title": "Subcontract signed", "description": "Brightline and Harmon signed the subcontract.", "issueIds": ["ISS-01"], "actorIds": ["CH-001", "CH-003"], "knownByIds": [], "significance": "Key" } ] }""";
+
+    private const string FactsSection2Json = """{ "facts": [ { "existingId": "", "date": "2024-05-10", "title": "Invoice submitted", "description": "Brightline invoiced $184,250.00.", "issueIds": ["ISS-01"], "actorIds": ["CH-001"], "knownByIds": ["CH-004"], "significance": "Hot" }, { "existingId": "", "date": "2024-03-18", "title": "Change order approved", "description": "Harmon approved CO-007.", "issueIds": ["ISS-01"], "actorIds": ["CH-004"], "knownByIds": [], "significance": "Key" } ] }""";
+
+    private static LlmProviderResponse[] CastResponses(CaseDraft draft)
+    {
+        // Roster adds two law firms to the two party organizations: 4 non-individual organizations get background staff
+        var orgs = draft.CoreDocument!.Parties.Count + 2;
+        return new[] { FakeLlmProvider.Ok(CivilRosterJson), FakeLlmProvider.Ok(DetailsJson(1, 10)) }
+            .Concat(Enumerable.Range(0, orgs).Select(_ => FakeLlmProvider.Ok(BackgroundJson)))
+            .ToArray();
+    }
+
+    [Fact]
+    public async Task GenerateAsync_FullRun()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        var responses = new[] { FakeLlmProvider.Ok(IssueDetailsJson) }
+            .Concat(CastResponses(draft))
+            .Concat(new[] { FakeLlmProvider.Ok(FactsSection1Json), FakeLlmProvider.Ok(FactsSection2Json), FakeLlmProvider.Ok(ValuesJson) })
+            .ToArray();
+        var (gateway, fake) = Gateway(responses);
+        var progress = new CaseTestData.SyncProgress<GuideProgress>();
+        var completed = new List<GuidePart>();
+        var revision = draft.Revision;
+
+        var result = await new CaseGuideGenerator(gateway).GenerateAsync(draft, progress, part =>
+        {
+            completed.Add(part);
+            return Task.CompletedTask;
+        });
+
+        var all = new[] { GuidePart.Issues, GuidePart.Cast, GuidePart.Facts, GuidePart.Values };
+        Assert.Equal(all, result.PartsWritten);
+        Assert.Equal(all, completed);
+        Assert.Empty(result.PartsFailed);
+        Assert.False(result.IsFatal);
+        Assert.Null(result.RefusedPart);
+        Assert.True(draft.Revision > revision);
+        Assert.Equal(responses.Length, fake.Requests.Count);
+
+        var guide = draft.Guide!;
+        Assert.All(all, p => Assert.Equal(GuidePartStatus.Ready, guide.State(p).Status));
+        Assert.Equal(new[] { "2024-01-15", "2024-03-18", "2024-05-10" }, guide.Facts.Select(f => f.Date));
+        Assert.Equal(new[] { "F-001", "F-002", "F-003" }, guide.Facts.Select(f => f.Id));
+        Assert.NotEmpty(guide.Values);
+
+        var messages = progress.Reports.Select(p => p.Message).ToList();
+        var order = new[]
+        {
+            "Extracting the issues from the counts...",
+            "Writing the cast: organizations and key characters...",
+            "Writing the key facts: The Subcontract (1 of 2)...",
+            "Writing the canonical values..."
+        }.Select(m => messages.IndexOf(m)).ToList();
+        Assert.DoesNotContain(-1, order);
+        Assert.Equal(order.OrderBy(i => i), order);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_SkipsReady()
+    {
+        var (gateway, fake) = Gateway(
+            FakeLlmProvider.Ok(FactsSection1Json),
+            FakeLlmProvider.Ok(FactsSection2Json),
+            FakeLlmProvider.Ok(ValuesJson));
+        var draft = FactsReadyDraft();
+
+        var result = await new CaseGuideGenerator(gateway).GenerateAsync(draft);
+
+        Assert.True(IsFactsRequest(fake.Requests[0]));
+        Assert.Equal(3, fake.Requests.Count);
+        Assert.Equal(new[] { GuidePart.Facts, GuidePart.Values }, result.PartsWritten);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_StopsAtFailedPart()
+    {
+        var (gateway, fake) = Gateway(FakeLlmProvider.Ok(IssueDetailsJson), FakeLlmProvider.Refused("I won't write that."));
+        var draft = CaseTestData.SampleComplaintDraft();
+        var completed = new List<GuidePart>();
+
+        var result = await new CaseGuideGenerator(gateway).GenerateAsync(draft, null, part =>
+        {
+            completed.Add(part);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(new[] { GuidePart.Issues }, result.PartsWritten);
+        Assert.Equal(new[] { GuidePart.Cast }, result.PartsFailed);
+        Assert.Equal(GuidePart.Cast, result.RefusedPart);
+        Assert.Equal("The model declined: I won't write that.", result.RefusalMessage);
+        Assert.Equal("The model declined: I won't write that.", result.FailureMessage);
+        Assert.Equal(new[] { GuidePart.Issues, GuidePart.Cast }, completed);
+        Assert.Equal(GuidePartStatus.Pending, draft.Guide!.FactsState.Status);
+        Assert.Equal(GuidePartStatus.Pending, draft.Guide.ValuesState.Status);
+        Assert.DoesNotContain(fake.Requests, IsFactsRequest);
+        Assert.Equal(2, fake.Requests.Count);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_Fatal()
+    {
+        var (gateway, fake) = Gateway(FakeLlmProvider.Failed(LlmFailureKind.Auth, "Invalid API key"));
+        var draft = FactsReadyDraft();
+
+        var result = await new CaseGuideGenerator(gateway).GenerateAsync(draft);
+
+        Assert.True(result.IsFatal);
+        Assert.Contains("Invalid API key", result.FatalError);
+        Assert.DoesNotContain(fake.Requests, IsValuesRequest);
+        Assert.Empty(result.PartsWritten);
+        Assert.Equal(GuidePartStatus.Pending, draft.Guide!.FactsState.Status);
+        Assert.Equal(GuidePartStatus.Pending, draft.Guide.ValuesState.Status);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_UserCancel()
+    {
+        var (gateway, fake) = Gateway(FakeLlmProvider.Ok(IssueDetailsJson), FakeLlmProvider.Ok(CivilRosterJson));
+        using var cts = new CancellationTokenSource();
+        fake.OnSend = i =>
+        {
+            if (i == 1)
+                cts.Cancel();
+        };
+        var draft = CaseTestData.SampleComplaintDraft();
+        var completed = new List<GuidePart>();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new CaseGuideGenerator(gateway).GenerateAsync(draft, null, part =>
+        {
+            completed.Add(part);
+            return Task.CompletedTask;
+        }, cts.Token));
+
+        Assert.Equal(GuidePart.Issues, completed[0]);
+        Assert.Equal(GuidePartStatus.Ready, draft.Guide!.IssuesState.Status);
+        Assert.Equal(GuidePartStatus.Pending, draft.Guide.CastState.Status);
+        Assert.DoesNotContain(fake.Requests, IsFactsRequest);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_IssueDetailsFailureDoesNotStop()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        var responses = new[] { FakeLlmProvider.Truncated(), FakeLlmProvider.Truncated() }
+            .Concat(CastResponses(draft))
+            .Concat(new[] { FakeLlmProvider.Ok(FactsSection1Json), FakeLlmProvider.Ok(FactsSection2Json), FakeLlmProvider.Ok(ValuesJson) })
+            .ToArray();
+        var (gateway, _) = Gateway(responses);
+
+        var result = await new CaseGuideGenerator(gateway).GenerateAsync(draft);
+
+        var guide = draft.Guide!;
+        Assert.Equal(GuidePartStatus.Failed, guide.IssueDetailsState.Status);
+        Assert.Equal(new[] { GuidePart.Issues, GuidePart.Cast, GuidePart.Facts, GuidePart.Values }, result.PartsWritten);
+        Assert.Equal(GuidePartStatus.Ready, guide.ValuesState.Status);
+        Assert.Null(result.RefusedPart);
+    }
+
     /// <summary>
     /// Delays every send so parallel calls overlap, and records the peak number in flight.
     /// </summary>

@@ -496,6 +496,15 @@ public class CoreDocumentGenerator
             sb.AppendLine($"Never use these real names: {string.Join(", ", applied.Select(s => s.Original.Trim()))}");
         }
 
+        // CASE-03 override (WR-01): names the user confirmed keeping. Stated here, not in the byte-stable system prompt.
+        var kept = draft.Substitutions
+            .Where(s => !s.Apply && !string.IsNullOrWhiteSpace(s.Original))
+            .Select(s => s.Original.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (kept.Count > 0)
+            sb.AppendLine($"The user has approved keeping these names exactly as written; use them unchanged as an exception to the fictional-names rule: {string.Join(", ", kept)}");
+
         sb.AppendLine();
         sb.Append("Plan the document: classify the matter, choose one court and venue, list the parties with fictional names, the counts or issues, the timeline (filing or memo date after the timeline ends), the factual subsections in date order with a paragraph target each, and fictional counsel or memo author details.");
 

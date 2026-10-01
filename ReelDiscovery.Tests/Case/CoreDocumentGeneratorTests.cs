@@ -141,8 +141,31 @@ public class CoreDocumentGeneratorTests
 
         Assert.Contains("Hank Brennan", prompt);
         Assert.Contains("Never use these real names: Walter White", prompt);
-        Assert.DoesNotContain("Jesse Pinkman", prompt);
+        Assert.DoesNotContain("Never use these real names: Walter White, Jesse Pinkman", prompt);
         Assert.DoesNotContain("Cody Marsh", prompt);
+    }
+
+    [Fact]
+    public void Outline_PromptApprovesKeptRealNames()
+    {
+        var draft = NewDraft();
+        draft.Substitutions.Add(new EntitySubstitution { Original = "Walter White", Substitute = "Hank Brennan", Apply = true });
+        draft.Substitutions.Add(new EntitySubstitution { Original = " Jesse Pinkman ", Substitute = "Cody Marsh", Apply = false });
+
+        var prompt = CoreDocumentGenerator.BuildOutlinePrompt(draft);
+
+        var approval = prompt.Split('\n').Single(l => l.Contains("approved keeping", StringComparison.Ordinal)).TrimEnd('\r');
+        Assert.EndsWith(": Jesse Pinkman", approval);
+        Assert.DoesNotContain("Walter White", approval);
+    }
+
+    [Fact]
+    public void Outline_NoKeptNames_NoApprovalLine()
+    {
+        var draft = NewDraft();
+        draft.Substitutions.Add(new EntitySubstitution { Original = "Walter White", Substitute = "Hank Brennan", Apply = true });
+
+        Assert.DoesNotContain("approved keeping", CoreDocumentGenerator.BuildOutlinePrompt(draft));
     }
 
     [Fact]

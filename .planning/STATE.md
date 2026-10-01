@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-10-01T15:24:38.366Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-10-01T15:28:35.060Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 22
-  completed_plans: 14
-  percent: 64
+  completed_plans: 15
+  percent: 68
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 2 (Case Scenario & Core Document) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 Last activity: 2026-10-01
 
@@ -65,6 +65,7 @@ Progress: [██████████] 100%
 | Phase 01 P11 | 9min | 2 tasks | 11 files |
 | Phase 01 P13 | 3min | 2 tasks | 6 files |
 | Phase 02 P01 | 9min | 2 tasks | 12 files |
+| Phase 02 P02 | 8min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,7 @@ Recent decisions affecting current work:
 - [01-13]: DistributeEmails largest-remainder, never negative; 0-email storylines skip the LLM call
 - [02-01]: CaseCount.Summary is serialized data; Computed_NotSerialized asserts only count summaries and no preset summary text
 - [02-01]: Case models use yyyy-MM-dd string dates parsed only via CaseDraft.TryParseDate; CaseDraft.JsonOptions (string enums) shared with Phase 3 case.json
+- [02-02]: Person aliases that prefix the original first name (Walt/Walter) map to the substitute first name; FindLeaks reports canonical stored terms
 
 ### Pending Todos
 
@@ -122,6 +124,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T15:24:29.531Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-10-01T15:28:35.053Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None

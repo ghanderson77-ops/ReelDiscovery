@@ -65,7 +65,7 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md — Case domain model (CaseDraft, CoreDocument, sections, presets, substitutions), WizardFlow + WizardState.Case, CaseTestData scaffold, JSON round-trip (Wave 1)
-- [ ] 02-02-PLAN.md — CitationScanner (no case-law citations) + NameSubstitution (single-pass fictional names, leak scan) (Wave 2)
+- [x] 02-02-PLAN.md — CitationScanner (no case-law citations) + NameSubstitution (single-pass fictional names, leak scan) (Wave 2)
 - [ ] 02-03-PLAN.md — DocumentTypeResolver, CoreDocumentTemplates, CoreDocumentAssembler (code-owned numbering, caption, incorporation, memo header) (Wave 2)
 - [ ] 02-04-PLAN.md — CoreDocumentValidator + CoreDocumentEditing (Wave 3)
 - [ ] 02-05-PLAN.md — RealEntityDetector (Story-tier real-name pre-flight) (Wave 2)

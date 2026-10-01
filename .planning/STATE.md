@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-12-PLAN.md
-last_updated: "2026-10-01T21:37:29.892Z"
+stopped_at: Completed 03-17-PLAN.md
+last_updated: "2026-10-01T21:46:31.010Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 33
-  percent: 79
+  completed_plans: 34
+  percent: 81
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 12 of 20
+Plan: 13 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [████████░░] 76%
+Progress: [████████░░] 81%
 
 ## Performance Metrics
 
@@ -173,6 +173,9 @@ Recent decisions affecting current work:
 - [03-12]: GuideTabPanel.BuildColumns runs from the base ctor (Grid + LDU only); the detail column switches to Absolute LDU(320)+LDU(8) when 40% is narrower; empty-detail text is padded to center on the grid's empty-text line
 - [03-12]: LinkPicker puts the locked suffix after the name (before " — "), lists locked then checked then the rest, and keeps dangling checked ids in CheckedIds
 - [03-12]: GUIDE-01/GUIDE-08 left Pending: 03-12 is display/editing infrastructure; the editable Cast/Facts tabs and step shell come in 03-13..03-16
+- [03-17]: Case Summary Finish/Back are disabled while an export or folder move runs (CanMoveNext = !_busy)
+- [03-17]: Export All stops at the first failure and keeps written documents; an open-in-Word target is detected via sharing/lock HResults or a FileShare.None probe
+- [03-17]: Data labels use UseMnemonic = false so "&" renders (Key Facts & Events, case titles, paths); Last saved falls back to case.json write time
 
 ### Pending Todos
 
@@ -194,6 +197,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T21:37:29.888Z
-Stopped at: Completed 03-12-PLAN.md
+Last session: 2026-10-01T21:46:31.005Z
+Stopped at: Completed 03-17-PLAN.md
 Resume file: None

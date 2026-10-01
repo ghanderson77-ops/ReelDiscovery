@@ -46,8 +46,8 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [ ] **GUIDE-07**: A deterministic validator checks the guide for consistency (dates within range, facts reference existing cast/issues, no orphan IDs)
 - [ ] **GUIDE-08**: User can review, edit, and regenerate the cast and the facts timeline
 - [ ] **GUIDE-09**: Editing an upstream artifact (core doc, cast, facts) warns the user and marks downstream artifacts stale
-- [ ] **GUIDE-10**: Case guide is saved as a case file (case.json) alongside the output
-- [ ] **GUIDE-11**: User can export the core document, cast and key-facts summary as .docx
+- [x] **GUIDE-10**: Case guide is saved as a case file (case.json) alongside the output
+- [x] **GUIDE-11**: User can export the core document, cast and key-facts summary as .docx
 
 ### Ancillary Discovery Documents
 
@@ -200,8 +200,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GUIDE-07 | Phase 3 | Pending |
 | GUIDE-08 | Phase 3 | Pending |
 | GUIDE-09 | Phase 3 | Pending |
-| GUIDE-10 | Phase 3 | Pending |
-| GUIDE-11 | Phase 3 | Pending |
+| GUIDE-10 | Phase 3 | Complete |
+| GUIDE-11 | Phase 3 | Complete |
 | ANC-01 | Phase 8 | Pending |
 | ANC-02 | Phase 8 | Pending |
 | ANC-03 | Phase 8 | Pending |

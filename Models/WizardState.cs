@@ -1,5 +1,6 @@
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Ai;
+using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.Models;
 
@@ -105,6 +106,16 @@ public class WizardState
 
     // Case-driven flow (Phase 2+)
     public CaseDraft Case { get; set; } = new();
+
+    /// <summary>
+    /// Shared case.json store (autosave, load, recent cases); injectable so tests and the render harness use temp folders.
+    /// </summary>
+    public CaseStore CaseStore { get; set; } = new();
+
+    /// <summary>
+    /// One-shot status text the next case step shows on entry (e.g. "Opened {title}."), then clears.
+    /// </summary>
+    public string PendingNotice { get; set; } = string.Empty;
 
     // Step 2 - Topic Input
     public string Topic { get; set; } = string.Empty;

@@ -84,7 +84,29 @@ Plans:
   2. The user sees a registry of canonical values (amounts, invoice/change-order numbers, document titles, project names), and a validator reports any inconsistency: dates out of range, or facts pointing to missing cast members or issues.
   3. The user can edit and regenerate the cast and the timeline. Editing the core document, cast or facts warns the user and marks downstream artifacts stale.
   4. The case guide is saved as case.json next to the output, can be reloaded, and the user can export the core document, cast and key-facts summary as .docx files that open in Word.
-**Plans**: TBD
+**Plans**: 20 plans in 10 waves
+
+Plans:
+- [ ] 03-01-PLAN.md — Guide data model, case.json fields (version, case id, stage, guide, Normalize), preset numbers, SampleGuidedDraft fixture (Wave 1)
+- [ ] 03-02-PLAN.md — 144-DPI render harness + clipping detector; GridStyle, TextFieldHost, DrawStatusDot (Wave 1)
+- [ ] 03-03-PLAN.md — IdAllocator, IssueExtractor, EmailIdentity, SignatureBuilder, UsTimeZones (Wave 2)
+- [ ] 03-04-PLAN.md — CaseFolderNaming + CaseStore (atomic autosave, load, recent cases, move) on WizardState (Wave 2)
+- [ ] 03-05-PLAN.md — CaseGuideDocxExporter: core document, cast, key facts .docx (Wave 2)
+- [ ] 03-06-PLAN.md — CaseGuideUiText copy helpers + ThemedDialog, Regenerate/Delete dialogs (Wave 2)
+- [ ] 03-07-PLAN.md — GuideStaleness + CaseGuideEditing (Wave 3)
+- [ ] 03-08-PLAN.md — CanonicalValueScanner + CaseGuideValidator (Wave 4)
+- [ ] 03-09-PLAN.md — CaseGuidePrompts + generator: issues and cast (roster, details, background) (Wave 4)
+- [ ] 03-10-PLAN.md — Generator: key facts, canonical values, GenerateAsync orchestration (Wave 5)
+- [ ] 03-11-PLAN.md — Generator: tab/entry regeneration and Update Guide (Wave 6)
+- [ ] 03-12-PLAN.md — IGuideHost, GuideTabPanel base, Issues tab, LinkPicker (Wave 5)
+- [ ] 03-13-PLAN.md — Cast tab (Wave 6)
+- [ ] 03-14-PLAN.md — Key Facts tab (Wave 6)
+- [ ] 03-15-PLAN.md — Canonical Values tab (Wave 6)
+- [ ] 03-16-PLAN.md — StepCaseGuide: runs, banner, Checks, autosave, Next gate (Wave 7)
+- [ ] 03-17-PLAN.md — StepCaseSummary: exports, open/move folder (Wave 5)
+- [ ] 03-18-PLAN.md — WizardForm 5-step flow + close semantics; StepCoreDocument autosave/notice/alignment (Wave 8)
+- [ ] 03-19-PLAN.md — Describe the Case: Recent cases, Open/New Case (Wave 9)
+- [ ] 03-20-PLAN.md — Phase gate: full suites + human check at 150% (Wave 10)
 **UI hint**: yes
 
 ### Phase 4: Corpus Plan & Answer Key

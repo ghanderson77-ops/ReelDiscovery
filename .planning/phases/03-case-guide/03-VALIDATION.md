@@ -1,8 +1,8 @@
 ---
 phase: 3
 slug: case-guide
-status: draft
-nyquist_compliant: false
+status: planned
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-10-01
 ---
@@ -39,23 +39,51 @@ created: 2026-10-01
 
 ## Per-Task Verification Map
 
-Filled in by the planner as task IDs are assigned. Requirement → test map (from 03-RESEARCH.md):
+Filled in by the planner. Unit filters run as `dotnet test ReelDiscovery.Tests/ReelDiscovery.Tests.csproj --filter "FullyQualifiedName~<filter>"`; render filters as written (`--filter "Category=Render&..."`). Every UI task's acceptance also requires opening the PNGs and checking UI-SPEC DPI rule 10.
 
-| Requirement | Behavior | Test Type | Automated Command (filter) | File Exists | Status |
-|-------------|----------|-----------|----------------------------|-------------|--------|
-| GUIDE-01 | Counts/findings → `ISS-nn`, IDs kept on re-extract | unit | `IssueExtractorTests` | ❌ W0 | ⬜ pending |
-| GUIDE-02 | Cast with required fields, `CH-nnn`, derived emails | unit | `CaseGuideGeneratorTests\|EmailIdentityTests\|IdAllocatorTests` | ❌ W0 | ⬜ pending |
-| GUIDE-03 | In-house + outside counsel; signing attorney seeded | unit | `CaseGuideGeneratorTests\|CaseGuideValidatorTests` | ❌ W0 | ⬜ pending |
-| GUIDE-04 | One background call per org, preset count | unit | `CaseGuideGeneratorTests` | ❌ W0 | ⬜ pending |
-| GUIDE-05 | One facts call per FactPlan section; links validated; KnownBy ⊇ actors | unit | `CaseGuideGeneratorTests` | ❌ W0 | ⬜ pending |
-| GUIDE-06 | Canonical values `V-nnn`; scanner; duplicate-label Error | unit | `CanonicalValueScannerTests\|CaseGuideValidatorTests` | ❌ W0 | ⬜ pending |
-| GUIDE-07 | Every validator rule fires; never throws | unit | `CaseGuideValidatorTests` | ❌ W0 | ⬜ pending |
-| GUIDE-08 | Edit/regenerate/delete semantics, hand edits kept | unit | `CaseGuideEditingTests\|CaseGuideGeneratorTests` | ❌ W0 | ⬜ pending |
-| GUIDE-09 | Hash-based staleness; cast rename → facts NeedsReview | unit | `GuideStalenessTests` | ❌ W0 | ⬜ pending |
-| GUIDE-10 | Save/load, atomic write, versioning, folder naming, recent list, stage → step | unit | `CaseStoreTests\|CaseFolderNamingTests\|WizardFlowTests` | ❌ W0 | ⬜ pending |
-| GUIDE-11 | Three .docx exports open, zero OpenXmlValidator errors | unit | `CaseGuideDocxExporterTests` | ❌ W0 | ⬜ pending |
-| cross | Strict schemas; prompts keep scenario names (D-01) and firm position (D-02) | unit | `CaseSchemaTests\|CaseGuideGeneratorTests` | ✅ / ❌ W0 | ⬜ pending |
-| UI | Pure UI helpers; 144-DPI renders with clipping detector | unit + render | `CaseGuideUiLogicTests\|Category=Render` | ❌ W0 | ⬜ pending |
+| Task ID | Plan | Wave | Requirement | Behavior | Test Type | Automated Command (filter) | File Exists | Status |
+|---------|------|------|-------------|----------|-----------|----------------------------|-------------|--------|
+| 03-01-T1 | 03-01 | 1 | GUIDE-01/02/05/06/10 | Model types, CaseDraft persistence fields, preset numbers | unit | `ComplexityPresetTests\|CaseDraftSerializationTests\|CaseDraftTests` | ❌ W1 (created by task) | ⬜ pending |
+| 03-01-T2 | 03-01 | 1 | GUIDE-10 | SampleGuidedDraft fixture, round trip, Normalize null-safety, no secrets | unit | `CaseGuideModelTests` | ❌ W1 (created by task) | ⬜ pending |
+| 03-02-T1 | 03-02 | 1 | D-04 (Wave 0) | Render harness (STA, PerMonitorV2, 144 DPI), clipping detector, baseline renders | render | `Category=Render&FullyQualifiedName~BaselineRenderTests` | ❌ W1 (created by task) | ⬜ pending |
+| 03-02-T2 | 03-02 | 1 | GUIDE-08 (UI infra) | GridStyle, TextFieldHost, DrawStatusDot | unit + render | `SharedUiHelperTests\|SharedHelperRenderTests` | ❌ W1 (created by task) | ⬜ pending |
+| 03-03-T1 | 03-03 | 2 | GUIDE-01 | IdAllocator never reuses; IssueExtractor keeps IDs | unit | `IdAllocatorTests\|IssueExtractorTests` | ❌ W2 (created by task) | ⬜ pending |
+| 03-03-T2 | 03-03 | 2 | GUIDE-02/03 | Email identities (.com/.gov/personal), signatures, time zones | unit | `CastIdentityTests` | ❌ W2 (created by task) | ⬜ pending |
+| 03-04-T1 | 03-04 | 2 | GUIDE-10 | Folder naming: sanitize, reserved names, uniqueness, traversal | unit | `CaseFolderNamingTests` | ❌ W2 (created by task) | ⬜ pending |
+| 03-04-T2 | 03-04 | 2 | GUIDE-10 | Atomic autosave, coalescing, load errors, recent list, move | unit | `CaseStoreTests` | ❌ W2 (created by task) | ⬜ pending |
+| 03-05-T1 | 03-05 | 2 | GUIDE-11 | Core document .docx, zero OpenXmlValidator errors, control chars | unit | `CaseGuideDocxExporterTests` | ❌ W2 (created by task) | ⬜ pending |
+| 03-05-T2 | 03-05 | 2 | GUIDE-11 | Cast and Key Facts .docx, zero validator errors | unit | `CaseGuideDocxExporterTests` | ❌ W2 (created by task) | ⬜ pending |
+| 03-06-T1 | 03-06 | 2 | GUIDE-08/09 | All UI copy helpers (Plural, tabs, state cards, banner, Next gate, confirmations) | unit | `CaseGuideUiLogicTests` | ❌ W2 (created by task) | ⬜ pending |
+| 03-06-T2 | 03-06 | 2 | GUIDE-08 | D1/D2 dialogs at 144 DPI | render | `Category=Render&FullyQualifiedName~DialogRenderTests` | ❌ W2 (created by task) | ⬜ pending |
+| 03-07-T1 | 03-07 | 3 | GUIDE-09 | Hash staleness per part; hand edits absorbed | unit | `GuideStalenessTests` | ❌ W3 (created by task) | ⬜ pending |
+| 03-07-T2 | 03-07 | 3 | GUIDE-08/09 | Edit/add/delete semantics, NeedsReview, rename replacement | unit | `CaseGuideEditingTests` | ❌ W3 (created by task) | ⬜ pending |
+| 03-08-T1 | 03-08 | 4 | GUIDE-06 | Amount/identifier scanner with timeouts | unit | `CanonicalValueScannerTests` | ❌ W4 (created by task) | ⬜ pending |
+| 03-08-T2 | 03-08 | 4 | GUIDE-07/03/06/09 | Every validator rule fires; never throws; fixture error-free | unit | `CaseGuideValidatorTests` | ❌ W4 (created by task) | ⬜ pending |
+| 03-09-T1 | 03-09 | 4 | GUIDE-01, D-01/D-02 | System prompt keeps names + firm position; issue enrichment; strict schemas | unit | `CaseGuideGeneratorTests\|CaseSchemaTests` | ❌ W4 (created by task) | ⬜ pending |
+| 03-09-T2 | 03-09 | 4 | GUIDE-02/03/04 | Roster, batched details, background per org, outcomes | unit | `CaseGuideGeneratorTests` | ❌ W4 (created by task) | ⬜ pending |
+| 03-10-T1 | 03-10 | 5 | GUIDE-05 | Facts per section, link checks, date-ordered IDs, resume | unit | `CaseGuideGeneratorTests` | ❌ W5 (created by task) | ⬜ pending |
+| 03-10-T2 | 03-10 | 5 | GUIDE-06 | Values + GenerateAsync orchestration | unit | `CaseGuideGeneratorTests\|CaseSchemaTests` | ❌ W5 (created by task) | ⬜ pending |
+| 03-11-T1 | 03-11 | 6 | GUIDE-08 | Tab regeneration keeps IDs and hand edits | unit | `CaseGuideRegenerationTests` | ❌ W6 (created by task) | ⬜ pending |
+| 03-11-T2 | 03-11 | 6 | GUIDE-08/09 | Entry regeneration; Update Guide (stale parts only) | unit | `CaseGuideRegenerationTests` | ❌ W6 (created by task) | ⬜ pending |
+| 03-12-T1 | 03-12 | 5 | GUIDE-08 | IGuideHost, GuideTabPanel, LinkPicker compile | build | (dotnet build ReelDiscovery.csproj) | ❌ W5 (created by task) | ⬜ pending |
+| 03-12-T2 | 03-12 | 5 | GUIDE-01 | Issues tab + LinkPicker renders | render | `Category=Render&FullyQualifiedName~GuidePanelRenderTests` | ❌ W5 (created by task) | ⬜ pending |
+| 03-13-T1 | 03-13 | 6 | GUIDE-02/08 | Cast panel helpers | unit | `CastPanelLogicTests` | ❌ W6 (created by task) | ⬜ pending |
+| 03-13-T2 | 03-13 | 6 | GUIDE-08 | Cast actions + renders | render | `Category=Render&FullyQualifiedName~CastPanelRenderTests` | ❌ W6 (created by task) | ⬜ pending |
+| 03-14-T1 | 03-14 | 6 | GUIDE-05/08 | Facts panel helpers | unit | `FactsPanelLogicTests` | ❌ W6 (created by task) | ⬜ pending |
+| 03-14-T2 | 03-14 | 6 | GUIDE-08/09 | Facts actions + renders | render | `Category=Render&FullyQualifiedName~FactsPanelRenderTests` | ❌ W6 (created by task) | ⬜ pending |
+| 03-15-T1 | 03-15 | 6 | GUIDE-06/08 | Values panel helpers | unit | `ValuesPanelLogicTests` | ❌ W6 (created by task) | ⬜ pending |
+| 03-15-T2 | 03-15 | 6 | GUIDE-06 | Values renders | render | `Category=Render&FullyQualifiedName~ValuesPanelRenderTests` | ❌ W6 (created by task) | ⬜ pending |
+| 03-16-T1 | 03-16 | 7 | GUIDE-01..09 | Tab state logic, unfinished parts | unit | `CaseGuideStepLogicTests` | ❌ W7 (created by task) | ⬜ pending |
+| 03-16-T2 | 03-16 | 7 | GUIDE-08/09/10 | Runs, autosave, Next gate (build + full suite) | build + unit | `Category!=Render` | ❌ W7 (created by task) | ⬜ pending |
+| 03-16-T3 | 03-16 | 7 | D-04 | All Case Guide states at 144 DPI | render | `Category=Render&FullyQualifiedName~CaseGuideRenderTests` | ❌ W7 (created by task) | ⬜ pending |
+| 03-17-T1 | 03-17 | 5 | GUIDE-10/11 | Summary line helpers | unit | `CaseSummaryLogicTests` | ❌ W5 (created by task) | ⬜ pending |
+| 03-17-T2 | 03-17 | 5 | GUIDE-11 | Export/open/move + renders | render | `Category=Render&FullyQualifiedName~CaseSummaryRenderTests` | ❌ W5 (created by task) | ⬜ pending |
+| 03-18-T1 | 03-18 | 8 | GUIDE-10 | 5-step flow, stage navigation, close decisions | unit | `WizardFlowTests` | ❌ W8 (created by task) | ⬜ pending |
+| 03-18-T2 | 03-18 | 8 | GUIDE-09/10 | Core document autosave/notice/alignment renders | render | `Category=Render&FullyQualifiedName~CoreDocumentRenderTests` | ❌ W8 (created by task) | ⬜ pending |
+| 03-19-T1 | 03-19 | 9 | GUIDE-10 | Reopen logic, theme colors | unit | `CaseScenarioUiLogicTests\|WizardFlowTests` | ❌ W9 (created by task) | ⬜ pending |
+| 03-19-T2 | 03-19 | 9 | GUIDE-10 | Describe the Case renders (0 / 8 recent) | render | `Category=Render&FullyQualifiedName~CaseScenarioRenderTests` | ❌ W9 (created by task) | ⬜ pending |
+| 03-20-T1 | 03-20 | 10 | all | Full suites green before UAT | unit + render | `Category!=Render (then Category=Render)` | ❌ W10 (created by task) | ⬜ pending |
+| 03-20-T2 | 03-20 | 10 | GUIDE-02/10/11, D-04 | Human check at 150% (manual-only items) | manual | — | ❌ W10 (created by task) | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -63,9 +91,9 @@ Filled in by the planner as task IDs are assigned. Requirement → test map (fro
 
 ## Wave 0 Requirements
 
-- [ ] `CaseTestData.SampleGuidedDraft()` + canned DTO JSON for roster / details / background / facts / values
-- [ ] `ReelDiscovery.Tests/Render/RenderHarness.cs` (STA, PerMonitorV2, DrawToBitmap, ClippingDetector, `Category=Render`)
-- [ ] New test files listed above; update `WizardFlowTests`, `CaseSchemaTests`, `ComplexityPresetTests`
+- [ ] `CaseTestData.SampleGuidedDraft()` (03-01-T2); canned DTO JSON lives in `CaseGuideGeneratorTests.cs` / `CaseGuideRegenerationTests.cs` (03-09..03-11)
+- [ ] `ReelDiscovery.Tests/Render/RenderHarness.cs` + `ClippingDetector.cs` (03-02-T1; throws instead of skipping when DPI != 144)
+- [ ] New test files listed above; `ComplexityPresetTests` (03-01-T1), `CaseSchemaTests` (03-09..03-11), `WizardFlowTests` (03-18-T1). Email identity tests live in `CastIdentityTests`
 
 ---
 
@@ -82,11 +110,11 @@ Filled in by the planner as task IDs are assigned. Requirement → test map (fro
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 60s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 60s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** planner sign-off 2026-10-01 (execution pending)

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-14-PLAN.md
-last_updated: "2026-10-01T22:33:51.766Z"
+stopped_at: Completed 03-15-PLAN.md
+last_updated: "2026-10-01T23:23:18.633Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 37
-  percent: 88
+  completed_plans: 38
+  percent: 90
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 15 of 20
+Plan: 16 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -87,6 +87,7 @@ Progress: [█████████░] 86%
 | Phase 03 P11 | 35min | 2 tasks | 6 files |
 | Phase 03 P13 | 14min | 2 tasks | 5 files |
 | Phase 03 P14 | 25min | 2 tasks | 4 files |
+| Phase 03 P15 | 12min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -193,6 +194,9 @@ Recent decisions affecting current work:
 - [03-14]: Mark Reviewed under the Needs review filter moves to the next fact to review; Add Fact resets the filter to All and focuses the Fact field
 - [03-14]: Link pickers are re-set only when items/checks/locks change, so the list being clicked keeps its order and scroll; an Actors change re-sets Who knew with the actors locked
 - [03-14]: GUIDE-05 and GUIDE-08 marked Complete; GUIDE-09 stays Pending until the step shell's stale/needs-review banner (03-16)
+- [03-15]: Canonical values list in ID order; the Kind column stays at UI-SPEC 112 and ellipsizes 'Change order number' cleanly (full kind in the detail card)
+- [03-15]: Used in facts lists facts in timeline order as 'F-003  2024-03-18  {title}'; the Kind combo commits the enum name; Mark Reviewed keeps the selection
+- [03-15]: GUIDE-06 and GUIDE-08 marked Complete (registry shown and editable; ValuesTabPanel is hosted by the step shell in 03-16)
 
 ### Pending Todos
 
@@ -214,6 +218,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T22:33:51.761Z
-Stopped at: Completed 03-14-PLAN.md
+Last session: 2026-10-01T23:23:12.974Z
+Stopped at: Completed 03-15-PLAN.md
 Resume file: None

@@ -34,6 +34,14 @@ public static class CaseGuideDocxExporter
     private const string MutedColor = "595959";
     private const string HeaderFill = "F2F4F7";
 
+    public static byte[] Build(CaseDraft draft, CaseExportKind kind) => kind switch
+    {
+        CaseExportKind.CoreDocument => BuildCoreDocument(draft),
+        CaseExportKind.Cast => BuildCast(draft),
+        CaseExportKind.KeyFacts => BuildKeyFacts(draft),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown export kind")
+    };
+
     public static string FileNameFor(CaseExportKind kind, string folderName) => kind switch
     {
         CaseExportKind.CoreDocument => $"{folderName} - Core Document.docx",
@@ -244,6 +252,203 @@ public static class CaseGuideDocxExporter
         }
     }
 
+    public static byte[] BuildCast(CaseDraft draft)
+    {
+        var (doc, guide) = RequireGuide(draft);
+        var word = new WordBuilder();
+
+        var key = guide.Cast.Where(c => c.Tier == CastTier.Key).ToList();
+        var background = guide.Cast.Where(c => c.Tier == CastTier.Background).ToList();
+
+        word.Paragraph("Cast of Key Characters", new ParaFormat { Style = "Title" });
+        word.Paragraph(doc.Title, new ParaFormat { Style = "Subtitle" });
+        // Title block shares the first landscape page with the wide reference tables
+        word.Paragraph($"{key.Count} key and {background.Count} background characters across {guide.Organizations.Count} organizations.");
+
+        word.Paragraph("Organizations", new ParaFormat { Style = "Heading1" });
+        if (guide.Organizations.Count == 0)
+            word.Paragraph(NoneText);
+        else
+            word.Table(
+                new[] { "ID", "Organization", "Type", "Domain", "Location", "Represents" },
+                guide.Organizations.Select(o => (IReadOnlyList<Cell>)new Cell[]
+                {
+                    o.Id, o.Name, OrganizationKindText(o.Kind), o.Domain, o.Location,
+                    string.Join(", ", o.RepresentsOrgIds.Select(id => OrganizationName(guide, id)))
+                }),
+                new[] { 900, 3600, 1300, 2400, 2400, 3080 });
+
+        word.Paragraph("Key Characters", new ParaFormat { Style = "Heading1" });
+        if (key.Count == 0)
+            word.Paragraph(NoneText);
+        else
+            word.Table(
+                new[] { "ID", "Name", "Title", "Organization", "Email", "Active", "Role" },
+                key.Select(c => (IReadOnlyList<Cell>)new Cell[]
+                {
+                    c.Id, c.FullName, c.Title, OrganizationName(guide, c.OrganizationId), c.Email,
+                    ActiveRange(c, ShortDate), RoleText(c.Role)
+                }),
+                new[] { 900, 2000, 2100, 2800, 3080, 1500, 1300 });
+        word.EndSection(landscape: true);
+
+        word.Paragraph("Character Profiles", new ParaFormat { Style = "Heading1" });
+        if (key.Count == 0)
+            word.Paragraph(NoneText);
+        foreach (var member in key)
+        {
+            word.Paragraph($"{member.FullName} ({member.Id})", new ParaFormat { Style = "Heading2" });
+            ProfileLine(word, "Title", member.Title);
+            ProfileLine(word, "Organization", OrganizationName(guide, member.OrganizationId));
+            ProfileLine(word, "Email", member.Email);
+            ProfileLine(word, "Active", ActiveRange(member, LongDate));
+            ProfileLine(word, "Key involvement", member.Involvement);
+            ProfileLine(word, "Writing voice", member.VoiceNote);
+            word.Paragraph(string.Empty, new ParaFormat { BoldLead = "Signature:", SpaceAfter = 40, KeepNext = true });
+            word.Paragraph(member.Signature, new ParaFormat { IndentLeft = 360, Color = MutedColor, SpaceAfter = 200, KeepLines = true });
+        }
+
+        word.Paragraph("Background Staff", new ParaFormat { Style = "Heading1" });
+        if (background.Count == 0)
+            word.Paragraph(NoneText);
+
+        // Organization order first, then any staff whose organization id no longer resolves
+        var groups = background
+            .GroupBy(c => c.OrganizationId)
+            .OrderBy(g => OrganizationOrder(guide, g.Key))
+            .ThenBy(g => g.Key, StringComparer.Ordinal);
+        foreach (var group in groups)
+        {
+            var groupName = group.Key.Length == 0 ? "(no organization)" : OrganizationName(guide, group.Key);
+            word.Paragraph(groupName, new ParaFormat { Style = "Heading2" });
+            word.Table(
+                new[] { "ID", "Name", "Title", "Department", "Email" },
+                group.Select(c => (IReadOnlyList<Cell>)new Cell[] { c.Id, c.FullName, c.Title, c.Department, c.Email }),
+                new[] { 900, 2200, 2700, 1900, 2380 });
+        }
+
+        return word.Save("Cast of Key Characters", landscape: false);
+    }
+
+    public static byte[] BuildKeyFacts(CaseDraft draft)
+    {
+        var (doc, guide) = RequireGuide(draft);
+        var word = new WordBuilder();
+
+        // Undated facts sort last; ids break ties
+        var facts = guide.Facts
+            .OrderBy(f => CaseDraft.TryParseDate(f.Date, out var d) ? d : DateTime.MaxValue)
+            .ThenBy(f => f.Id, StringComparer.Ordinal)
+            .ToList();
+
+        word.Paragraph("Key Facts & Events", new ParaFormat { Style = "Title" });
+        word.Paragraph(doc.Title, new ParaFormat { Style = "Subtitle" });
+        var dated = facts.Where(f => CaseDraft.TryParseDate(f.Date, out _)).ToList();
+        word.Paragraph(dated.Count > 0
+            ? $"{facts.Count} key facts from {LongDate(dated[0].Date)} to {LongDate(dated[^1].Date)}."
+            : $"{facts.Count} key facts.");
+
+        word.Paragraph("Chronology", new ParaFormat { Style = "Heading1" });
+        if (facts.Count == 0)
+            word.Paragraph(NoneText);
+        else
+            word.Table(
+                new[] { "ID", "Date", "Fact", "Issues", "Who did it", "Who knew" },
+                facts.Select(f => (IReadOnlyList<Cell>)new Cell[]
+                {
+                    f.Id,
+                    LongDate(f.Date),
+                    new Cell(f.Description, f.Title.Length > 0 ? f.Title + ": " : null),
+                    string.Join(", ", f.IssueIds),
+                    CastNames(guide, f.ActorIds),
+                    CastNames(guide, f.KnownByIds)
+                }),
+                new[] { 800, 1700, 6180, 1000, 2000, 2000 });
+        word.EndSection(landscape: true);
+
+        word.Paragraph("Index by Issue", new ParaFormat { Style = "Heading1" });
+        if (guide.Issues.Count == 0)
+            word.Paragraph(NoneText);
+        foreach (var issue in guide.Issues)
+        {
+            word.Paragraph($"{issue.Id} {issue.Title}".Trim(), new ParaFormat { Style = "Heading2" });
+            var linked = facts.Where(f => f.IssueIds.Contains(issue.Id, StringComparer.Ordinal)).ToList();
+            if (linked.Count == 0)
+                word.Paragraph("(no facts)", new ParaFormat { Color = MutedColor });
+            foreach (var fact in linked)
+            {
+                var date = fact.Date.Length > 0 ? $" ({LongDate(fact.Date)})" : string.Empty;
+                word.Paragraph(fact.Title, new ParaFormat { BoldLead = $"{fact.Id}{date} ", IndentLeft = 360, SpaceAfter = 60 });
+            }
+        }
+
+        return word.Save("Key Facts & Events", landscape: false);
+    }
+
+    private const string NoneText = "(none)";
+
+    private static (CoreDocument Doc, CaseGuide Guide) RequireGuide(CaseDraft draft)
+    {
+        if (draft.CoreDocument == null || draft.Guide == null)
+            throw new InvalidOperationException("Nothing to export yet.");
+        return (draft.CoreDocument, draft.Guide);
+    }
+
+    private static void ProfileLine(WordBuilder word, string label, string value) =>
+        // KeepNext chains each profile to its signature so a profile never splits across pages
+        word.Paragraph(value, new ParaFormat { BoldLead = label + ": ", SpaceAfter = 60, KeepNext = true });
+
+    // Unknown ids render as the raw id (T-03-19): exports never throw on orphans
+    private static string OrganizationName(CaseGuide guide, string id)
+    {
+        var organization = guide.FindOrganization(id);
+        return organization == null || organization.Name.Length == 0 ? id : organization.Name;
+    }
+
+    private static int OrganizationOrder(CaseGuide guide, string id)
+    {
+        var index = guide.Organizations.FindIndex(o => o.Id == id);
+        return index < 0 ? int.MaxValue : index;
+    }
+
+    private static string CastNames(CaseGuide guide, IEnumerable<string> ids) =>
+        string.Join(", ", ids.Select(id =>
+        {
+            var member = guide.FindCast(id);
+            return member == null || member.FullName.Length == 0 ? id : member.FullName;
+        }));
+
+    private static string ActiveRange(CastMember member, Func<string, string> format)
+    {
+        if (member.ActiveFrom.Length == 0 && member.ActiveTo.Length == 0)
+            return string.Empty;
+        var from = member.ActiveFrom.Length > 0 ? format(member.ActiveFrom) : "unknown";
+        var to = member.ActiveTo.Length > 0 ? format(member.ActiveTo) : "present";
+        return $"{from} to {to}";
+    }
+
+    private static string ShortDate(string yyyyMmDd) =>
+        CaseDraft.TryParseDate(yyyyMmDd, out var date)
+            ? date.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)
+            : yyyyMmDd;
+
+    private static string RoleText(CastRole role) => role switch
+    {
+        CastRole.Party => "Party",
+        CastRole.InHouseCounsel => "In-house counsel",
+        CastRole.OutsideCounsel => "Outside counsel",
+        _ => "Staff"
+    };
+
+    private static string OrganizationKindText(OrganizationKind kind) => kind switch
+    {
+        OrganizationKind.Party => "Party",
+        OrganizationKind.LawFirm => "Law firm",
+        OrganizationKind.Agency => "Agency",
+        OrganizationKind.ThirdParty => "Third party",
+        _ => "Individual"
+    };
+
     private static ParaFormat BodyFormat() => new() { FirstLine = 720, Align = JustificationValues.Both };
 
     private static ParaFormat Compact() => new() { SpaceAfter = 0 };
@@ -312,6 +517,7 @@ public static class CaseGuideDocxExporter
         public int? SpaceAfter { get; set; }
         public int? RightTab { get; set; }
         public bool KeepNext { get; set; }
+        public bool KeepLines { get; set; }
         public bool BottomBorder { get; set; }
     }
 
@@ -433,7 +639,7 @@ public static class CaseGuideDocxExporter
             return paragraph;
         }
 
-        // Order follows CT_PPrBase: pStyle, keepNext, pBdr, tabs, spacing, ind, jc
+        // Order follows CT_PPrBase: pStyle, keepNext, keepLines, pBdr, tabs, spacing, ind, jc
         private static ParagraphProperties BuildParagraphProperties(ParaFormat format)
         {
             var properties = new ParagraphProperties();
@@ -441,6 +647,8 @@ public static class CaseGuideDocxExporter
                 properties.Append(new ParagraphStyleId { Val = format.Style });
             if (format.KeepNext)
                 properties.Append(new KeepNext());
+            if (format.KeepLines)
+                properties.Append(new KeepLines());
             if (format.BottomBorder)
                 properties.Append(new ParagraphBorders(new BottomBorder { Val = BorderValues.Single, Size = 6, Space = 1, Color = "808080" }));
             if (format.RightTab != null)

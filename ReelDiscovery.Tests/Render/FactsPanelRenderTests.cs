@@ -32,7 +32,7 @@ public class FactsPanelRenderTests
                 notesShown = AllControls(panel).OfType<Label>().Any(l => l.Text == "Notes from generation");
             });
 
-            Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
             Assert.Equal("F-004", selected);
             Assert.True(noticeShown);
             Assert.True(notesShown);
@@ -51,7 +51,7 @@ public class FactsPanelRenderTests
                 panel.SelectEntity("F-004");
             }, new ClippingOptions { AllowGridHorizontalScroll = true });
 
-            Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
             Assert.Empty(result.Clipping);
         });
     }

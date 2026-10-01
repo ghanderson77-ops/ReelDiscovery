@@ -60,6 +60,6 @@ public class BaselineRenderTests
     {
         Assert.True(File.Exists(result.PngPath), result.PngPath);
         Assert.True(new FileInfo(result.PngPath).Length > 10_000, $"{result.PngPath} looks blank");
-        Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+        Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
     }
 }

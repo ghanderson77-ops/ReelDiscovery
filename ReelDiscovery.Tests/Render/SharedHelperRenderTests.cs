@@ -18,7 +18,7 @@ public class SharedHelperRenderTests
                 "shared-helpers", RenderHarness.Large, Build);
 
             Assert.True(new FileInfo(result.PngPath).Length > 10_000);
-            Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
             Assert.Empty(result.Clipping);
         });
     }

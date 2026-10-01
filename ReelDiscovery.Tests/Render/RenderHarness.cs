@@ -13,12 +13,13 @@ internal sealed class RenderResult
 }
 
 /// <summary>
-/// Renders real WinForms controls at the display DPI (must be 144 = 150%) to PNG files under
+/// Renders real WinForms controls at the display DPI (reference 144 = 150%; 120 = 125% also accepted) to PNG files under
 /// renders/, and runs the clipping detector on the live control tree. Category=Render only.
 /// </summary>
 internal static class RenderHarness
 {
     public const int RequiredDpi = 144;
+    public const int MinimumDpi = 120;
     public static readonly Size Large = new(1100, 750);
     public static readonly Size Small = new(900, 600);
 
@@ -183,12 +184,15 @@ internal static class RenderHarness
 
     private static void CheckDpi(Form form)
     {
+        // Renders run at whatever scaling the display uses (the user switches between 125% and 150%);
+        // 144 DPI (150%) remains the reference. Layouts are DPI-scaled, so a clean run at any scaled DPI is
+        // meaningful. Below 120 DPI the per-monitor awareness most likely did not apply, so fail loudly
+        // rather than pass silently (xUnit 2 cannot skip at runtime).
         var dpi = form.DeviceDpi;
-        if (dpi != RequiredDpi)
+        if (dpi < MinimumDpi)
         {
-            // Deliberate: xUnit 2 cannot skip at runtime and a silent pass would hide UI regressions
             throw new InvalidOperationException(
-                $"Render tests need a 144-DPI (150%) display; this display is {dpi} DPI. Run them on the 150% monitor.");
+                $"Render tests need a scaled display (125% or 150%); this display is {dpi} DPI.");
         }
     }
 

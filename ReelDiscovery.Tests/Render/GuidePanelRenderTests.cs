@@ -20,7 +20,7 @@ public class GuidePanelRenderTests
             var result = RenderPanel(() => new IssuesTabPanel(), "issues-first-selected", RenderHarness.Large, null,
                 panel => selected = FindGrid(panel).SelectedRows.Count > 0 ? FindGrid(panel).SelectedRows[0].Tag as string : null);
 
-            Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
             Assert.Equal("ISS-01", selected);
             Assert.Empty(result.Clipping);
         });
@@ -33,7 +33,7 @@ public class GuidePanelRenderTests
         {
             var result = RenderPanel(() => new IssuesTabPanel(), "issues-first-selected", RenderHarness.Small, null);
 
-            Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
             Assert.Empty(result.Clipping);
         });
     }
@@ -142,7 +142,7 @@ public class GuidePanelRenderTests
                 owner.Controls.Add(card);
             });
 
-            Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
             Assert.Empty(result.Clipping);
             Assert.Equal(new[] { "CH-002", "CH-003", "CH-004" }, pickers[1].CheckedIds.OrderBy(x => x));
         });

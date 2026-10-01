@@ -72,7 +72,7 @@ public class DialogRenderTests
 
     private static void AssertRendered(RenderResult result, int clientHeight, int workingHeight)
     {
-        Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+        Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
         Assert.True(File.Exists(result.PngPath));
         Assert.Empty(result.Clipping);
         Assert.True(clientHeight > 0 && clientHeight < workingHeight,

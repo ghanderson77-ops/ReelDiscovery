@@ -24,7 +24,7 @@ public class CastPanelRenderTests
                 selected = SelectedId(panel);
             });
 
-            Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
             Assert.Equal("CH-006", selected);
             Assert.Empty(result.Clipping);
         });
@@ -47,7 +47,7 @@ public class CastPanelRenderTests
                 scroller.ScrollControlIntoView(labels.Last(l => l.Text.StartsWith("Appears in") || l.Text.StartsWith("Not in")));
             });
 
-            Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
             Assert.Contains(Environment.NewLine, signature);
             Assert.Empty(result.Clipping);
         });

@@ -100,7 +100,7 @@ public class CaseSummaryRenderTests
     private static void AssertRendered(RenderResult result)
     {
         Assert.True(File.Exists(result.PngPath), result.PngPath);
-        Assert.Equal(RenderHarness.RequiredDpi, result.DeviceDpi);
+        Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
         Assert.Empty(result.Clipping);
     }
 

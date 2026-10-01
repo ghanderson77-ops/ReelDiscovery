@@ -46,15 +46,29 @@ public class LoadingOverlay : Panel
         "Breathing life into names"
     };
 
+    private static readonly string[] EntityCheckMessages = new[]
+    {
+        "Checking for real names",
+        "Looking for real people and companies",
+        "Preparing fictional substitutes"
+    };
+
     public enum LoadingType
     {
         Storylines,
-        Characters
+        Characters,
+        EntityCheck
     }
 
     public LoadingOverlay(LoadingType type)
     {
-        _messages = type == LoadingType.Storylines ? StorylineMessages : CharacterMessages;
+        _messages = type switch
+        {
+            LoadingType.Storylines => StorylineMessages,
+            LoadingType.Characters => CharacterMessages,
+            LoadingType.EntityCheck => EntityCheckMessages,
+            _ => StorylineMessages
+        };
 
         // Enable double buffering to prevent flickering
         this.SetStyle(ControlStyles.OptimizedDoubleBuffer |

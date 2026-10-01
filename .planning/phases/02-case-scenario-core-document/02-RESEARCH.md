@@ -427,15 +427,18 @@ yield return new NumberedParagraph(++n,
 | A9 | Reporter regex list covers the realistic LLM output space | Code Examples | Medium. Rare regional reporters are missed; mitigated by the "v." warning and the prompt rule |
 | A10 | Petition chosen only for state courts when the outline says the forum uses Petition terminology | Pattern 2 | Low. The user override exists |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Persistence in Phase 2.**
    - What we know: GUIDE-10 (case.json) is Phase 3, and Phase 1 built no run store. The case-driven flow in Phase 2 ends at the core document, and "Finish" closes the form.
    - What's unclear: whether losing the draft on close is acceptable for Phase 2 UAT.
    - Recommendation: make `CaseDraft` fully JSON-round-trippable (tested). Add a small "Save draft…/Open draft…" (SaveFileDialog, `.reelcase.json`) **only if cheap**, reusing the same serializer Phase 3 will use for case.json. Otherwise add a confirm on Finish. Planner's call. Mark it optional in the plan.
+   - RESOLVED: Phase 2 adds the C6 "Close Case" confirm on Finish and no Save/Open Draft (plan 02-09). CaseDraft is JSON round-trippable now (02-01); case.json is GUIDE-10 in Phase 3.
 2. **Jurisdiction picker granularity.**
    - Recommendation: combos for "Court system: Auto / Federal / State" and "State: (Auto) + 50 states + DC". The outline picks the district/county. Anything finer is out of scope.
+   - RESOLVED: Court combo Auto / Federal / State plus a State combo with Auto + 50 states + District of Columbia, enabled only for State (plan 02-07).
 3. **Should edits to the core doc re-run real-name leak scanning?** Yes. It is cheap and deterministic, so run it with the citation scan on every edit.
+   - RESOLVED: CoreDocumentValidator runs NameSubstitution.FindLeaks on every section on every validate, which StepCoreDocument calls after each apply/regenerate and before Finish (plans 02-04, 02-08).
 
 ## Environment Availability
 

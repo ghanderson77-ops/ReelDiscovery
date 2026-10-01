@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-10-01T20:08:41.234Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-10-01T20:14:30.812Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 23
-  percent: 55
+  completed_plans: 24
+  percent: 57
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 2 of 20
+Plan: 3 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [█████░░░░░] 55%
+Progress: [██████░░░░] 57%
 
 ## Performance Metrics
 
@@ -74,6 +74,7 @@ Progress: [█████░░░░░] 55%
 | Phase 02 P08 | 14min | 2 tasks | 2 files |
 | Phase 02 P09 | 6min | 2 tasks | 3 files |
 | Phase 03 P01 | 5min | 2 tasks | 14 files |
+| Phase 03 P02 | 15min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -128,6 +129,8 @@ Recent decisions affecting current work:
 - [02-09]: Finish always runs the last step's ValidateStepAsync before closing; case-driven Finish adds the C6 'Close Case' confirm (default No)
 - [03-01]: SampleGuidedDraft has a single issue (ISS-01) because SampleComplaintDraft has one count; fixture law-firm domain derived from Counsel.FirmName (ellispark.com, CH-006 Morgan Ellis)
 - [03-01]: CaseDraft.Normalize also repairs substitution strings/aliases and CoreDocument scalar strings; Stage only moves forward via AdvanceStage
+- [03-02]: Render tests ([Trait Category=Render]) write PNG + .clip.txt to ReelDiscovery.Tests/bin/Debug/net10.0-windows/renders/; the harness throws (not skips) off 144 DPI; build test controls in the arrange callback
+- [03-02]: Every Phase 3 grid/text field/status dot uses GridStyle.Apply/AddDotColumn, TextFieldHost.Create (EM_SETMARGINS zeroed for one left edge) and Theme.DrawStatusDot
 
 ### Pending Todos
 
@@ -149,6 +152,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T20:08:35.704Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-10-01T20:14:25.024Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None

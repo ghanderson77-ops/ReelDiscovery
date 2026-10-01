@@ -38,7 +38,8 @@ public class SharedUiHelperTests
         GridStyle.Apply(grid, owner);
 
         Assert.Equal(owner.LogicalToDeviceUnits(15), grid.DefaultCellStyle.Padding.Left);
-        Assert.Equal(owner.LogicalToDeviceUnits(15), grid.ColumnHeadersDefaultCellStyle.Padding.Left);
+        // Header cells add an unscaled 2 px text margin, so their padding compensates to land on the same x
+        Assert.Equal(owner.LogicalToDeviceUnits(15) - GridStyle.HeaderTextMargin, grid.ColumnHeadersDefaultCellStyle.Padding.Left);
     }
 
     [Fact]

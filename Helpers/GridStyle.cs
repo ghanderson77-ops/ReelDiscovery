@@ -7,6 +7,11 @@ public static class GridStyle
 {
     public const string DotColumnName = "Dot";
 
+    /// <summary>
+    /// Device-pixel text margin DataGridViewColumnHeaderCell adds on each side (not DPI-scaled).
+    /// </summary>
+    public const int HeaderTextMargin = 2;
+
     public static void Apply(DataGridView grid, Control owner)
     {
         // Every Phase 3 grid uses this so cell and header text land on Content x = 16 inside Padding = 1 cards (UI-SPEC)
@@ -31,7 +36,9 @@ public static class GridStyle
         grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.SurfaceMuted;
         grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.TextMuted;
         grid.ColumnHeadersDefaultCellStyle.Font = Theme.SmallFont();
-        grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(owner.LogicalToDeviceUnits(15), owner.LogicalToDeviceUnits(6), 0, owner.LogicalToDeviceUnits(6));
+        // Column header cells add a fixed, unscaled 2 px text margin on each side that text cells do not,
+        // so the header padding is 2 less to put header and cell text on the same x
+        grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(owner.LogicalToDeviceUnits(15) - HeaderTextMargin, owner.LogicalToDeviceUnits(6), 0, owner.LogicalToDeviceUnits(6));
 
         grid.DefaultCellStyle.BackColor = Theme.Surface;
         grid.DefaultCellStyle.ForeColor = Theme.Text;

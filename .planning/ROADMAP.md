@@ -100,7 +100,7 @@ Plans:
 - [x] 03-11-PLAN.md — Generator: tab/entry regeneration and Update Guide (Wave 6)
 - [x] 03-12-PLAN.md — IGuideHost, GuideTabPanel base, Issues tab, LinkPicker (Wave 5)
 - [x] 03-13-PLAN.md — Cast tab (Wave 6)
-- [ ] 03-14-PLAN.md — Key Facts tab (Wave 6)
+- [x] 03-14-PLAN.md — Key Facts tab (Wave 6)
 - [ ] 03-15-PLAN.md — Canonical Values tab (Wave 6)
 - [ ] 03-16-PLAN.md — StepCaseGuide: runs, banner, Checks, autosave, Next gate (Wave 7)
 - [x] 03-17-PLAN.md — StepCaseSummary: exports, open/move folder (Wave 5)
@@ -179,7 +179,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 |-------|----------------|--------|-----------|
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
-| 3. Case Guide | 14/20 | In Progress|  |
+| 3. Case Guide | 15/20 | In Progress|  |
 | 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |

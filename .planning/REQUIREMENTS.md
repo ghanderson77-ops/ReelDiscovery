@@ -41,10 +41,10 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [x] **GUIDE-02**: System generates a Cast of Key Characters with stable IDs: name, title, organization, email address, active date range, summary of key involvement
 - [x] **GUIDE-03**: Cast includes counsel characters (in-house and outside) so privileged communications can exist
 - [x] **GUIDE-04**: Cast includes ancillary (non-key) characters per organization for non-relevant and background traffic
-- [ ] **GUIDE-05**: System generates a Summary of Key Facts & Events as a dated timeline with stable IDs, each fact linked to one or more issues, the actors involved, and who knew about it
+- [x] **GUIDE-05**: System generates a Summary of Key Facts & Events as a dated timeline with stable IDs, each fact linked to one or more issues, the actors involved, and who knew about it
 - [ ] **GUIDE-06**: System maintains a registry of canonical values (amounts, invoice/change-order numbers, document titles, project names) that all generated content must use
 - [ ] **GUIDE-07**: A deterministic validator checks the guide for consistency (dates within range, facts reference existing cast/issues, no orphan IDs)
-- [ ] **GUIDE-08**: User can review, edit, and regenerate the cast and the facts timeline
+- [x] **GUIDE-08**: User can review, edit, and regenerate the cast and the facts timeline
 - [ ] **GUIDE-09**: Editing an upstream artifact (core doc, cast, facts) warns the user and marks downstream artifacts stale
 - [x] **GUIDE-10**: Case guide is saved as a case file (case.json) alongside the output
 - [x] **GUIDE-11**: User can export the core document, cast and key-facts summary as .docx
@@ -195,10 +195,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GUIDE-02 | Phase 3 | Complete |
 | GUIDE-03 | Phase 3 | Complete |
 | GUIDE-04 | Phase 3 | Complete |
-| GUIDE-05 | Phase 3 | Pending |
+| GUIDE-05 | Phase 3 | Complete |
 | GUIDE-06 | Phase 3 | Pending |
 | GUIDE-07 | Phase 3 | Pending |
-| GUIDE-08 | Phase 3 | Pending |
+| GUIDE-08 | Phase 3 | Complete |
 | GUIDE-09 | Phase 3 | Pending |
 | GUIDE-10 | Phase 3 | Complete |
 | GUIDE-11 | Phase 3 | Complete |

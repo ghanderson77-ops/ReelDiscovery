@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-13-PLAN.md
-last_updated: "2026-10-01T22:19:48.093Z"
+stopped_at: Completed 03-14-PLAN.md
+last_updated: "2026-10-01T22:33:51.766Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 36
-  percent: 86
+  completed_plans: 37
+  percent: 88
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 14 of 20
+Plan: 15 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
@@ -86,6 +86,7 @@ Progress: [█████████░] 86%
 | Phase 03 P12 | 8min | 2 tasks | 8 files |
 | Phase 03 P11 | 35min | 2 tasks | 6 files |
 | Phase 03 P13 | 14min | 2 tasks | 5 files |
+| Phase 03 P14 | 25min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,11 @@ Recent decisions affecting current work:
 - [03-17]: Case Summary Finish/Back are disabled while an export or folder move runs (CanMoveNext = !_busy)
 - [03-17]: Export All stops at the first failure and keeps written documents; an open-in-Word target is detected via sharing/lock HResults or a FileShare.None probe
 - [03-17]: Data labels use UseMnemonic = false so "&" renders (Key Facts & Events, case titles, paths); Last saved falls back to case.json write time
+- [03-14]: Key Facts grid Who knew is 100 and Who did it min 112 (UI-SPEC 64/96) with single-line headers; at the spec widths the headers wrapped and the grid no longer top-aligned with the other tabs
+- [03-14]: Facts rows list chronologically (yyyy-MM-dd ordinal, undated last); MetaLine adds ' · Edited by you' like Cast
+- [03-14]: Mark Reviewed under the Needs review filter moves to the next fact to review; Add Fact resets the filter to All and focuses the Fact field
+- [03-14]: Link pickers are re-set only when items/checks/locks change, so the list being clicked keeps its order and scroll; an Actors change re-sets Who knew with the actors locked
+- [03-14]: GUIDE-05 and GUIDE-08 marked Complete; GUIDE-09 stays Pending until the step shell's stale/needs-review banner (03-16)
 
 ### Pending Todos
 
@@ -208,6 +214,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T22:19:42.392Z
-Stopped at: Completed 03-13-PLAN.md
+Last session: 2026-10-01T22:33:51.761Z
+Stopped at: Completed 03-14-PLAN.md
 Resume file: None

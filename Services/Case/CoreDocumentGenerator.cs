@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Ai;
 
@@ -299,7 +300,17 @@ public class CoreDocumentGenerator
         var paragraphs = CleanParagraphs((await _llm.GenerateAsync<SectionDto>(request, ct)).GetValueOrThrow());
 
         // Content-level retry (not a transport retry): exactly one rewrite when case law was cited (T-02-22)
-        var findings = CitationScanner.Scan(string.Join("\n", paragraphs), OwnPartyNames(doc));
+        List<CitationFinding> findings;
+        try
+        {
+            findings = CitationScanner.Scan(string.Join("\n", paragraphs), OwnPartyNames(doc));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Too large to scan: keep the text; the validator reports the section (WR-04)
+            findings = new List<CitationFinding>();
+        }
+
         if (CitationScanner.HasErrors(findings))
         {
             var errors = findings.Where(f => f.Severity == CitationSeverity.Error).Select(f => f.Text);

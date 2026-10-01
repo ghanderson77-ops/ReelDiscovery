@@ -338,6 +338,20 @@ public class CoreDocumentValidatorTests
     }
 
     [Fact]
+    public void HugeCapitalizedRun_DoesNotThrow()
+    {
+        // Worst case for the CaseName pattern: a long run of capitalized words with no "v."
+        var draft = CaseTestData.SampleComplaintDraft();
+        AppendParagraph(draft, "facts-1", string.Join(" ", Enumerable.Repeat("Alpha Bravo Charlie Delta", 5_000)));
+
+        var issues = CoreDocumentValidator.Validate(draft);
+
+        // Either the scan finished in time, or the section is reported instead of throwing
+        Assert.All(issues.Where(i => i.Message == CoreDocumentValidator.TooLargeToScan),
+            i => Assert.Equal(IssueSeverity.Warning, i.Severity));
+    }
+
+    [Fact]
     public void PleadingWithNoCounts_IsError()
     {
         var draft = CaseTestData.SampleComplaintDraft();

@@ -82,4 +82,20 @@ public class CitationScannerTests
         Assert.False(CitationScanner.HasErrors(CitationScanner.Scan("Smith v. Jones and supra", OwnParties)));
         Assert.False(CitationScanner.HasErrors(CitationScanner.Scan("28 U.S.C. § 1332", OwnParties)));
     }
+
+    [Theory]
+    [InlineData("ReporterCitation")]
+    [InlineData("DatabaseCitation")]
+    [InlineData("CaseName")]
+    [InlineData("CitationSignal")]
+    public void ScanningPatterns_HaveMatchTimeout(string patternName)
+    {
+        var method = typeof(CitationScanner).GetMethod(patternName,
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var regex = (System.Text.RegularExpressions.Regex)method!.Invoke(null, null)!;
+
+        Assert.Equal(TimeSpan.FromMilliseconds(CitationScanner.MatchTimeoutMs), regex.MatchTimeout);
+    }
 }

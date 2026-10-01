@@ -27,6 +27,11 @@ public class CitationFinding
 /// </summary>
 public static partial class CitationScanner
 {
+    /// <summary>
+    /// Match timeout for the scanning patterns; callers treat RegexMatchTimeoutException as "too large to scan".
+    /// </summary>
+    public const int MatchTimeoutMs = 1000;
+
     private static readonly HashSet<string> NoiseTokens = new(StringComparer.Ordinal)
     {
         "inc", "llc", "corp", "corporation", "co", "ltd", "lp", "llp", "pc", "pa", "the", "et", "al", "company"
@@ -34,18 +39,19 @@ public static partial class CitationScanner
 
     // volume + reporter + first page, e.g. "531 U.S. 98", "123 F.3d 456", "45 Cal. Rptr. 3d 12".
     // "U.S." must be followed by whitespace and a page number, so "28 U.S.C. § 1332" can never match.
-    [GeneratedRegex(@"\b\d{1,4}\s+(?:U\.\s?S\.|S\.\s?Ct\.|L\.\s?Ed\.(?:\s?2d)?|F\.\s?Supp\.(?:\s?[23]d)?|F\.\s?App'x|Fed\.\s?Appx\.?|F\.(?:\s?(?:2d|3d|4th))?|B\.\s?R\.|Fed\.\s?Cl\.|A\.(?:\s?[23]d)?|P\.(?:\s?[23]d)?|N\.E\.(?:\s?[23]d)?|N\.W\.(?:\s?2d)?|S\.E\.(?:\s?2d)?|S\.W\.(?:\s?[23]d)?|So\.(?:\s?[23]d)?|Cal\.\s?Rptr\.(?:\s?[23]d)?|Cal\.\s?App\.\s?(?:2d|3d|4th|5th)|Cal\.\s?(?:2d|3d|4th|5th)|N\.Y\.S\.(?:\s?[23]d)?|N\.Y\.\s?[23]d|A\.D\.\s?[23]d|Ill\.\s?Dec\.|Ill\.\s?App\.(?:\s?[23]d)?)\s+\d{1,5}\b")]
+    [GeneratedRegex(@"\b\d{1,4}\s+(?:U\.\s?S\.|S\.\s?Ct\.|L\.\s?Ed\.(?:\s?2d)?|F\.\s?Supp\.(?:\s?[23]d)?|F\.\s?App'x|Fed\.\s?Appx\.?|F\.(?:\s?(?:2d|3d|4th))?|B\.\s?R\.|Fed\.\s?Cl\.|A\.(?:\s?[23]d)?|P\.(?:\s?[23]d)?|N\.E\.(?:\s?[23]d)?|N\.W\.(?:\s?2d)?|S\.E\.(?:\s?2d)?|S\.W\.(?:\s?[23]d)?|So\.(?:\s?[23]d)?|Cal\.\s?Rptr\.(?:\s?[23]d)?|Cal\.\s?App\.\s?(?:2d|3d|4th|5th)|Cal\.\s?(?:2d|3d|4th|5th)|N\.Y\.S\.(?:\s?[23]d)?|N\.Y\.\s?[23]d|A\.D\.\s?[23]d|Ill\.\s?Dec\.|Ill\.\s?App\.(?:\s?[23]d)?)\s+\d{1,5}\b", RegexOptions.None, MatchTimeoutMs)]
     private static partial Regex ReporterCitation();
 
     // "2019 WL 1234567", "2020 U.S. Dist. LEXIS 12345"
-    [GeneratedRegex(@"\b(?:19|20)\d{2}\s+(?:WL|U\.S\.\s?(?:Dist\.|App\.)\s?LEXIS|[A-Z][A-Za-z.]*\s?LEXIS)\s+\d+\b")]
+    [GeneratedRegex(@"\b(?:19|20)\d{2}\s+(?:WL|U\.S\.\s?(?:Dist\.|App\.)\s?LEXIS|[A-Z][A-Za-z.]*\s?LEXIS)\s+\d+\b", RegexOptions.None, MatchTimeoutMs)]
     private static partial Regex DatabaseCitation();
 
-    // "Smith v. Jones" (warning unless it is this document's own caption)
-    [GeneratedRegex(@"\b([A-Z][\w.&'\-]*(?:\s+(?:[A-Z][\w.&'\-]*|of|the|and|&))*)\s+v\.\s+([A-Z][\w.&'\-]*(?:\s+(?:[A-Z][\w.&'\-]*|of|the|and|&))*)")]
+    // "Smith v. Jones" (warning unless it is this document's own caption).
+    // Backtracks over long runs of capitalized words, so the timeout matters most here (WR-04).
+    [GeneratedRegex(@"\b([A-Z][\w.&'\-]*(?:\s+(?:[A-Z][\w.&'\-]*|of|the|and|&))*)\s+v\.\s+([A-Z][\w.&'\-]*(?:\s+(?:[A-Z][\w.&'\-]*|of|the|and|&))*)", RegexOptions.None, MatchTimeoutMs)]
     private static partial Regex CaseName();
 
-    [GeneratedRegex(@"\bId\.\s+at\s+\d+|\bsupra\b|\bSee,?\s+e\.g\.,")]
+    [GeneratedRegex(@"\bId\.\s+at\s+\d+|\bsupra\b|\bSee,?\s+e\.g\.,", RegexOptions.None, MatchTimeoutMs)]
     private static partial Regex CitationSignal();
 
     [GeneratedRegex(@"[^a-z0-9]+")]

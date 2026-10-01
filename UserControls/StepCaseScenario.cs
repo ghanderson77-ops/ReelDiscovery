@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
@@ -398,7 +399,18 @@ public class StepCaseScenario : UserControl, IWizardStep
             }
         }
 
-        draft.EffectiveScenario = NameSubstitution.Apply(text, draft.Substitutions);
+        try
+        {
+            draft.EffectiveScenario = NameSubstitution.Apply(text, draft.Substitutions);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Never let a regex timeout escape into the async void Next handler (WR-04)
+            _lblStatus.Text = "Could not apply the substitute names to this scenario. Shorten it and click Next again.";
+            _lblStatus.ForeColor = Color.Red;
+            return false;
+        }
+
         return true;
     }
 }

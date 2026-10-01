@@ -41,7 +41,7 @@ public static partial class CoreDocumentValidator
 {
     private const string OutlineSectionId = "outline";
 
-    [GeneratedRegex(@"\bparagraphs?\s+\d+", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\bparagraphs?\s+\d+", RegexOptions.IgnoreCase, CitationScanner.MatchTimeoutMs)]
     private static partial Regex ParagraphReference();
 
     // Whole-word state matchers, longest names first so "West Virginia" wins over "Virginia".
@@ -192,7 +192,16 @@ public static partial class CoreDocumentValidator
         if (state.Length == 0)
             return;
 
-        var other = FindOtherState(courtName, state);
+        string? other;
+        try
+        {
+            other = FindOtherState(courtName, state);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Heuristic warning only; skip it rather than throw from Validate (WR-04)
+            other = null;
+        }
         if (other != null)
             issues.Add(Warning(IssueCategory.Jurisdiction, string.Empty, $"The court name mentions {other} but the case is in {state}."));
     }
@@ -335,35 +344,50 @@ public static partial class CoreDocumentValidator
         {
             var text = string.Join("\n", section.Paragraphs);
 
-            foreach (var finding in CitationScanner.Scan(text, ownPartyNames))
+            // Regex timeouts must never escape: Validate runs inside UI event handlers (WR-04)
+            try
             {
-                if (finding.Severity == CitationSeverity.Error)
-                    issues.Add(Error(IssueCategory.Citation, section.Id, $"Case citation: \"{finding.Text}\""));
-                else
-                    issues.Add(Warning(IssueCategory.Citation, section.Id, $"Possible case name or citation phrase: \"{finding.Text}\""));
+                AddCitations(issues, section.Id, CitationScanner.Scan(text, ownPartyNames));
+                AddLeaks(issues, section.Id, NameSubstitution.FindLeaks(text, subs));
+
+                if (ParagraphReference().IsMatch(text))
+                    issues.Add(Warning(IssueCategory.Structure, section.Id, "Refers to paragraph numbers, which change when sections are edited."));
             }
-
-            AddLeaks(issues, section.Id, NameSubstitution.FindLeaks(text, subs));
-
-            if (ParagraphReference().IsMatch(text))
-                issues.Add(Warning(IssueCategory.Structure, section.Id, "Refers to paragraph numbers, which change when sections are edited."));
+            catch (RegexMatchTimeoutException)
+            {
+                issues.Add(Warning(IssueCategory.Structure, section.Id, TooLargeToScan));
+            }
         }
 
-        // Everything rendered outside the sections: caption, title, court, memo header, signature block (WR-02)
-        var outlineText = string.Join("\n", OutlineFields(doc).Where(s => !string.IsNullOrWhiteSpace(s)));
-        AddLeaks(issues, OutlineSectionId, NameSubstitution.FindLeaks(outlineText, subs));
-
-        // Free-text outline lines that could carry a case citation
-        var citationText = string.Join("\n", new[] { doc.Title, doc.Memo?.Re }.Where(s => !string.IsNullOrWhiteSpace(s)));
-        foreach (var finding in CitationScanner.Scan(citationText, ownPartyNames))
+        try
         {
-            if (finding.Severity == CitationSeverity.Error)
-                issues.Add(Error(IssueCategory.Citation, OutlineSectionId, $"Case citation: \"{finding.Text}\""));
-            else
-                issues.Add(Warning(IssueCategory.Citation, OutlineSectionId, $"Possible case name or citation phrase: \"{finding.Text}\""));
+            // Everything rendered outside the sections: caption, title, court, memo header, signature block (WR-02)
+            var outlineText = string.Join("\n", OutlineFields(doc).Where(s => !string.IsNullOrWhiteSpace(s)));
+            AddLeaks(issues, OutlineSectionId, NameSubstitution.FindLeaks(outlineText, subs));
+
+            // Free-text outline lines that could carry a case citation
+            var citationText = string.Join("\n", new[] { doc.Title, doc.Memo?.Re }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            AddCitations(issues, OutlineSectionId, CitationScanner.Scan(citationText, ownPartyNames));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            issues.Add(Warning(IssueCategory.Structure, OutlineSectionId, TooLargeToScan));
         }
 
         return issues;
+    }
+
+    internal const string TooLargeToScan = "Section too large to scan for case citations and real names. Shorten it, then check it by hand.";
+
+    private static void AddCitations(List<CoreDocumentIssue> issues, string sectionId, List<CitationFinding> findings)
+    {
+        foreach (var finding in findings)
+        {
+            if (finding.Severity == CitationSeverity.Error)
+                issues.Add(Error(IssueCategory.Citation, sectionId, $"Case citation: \"{finding.Text}\""));
+            else
+                issues.Add(Warning(IssueCategory.Citation, sectionId, $"Possible case name or citation phrase: \"{finding.Text}\""));
+        }
     }
 
     private static IEnumerable<string?> OutlineFields(CoreDocument doc)

@@ -90,7 +90,7 @@ Plans:
 - [x] 03-01-PLAN.md — Guide data model, case.json fields (version, case id, stage, guide, Normalize), preset numbers, SampleGuidedDraft fixture (Wave 1)
 - [x] 03-02-PLAN.md — 144-DPI render harness + clipping detector; GridStyle, TextFieldHost, DrawStatusDot (Wave 1)
 - [x] 03-03-PLAN.md — IdAllocator, IssueExtractor, EmailIdentity, SignatureBuilder, UsTimeZones (Wave 2)
-- [ ] 03-04-PLAN.md — CaseFolderNaming + CaseStore (atomic autosave, load, recent cases, move) on WizardState (Wave 2)
+- [x] 03-04-PLAN.md — CaseFolderNaming + CaseStore (atomic autosave, load, recent cases, move) on WizardState (Wave 2)
 - [ ] 03-05-PLAN.md — CaseGuideDocxExporter: core document, cast, key facts .docx (Wave 2)
 - [ ] 03-06-PLAN.md — CaseGuideUiText copy helpers + ThemedDialog, Regenerate/Delete dialogs (Wave 2)
 - [ ] 03-07-PLAN.md — GuideStaleness + CaseGuideEditing (Wave 3)

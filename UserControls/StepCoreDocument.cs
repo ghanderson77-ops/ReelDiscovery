@@ -675,6 +675,34 @@ public class StepCoreDocument : UserControl, IWizardStep
 
     // ----- Generation -----
 
+    // No-op once the step is disposed: generation continuations can resume after the window closed (WR-07)
+    private void SetStatus(string text, Color color)
+    {
+        if (IsDisposed)
+            return;
+
+        _lblStatus.Text = text;
+        _lblStatus.ForeColor = color;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // Closing the wizard or switching flows stops in-flight generation so no further calls are billed (WR-07)
+            try
+            {
+                _cts?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The run already finished and released its token source; nothing to cancel
+            }
+        }
+
+        base.Dispose(disposing);
+    }
+
     private void SetBusy(bool busy)
     {
         _isGenerating = busy;
@@ -702,8 +730,10 @@ public class StepCoreDocument : UserControl, IWizardStep
             var generator = new CoreDocumentGenerator(_state.CreateGateway());
             var progress = new Progress<string>(msg =>
             {
-                _lblStatus.Text = msg;
-                _lblStatus.ForeColor = Accent;
+                if (IsDisposed)
+                    return;
+
+                SetStatus(msg, Accent);
                 var doc = _state.Case.CoreDocument;
                 var max = Math.Max(1, doc?.Sections.Count ?? 1);
                 var ready = doc?.Sections.Count(s => s.Status == SectionStatus.Ready) ?? 0;
@@ -714,63 +744,62 @@ public class StepCoreDocument : UserControl, IWizardStep
             });
 
             var writeOutline = fullRegenerate || _state.Case.CoreDocument == null;
-            _lblStatus.Text = writeOutline ? "Writing the outline..." : "Writing the remaining sections...";
-            _lblStatus.ForeColor = Accent;
+            SetStatus(writeOutline ? "Writing the outline..." : "Writing the remaining sections...", Accent);
 
             var result = writeOutline
                 ? await generator.GenerateAsync(_state.Case, progress, _cts.Token)
                 : await generator.GenerateSectionsAsync(_state.Case, progress, _cts.Token);
 
+            // The window may have closed during the run (WR-07)
+            if (IsDisposed)
+                return;
+
             var failed = _state.Case.CoreDocument?.Sections.FirstOrDefault(s => s.Status == SectionStatus.Failed);
             if (result.IsFatal)
             {
-                _lblStatus.Text = FatalText(result.FatalError);
-                _lblStatus.ForeColor = Color.Red;
+                SetStatus(FatalText(result.FatalError), Color.Red);
             }
             else if (failed != null)
             {
-                _lblStatus.Text = $"{failed.Heading} failed: {failed.FailureMessage}. Select it and click Retry Section.";
-                _lblStatus.ForeColor = Color.Red;
+                SetStatus($"{failed.Heading} failed: {failed.FailureMessage}. Select it and click Retry Section.", Color.Red);
             }
             else
             {
                 var (text, color) = ReadyStatus(_state.Case, CoreDocumentValidator.Validate(_state.Case));
-                _lblStatus.Text = text;
-                _lblStatus.ForeColor = color;
+                SetStatus(text, color);
             }
         }
         catch (OperationCanceledException)
         {
-            _lblStatus.Text = CancelledText;
-            _lblStatus.ForeColor = Color.DarkOrange;
+            SetStatus(CancelledText, Color.DarkOrange);
         }
         catch (LlmCallException ex) when (ex.Result.Outcome == LlmOutcome.Refused)
         {
             var refusedText = $"The model declined to write this scenario: {ex.Result.Message}. Go Back and rephrase it. Keep criminal methods general and focus on who knew what, when, and where the money went.";
             // Always shown: a refused Regenerate All keeps the old document visible, so the status explains why
-            _lblStatus.Text = refusedText;
-            _lblStatus.ForeColor = Color.Red;
-            if (_state.Case.CoreDocument == null)
+            SetStatus(refusedText, Color.Red);
+            if (!IsDisposed && _state.Case.CoreDocument == null)
                 _lblEmptyBody.Text = refusedText;
         }
         catch (LlmCallException ex) when (ex.Result.IsFatal)
         {
-            _lblStatus.Text = FatalText(ex.Result.Message ?? ex.Message);
-            _lblStatus.ForeColor = Color.Red;
+            SetStatus(FatalText(ex.Result.Message ?? ex.Message), Color.Red);
         }
         catch (Exception ex)
         {
-            _lblStatus.Text = ErrorText(ex);
-            _lblStatus.ForeColor = Color.Red;
+            SetStatus(ErrorText(ex), Color.Red);
         }
         finally
         {
             _cts?.Dispose();
             _cts = null;
-            SetBusy(false);
-            RefreshAll();
-            ReloadEditorAfterRun();
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+                RefreshAll();
+                ReloadEditorAfterRun();
+                StateChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
 
@@ -802,48 +831,47 @@ public class StepCoreDocument : UserControl, IWizardStep
         _cts = new CancellationTokenSource();
         _progress.Value = 0;
         SetBusy(true);
-        _lblStatus.Text = $"Writing {s.Heading}...";
-        _lblStatus.ForeColor = Accent;
+        SetStatus($"Writing {s.Heading}...", Accent);
 
         try
         {
             var generator = new CoreDocumentGenerator(_state.CreateGateway());
             await generator.RegenerateSectionAsync(_state.Case, s.Id, _txtGuidance.Text.Trim(), _cts.Token);
+            if (IsDisposed)
+                return;
 
             _txtGuidance.Clear();
             var (text, color) = ReadyStatus(_state.Case, CoreDocumentValidator.Validate(_state.Case));
-            _lblStatus.Text = text;
-            _lblStatus.ForeColor = color;
+            SetStatus(text, color);
         }
         catch (OperationCanceledException)
         {
-            _lblStatus.Text = CancelledText;
-            _lblStatus.ForeColor = Color.DarkOrange;
+            SetStatus(CancelledText, Color.DarkOrange);
         }
         catch (LlmCallException ex) when (ex.Result.IsFatal)
         {
-            _lblStatus.Text = FatalText(ex.Result.Message ?? ex.Message);
-            _lblStatus.ForeColor = Color.Red;
+            SetStatus(FatalText(ex.Result.Message ?? ex.Message), Color.Red);
         }
         catch (LlmCallException ex)
         {
             // The generator keeps the old text on failure
-            _lblStatus.Text = $"{s.Heading} failed: {ex.Result.Message ?? ex.Message}. Select it and click Retry Section.";
-            _lblStatus.ForeColor = Color.Red;
+            SetStatus($"{s.Heading} failed: {ex.Result.Message ?? ex.Message}. Select it and click Retry Section.", Color.Red);
         }
         catch (Exception ex)
         {
-            _lblStatus.Text = ErrorText(ex);
-            _lblStatus.ForeColor = Color.Red;
+            SetStatus(ErrorText(ex), Color.Red);
         }
         finally
         {
             _cts?.Dispose();
             _cts = null;
-            SetBusy(false);
-            RefreshAll();
-            ReloadEditorAfterRun();
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+                RefreshAll();
+                ReloadEditorAfterRun();
+                StateChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
 

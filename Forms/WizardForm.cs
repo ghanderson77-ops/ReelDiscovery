@@ -321,8 +321,13 @@ public partial class WizardForm : Form
             }
             finally
             {
-                _btnNext.Enabled = true;
+                // The window may have closed while validation awaited an LLM call (WR-07)
+                if (!IsDisposed)
+                    _btnNext.Enabled = true;
             }
+
+            if (IsDisposed)
+                return;
         }
 
         if (_currentStepIndex >= _steps.Count - 1)

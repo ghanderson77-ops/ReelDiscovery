@@ -27,7 +27,9 @@ public class StepCaseScenario : UserControl, IWizardStep
     private ComboBox _cmbState = null!;
     private Label _lblStatus = null!;
     private LinkLabel _lnkReviewNames = null!;
+    private LinkLabel _lnkCancelCheck = null!;
     private LoadingOverlay _loadingOverlay = null!;
+    private CancellationTokenSource? _checkCts;
     private bool _isChecking;
 
     public string StepTitle => "Describe the Case";
@@ -180,15 +182,16 @@ public class StepCaseScenario : UserControl, IWizardStep
         preferencePanel.Controls.Add(_cmbState);
         mainLayout.Controls.Add(preferencePanel, 0, 7);
 
-        // Status + "Review real names" link
+        // Status + "Review real names" and "Cancel check" links
         var statusLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
             Margin = new Padding(0)
         };
         statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         statusLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _lblStatus = new Label
         {
@@ -206,8 +209,19 @@ public class StepCaseScenario : UserControl, IWizardStep
             Visible = false
         };
         _lnkReviewNames.LinkClicked += (s, e) => ReviewRealNames();
+        // Shown only while the real-name check runs (WR-07)
+        _lnkCancelCheck = new LinkLabel
+        {
+            Text = "Cancel check",
+            AutoSize = true,
+            Anchor = AnchorStyles.Right,
+            Font = new Font("Segoe UI", 9F),
+            Visible = false
+        };
+        _lnkCancelCheck.LinkClicked += (s, e) => CancelCheck();
         statusLayout.Controls.Add(_lblStatus, 0, 0);
         statusLayout.Controls.Add(_lnkReviewNames, 1, 0);
+        statusLayout.Controls.Add(_lnkCancelCheck, 2, 0);
         mainLayout.Controls.Add(statusLayout, 0, 8);
 
         _loadingOverlay = new LoadingOverlay(LoadingOverlay.LoadingType.EntityCheck);
@@ -295,6 +309,30 @@ public class StepCaseScenario : UserControl, IWizardStep
         _cmbCourt.Enabled = enabled;
         _lnkReviewNames.Enabled = enabled;
         UpdateStateComboEnabled();
+    }
+
+    private void CancelCheck()
+    {
+        try
+        {
+            _checkCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The check already finished and released its token source; nothing to cancel
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            // Closing the wizard or switching flows stops the in-flight check (WR-07)
+            CancelCheck();
+            _loadingOverlay?.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     private void UpdateReviewNamesLink()
@@ -397,11 +435,18 @@ public class StepCaseScenario : UserControl, IWizardStep
             _lblStatus.Text = "Checking the scenario for real names...";
             _lblStatus.ForeColor = Color.FromArgb(0, 120, 215);
             _loadingOverlay.Show(_txtScenario);
+            var checkCts = new CancellationTokenSource();
+            _checkCts = checkCts;
+            _lnkCancelCheck.Visible = true;
             StateChanged?.Invoke(this, EventArgs.Empty);
 
             try
             {
-                var entities = await new RealEntityDetector(_state.CreateGateway()).DetectAsync(text);
+                var entities = await new RealEntityDetector(_state.CreateGateway()).DetectAsync(text, checkCts.Token);
+
+                // The window may have closed while the check ran (WR-07)
+                if (IsDisposed)
+                    return false;
 
                 // Hide the overlay before the modal dialog opens
                 _loadingOverlay.Hide();
@@ -426,8 +471,20 @@ public class StepCaseScenario : UserControl, IWizardStep
 
                 draft.EntityCheckHash = hash;
             }
+            catch (OperationCanceledException) when (checkCts.IsCancellationRequested)
+            {
+                if (!IsDisposed)
+                {
+                    _lblStatus.Text = "Real-name check cancelled. Click Next to check again.";
+                    _lblStatus.ForeColor = Color.DarkOrange;
+                }
+                return false;
+            }
             catch (Exception ex)
             {
+                if (IsDisposed)
+                    return false;
+
                 var message = ex.InnerException != null
                     ? $"{ex.Message} ({ex.InnerException.Message})"
                     : ex.Message;
@@ -437,11 +494,17 @@ public class StepCaseScenario : UserControl, IWizardStep
             }
             finally
             {
+                checkCts.Dispose();
+                _checkCts = null;
                 _isChecking = false;
-                SetInputsEnabled(true);
-                UpdateReviewNamesLink();
-                _loadingOverlay.Hide();
-                StateChanged?.Invoke(this, EventArgs.Empty);
+                if (!IsDisposed)
+                {
+                    _lnkCancelCheck.Visible = false;
+                    SetInputsEnabled(true);
+                    UpdateReviewNamesLink();
+                    _loadingOverlay.Hide();
+                    StateChanged?.Invoke(this, EventArgs.Empty);
+                }
             }
         }
 

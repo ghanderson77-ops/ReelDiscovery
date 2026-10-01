@@ -170,6 +170,18 @@ public class RealEntityDetectorTests
     }
 
     [Fact]
+    public async Task Detect_CancelledToken_ThrowsOperationCanceled()
+    {
+        // The scenario step's "Cancel check" link and step disposal cancel this token (WR-07)
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(TwoEntitiesJson));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new RealEntityDetector(gateway).DetectAsync(Scenario, cts.Token));
+    }
+
+    [Fact]
     public void SchemaTypes_AreStrict()
     {
         foreach (var type in RealEntityDetector.SchemaTypes)

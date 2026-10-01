@@ -16,7 +16,7 @@ public class ComplexityPresetTests
     public static TheoryData<string> RangeNames() => new()
     {
         "Parties", "Counts", "Characters", "TimelineMonths", "FactSubsections",
-        "Paragraphs", "Pages", "MemoPages", "Findings", "MemoParagraphs"
+        "Paragraphs", "Pages", "MemoPages", "Findings", "MemoParagraphs", "Facts"
     };
 
     [Theory]
@@ -59,6 +59,30 @@ public class ComplexityPresetTests
         Assert.Equal(300, complex.MemoParagraphsMax);
     }
 
+    [Fact]
+    public void BackgroundPerOrg_ByLevel()
+    {
+        Assert.Equal(3, ComplexityPreset.Get(ComplexityLevel.Simple).BackgroundPerOrg);
+        Assert.Equal(6, ComplexityPreset.Get(ComplexityLevel.Standard).BackgroundPerOrg);
+        Assert.Equal(10, ComplexityPreset.Get(ComplexityLevel.Complex).BackgroundPerOrg);
+    }
+
+    [Fact]
+    public void FactsRange_ByLevel()
+    {
+        var simple = ComplexityPreset.Get(ComplexityLevel.Simple);
+        Assert.Equal(12, simple.FactsMin);
+        Assert.Equal(20, simple.FactsMax);
+
+        var standard = ComplexityPreset.Get(ComplexityLevel.Standard);
+        Assert.Equal(30, standard.FactsMin);
+        Assert.Equal(50, standard.FactsMax);
+
+        var complex = ComplexityPreset.Get(ComplexityLevel.Complex);
+        Assert.Equal(70, complex.FactsMin);
+        Assert.Equal(110, complex.FactsMax);
+    }
+
     [Theory]
     [InlineData(2, 2, "2")]
     [InlineData(1, 2, "1-2")]
@@ -79,6 +103,7 @@ public class ComplexityPresetTests
         "MemoPages" => preset.MemoPagesMin,
         "Findings" => preset.FindingsMin,
         "MemoParagraphs" => preset.MemoParagraphsMin,
+        "Facts" => preset.FactsMin,
         _ => throw new ArgumentOutOfRangeException(nameof(name))
     };
 
@@ -94,6 +119,7 @@ public class ComplexityPresetTests
         "MemoPages" => preset.MemoPagesMax,
         "Findings" => preset.FindingsMax,
         "MemoParagraphs" => preset.MemoParagraphsMax,
+        "Facts" => preset.FactsMax,
         _ => throw new ArgumentOutOfRangeException(nameof(name))
     };
 }

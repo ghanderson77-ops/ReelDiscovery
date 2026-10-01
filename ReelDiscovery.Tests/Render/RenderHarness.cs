@@ -203,7 +203,9 @@ internal static class RenderHarness
 
     private static RenderResult Capture(Form form, string fileName, ClippingOptions? options)
     {
-        var size = form.ClientSize;
+        // DrawToBitmap paints the whole window (title bar and borders included), so bordered dialogs need
+        // the full window size or their bottom and right edges are cut off; borderless hosts are unchanged
+        var size = form.FormBorderStyle == FormBorderStyle.None ? form.ClientSize : form.Size;
         var png = Path.Combine(OutputFolder, fileName + ".png");
         using (var bitmap = new Bitmap(size.Width, size.Height))
         {

@@ -342,6 +342,11 @@ public class StepCoreDocument : UserControl, IWizardStep
         _btnRegenerateAll.Click += BtnRegenerateAll_Click;
         _btnGenerate.Click += async (s, e) => await RunGenerationAsync(fullRegenerate: true);
         _btnCancel.Click += BtnCancel_Click;
+        _txtEditor.TextChanged += (s, e) => _btnApply.Enabled = !_isGenerating && _txtEditor.Text != _editorOriginalText;
+        _txtEditor.Leave += (s, e) => ApplyPendingEdit();
+        _btnApply.Click += (s, e) => ApplyPendingEdit();
+        _btnRegenerateSection.Click += async (s, e) => await RegenerateSelectedSectionAsync();
+        _gridIssues.CellDoubleClick += GridIssues_CellDoubleClick;
     }
 
     private void InitializeSplitter()
@@ -557,6 +562,8 @@ public class StepCoreDocument : UserControl, IWizardStep
         if (_suppressSelection || _isGenerating)
             return;
 
+        // Edits to the previous section are applied, never lost, when switching
+        ApplyPendingEdit();
         LoadSelectedSection();
     }
 
@@ -583,6 +590,29 @@ public class StepCoreDocument : UserControl, IWizardStep
             ? "Retry Section"
             : "Regenerate Section";
         UpdateEditorEnabled();
+    }
+
+    /// <summary>
+    /// Applies the editor text to the section it was loaded from (no-op when unchanged), then re-validates.
+    /// </summary>
+    private void ApplyPendingEdit()
+    {
+        if (_isGenerating || _state == null || string.IsNullOrEmpty(_editorSectionId) || _txtEditor.Text == _editorOriginalText)
+            return;
+
+        var section = _state.Case.CoreDocument?.FindSection(_editorSectionId);
+        if (section == null)
+            return;
+
+        CoreDocumentEditing.ApplyEdit(_state.Case, _editorSectionId, _txtEditor.Text);
+
+        // Show the normalized text (also when only whitespace changed and nothing was applied)
+        _txtEditor.Text = CoreDocumentEditing.JoinParagraphs(section.Paragraphs);
+        _editorOriginalText = _txtEditor.Text;
+        _btnApply.Enabled = false;
+        if (section.Status == SectionStatus.Ready)
+            _btnRegenerateSection.Text = "Regenerate Section";
+        RefreshAll();
     }
 
     private void UpdateEditorEnabled()
@@ -629,6 +659,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         if (_isGenerating || _state == null)
             return;
 
+        ApplyPendingEdit();
         _cts = new CancellationTokenSource();
         _lblEmptyBody.Text = DefaultEmptyBody;
         _progress.Value = 0;
@@ -711,6 +742,109 @@ public class StepCoreDocument : UserControl, IWizardStep
         }
     }
 
+    private async Task RegenerateSelectedSectionAsync()
+    {
+        if (_isGenerating || _state == null)
+            return;
+
+        var s = SelectedSection;
+        if (s == null)
+            return;
+
+        ApplyPendingEdit();
+
+        if (s.IsUserEdited)
+        {
+            var answer = MessageBox.Show(
+                $"Regenerate \"{s.Heading}\"? Your edits to this section will be replaced.",
+                "Regenerate Section",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes)
+                return;
+        }
+
+        // Retry Section: the generator writes every Pending/Failed section (also resumes after a fatal stop or cancel)
+        if (s.Status == SectionStatus.Pending || s.Status == SectionStatus.Failed)
+        {
+            await RunGenerationAsync(fullRegenerate: false);
+            return;
+        }
+
+        _cts = new CancellationTokenSource();
+        _progress.Value = 0;
+        SetBusy(true);
+        _lblStatus.Text = $"Writing {s.Heading}...";
+        _lblStatus.ForeColor = Accent;
+
+        try
+        {
+            var generator = new CoreDocumentGenerator(_state.CreateGateway());
+            await generator.RegenerateSectionAsync(_state.Case, s.Id, _txtGuidance.Text.Trim(), _cts.Token);
+
+            _txtGuidance.Clear();
+            var (text, color) = ReadyStatus(_state.Case, CoreDocumentValidator.Validate(_state.Case));
+            _lblStatus.Text = text;
+            _lblStatus.ForeColor = color;
+        }
+        catch (OperationCanceledException)
+        {
+            _lblStatus.Text = CancelledText;
+            _lblStatus.ForeColor = Color.DarkOrange;
+        }
+        catch (LlmCallException ex) when (ex.Result.IsFatal)
+        {
+            _lblStatus.Text = FatalText(ex.Result.Message ?? ex.Message);
+            _lblStatus.ForeColor = Color.Red;
+        }
+        catch (LlmCallException ex)
+        {
+            // The generator keeps the old text on failure
+            _lblStatus.Text = $"{s.Heading} failed: {ex.Result.Message ?? ex.Message}. Select it and click Retry Section.";
+            _lblStatus.ForeColor = Color.Red;
+        }
+        catch (Exception ex)
+        {
+            _lblStatus.Text = ErrorText(ex);
+            _lblStatus.ForeColor = Color.Red;
+        }
+        finally
+        {
+            _cts?.Dispose();
+            _cts = null;
+            SetBusy(false);
+            RefreshAll();
+            ReloadEditorAfterRun();
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void GridIssues_CellDoubleClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (_isGenerating || e.RowIndex < 0 || e.RowIndex >= _gridIssues.Rows.Count)
+            return;
+
+        if (_gridIssues.Rows[e.RowIndex].Tag is not string sectionId || string.IsNullOrEmpty(sectionId))
+            return;
+
+        var index = -1;
+        for (var i = 0; i < _lstSections.Items.Count; i++)
+        {
+            if (_lstSections.Items[i] is CoreDocumentSection section && section.Id == sectionId)
+            {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0)
+            return;
+
+        _lstSections.SelectedIndex = index; // Applies pending edits, then loads the section
+        _tabs.SelectedTab = _tabSection;
+        _txtEditor.Focus();
+    }
+
     private void BtnCancel_Click(object? sender, EventArgs e)
     {
         if (!_isGenerating || _cts == null)
@@ -791,11 +925,59 @@ public class StepCoreDocument : UserControl, IWizardStep
 
     public Task OnLeaveStepAsync()
     {
+        ApplyPendingEdit();
         return Task.CompletedTask;
     }
 
     public Task<bool> ValidateStepAsync()
     {
-        return Task.FromResult(!_isGenerating && _state.Case.CoreDocument != null);
+        if (_isGenerating)
+            return Task.FromResult(false);
+
+        ApplyPendingEdit();
+        RefreshAll();
+
+        if (_state.Case.CoreDocument == null)
+        {
+            MessageBox.Show("Generate the core document before finishing.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return Task.FromResult(false);
+        }
+
+        // Invented case law must never reach later phases (CASE-06)
+        var citationErrors = CoreDocumentValidator.CountCitationErrors(_issues);
+        if (citationErrors > 0)
+        {
+            MessageBox.Show(
+                $"The document cites {citationErrors} court decisions. Case-law citations are not allowed because they may be invented. Edit or regenerate the sections listed under Issues, then click Finish again.",
+                "Case Citations Found",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return Task.FromResult(false);
+        }
+
+        var errors = CoreDocumentValidator.CountErrors(_issues);
+        if (errors > 0)
+        {
+            MessageBox.Show(
+                $"The document has {errors} errors (listed under Issues). Fix or regenerate those sections, then click Finish again.",
+                "Validation",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return Task.FromResult(false);
+        }
+
+        var warnings = CoreDocumentValidator.CountWarnings(_issues);
+        if (warnings > 0)
+        {
+            var answer = MessageBox.Show(
+                $"{warnings} warnings remain (possible case names or citation phrases). Continue anyway?",
+                "Review Warnings",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            return Task.FromResult(answer == DialogResult.Yes);
+        }
+
+        return Task.FromResult(true);
     }
 }

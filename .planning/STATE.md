@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 UI-SPEC approved
-last_updated: "2026-10-01T00:26:55.989Z"
-last_activity: 2026-10-01 -- Phase 2 planning complete
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-10-01T15:24:38.366Z"
+last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 22
-  completed_plans: 13
-  percent: 59
+  completed_plans: 14
+  percent: 64
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-29)
 
 **Core value:** Every relevant email in a multi-thousand-document corpus must stay faithful to one consistent case story (core pleading + key-facts timeline).
-**Current focus:** Phase 01 — foundation-provider-gateway
+**Current focus:** Phase 2 — Case Scenario & Core Document
 
 ## Current Position
 
-Phase: 01 (foundation-provider-gateway) — EXECUTING
-Plan: 13 of 13
+Phase: 2 (Case Scenario & Core Document) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-10-01 -- Phase 2 planning complete
+Last activity: 2026-10-01
 
 Progress: [██████████] 100%
 
@@ -64,6 +64,7 @@ Progress: [██████████] 100%
 | Phase 01 P10 | 4min | 2 tasks | 3 files |
 | Phase 01 P11 | 9min | 2 tasks | 11 files |
 | Phase 01 P13 | 3min | 2 tasks | 6 files |
+| Phase 02 P01 | 9min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,8 @@ Recent decisions affecting current work:
 - [01-12]: Key test result applied only if KeyTestGuard.IsResultCurrent; key box and Clear locked during test
 - [01-13]: Generator OCE rethrown only when run token cancelled; other OCE = recorded timeout skip; unexplained stop records an error
 - [01-13]: DistributeEmails largest-remainder, never negative; 0-email storylines skip the LLM call
+- [02-01]: CaseCount.Summary is serialized data; Computed_NotSerialized asserts only count summaries and no preset summary text
+- [02-01]: Case models use yyyy-MM-dd string dates parsed only via CaseDraft.TryParseDate; CaseDraft.JsonOptions (string enums) shared with Phase 3 case.json
 
 ### Pending Todos
 
@@ -119,6 +122,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-09-30T23:56:58.283Z
-Stopped at: Phase 2 UI-SPEC approved
-Resume file: .planning/phases/02-case-scenario-core-document/02-UI-SPEC.md
+Last session: 2026-10-01T15:24:29.531Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None

@@ -27,8 +27,8 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Case Scenario & Core Document
 
-- [ ] **CASE-01**: User can enter a free-text real-life scenario to seed a case
-- [ ] **CASE-02**: User can pick a complexity preset (Simple / Standard / Complex) that sets the number of parties, issues/counts, characters, timeline span and core-document length
+- [x] **CASE-01**: User can enter a free-text real-life scenario to seed a case
+- [x] **CASE-02**: User can pick a complexity preset (Simple / Standard / Complex) that sets the number of parties, issues/counts, characters, timeline span and core-document length
 - [ ] **CASE-03**: System detects real people/companies named in the scenario, warns the user, and substitutes fictional names by default (user can override)
 - [ ] **CASE-04**: System generates the appropriate core document: Complaint / Petition for civil disputes, Investigation Memo for criminal or regulatory scenarios
 - [ ] **CASE-05**: Core document follows realistic structure (caption, parties, jurisdiction/venue, factual allegations, counts/causes of action, prayer for relief — or the memo equivalent) consistent with one chosen jurisdiction
@@ -184,8 +184,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROV-05 | Phase 1 | Complete |
 | PROV-06 | Phase 1 | Complete |
 | PROV-07 | Phase 7 | Pending |
-| CASE-01 | Phase 2 | Pending |
-| CASE-02 | Phase 2 | Pending |
+| CASE-01 | Phase 2 | Complete |
+| CASE-02 | Phase 2 | Complete |
 | CASE-03 | Phase 2 | Pending |
 | CASE-04 | Phase 2 | Pending |
 | CASE-05 | Phase 2 | Pending |

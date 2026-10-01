@@ -64,7 +64,7 @@ Plans:
 **Plans**: 9 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Case domain model (CaseDraft, CoreDocument, sections, presets, substitutions), WizardFlow + WizardState.Case, CaseTestData scaffold, JSON round-trip (Wave 1)
+- [x] 02-01-PLAN.md — Case domain model (CaseDraft, CoreDocument, sections, presets, substitutions), WizardFlow + WizardState.Case, CaseTestData scaffold, JSON round-trip (Wave 1)
 - [ ] 02-02-PLAN.md — CitationScanner (no case-law citations) + NameSubstitution (single-pass fictional names, leak scan) (Wave 2)
 - [ ] 02-03-PLAN.md — DocumentTypeResolver, CoreDocumentTemplates, CoreDocumentAssembler (code-owned numbering, caption, incorporation, memo header) (Wave 2)
 - [ ] 02-04-PLAN.md — CoreDocumentValidator + CoreDocumentEditing (Wave 3)
@@ -156,7 +156,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
-| 2. Case Scenario & Core Document | 0/9 | Planned | - |
+| 2. Case Scenario & Core Document | 1/9 | In Progress|  |
 | 3. Case Guide | 0/TBD | Not started | - |
 | 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |

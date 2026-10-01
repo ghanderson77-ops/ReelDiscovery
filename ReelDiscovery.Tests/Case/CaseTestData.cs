@@ -197,6 +197,180 @@ internal static class CaseTestData
         return draft;
     }
 
+    /// <summary>
+    /// SampleComplaintDraft plus a complete, internally consistent case guide (Phase 3 fixture).
+    /// Every issue has a fact and every key party/staff character acts in at least one fact; validators expect zero errors.
+    /// </summary>
+    public static CaseDraft SampleGuidedDraft()
+    {
+        var draft = SampleComplaintDraft();
+        var doc = draft.CoreDocument!;
+        draft.Stage = CaseStage.CaseGuide;
+
+        var guide = new CaseGuide();
+
+        foreach (var count in doc.Counts)
+        {
+            guide.Issues.Add(new CaseIssue
+            {
+                Id = $"ISS-{count.Number:00}",
+                CountId = count.Id,
+                Number = count.Number,
+                Title = count.Title,
+                LegalBasis = count.LegalBasis,
+                Summary = count.Summary,
+                AgainstPartyIds = new List<string>(count.AgainstPartyIds),
+                Description = $"Whether Harmon is liable to Brightline for {count.Title.ToLowerInvariant()} arising from the unpaid Lakeview Tower change orders.",
+                Elements = new List<string>
+                {
+                    "A valid subcontract obligated Harmon to pay for approved changed work.",
+                    "Harmon failed to pay for approved change order work, causing Brightline damages."
+                },
+                RelevanceCriteria = "Documents discussing change order approval, invoicing or payment for the Lakeview Tower glazing work."
+            });
+        }
+
+        var firmTokens = doc.Counsel.FirmName
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(t => new string(t.Where(char.IsLetter).ToArray()).ToLowerInvariant())
+            .Where(t => t.Length > 0 && t is not ("llp" or "llc" or "pc"))
+            .Take(2);
+        var firmDomain = string.Concat(firmTokens) + ".com";
+
+        guide.Organizations.Add(Organization("ORG-01", "Brightline Glazing, LLC", "Brightline", OrganizationKind.Party, "party-1", "brightline.com"));
+        guide.Organizations.Add(Organization("ORG-02", "Harmon Builders, Inc.", "Harmon", OrganizationKind.Party, "party-2", "harmon.com"));
+        var firm = Organization("ORG-03", doc.Counsel.FirmName, doc.Counsel.FirmName.Split(' ')[0], OrganizationKind.LawFirm, "", firmDomain);
+        firm.RepresentsOrgIds.Add("ORG-01");
+        guide.Organizations.Add(firm);
+
+        var attorney = doc.Counsel.AttorneyName;
+        var split = attorney.LastIndexOf(' ');
+        var attorneyFirst = split > 0 ? attorney[..split] : attorney;
+        var attorneyLast = split > 0 ? attorney[(split + 1)..] : string.Empty;
+
+        guide.Cast.Add(Member(guide, "CH-001", "Maria", "Delgado", "President", "", "ORG-01", CastTier.Key, CastRole.Party,
+            "Founder of Brightline who signed the subcontract and pressed Harmon for payment.", "Direct and formal; signs off with her first initial."));
+        guide.Cast.Add(Member(guide, "CH-002", "Tom", "Becker", "Project Manager", "", "ORG-01", CastTier.Key, CastRole.Staff,
+            "Ran the Lakeview Tower glazing work and negotiated Change Order 7 in the field.", "Short, practical messages written from the jobsite."));
+        guide.Cast.Add(Member(guide, "CH-003", "Raymond", "Harmon", "Chief Executive Officer", "", "ORG-02", CastTier.Key, CastRole.Party,
+            "Harmon's chief executive who decided to withhold payment on the change orders.", "Terse and dismissive; rarely writes more than two lines."));
+        guide.Cast.Add(Member(guide, "CH-004", "Lisa", "Chen", "Project Executive", "", "ORG-02", CastTier.Key, CastRole.Staff,
+            "Harmon's project executive who approved Change Order 7 in writing.", "Polished and procedural; cites contract sections."));
+        guide.Cast.Add(Member(guide, "CH-005", "Karen", "Walsh", "General Counsel", "", "ORG-01", CastTier.Key, CastRole.InHouseCounsel,
+            "Brightline's general counsel who reviewed the subcontract and the payment dispute.", "Careful and measured; marks messages privileged."));
+        guide.Cast.Add(Member(guide, "CH-006", attorneyFirst, attorneyLast, "Partner", "", "ORG-03", CastTier.Key, CastRole.OutsideCounsel,
+            "Outside litigation counsel who sent the demand letter and filed the complaint.", "Formal legal prose with numbered points."));
+        guide.Cast.Add(Member(guide, "CH-007", "Evan", "Price", "Associate", "", "ORG-03", CastTier.Key, CastRole.OutsideCounsel,
+            "Associate who assembled the payment history and invoice records for the claim.", "Thorough and deferential; summarizes before asking."));
+        guide.Cast.Add(Member(guide, "CH-008", "Priya", "Nair", "Accounts Payable Specialist", "Accounting", "ORG-02", CastTier.Background, CastRole.Staff, "", ""));
+        guide.Cast.Add(Member(guide, "CH-009", "Owen", "Reilly", "Glazing Foreman", "Field Operations", "ORG-01", CastTier.Background, CastRole.Staff, "", ""));
+
+        var issueIds = guide.Issues.Select(i => i.Id).ToList();
+        guide.Facts.Add(Fact(1, "2024-01-15", "Subcontract signed for Lakeview Tower",
+            "Brightline and Harmon signed the glazing subcontract for Lakeview Tower, which required Harmon to pay for changed work once a written change order was approved.",
+            issueIds, new[] { "CH-001", "CH-003" }, "CH-005", FactSignificance.Key, "facts-1"));
+        guide.Facts.Add(Fact(2, "2024-02-12", "Harmon confirms the change order procedure",
+            "Harmon's project executive confirmed to Brightline that approved change orders on Lakeview Tower would be paid within thirty days of invoice.",
+            issueIds, new[] { "CH-004", "CH-002" }, "CH-001", FactSignificance.Supporting, "facts-1"));
+        guide.Facts.Add(Fact(3, "2024-03-18", "Harmon approves Change Order 7",
+            "Harmon approved Change Order 7 in writing for $184,250.00 covering additional window work on the upper floors of Lakeview Tower.",
+            issueIds, new[] { "CH-004", "CH-002" }, "CH-003", FactSignificance.Hot, "facts-2"));
+        guide.Facts.Add(Fact(4, "2024-04-22", "Brightline completes the changed work",
+            "Brightline completed the upper-floor window work described in Change Order 7 and Harmon accepted it without objection.",
+            issueIds, new[] { "CH-002" }, "CH-004", FactSignificance.Supporting, "facts-2"));
+        guide.Facts.Add(Fact(5, "2024-05-10", "Brightline invoices Change Order 7",
+            "Brightline submitted invoice INV-2024-118 to Harmon for the $184,250.00 approved under Change Order 7.",
+            issueIds, new[] { "CH-001" }, "CH-004", FactSignificance.Key, "facts-2"));
+        guide.Facts.Add(Fact(6, "2024-06-20", "Harmon refuses to pay",
+            "Harmon's chief executive refused to pay INV-2024-118 and gave no legitimate reason for withholding the Change Order 7 amount.",
+            issueIds, new[] { "CH-003" }, "CH-001", FactSignificance.Key, "facts-2"));
+
+        guide.Values.Add(Value(1, ValueKind.Amount, "Change Order 7 amount", "$184,250.00", "F-003"));
+        guide.Values.Add(Value(2, ValueKind.ChangeOrderNumber, "Change order number", "CO-007", "F-003"));
+        guide.Values.Add(Value(3, ValueKind.ProjectName, "Project name", "Lakeview Tower", "F-001"));
+        guide.Values.Add(Value(4, ValueKind.InvoiceNumber, "Unpaid invoice", "INV-2024-118", "F-005"));
+
+        guide.IdCounters = new Dictionary<string, int>
+        {
+            ["ISS"] = guide.Issues.Count,
+            ["ORG"] = 3,
+            ["CH"] = 9,
+            ["F"] = 6,
+            ["V"] = 4
+        };
+
+        foreach (var state in new[] { guide.IssuesState, guide.IssueDetailsState, guide.CastState, guide.FactsState, guide.ValuesState })
+            state.Status = GuidePartStatus.Ready;
+
+        draft.Guide = guide;
+        return draft;
+    }
+
+    private static CaseOrganization Organization(string id, string name, string shortName, OrganizationKind kind, string partyId, string domain) => new()
+    {
+        Id = id,
+        Name = name,
+        ShortName = shortName,
+        Kind = kind,
+        PartyId = partyId,
+        Domain = domain,
+        Location = "Chicago, Illinois",
+        TimeZoneId = "America/Chicago"
+    };
+
+    private static CastMember Member(CaseGuide guide, string id, string first, string last, string title, string department,
+        string orgId, CastTier tier, CastRole role, string involvement, string voiceNote)
+    {
+        var org = guide.FindOrganization(orgId)!;
+        var member = new CastMember
+        {
+            Id = id,
+            FirstName = first,
+            LastName = last,
+            Title = title,
+            Department = department,
+            OrganizationId = orgId,
+            Tier = tier,
+            Role = role,
+            Email = $"{first}.{last}@{org.Domain}".ToLowerInvariant(),
+            Phone = $"(555) 555-01{id[^2..]}",
+            ActiveFrom = "2023-10-01",
+            ActiveTo = "2024-12-31",
+            Involvement = involvement,
+            VoiceNote = voiceNote,
+            SignatureStyle = SignatureStyle.Full
+        };
+
+        if (tier == CastTier.Key)
+            member.Signature = $"{member.FullName}\n{title}\n{org.Name}\n{member.Phone}\n{member.Email}";
+
+        return member;
+    }
+
+    private static KeyFact Fact(int number, string date, string title, string description, List<string> issueIds,
+        string[] actorIds, string alsoKnownBy, FactSignificance significance, string sourceSectionId) => new()
+    {
+        Id = $"F-{number:000}",
+        Date = date,
+        Title = title,
+        Description = description,
+        IssueIds = new List<string>(issueIds),
+        ActorIds = actorIds.ToList(),
+        KnownByIds = actorIds.Append(alsoKnownBy).ToList(),
+        Significance = significance,
+        SourceSectionId = sourceSectionId
+    };
+
+    private static CanonicalValue Value(int number, ValueKind kind, string label, string value, string factId) => new()
+    {
+        Id = $"V-{number:000}",
+        Kind = kind,
+        Label = label,
+        Value = value,
+        Description = $"{label} as stated in the case guide; use exactly this text.",
+        FactIds = new List<string> { factId }
+    };
+
     public static CaseDraft SampleMemoDraft()
     {
         const string scenario = "A federal task force investigates whether Victor Lane used Desert Bloom Laundromats LLC in Albuquerque to launder cash from a drug distribution ring during 2023.";

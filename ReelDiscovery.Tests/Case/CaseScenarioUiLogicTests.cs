@@ -56,4 +56,32 @@ public class CaseScenarioUiLogicTests
 
         Assert.Null(EntityReviewDialog.FindBlankSubstitute(new[] { kept, filled }));
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(7200)]
+    public void CounterColor_AtOrBelowNinetyPercent_IsDimGray(int length)
+    {
+        Assert.Equal(Color.DimGray, StepCaseScenario.CounterColor(length));
+    }
+
+    [Theory]
+    [InlineData(7201)]
+    [InlineData(8000)]
+    public void CounterColor_AboveNinetyPercent_IsDarkOrange(int length)
+    {
+        Assert.Equal(Color.DarkOrange, StepCaseScenario.CounterColor(length));
+    }
+
+    [Fact]
+    public void CounterColor_OverCap_IsRed()
+    {
+        Assert.Equal(Color.Red, StepCaseScenario.CounterColor(8001));
+    }
+
+    [Fact]
+    public void CounterText_FormatsWithThousandsSeparator()
+    {
+        Assert.Equal("1,234 / 8,000 characters", StepCaseScenario.CounterText(1234));
+    }
 }

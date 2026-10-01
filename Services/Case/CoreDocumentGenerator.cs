@@ -51,6 +51,407 @@ public class CoreDocumentGenerator
         return MapOutline(result.GetValueOrThrow(), draft);
     }
 
+    /// <summary>
+    /// Outline, then every section. Section failures are recorded on the section; a fatal failure stops
+    /// further calls and keeps completed sections. Cancellation propagates.
+    /// </summary>
+    public async Task<CoreDocumentGenerationResult> GenerateAsync(CaseDraft draft, IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        progress?.Report("Writing the outline...");
+        var doc = await GenerateOutlineAsync(draft, ct);
+        draft.CoreDocument = doc;
+        draft.Revision++;
+        progress?.Report($"Outline ready: {doc.Sections.Count} sections");
+
+        return await GenerateSectionsAsync(draft, progress, ct);
+    }
+
+    /// <summary>
+    /// Writes every Pending or Failed section (also serves Retry and resume): lead sections in order,
+    /// counts/findings in parallel, then the tail, then the executive summary last.
+    /// </summary>
+    public async Task<CoreDocumentGenerationResult> GenerateSectionsAsync(CaseDraft draft, IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        var doc = draft.CoreDocument ?? throw new InvalidOperationException("Generate the outline before writing sections.");
+
+        var result = new CoreDocumentGenerationResult();
+        var preset = draft.Preset;
+        var todo = doc.Sections.Where(s => s.Status is SectionStatus.Pending or SectionStatus.Failed).ToList();
+        if (todo.Count == 0)
+            return result;
+
+        var lead = todo.Where(s => IsLead(s.Kind)).ToList();
+        var parallel = todo.Where(s => s.Kind is SectionKind.Count or SectionKind.Finding).ToList();
+        var tail = todo.Where(s => s.Kind is SectionKind.PrayerForRelief or SectionKind.ConditionsPrecedent or SectionKind.LegalAnalysis or SectionKind.Recommendations).ToList();
+        var last = todo.Where(s => s.Kind == SectionKind.ExecutiveSummary).ToList();
+
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        try
+        {
+            // a. Lead sections, sequential in render order
+            await WriteSequentialAsync(doc, preset, lead, result, progress, runCts, ct);
+
+            // b. Counts / findings in parallel; each sees the lead sections
+            if (!result.IsFatal && parallel.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var leadText = FormatSections(doc.Sections.Where(s => IsLead(s.Kind) && s.Status == SectionStatus.Ready));
+
+                using var semaphore = new SemaphoreSlim(MaxParallelSections, MaxParallelSections);
+                var tasks = parallel.Select(async section =>
+                {
+                    await semaphore.WaitAsync(ct);
+                    try
+                    {
+                        // A fatal error in another call stopped the run: leave this section Pending
+                        if (runCts.IsCancellationRequested)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            return;
+                        }
+
+                        progress?.Report(DescribeProgress(doc, section));
+                        await WriteOneAsync(doc, preset, section, leadText, result, runCts, ct);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }).ToList();
+
+                await Task.WhenAll(tasks);
+            }
+
+            // c. Tail, then d. executive summary (it summarizes the findings)
+            await WriteSequentialAsync(doc, preset, tail, result, progress, runCts, ct);
+            await WriteSequentialAsync(doc, preset, last, result, progress, runCts, ct);
+        }
+        finally
+        {
+            // I1: Phase 3 stale-marking sees retried/resumed sections as a change (also on fatal stop or cancel)
+            if (result.SectionsWritten > 0)
+                draft.Revision++;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Rewrites one section in place (same object, same Id), using every other section's current text
+    /// (including user edits) and optional guidance. Failures propagate and leave the old text untouched.
+    /// </summary>
+    public async Task RegenerateSectionAsync(CaseDraft draft, string sectionId, string guidance, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        var doc = draft.CoreDocument;
+        var section = doc?.FindSection(sectionId);
+        if (doc == null || section == null)
+            throw new ArgumentException($"Unknown section '{sectionId}'.", nameof(sectionId));
+
+        var otherText = FormatSections(doc.Sections.Where(s => !ReferenceEquals(s, section) && s.Paragraphs.Count > 0));
+        var currentText = string.Join("\n\n", section.Paragraphs);
+
+        var paragraphs = await WriteSectionAsync(doc, draft.Preset, section, otherText, currentText, guidance ?? string.Empty, ct);
+
+        section.Paragraphs = paragraphs;
+        section.Status = SectionStatus.Ready;
+        section.FailureMessage = string.Empty;
+        section.IsUserEdited = false;
+        draft.Revision++;
+    }
+
+    private static bool IsLead(SectionKind kind) => kind is not (SectionKind.Count or SectionKind.Finding
+        or SectionKind.PrayerForRelief or SectionKind.ConditionsPrecedent or SectionKind.ExecutiveSummary
+        or SectionKind.LegalAnalysis or SectionKind.Recommendations);
+
+    private async Task WriteSequentialAsync(CoreDocument doc, ComplexityPreset preset, List<CoreDocumentSection> sections,
+        CoreDocumentGenerationResult result, IProgress<string>? progress, CancellationTokenSource runCts, CancellationToken ct)
+    {
+        foreach (var section in sections)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // Fatal error recorded: stop, remaining sections stay Pending
+            if (result.IsFatal)
+                return;
+
+            progress?.Report(DescribeProgress(doc, section));
+            var otherText = FormatSections(doc.Sections.Where(s => !ReferenceEquals(s, section) && s.Status == SectionStatus.Ready));
+            await WriteOneAsync(doc, preset, section, otherText, result, runCts, ct);
+        }
+    }
+
+    private async Task WriteOneAsync(CoreDocument doc, ComplexityPreset preset, CoreDocumentSection section, string otherText,
+        CoreDocumentGenerationResult result, CancellationTokenSource runCts, CancellationToken ct)
+    {
+        section.Status = SectionStatus.Writing;
+        try
+        {
+            var paragraphs = await WriteSectionAsync(doc, preset, section, otherText, string.Empty, string.Empty, runCts.Token);
+
+            section.Paragraphs = paragraphs;
+            section.Status = SectionStatus.Ready;
+            section.FailureMessage = string.Empty;
+            section.IsUserEdited = false;
+            lock (result)
+                result.SectionsWritten++;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // User cancel: nothing written for this section
+            section.Status = SectionStatus.Pending;
+            throw;
+        }
+        catch (OperationCanceledException) when (runCts.IsCancellationRequested)
+        {
+            // Fatal stop from another call
+            section.Status = SectionStatus.Pending;
+        }
+        catch (OperationCanceledException)
+        {
+            // Run not cancelled: the request timed out
+            MarkFailed(section, result, "The request timed out. Click Retry Section.");
+        }
+        catch (LlmCallException ex) when (ex.Result.IsFatal)
+        {
+            // Bad key or exhausted spend limit: stop all further calls, keep completed sections
+            section.Status = SectionStatus.Pending;
+            lock (result)
+            {
+                if (!result.IsFatal)
+                    result.FatalError = ex.Result.Message ?? ex.Message;
+            }
+
+            runCts.Cancel();
+        }
+        catch (LlmCallException ex)
+        {
+            // Refused / truncated / invalid / non-fatal failure: mark this section, keep going
+            MarkFailed(section, result, DescribeOutcome(ex.Result));
+        }
+        catch (Exception ex)
+        {
+            MarkFailed(section, result, ex.Message);
+        }
+    }
+
+    private static void MarkFailed(CoreDocumentSection section, CoreDocumentGenerationResult result, string message)
+    {
+        section.Status = SectionStatus.Failed;
+        section.FailureMessage = message;
+        lock (result)
+            result.SectionsFailed++;
+    }
+
+    private static string DescribeOutcome(LlmResult result) => result.Outcome switch
+    {
+        LlmOutcome.Refused => $"The model declined: {result.Message}",
+        LlmOutcome.Truncated => "The response was cut off. Click Retry Section.",
+        LlmOutcome.Invalid => "The response could not be read. Click Retry Section.",
+        _ => $"{result.FailureKind}: {result.Message}"
+    };
+
+    private static string DescribeProgress(CoreDocument doc, CoreDocumentSection section)
+    {
+        switch (section.Kind)
+        {
+            case SectionKind.FactualAllegations:
+            {
+                var facts = doc.Sections.Where(s => s.Kind == SectionKind.FactualAllegations).ToList();
+                return $"Writing {section.Heading} ({facts.IndexOf(section) + 1} of {facts.Count} fact sections)...";
+            }
+            case SectionKind.Count:
+                return $"Writing Count {CoreDocumentAssembler.ToRoman(CountNumber(doc, section))} of {CoreDocumentAssembler.ToRoman(doc.Counts.Count)}...";
+            case SectionKind.Finding:
+                return $"Writing Finding {CountNumber(doc, section)} of {doc.Counts.Count}...";
+            default:
+                return $"Writing {section.Heading}...";
+        }
+    }
+
+    private static int CountNumber(CoreDocument doc, CoreDocumentSection section)
+    {
+        var count = doc.Counts.FirstOrDefault(c => c.Id == section.CountId);
+        return count?.Number ?? Math.Max(1, doc.Sections.Where(s => s.Kind == section.Kind).ToList().IndexOf(section) + 1);
+    }
+
+    private async Task<List<string>> WriteSectionAsync(CoreDocument doc, ComplexityPreset preset, CoreDocumentSection section,
+        string otherSectionsText, string currentText, string guidance, CancellationToken ct)
+    {
+        var prompt = BuildSectionPrompt(doc, preset, section, otherSectionsText, currentText, guidance);
+        var request = new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = $"Core Document - {section.Heading}",
+            SystemPrompt = SystemPrompt,
+            UserPrompt = prompt,
+            MaxOutputTokens = SectionMaxOutputTokens
+        };
+
+        var paragraphs = CleanParagraphs((await _llm.GenerateAsync<SectionDto>(request, ct)).GetValueOrThrow());
+
+        // Content-level retry (not a transport retry): exactly one rewrite when case law was cited (T-02-22)
+        var findings = CitationScanner.Scan(string.Join("\n", paragraphs), OwnPartyNames(doc));
+        if (CitationScanner.HasErrors(findings))
+        {
+            var errors = findings.Where(f => f.Severity == CitationSeverity.Error).Select(f => f.Text);
+            request.UserPrompt = prompt + "\n\nYour draft cited court decisions, which is not allowed. Rewrite the section without these citations and without any other case names or reporter citations: " + string.Join("; ", errors);
+
+            // Whatever comes back is kept; remaining findings are reported by the validator
+            paragraphs = CleanParagraphs((await _llm.GenerateAsync<SectionDto>(request, ct)).GetValueOrThrow());
+        }
+
+        return paragraphs;
+    }
+
+    private static List<string> CleanParagraphs(SectionDto dto) =>
+        (dto.Paragraphs ?? new List<string>())
+            .Select(p => CoreDocumentAssembler.StripLeadingNumber(p ?? string.Empty).Trim())
+            .Where(p => p.Length > 0)
+            .ToList();
+
+    private static List<string> OwnPartyNames(CoreDocument doc) =>
+        doc.Parties
+            .SelectMany(p => new[] { p.Name, p.ShortName })
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .ToList();
+
+    private static string FormatSections(IEnumerable<CoreDocumentSection> sections)
+    {
+        var blocks = sections
+            .Where(s => s.Paragraphs.Count > 0)
+            .Select(s => $"== {s.Heading} ==\n" + string.Join("\n\n", s.Paragraphs))
+            .ToList();
+
+        return blocks.Count == 0 ? "(nothing written yet)" : string.Join("\n\n", blocks);
+    }
+
+    internal static string BuildSectionPrompt(CoreDocument doc, ComplexityPreset preset, CoreDocumentSection section,
+        string otherSectionsText, string currentText, string guidance)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine($"Document type: {doc.DocumentType}");
+        sb.AppendLine($"Court: {doc.Jurisdiction.CourtName} ({doc.Jurisdiction.District})");
+        sb.AppendLine($"Title: {doc.Title}");
+        sb.AppendLine($"Timeline: {doc.TimelineStart} to {doc.TimelineEnd}");
+
+        sb.AppendLine("Parties:");
+        foreach (var party in doc.Parties)
+            sb.AppendLine($"- {party.Name} ({party.ShortName}), {party.Role}, {party.EntityType}, {party.Domicile}: {party.Description}");
+
+        sb.AppendLine("Counts or issues:");
+        foreach (var count in doc.Counts)
+            sb.AppendLine($"- {count.Number}. {count.Title} against {AgainstNames(doc, count)}: {count.LegalBasis}. {count.Summary}");
+
+        sb.AppendLine("Factual subsections:");
+        foreach (var fact in doc.FactPlan)
+            sb.AppendLine($"- {fact.Heading} ({fact.StartDate} to {fact.EndDate}): {fact.Focus}");
+
+        if (doc.DocumentType == CoreDocumentType.InvestigationMemo)
+            sb.AppendLine($"Memo: TO {doc.Memo.To}; FROM {doc.Memo.From}; RE {doc.Memo.Re}; organization {doc.Memo.Organization}");
+
+        sb.AppendLine();
+        sb.AppendLine("Document so far:");
+        sb.AppendLine(string.IsNullOrWhiteSpace(otherSectionsText) ? "(nothing written yet)" : otherSectionsText);
+        sb.AppendLine();
+
+        var target = CoreDocumentTemplates.GetSectionSpecs(doc).FirstOrDefault(s => s.Id == section.Id)?.TargetParagraphs ?? 3;
+        sb.AppendLine($"Section: {section.Heading}");
+        sb.AppendLine($"Write about {target} paragraphs.");
+        sb.Append(SectionInstructions(section, doc, preset));
+
+        if (!string.IsNullOrWhiteSpace(currentText))
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.AppendLine("Current text of this section (rewrite it):");
+            sb.Append(currentText);
+        }
+
+        if (!string.IsNullOrWhiteSpace(guidance))
+        {
+            sb.AppendLine();
+            sb.AppendLine();
+            sb.Append("Guidance from the user: " + guidance.Trim());
+        }
+
+        return sb.ToString();
+    }
+
+    private static string AgainstNames(CoreDocument doc, CaseCount count)
+    {
+        var names = doc.Parties
+            .Where(p => count.AgainstPartyIds.Contains(p.Id))
+            .Select(p => p.ShortName.Length > 0 ? p.ShortName : p.Name)
+            .ToList();
+
+        return names.Count == 0 ? "the opposing parties" : string.Join(", ", names);
+    }
+
+    private static string CountDetail(CoreDocument doc, CoreDocumentSection section)
+    {
+        var count = doc.Counts.FirstOrDefault(c => c.Id == section.CountId);
+        return count == null
+            ? string.Empty
+            : $" This issue: {count.Title} against {AgainstNames(doc, count)}; basis: {count.LegalBasis}. {count.Summary}";
+    }
+
+    private static string SectionInstructions(CoreDocumentSection s, CoreDocument doc, ComplexityPreset preset)
+    {
+        // W3: the preset's key-character count must show in the document; Phase 3 extracts the cast from these sections
+        var characters = $"{preset.CharactersMin}-{preset.CharactersMax}";
+
+        switch (s.Kind)
+        {
+            case SectionKind.NatureOfAction:
+                return "Summarize who the parties are, what went wrong and the relief sought, in plain words.";
+            case SectionKind.Parties:
+                return "Write one paragraph per party giving its full name, entity type, domicile and role. " +
+                    $"After the party paragraphs, identify the key individuals at each party by name and role; across the whole document name about {characters} named individuals.";
+            case SectionKind.JurisdictionVenue:
+                return $"State subject-matter jurisdiction and venue for {doc.Jurisdiction.CourtName} using statutes only.";
+            case SectionKind.DiscoveryControlPlan:
+                return "State the discovery control plan level under which discovery is intended to be conducted, citing the court rule by number.";
+            case SectionKind.ClaimForRelief:
+                return "State the range of monetary relief sought, as the court rules require.";
+            case SectionKind.FactualAllegations:
+            {
+                var plan = doc.FactPlan.FirstOrDefault(f => f.Id == s.Id);
+                var period = plan == null ? string.Empty : $" Period: {plan.StartDate} to {plan.EndDate}. Focus: {plan.Focus}";
+                return "Write dated factual allegations for this period only, naming who said or did what, when, and the amounts involved." + period +
+                    $" Use the named individuals already introduced; the whole document should name about {characters} named individuals.";
+            }
+            case SectionKind.Count:
+                return "Apply the elements of this cause of action to the facts, then state the damages or relief. Do not write a paragraph that repeats or incorporates earlier paragraphs; it is added automatically." +
+                    CountDetail(doc, s);
+            case SectionKind.ConditionsPrecedent:
+                return "State that all conditions precedent to the claims have been performed, have occurred or have been waived.";
+            case SectionKind.PrayerForRelief:
+                return "Write each item of relief requested as its own paragraph, without letters.";
+            case SectionKind.ExecutiveSummary:
+                return "Summarize the findings and the overall conclusion.";
+            case SectionKind.Background:
+                return "Describe the organizations involved, the business context and how the matter came to light.";
+            case SectionKind.ScopeMethodology:
+                return "Describe the review period, the sources examined (documents, email, financial records, interviews) and any limitations.";
+            case SectionKind.KeyIndividuals:
+                return $"Describe about {characters} named individuals (officers, employees, counsel, agents, associates) and the entities, with each person's role and what they knew.";
+            case SectionKind.Finding:
+                return "State the finding for this issue, the supporting evidence by date and person, and the confidence level." + CountDetail(doc, s);
+            case SectionKind.LegalAnalysis:
+                return "Analyze the exposure under the statutes and regulations involved, in plain words.";
+            case SectionKind.Recommendations:
+                return "State the conclusions and concrete recommended next steps.";
+            default:
+                return "Write this section in the style of the rest of the document.";
+        }
+    }
+
     internal static string BuildOutlinePrompt(CaseDraft draft)
     {
         var p = draft.Preset;
@@ -439,4 +840,17 @@ public class CoreDocumentGenerator
         [Description("Paragraphs in order, plain prose, no numbers or letters")]
         public List<string> Paragraphs { get; set; } = new();
     }
+}
+
+public class CoreDocumentGenerationResult
+{
+    public int SectionsWritten { get; set; }
+    public int SectionsFailed { get; set; }
+
+    /// <summary>
+    /// Non-empty when a fatal failure (bad key or spend limit) stopped further calls.
+    /// </summary>
+    public string FatalError { get; set; } = string.Empty;
+
+    public bool IsFatal => FatalError.Length > 0;
 }

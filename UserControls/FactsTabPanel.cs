@@ -28,6 +28,8 @@ public class FactsTabPanel : GuideTabPanel
     private readonly CardPanel _notice;
     private readonly Label _lblNotice;
     private readonly ThemedButton _btnMarkReviewed;
+    private readonly ThemedButton _btnAddFact;
+    private readonly ThemedButton _btnRegenerateFacts;
     private readonly Font _noteFont;
     private readonly Control[] _tabActions;
     private readonly Dictionary<TextBox, FactField> _textFields = new();
@@ -68,7 +70,8 @@ public class FactsTabPanel : GuideTabPanel
         {
             BorderColor = Theme.Warning,
             Padding = new Padding(noticePadding),
-            Dock = DockStyle.Fill,
+            // Anchored, not Fill: the AutoSize slot then takes the height SizeNotice sets instead of overriding it
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
             Margin = new Padding(0)
         };
         var noticeLayout = new TableLayoutPanel
@@ -101,14 +104,23 @@ public class FactsTabPanel : GuideTabPanel
         _notice.Controls.Add(noticeLayout);
         NoticeSlot.Controls.Add(_notice);
 
-        _tabActions = Array.Empty<Control>();
+        var buttonHeight = LogicalToDeviceUnits(34);
+        _btnAddFact = (ThemedButton)ButtonHelper.CreateButton("Add Fact", 0, buttonHeight, ButtonStyle.Default);
+        _btnAddFact.Margin = new Padding(0);
+        _btnRegenerateFacts = (ThemedButton)ButtonHelper.CreateButton("Regenerate Facts...", 0, buttonHeight, ButtonStyle.Default);
+        _btnRegenerateFacts.Margin = new Padding(0);
+        _tabActions = new Control[] { _btnAddFact, _btnRegenerateFacts };
 
         // Wire handlers only after every control exists
         _btnAll.Click += (s, e) => SetFilter(FactFilter.All);
         _btnNeedsReview.Click += (s, e) => SetFilter(FactFilter.NeedsReview);
-        _notice.SizeChanged += (s, e) => SizeNotice();
+        _notice.SizeChanged += (s, e) => QueueSizeNotice();
         _btnMarkReviewed.Click += BtnMarkReviewed_Click;
         Grid.CellEndEdit += Grid_CellEndEdit;
+        _btnAddFact.Click += BtnAddFact_Click;
+        _btnRegenerateFacts.Click += BtnRegenerateFacts_Click;
+        DeleteButton.Click += DeleteButton_Click;
+        RegenerateButton.Click += RegenerateButton_Click;
     }
 
     public override IReadOnlyList<Control> TabActions => _tabActions;
@@ -164,6 +176,8 @@ public class FactsTabPanel : GuideTabPanel
     // Widths in logical px (UI-SPEC): no ID column on Key Facts, the date is the key
     protected override void BuildColumns()
     {
+        // One header line on every tab, so the grids top-align when switching tabs
+        Grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False;
         GridStyle.AddDotColumn(Grid, this);
         Grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Date", HeaderText = "Date", Width = LogicalToDeviceUnits(96) });
         Grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -181,11 +195,11 @@ public class FactsTabPanel : GuideTabPanel
             HeaderText = "Who did it",
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
             FillWeight = 25,
-            MinimumWidth = LogicalToDeviceUnits(96),
+            MinimumWidth = LogicalToDeviceUnits(112),
             ReadOnly = true
         });
         // Int cell values sort numerically; right-aligned with the card's 15 px right inset
-        var knew = new DataGridViewTextBoxColumn { Name = "Knew", HeaderText = "Who knew", Width = LogicalToDeviceUnits(64), ReadOnly = true };
+        var knew = new DataGridViewTextBoxColumn { Name = "Knew", HeaderText = "Who knew", Width = LogicalToDeviceUnits(100), ReadOnly = true };
         knew.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
         knew.DefaultCellStyle.Padding = new Padding(0, 0, LogicalToDeviceUnits(15), 0);
         knew.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleRight;
@@ -491,6 +505,30 @@ public class FactsTabPanel : GuideTabPanel
         }
     }
 
+    private bool _sizeNoticeQueued;
+
+    /// <summary>
+    /// Width changes arrive inside a layout pass, where a new height would not stick: size the notice afterwards.
+    /// </summary>
+    private void QueueSizeNotice()
+    {
+        if (!IsHandleCreated || IsDisposed)
+        {
+            SizeNotice();
+            return;
+        }
+        if (_sizeNoticeQueued)
+            return;
+
+        _sizeNoticeQueued = true;
+        BeginInvoke(new Action(() =>
+        {
+            _sizeNoticeQueued = false;
+            if (!IsDisposed)
+                SizeNotice();
+        }));
+    }
+
     private void SizeNotice()
     {
         // The text wraps beside the button; the card is as tall as the taller of the two plus its padding
@@ -501,7 +539,11 @@ public class FactsTabPanel : GuideTabPanel
         var textHeight = _lblNotice.GetPreferredSize(new Size(textWidth, 0)).Height;
         var height = Math.Max(textHeight, _btnMarkReviewed.Height) + _notice.Padding.Vertical;
         if (_notice.Height != height)
+        {
             _notice.Height = height;
+            // The slot is AutoSize: its parent row must lay out again to give it the new height
+            (NoticeSlot.Parent ?? NoticeSlot).PerformLayout();
+        }
     }
 
     private static List<LinkItem> IssueItems(CaseGuide guide) =>
@@ -719,6 +761,120 @@ public class FactsTabPanel : GuideTabPanel
 
         if (resort)
             RequestRefresh();
+    }
+
+    // ----- Actions -----
+
+    private void BtnAddFact_Click(object? sender, EventArgs e)
+    {
+        if (!IsAttached || Host.IsBusy)
+            return;
+
+        CommitPendingEdits();
+        var fact = CaseGuideEditing.AddFact(Host.Draft);
+        Host.NotifyEdited(GuidePart.Facts);
+        // A new fact does not need review: the Needs review filter would hide it
+        ApplyFilter(FactFilter.All);
+        RefreshFromDraft();
+        if (SelectEntity(fact.Id) && _txtTitle != null)
+        {
+            _txtTitle.Focus();
+            _txtTitle.SelectAll();
+        }
+    }
+
+    private void DeleteButton_Click(object? sender, EventArgs e)
+    {
+        var id = SelectedId;
+        var fact = Fact(id);
+        if (!IsAttached || Host.IsBusy || id == null || fact == null)
+            return;
+
+        // C5 defaults to No (T-03-49)
+        var (title, text) = CaseGuideUiText.C5DeleteFact(id, fact.Title, CaseGuideEditing.ValuesReferencing(Host.Draft, id));
+        var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.Yes || IsDisposed)
+            return;
+
+        var nextId = NeighborId(id);
+        if (!CaseGuideEditing.DeleteFact(Host.Draft, id))
+            return;
+
+        Host.NotifyEdited(GuidePart.Facts);
+        RefreshFromDraft();
+        if (nextId != null && SelectEntity(nextId))
+            Grid.Focus();
+    }
+
+    private async void RegenerateButton_Click(object? sender, EventArgs e)
+    {
+        var id = SelectedId;
+        var fact = Fact(id);
+        if (!IsAttached || Host.IsBusy || id == null || fact == null)
+            return;
+
+        CommitPendingEdits();
+        var wasEdited = fact.IsUserEdited;
+        if (wasEdited)
+        {
+            // C3 defaults to No (T-03-49)
+            var (title, text) = CaseGuideUiText.C3RegenerateEdited("Fact", fact.Title);
+            var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes || IsDisposed)
+                return;
+        }
+
+        var before = Snapshot(fact);
+        try
+        {
+            await Host.RegenerateEntryAsync(GuidePart.Facts, id, GuidanceBox.Text.Trim());
+        }
+        catch (Exception ex)
+        {
+            // The host reports its own failures; this only catches a fault before it could
+            if (!IsDisposed)
+                Host.SetStatus(ex.InnerException != null ? $"Error: {ex.Message} ({ex.InnerException.Message})" : $"Error: {ex.Message}", Theme.Danger);
+        }
+
+        if (IsDisposed)
+            return;
+
+        // Success clears the edited flag and rewrites the entry (host contract); failure keeps the old text and the guidance
+        var after = Fact(id);
+        if (after != null && !after.IsUserEdited && (wasEdited || Snapshot(after) != before))
+            GuidanceBox.Clear();
+
+        // The rewritten entry may change any field or its notes, so build the card again
+        _builtId = null;
+        RefreshFromDraft();
+    }
+
+    private static string Snapshot(KeyFact f) =>
+        string.Join("\u001f", f.Date, f.Title, f.Description, f.Significance, string.Join(",", f.IssueIds),
+            string.Join(",", f.ActorIds), string.Join(",", f.KnownByIds), string.Join("\u001e", f.MappingNotes));
+
+    private async void BtnRegenerateFacts_Click(object? sender, EventArgs e)
+    {
+        if (!IsAttached || Host.IsBusy)
+            return;
+
+        CommitPendingEdits();
+        try
+        {
+            await Host.RegenerateTabAsync(GuidePart.Facts);
+        }
+        catch (Exception ex)
+        {
+            // The host reports its own failures; this only catches a fault before it could
+            if (!IsDisposed)
+                Host.SetStatus(ex.InnerException != null ? $"Error: {ex.Message} ({ex.InnerException.Message})" : $"Error: {ex.Message}", Theme.Danger);
+        }
+
+        if (IsDisposed)
+            return;
+
+        _builtId = null;
+        RefreshFromDraft();
     }
 
     private void BtnMarkReviewed_Click(object? sender, EventArgs e)

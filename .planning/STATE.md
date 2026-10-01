@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-06-PLAN.md
-last_updated: "2026-10-01T20:47:13.032Z"
+stopped_at: Completed 03-07-PLAN.md
+last_updated: "2026-10-01T20:53:32.565Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 28
-  percent: 67
+  completed_plans: 29
+  percent: 69
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 7 of 20
+Plan: 8 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [███████░░░] 67%
+Progress: [███████░░░] 69%
 
 ## Performance Metrics
 
@@ -79,6 +79,7 @@ Progress: [███████░░░] 67%
 | Phase 03 P04 | 14min | 2 tasks | 5 files |
 | Phase 03 P05 | 22min | 2 tasks | 2 files |
 | Phase 03 P06 | 25min | 2 tasks | 7 files |
+| Phase 03 P07 | 10min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,10 @@ Recent decisions affecting current work:
 - [03-06]: ThemedDialog scales the empty form once before children are built with LogicalToDeviceUnits; dialogs size ClientSize from the root TLP preferred height
 - [03-06]: RenderHarness captures form.Size for bordered forms (DrawToBitmap includes the title bar)
 - [03-06]: Empty message/reason strings drop their ': {message}' clause; singular counts get singular follow-ups ('Fix it', 'that link', 'it is listed')
+- [03-07]: Guide staleness = stored per-part basis hash over component hashes (core; +issues/cast for Facts; +facts for Values); hand edits run in GuideStaleness.AbsorbHandEdit so fresh downstream parts are restamped and review flows through NeedsReview
+- [03-07]: Enum-valued guide edits accept names only; other input returns 'Choose a value from the list.'
+- [03-07]: Counsel sync runs on any identity change (name, organization or typed email) when the old full name matches Counsel.AttorneyName
+- [03-07]: Empty cast ActiveFrom/ActiveTo is allowed (unknown); empty fact Date is rejected; MarkReviewed bumps Revision without IsUserEdited
 
 ### Pending Todos
 
@@ -169,6 +174,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T20:47:07.125Z
-Stopped at: Completed 03-06-PLAN.md
+Last session: 2026-10-01T20:53:26.608Z
+Stopped at: Completed 03-07-PLAN.md
 Resume file: None

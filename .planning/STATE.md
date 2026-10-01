@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-10-01T20:35:00.861Z"
+stopped_at: Completed 03-06-PLAN.md
+last_updated: "2026-10-01T20:47:13.032Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 27
-  percent: 64
+  completed_plans: 28
+  percent: 67
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 6 of 20
+Plan: 7 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
-Progress: [██████░░░░] 64%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -78,6 +78,7 @@ Progress: [██████░░░░] 64%
 | Phase 03 P03 | 12min | 2 tasks | 8 files |
 | Phase 03 P04 | 14min | 2 tasks | 5 files |
 | Phase 03 P05 | 22min | 2 tasks | 2 files |
+| Phase 03 P06 | 25min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -143,6 +144,10 @@ Recent decisions affecting current work:
 - [03-05]: Cast and Key Facts exports put the title block on the first landscape page with the wide tables; profiles, background staff and the issue index stay portrait
 - [03-05]: Core document export reuses CoreDocumentAssembler caption/numbering/memo header/signature text; caption padding becomes a right tab stop, memo labels are tab-aligned
 - [03-05]: No page-number footer in the exports (PAGE fields would contradict the T-03-18 no-fields acceptance)
+- [03-06]: All Phase 3 copy with counts/parts/states comes from CaseGuideUiText (pure, unit-tested); UI plans stay layout-only
+- [03-06]: ThemedDialog scales the empty form once before children are built with LogicalToDeviceUnits; dialogs size ClientSize from the root TLP preferred height
+- [03-06]: RenderHarness captures form.Size for bordered forms (DrawToBitmap includes the title bar)
+- [03-06]: Empty message/reason strings drop their ': {message}' clause; singular counts get singular follow-ups ('Fix it', 'that link', 'it is listed')
 
 ### Pending Todos
 
@@ -164,6 +169,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T20:34:55.028Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-10-01T20:47:07.125Z
+Stopped at: Completed 03-06-PLAN.md
 Resume file: None

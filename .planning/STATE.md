@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-08-PLAN.md
-last_updated: "2026-10-01T21:01:35.054Z"
+stopped_at: Completed 03-09-PLAN.md
+last_updated: "2026-10-01T21:14:38.077Z"
 last_activity: 2026-10-01
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 30
-  percent: 71
+  completed_plans: 31
+  percent: 74
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 9 of 20
+Plan: 10 of 20
 Status: Ready to execute
 Last activity: 2026-10-01
 
@@ -81,6 +81,7 @@ Progress: [███████░░░] 69%
 | Phase 03 P08 | 14min | 2 tasks | 4 files |
 | Phase 03 P06 | 25min | 2 tasks | 7 files |
 | Phase 03 P07 | 10min | 2 tasks | 4 files |
+| Phase 03 P09 | 10min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -158,6 +159,10 @@ Recent decisions affecting current work:
 - [03-08]: Conflict findings (duplicate label, value under two labels, shared org domain) are reported once on the later entry; label conflicts compare exact trimmed text
 - [03-08]: Text-checked canonical value kinds (must appear in core doc or facts): Amount, InvoiceNumber, ChangeOrderNumber, ContractNumber, PurchaseOrder, AccountNumber
 - [03-08]: Missing/invalid active range is a validator Error for every cast member; inactive-actor checks skip invalid ranges
+- [03-09]: CaseGuidePrompts.SystemPrompt says "Keep each person, company and organization" (not "every"): the plan's exact text matched its own D-01 regex
+- [03-09]: Counsel top-up runs only right after a roster call (never on resume), at most once; CounselGaps mirrors validator rule 17
+- [03-09]: Signing attorney seeded as Partner at the counsel firm (created if missing, representing Plaintiff/Complainant orgs); memo author seeded from Memo.From
+- [03-09]: Parallel guide units return DTOs; the guide is merged on the calling thread after Task.WhenAll (finally block keeps finished units on user cancel)
 
 ### Pending Todos
 
@@ -179,6 +184,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T21:01:35.050Z
-Stopped at: Completed 03-08-PLAN.md
+Last session: 2026-10-01T21:14:38.072Z
+Stopped at: Completed 03-09-PLAN.md
 Resume file: None

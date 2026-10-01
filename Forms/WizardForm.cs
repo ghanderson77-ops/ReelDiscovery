@@ -10,6 +10,7 @@ public partial class WizardForm : Form
     private readonly WizardState _state = new();
     private readonly List<UserControl> _steps = new();
     private int _currentStepIndex = 0;
+    private WizardFlow _builtFlow;
 
     private Panel _contentPanel = null!;
     private Panel _navigationPanel = null!;
@@ -207,29 +208,57 @@ public partial class WizardForm : Form
         this.Controls.Add(_footerPanel);       // Bottom - at very bottom (added last)
     }
 
+    /// <summary>
+    /// Steps for each flow. Index 0 (API configuration) is shared and never rebuilt.
+    /// </summary>
+    internal static IReadOnlyList<Type> StepTypesFor(WizardFlow flow) =>
+        flow == WizardFlow.CaseDriven
+            ? new[] { typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument) }
+            : new[]
+            {
+                typeof(StepApiConfiguration), typeof(StepTopicInput), typeof(StepStorylines), typeof(StepCharacters),
+                typeof(StepGenerationConfig), typeof(StepGeneration), typeof(StepComplete)
+            };
+
     private void LoadSteps()
     {
         _steps.Add(new StepApiConfiguration());
-        _steps.Add(new StepTopicInput());
-        _steps.Add(new StepStorylines());
-        _steps.Add(new StepCharacters());
-        _steps.Add(new StepGenerationConfig());
-        _steps.Add(new StepGeneration());
-        _steps.Add(new StepComplete());
+        WireStep(_steps[0]);
+        BuildSteps(_state.Flow);
+        ShowStep(0);
+    }
 
-        foreach (var step in _steps)
+    private void WireStep(UserControl step)
+    {
+        if (step is IWizardStep wizardStep)
         {
-            if (step is IWizardStep wizardStep)
-            {
-                wizardStep.BindState(_state);
-                wizardStep.StateChanged += (s, e) => UpdateNavigationButtons();
-            }
-            step.Dock = DockStyle.Fill;
-            step.Visible = false;
-            _contentPanel.Controls.Add(step);
+            wizardStep.BindState(_state);
+            wizardStep.StateChanged += (s, e) => UpdateNavigationButtons();
+        }
+        step.Dock = DockStyle.Fill;
+        step.Visible = false;
+        _contentPanel.Controls.Add(step);
+    }
+
+    private void BuildSteps(WizardFlow flow)
+    {
+        // Legacy flow stays selectable until Phase 7 (PROJECT.md).
+        // Drop every step after the shared API step before creating the new list
+        for (var i = _steps.Count - 1; i >= 1; i--)
+        {
+            _contentPanel.Controls.Remove(_steps[i]);
+            _steps[i].Dispose();
+            _steps.RemoveAt(i);
         }
 
-        ShowStep(0);
+        foreach (var type in StepTypesFor(flow).Skip(1))
+        {
+            var step = (UserControl)Activator.CreateInstance(type)!;
+            _steps.Add(step);
+            WireStep(step);
+        }
+
+        _builtFlow = flow;
     }
 
     private async void ShowStep(int index)
@@ -282,30 +311,36 @@ public partial class WizardForm : Form
 
     private async void BtnNext_Click(object? sender, EventArgs e)
     {
-        if (_currentStepIndex >= _steps.Count - 1)
-        {
-            // On last step, close the form
-            this.Close();
-            return;
-        }
-
         var currentStep = _steps[_currentStepIndex];
         if (currentStep is IWizardStep wizard)
         {
             _btnNext.Enabled = false;
             try
             {
-                if (!await wizard.ValidateStepAsync())
-                {
-                    _btnNext.Enabled = true;
-                    return;
-                }
+                if (!await wizard.ValidateStepAsync()) return;
             }
             finally
             {
                 _btnNext.Enabled = true;
             }
         }
+
+        if (_currentStepIndex >= _steps.Count - 1)
+        {
+            // Finish: the last step has validated (e.g. citation errors block closing)
+            if (_state.Flow == WizardFlow.CaseDriven &&
+                MessageBox.Show("This version does not save the case yet. Closing will discard the scenario and document. Close anyway?",
+                    "Close Case", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            {
+                return;
+            }
+            this.Close();
+            return;
+        }
+
+        // Leaving the API step: rebuild the step list when the workflow choice changed
+        if (_currentStepIndex == 0 && _state.Flow != _builtFlow)
+            BuildSteps(_state.Flow);
 
         ShowStep(_currentStepIndex + 1);
     }

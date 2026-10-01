@@ -1,3 +1,4 @@
+using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Models;
@@ -98,6 +99,12 @@ public class WizardState
 
     // Token Usage Tracking
     public TokenUsageTracker UsageTracker { get; } = new();
+
+    // Workflow
+    public WizardFlow Flow { get; set; } = WizardFlow.CaseDriven;
+
+    // Case-driven flow (Phase 2+)
+    public CaseDraft Case { get; set; } = new();
 
     // Step 2 - Topic Input
     public string Topic { get; set; } = string.Empty;

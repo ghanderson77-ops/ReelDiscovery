@@ -662,6 +662,31 @@ public class CoreDocumentGeneratorTests
     }
 
     [Fact]
+    public async Task Regenerate_FailedSection_WritesOnlyItWithGuidance()
+    {
+        // Retry Section on a Failed section (WR-05): only that section, and the guidance reaches the model
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(Paragraphs("Retried unpaid change order facts.")));
+        var draft = CaseTestData.SampleComplaintDraft();
+        var facts2 = draft.CoreDocument!.FindSection("facts-2")!;
+        facts2.Status = SectionStatus.Failed;
+        facts2.FailureMessage = "The response was cut off. Click Retry Section.";
+        facts2.Paragraphs = new List<string>();
+        var prayer = draft.CoreDocument.FindSection("prayer")!;
+        prayer.Status = SectionStatus.Pending;
+
+        await new CoreDocumentGenerator(gateway).RegenerateSectionAsync(draft, "facts-2", "mention the March 3 meeting");
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Contains("Section: Unpaid Change Orders", request.UserPrompt);
+        Assert.Contains("Guidance from the user: mention the March 3 meeting", request.UserPrompt);
+        Assert.DoesNotContain("Current text of this section", request.UserPrompt);
+        Assert.Equal(SectionStatus.Ready, facts2.Status);
+        Assert.Equal(string.Empty, facts2.FailureMessage);
+        Assert.Equal(SectionStatus.Pending, prayer.Status);
+    }
+
+    [Fact]
     public async Task Regenerate_UnknownId_Throws()
     {
         var (gateway, fake) = CaseTestData.CreateGateway();

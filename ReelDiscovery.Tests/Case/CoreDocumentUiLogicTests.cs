@@ -136,6 +136,26 @@ public class CoreDocumentUiLogicTests
     }
 
     [Fact]
+    public void HasUnfinishedSections_OnlyForUnwrittenSectionsWithoutHandText()
+    {
+        Assert.False(StepCoreDocument.HasUnfinishedSections(null));
+
+        var doc = CaseTestData.SampleComplaintDraft().CoreDocument!;
+        Assert.False(StepCoreDocument.HasUnfinishedSections(doc));
+
+        var facts2 = doc.FindSection("facts-2")!;
+        facts2.Status = SectionStatus.Pending;
+        facts2.IsUserEdited = true;
+        Assert.False(StepCoreDocument.HasUnfinishedSections(doc)); // hand-written text is never resumed over
+
+        facts2.IsUserEdited = false;
+        Assert.True(StepCoreDocument.HasUnfinishedSections(doc));
+
+        facts2.Status = SectionStatus.Failed;
+        Assert.True(StepCoreDocument.HasUnfinishedSections(doc));
+    }
+
+    [Fact]
     public void IssuesCaption_CountsBySeverity()
     {
         Assert.Equal("Issues (1 errors, 2 warnings)", StepCoreDocument.IssuesCaption(new[] { Error(), Warning(), Warning() }));

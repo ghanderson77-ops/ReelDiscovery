@@ -20,6 +20,7 @@ public class StepCoreDocument : UserControl, IWizardStep
     private WizardState _state = null!;
     private Label _lblTitle = null!;
     private Button _btnRegenerateAll = null!;
+    private Button _btnResumeAll = null!;
     private Panel _bodyHost = null!;
     private SplitContainer _split = null!;
     private ListBox _lstSections = null!;
@@ -103,11 +104,21 @@ public class StepCoreDocument : UserControl, IWizardStep
         _btnRegenerateAll.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         headerPanel.Controls.Add(_btnRegenerateAll);
 
-        headerPanel.Resize += (s, e) =>
+        // Writes every unwritten section (resume after cancel or a fatal stop); shown only when some remain
+        _btnResumeAll = ButtonHelper.CreateButton("Resume All", 110, 32, ButtonStyle.Default);
+        _btnResumeAll.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _btnResumeAll.Visible = false;
+        headerPanel.Controls.Add(_btnResumeAll);
+
+        void LayoutHeader()
         {
             _btnRegenerateAll.Location = new Point(headerPanel.Width - _btnRegenerateAll.Width, 0);
-            _lblTitle.Width = Math.Max(0, headerPanel.Width - _btnRegenerateAll.Width - 8);
-        };
+            _btnResumeAll.Location = new Point(_btnRegenerateAll.Left - _btnResumeAll.Width - 8, 0);
+            var buttonsWidth = _btnRegenerateAll.Width + (_btnResumeAll.Visible ? _btnResumeAll.Width + 8 : 0);
+            _lblTitle.Width = Math.Max(0, headerPanel.Width - buttonsWidth - 8);
+        }
+        headerPanel.Resize += (s, e) => LayoutHeader();
+        _btnResumeAll.VisibleChanged += (s, e) => LayoutHeader();
         mainLayout.Controls.Add(headerPanel, 0, 0);
 
         // Body host: split view and empty state share row 1
@@ -340,6 +351,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         _lstSections.SelectedIndexChanged += LstSections_SelectedIndexChanged;
         _tabs.SelectedIndexChanged += (s, e) => RefreshPreview();
         _btnRegenerateAll.Click += BtnRegenerateAll_Click;
+        _btnResumeAll.Click += async (s, e) => await RunGenerationAsync(fullRegenerate: false);
         // An existing outline is resumed, never silently replaced (CR-02, WR-09); Regenerate All asks first
         _btnGenerate.Click += async (s, e) => await RunGenerationAsync(fullRegenerate: _state?.Case.CoreDocument == null);
         _btnCancel.Click += BtnCancel_Click;
@@ -432,11 +444,18 @@ public class StepCoreDocument : UserControl, IWizardStep
     public static bool ShowsEmptyState(CoreDocument? doc, bool isGenerating) =>
         !isGenerating && (doc == null || doc.Sections.All(s => s.Status == SectionStatus.Pending && s.Paragraphs.Count == 0));
 
+    /// <summary>
+    /// True when Resume All has work to do: a Pending or Failed section without hand-written text (WR-05).
+    /// </summary>
+    public static bool HasUnfinishedSections(CoreDocument? doc) =>
+        doc != null && doc.Sections.Any(s => (s.Status is SectionStatus.Pending or SectionStatus.Failed)
+            && !(s.IsUserEdited && s.Paragraphs.Count > 0));
+
     public static string IssuesCaption(IReadOnlyCollection<CoreDocumentIssue> issues) =>
         $"Issues ({CoreDocumentValidator.CountErrors(issues)} errors, {CoreDocumentValidator.CountWarnings(issues)} warnings)";
 
     private static string FatalText(string? message) =>
-        $"Generation stopped: {message}. Completed sections were kept. Fix the problem on the API Configuration step, then click Retry Section or Regenerate All.";
+        $"Generation stopped: {message}. Completed sections were kept. Fix the problem on the API Configuration step, then click Resume All or Regenerate All.";
 
     private static string ErrorText(Exception ex) =>
         ex.InnerException != null ? $"Error: {ex.Message} ({ex.InnerException.Message})" : $"Error: {ex.Message}";
@@ -506,6 +525,10 @@ public class StepCoreDocument : UserControl, IWizardStep
             CenterEmptyContent();
 
         _btnRegenerateAll.Enabled = !_isGenerating && doc != null;
+
+        // Hidden in the empty state: its Generate Document button already resumes
+        _btnResumeAll.Visible = !_emptyPanel.Visible && HasUnfinishedSections(doc);
+        _btnResumeAll.Enabled = !_isGenerating;
     }
 
     private static string SectionLabel(CoreDocument? doc, string sectionId)
@@ -631,6 +654,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         _btnRegenerateSection.Enabled = !_isGenerating && hasSection;
         _btnApply.Enabled = !_isGenerating && hasSection && _txtEditor.Text != _editorOriginalText;
         _btnRegenerateAll.Enabled = !_isGenerating && _state?.Case.CoreDocument != null;
+        _btnResumeAll.Enabled = !_isGenerating;
         _btnGenerate.Enabled = !_isGenerating;
     }
 
@@ -773,13 +797,8 @@ public class StepCoreDocument : UserControl, IWizardStep
                 return;
         }
 
-        // Retry Section: the generator writes every Pending/Failed section (also resumes after a fatal stop or cancel)
-        if (s.Status == SectionStatus.Pending || s.Status == SectionStatus.Failed)
-        {
-            await RunGenerationAsync(fullRegenerate: false);
-            return;
-        }
-
+        // Retry Section and Regenerate Section both write only the selected section and send the guidance (WR-05);
+        // Resume All writes every unwritten section
         _cts = new CancellationTokenSource();
         _progress.Value = 0;
         SetBusy(true);

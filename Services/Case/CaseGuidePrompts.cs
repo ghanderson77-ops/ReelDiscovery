@@ -307,6 +307,153 @@ public static class CaseGuidePrompts
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Regenerate one character: the case context, the issues, the character's current fields, the facts they appear in and the guidance.
+    /// </summary>
+    internal static string BuildCastEntryPrompt(CaseDraft draft, CastMember member, string guidance)
+    {
+        var doc = RequireDocument(draft);
+        var guide = draft.Guide ?? new CaseGuide();
+        var sb = new StringBuilder();
+
+        AppendDocumentHeader(sb, doc);
+        AppendCaseSummary(sb, doc);
+        AppendTimeline(sb, doc);
+        sb.AppendLine();
+        AppendIssues(sb, guide);
+        sb.AppendLine();
+        AppendOrganizations(sb, guide);
+        sb.AppendLine();
+
+        sb.AppendLine("Character:");
+        sb.AppendLine($"{member.Id} | {member.FullName} | {member.Title} | {OrgName(guide, member.OrganizationId)} | {member.Role} | {member.Tier}");
+        sb.AppendLine($"Involvement: {member.Involvement}");
+        sb.AppendLine($"Active: {member.ActiveFrom} to {member.ActiveTo}");
+        if (member.Tier == CastTier.Key)
+        {
+            sb.AppendLine($"How they write email: {member.VoiceNote}");
+            sb.AppendLine($"Signature style: {member.SignatureStyle}");
+        }
+
+        var facts = guide.Facts.Where(f => f != null && (f.ActorIds.Contains(member.Id) || f.KnownByIds.Contains(member.Id))).ToList();
+        sb.AppendLine("Facts this character appears in:");
+        if (facts.Count == 0)
+            sb.AppendLine("(none)");
+        foreach (var fact in facts)
+            sb.AppendLine($"{fact.Id} | {fact.Date} | {fact.Title}");
+
+        sb.AppendLine();
+        sb.AppendLine(member.Tier == CastTier.Key
+            ? $"Rewrite this character: first and last name, title, a 2-4 sentence summary of their key involvement stated as fact, the dates they were active in the story (YYYY-MM-DD, inside {doc.TimelineStart} to {StoryEnd(doc)}), a 1-2 line note on how they write email, and a signature style."
+            : $"Rewrite this background staff member: first and last name, title, a one-line summary of what they do at the organization, and the dates they were active (YYYY-MM-DD, inside {doc.TimelineStart} to {StoryEnd(doc)}). Leave the email note empty.");
+        sb.AppendLine("Keep the name unless the guidance asks for a different one, and stay consistent with the facts listed above.");
+        AppendNameRules(sb, draft);
+        AppendGuidance(sb, guidance);
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Regenerate one key fact: the issues, the compact cast, the fact's section text and its current fields.
+    /// </summary>
+    internal static string BuildFactEntryPrompt(CaseDraft draft, KeyFact fact, string guidance)
+    {
+        var doc = RequireDocument(draft);
+        var guide = draft.Guide ?? new CaseGuide();
+        var sb = new StringBuilder();
+
+        AppendDocumentHeader(sb, doc);
+        AppendCaseSummary(sb, doc);
+        AppendTimeline(sb, doc);
+        sb.AppendLine();
+        AppendIssues(sb, guide);
+        sb.AppendLine();
+        AppendCompactCast(sb, guide);
+
+        var section = doc.FindSection(fact.SourceSectionId);
+        if (section != null)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"Section: {section.Heading}");
+            sb.AppendLine(Cap(string.Join("\n\n", section.Paragraphs.Where(p => !string.IsNullOrWhiteSpace(p))), IssueSourceMaxChars));
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Fact:");
+        sb.AppendLine($"{fact.Id} | {fact.Date} | {fact.Title}");
+        sb.AppendLine($"Description: {fact.Description}");
+        sb.AppendLine($"Issues: {string.Join(", ", fact.IssueIds)}; did it: {string.Join(", ", fact.ActorIds)}; knew about it: {string.Join(", ", fact.KnownByIds)}; significance: {fact.Significance}");
+
+        sb.AppendLine();
+        sb.AppendLine("Rewrite this fact: the date (YYYY-MM-DD), a short title, a 1-3 sentence description of what happened (who did it, who knew about it and when, and the amounts involved), the issue IDs it supports, the IDs of the people who did it, the IDs of everyone else who knew about it at the time, and its significance (Hot, Key or Supporting).");
+        sb.AppendLine("Refer to issues and people only by the IDs listed above.");
+        AppendNameRules(sb, draft);
+        AppendGuidance(sb, guidance);
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Regenerate one canonical value: the issues, the compact cast, every key fact and the value's current fields.
+    /// </summary>
+    internal static string BuildValueEntryPrompt(CaseDraft draft, CanonicalValue value, string guidance)
+    {
+        var doc = RequireDocument(draft);
+        var guide = draft.Guide ?? new CaseGuide();
+        var sb = new StringBuilder();
+
+        AppendDocumentHeader(sb, doc);
+        AppendCaseSummary(sb, doc);
+        sb.AppendLine();
+        AppendIssues(sb, guide);
+        sb.AppendLine();
+        AppendCompactCast(sb, guide);
+        sb.AppendLine();
+
+        sb.AppendLine("Key facts:");
+        foreach (var fact in guide.Facts.Where(f => f != null))
+            sb.AppendLine($"{fact.Id} | {fact.Date} | {fact.Title} | {fact.Description}");
+
+        sb.AppendLine();
+        sb.AppendLine("Value:");
+        sb.AppendLine($"{value.Id} | {value.Kind} | {value.Label} | {value.Value}");
+        sb.AppendLine($"Description: {value.Description}");
+        sb.AppendLine($"Facts: {string.Join(", ", value.FactIds)}");
+
+        sb.AppendLine();
+        sb.AppendLine("Rewrite this value: its kind, a short label, the exact text a document or email would use (for example $184,250.00), a one-sentence description, and the fact IDs that use it.");
+        sb.AppendLine($"Kinds: {string.Join(", ", Enum.GetNames<ValueKind>())}");
+        sb.AppendLine("Refer to facts only by the IDs listed above.");
+        AppendNameRules(sb, draft);
+        AppendGuidance(sb, guidance);
+
+        return sb.ToString();
+    }
+
+    private static void AppendCaseSummary(StringBuilder sb, CoreDocument doc)
+    {
+        var summary = doc.Sections
+            .Where(s => s != null && s.Kind is SectionKind.NatureOfAction or SectionKind.ExecutiveSummary)
+            .SelectMany(s => s.Paragraphs)
+            .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p));
+        if (summary != null)
+            sb.AppendLine($"Case summary: {summary.Trim()}");
+    }
+
+    private static void AppendIssues(StringBuilder sb, CaseGuide guide)
+    {
+        sb.AppendLine("Issues:");
+        foreach (var issue in guide.Issues.Where(i => i != null))
+            sb.AppendLine($"{issue.Id} | {issue.Title} | {(issue.Description.Length > 0 ? issue.Description : issue.Summary)}");
+    }
+
+    private static void AppendCompactCast(StringBuilder sb, CaseGuide guide)
+    {
+        sb.AppendLine("Cast:");
+        foreach (var member in guide.Cast.Where(c => c != null))
+            sb.AppendLine($"{member.Id} | {member.FullName} | {member.Title} | {OrgName(guide, member.OrganizationId)} | active {member.ActiveFrom} to {member.ActiveTo}");
+    }
+
     // Current entries for regeneration; protected (hand-edited) ones must come back unchanged (D-19)
     private static void AppendExisting(StringBuilder sb, string header, IEnumerable<(bool IsProtected, string Line)> entries)
     {

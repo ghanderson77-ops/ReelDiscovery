@@ -22,6 +22,7 @@ public class CaseGuideGenerator
     public const int FactsMaxOutputTokens = 16_000;
     public const int ValuesMaxOutputTokens = 12_000;
     public const int MaxFactsPerCall = 30;
+    public const int EntryMaxOutputTokens = 4_000;
 
     private readonly ILlmGateway _llm;
 
@@ -30,7 +31,10 @@ public class CaseGuideGenerator
     /// </summary>
     internal static IReadOnlyList<Type> SchemaTypes { get; } = new[]
     {
-        typeof(IssueDetailsDto), typeof(CastRosterDto), typeof(CastDetailsDto), typeof(BackgroundStaffDto), typeof(FactBatchDto), typeof(ValuesDto)
+        typeof(IssueDetailsDto), typeof(CastRosterDto), typeof(CastDetailsDto), typeof(BackgroundStaffDto), typeof(FactBatchDto), typeof(ValuesDto),
+        typeof(CastEntryDto),
+        typeof(FactEntryDto),
+        typeof(ValueEntryDto)
     };
 
     public CaseGuideGenerator(ILlmGateway llm)
@@ -64,47 +68,9 @@ public class CaseGuideGenerator
                 if (GuideStaleness.Order.TakeWhile(p => p != part).Any(p => guide.State(p).Status != GuidePartStatus.Ready))
                     break;
 
-                var revision = draft.Revision;
-                var finished = false;
-                GuidePartResult partResult;
-                try
-                {
-                    partResult = await RunPartAsync(draft, part, progress, ct);
-                    finished = true;
-                }
-                finally
-                {
-                    // Autosave hook: after a finished or failed part, and after a cancelled part that kept partial results
-                    if (partCompleted != null && (finished || draft.Revision != revision))
-                        await partCompleted(part);
-                }
-
-                result.Notes.AddRange(partResult.Notes);
-                if (partResult.Succeeded)
-                {
-                    result.PartsWritten.Add(part);
-                    if (part == GuidePart.Issues && guide.IssueDetailsState.Status == GuidePartStatus.Failed)
-                        result.Notes.Add(guide.IssueDetailsState.FailureMessage);
-                }
-
-                if (partResult.IsFatal)
-                {
-                    result.FatalError = partResult.FatalError;
+                var partResult = await RunTrackedAsync(draft, part, () => RunPartAsync(draft, part, progress, ct), partCompleted);
+                if (!RecordPart(draft, result, part, partResult))
                     break;
-                }
-
-                if (partResult.Succeeded)
-                    continue;
-
-                result.PartsFailed.Add(part);
-                result.FailureMessage = partResult.FailureMessage;
-                if (partResult.WasRefused)
-                {
-                    result.RefusedPart = part;
-                    result.RefusalMessage = partResult.FailureMessage;
-                }
-
-                break;
             }
         }
         finally
@@ -114,6 +80,93 @@ public class CaseGuideGenerator
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Update Guide (GUIDE-09, D-20): re-runs only the stale parts, in order issues -> cast -> facts -> values, keeping hand edits.
+    /// Issues are re-extracted (ids and details kept); Cast, Facts and Values are regenerated without guidance. Stops at the first
+    /// failed part or a fatal error; <paramref name="partCompleted"/> is awaited after each part so the caller can autosave.
+    /// </summary>
+    public async Task<CaseGuideGenerationResult> UpdateStaleAsync(CaseDraft draft, IProgress<GuideProgress>? progress = null,
+        Func<GuidePart, Task>? partCompleted = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        var result = new CaseGuideGenerationResult();
+
+        try
+        {
+            // Only parts the user asked to update, and only when stale: nothing regenerates silently (D-20)
+            foreach (var part in GuideStaleness.Order)
+            {
+                // Re-checked at each step: an earlier regeneration changes the later parts' basis
+                if (!GuideStaleness.IsStale(draft, part))
+                    continue;
+
+                var partResult = await RunTrackedAsync(draft, part, () => part == GuidePart.Issues
+                    ? GenerateIssuesAsync(draft, progress, ct)
+                    : RegenerateTabAsync(draft, part, string.Empty, replaceEdited: false, progress, ct), partCompleted);
+                if (!RecordPart(draft, result, part, partResult))
+                    break;
+            }
+        }
+        finally
+        {
+            if (result.PartsWritten.Count > 0)
+                draft.Revision++;
+        }
+
+        return result;
+    }
+
+    // Runs one part, then awaits the autosave hook: after a finished or failed part, and after a cancelled part that kept partial results
+    private static async Task<GuidePartResult> RunTrackedAsync(CaseDraft draft, GuidePart part, Func<Task<GuidePartResult>> run,
+        Func<GuidePart, Task>? partCompleted)
+    {
+        var revision = draft.Revision;
+        var finished = false;
+        try
+        {
+            var partResult = await run();
+            finished = true;
+            return partResult;
+        }
+        finally
+        {
+            if (partCompleted != null && (finished || draft.Revision != revision))
+                await partCompleted(part);
+        }
+    }
+
+    // Adds one part's outcome to the run result; false when the run must stop (failure or fatal error)
+    private static bool RecordPart(CaseDraft draft, CaseGuideGenerationResult result, GuidePart part, GuidePartResult partResult)
+    {
+        var guide = draft.Guide!;
+        result.Notes.AddRange(partResult.Notes);
+        if (partResult.Succeeded)
+        {
+            result.PartsWritten.Add(part);
+            if (part == GuidePart.Issues && guide.IssueDetailsState.Status == GuidePartStatus.Failed)
+                result.Notes.Add(guide.IssueDetailsState.FailureMessage);
+        }
+
+        if (partResult.IsFatal)
+        {
+            result.FatalError = partResult.FatalError;
+            return false;
+        }
+
+        if (partResult.Succeeded)
+            return true;
+
+        result.PartsFailed.Add(part);
+        result.FailureMessage = partResult.FailureMessage;
+        if (partResult.WasRefused)
+        {
+            result.RefusedPart = part;
+            result.RefusalMessage = partResult.FailureMessage;
+        }
+
+        return false;
     }
 
     private Task<GuidePartResult> RunPartAsync(CaseDraft draft, GuidePart part, IProgress<GuideProgress>? progress, CancellationToken ct) => part switch
@@ -2163,6 +2216,122 @@ public class CaseGuideGenerator
             notes.Add(note);
     }
 
+    // ---------- Single-entry regeneration (GUIDE-08) ----------
+
+    /// <summary>
+    /// Rewrites one character, fact or value in place (same object, same id) with optional guidance; clears its edited flag.
+    /// Failures (LlmCallException, cancellation) propagate and leave the entry untouched. Unknown ids throw ArgumentException.
+    /// Applied like a hand edit: entries that depend on it are flagged for review and downstream parts stay fresh (D-20).
+    /// </summary>
+    public async Task RegenerateEntryAsync(CaseDraft draft, GuidePart part, string entityId, string guidance, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        if (part is not (GuidePart.Cast or GuidePart.Facts or GuidePart.Values))
+            throw new ArgumentException("Only characters, facts and values can be regenerated one at a time.", nameof(part));
+
+        var guide = draft.Guide;
+        guidance ??= string.Empty;
+
+        switch (part)
+        {
+            case GuidePart.Cast:
+            {
+                var member = guide?.FindCast(entityId) ?? throw UnknownEntry(part, entityId);
+                var dto = await GenerateEntryAsync<CastEntryDto>($"Case Guide - Character {member.Id}",
+                    CaseGuidePrompts.BuildCastEntryPrompt(draft, member, guidance), ct);
+                GuideStaleness.AbsorbHandEdit(draft, GuidePart.Cast, () => ApplyCastEntry(draft, member, dto));
+                break;
+            }
+
+            case GuidePart.Facts:
+            {
+                var fact = guide?.FindFact(entityId) ?? throw UnknownEntry(part, entityId);
+                var dto = await GenerateEntryAsync<FactEntryDto>($"Case Guide - Fact {fact.Id}",
+                    CaseGuidePrompts.BuildFactEntryPrompt(draft, fact, guidance), ct);
+                // Mapped before anything changes: an empty response leaves the fact as it was
+                var mapped = MapFact(guide!, new FactDto
+                {
+                    Date = dto.Date,
+                    Title = dto.Title,
+                    Description = dto.Description,
+                    IssueIds = dto.IssueIds,
+                    ActorIds = dto.ActorIds,
+                    KnownByIds = dto.KnownByIds,
+                    Significance = dto.Significance
+                }, fact.SourceSectionId) ?? throw new InvalidOperationException("The response had no fact text.");
+                GuideStaleness.AbsorbHandEdit(draft, GuidePart.Facts, () =>
+                {
+                    CopyFact(fact, mapped);
+                    CaseGuideEditing.FlagValues(guide!, fact.Id, $"{fact.Id} was changed after it was written.");
+                });
+                break;
+            }
+
+            default:
+            {
+                var value = guide?.FindValue(entityId) ?? throw UnknownEntry(part, entityId);
+                var dto = await GenerateEntryAsync<ValueEntryDto>($"Case Guide - Value {value.Id}",
+                    CaseGuidePrompts.BuildValueEntryPrompt(draft, value, guidance), ct);
+                var mapped = MapValue(guide!, dto.Kind, dto.Label, dto.Value, dto.Description, dto.FactIds)
+                    ?? throw new InvalidOperationException("The response had no value text.");
+                GuideStaleness.AbsorbHandEdit(draft, GuidePart.Values, () => CopyValue(value, mapped));
+                break;
+            }
+        }
+
+        draft.Revision++;
+    }
+
+    private static ArgumentException UnknownEntry(GuidePart part, string? id) =>
+        new($"Unknown {part} '{id}'.", nameof(id));
+
+    // One Story call; failures throw LlmCallException (nothing is changed before this returns)
+    private async Task<T> GenerateEntryAsync<T>(string operationName, string prompt, CancellationToken ct) where T : class =>
+        (await _llm.GenerateAsync<T>(new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = operationName,
+            SystemPrompt = CaseGuidePrompts.SystemPrompt,
+            UserPrompt = prompt,
+            MaxOutputTokens = EntryMaxOutputTokens
+        }, ct)).GetValueOrThrow();
+
+    private static void ApplyCastEntry(CaseDraft draft, CastMember member, CastEntryDto dto)
+    {
+        // Renames go through the editing path: facts citing the character are updated and flagged for review
+        var first = Clean(dto.FirstName);
+        var last = Clean(dto.LastName);
+        if (first.Length > 0 && first != member.FirstName)
+            CaseGuideEditing.SetCastField(draft, member.Id, CastField.FirstName, first);
+        if (last.Length > 0 && last != member.LastName)
+            CaseGuideEditing.SetCastField(draft, member.Id, CastField.LastName, last);
+
+        if (Clean(dto.Title).Length > 0)
+            member.Title = Clean(dto.Title);
+        if (Clean(dto.Summary).Length > 0)
+            member.Involvement = Clean(dto.Summary);
+
+        // Invalid or reversed dates keep the current range
+        if (CaseDraft.TryParseDate(dto.ActiveFrom, out var from) && CaseDraft.TryParseDate(dto.ActiveTo, out var to) && from <= to
+            && (Clean(dto.ActiveFrom) != member.ActiveFrom || Clean(dto.ActiveTo) != member.ActiveTo))
+        {
+            member.ActiveFrom = Clean(dto.ActiveFrom);
+            member.ActiveTo = Clean(dto.ActiveTo);
+            CaseGuideEditing.FlagReferencingFacts(draft, member, member.FullName);
+        }
+
+        // Background staff have no email voice or signature
+        if (member.Tier == CastTier.Key)
+        {
+            member.VoiceNote = Clean(dto.VoiceNote);
+            member.SignatureStyle = dto.SignatureStyle;
+        }
+
+        CaseGuideEditing.RefreshIdentity(draft, member);
+        member.IsUserEdited = false;
+        member.DetailsPending = false;
+    }
+
     // ---------- Shared helpers ----------
 
     private static void SetReady(GuidePartState state)
@@ -2412,6 +2581,95 @@ public class CaseGuideGenerator
         [Description("ID of the existing value this revises, e.g. V-004; empty string for a new value")]
         public string ExistingId { get; set; } = string.Empty;
 
+        [JsonPropertyName("kind")]
+        [Description("Amount, InvoiceNumber, ChangeOrderNumber, ContractNumber, PurchaseOrder, DocumentTitle, ProjectName, AccountNumber, Address or Other")]
+        public ValueKind Kind { get; set; }
+
+        [JsonPropertyName("label")]
+        [Description("Short label, e.g. Change Order 7 amount")]
+        public string Label { get; set; } = string.Empty;
+
+        [JsonPropertyName("value")]
+        [Description("Exact text a document or email would use, e.g. $184,250.00")]
+        public string Value { get; set; } = string.Empty;
+
+        [JsonPropertyName("description")]
+        [Description("One sentence on what the value is")]
+        public string Description { get; set; } = string.Empty;
+
+        [JsonPropertyName("factIds")]
+        [Description("Fact IDs that use this value, e.g. F-003")]
+        public List<string> FactIds { get; set; } = new();
+    }
+
+    internal class CastEntryDto
+    {
+        [JsonPropertyName("firstName")]
+        [Description("First name")]
+        public string FirstName { get; set; } = string.Empty;
+
+        [JsonPropertyName("lastName")]
+        [Description("Last name")]
+        public string LastName { get; set; } = string.Empty;
+
+        [JsonPropertyName("title")]
+        [Description("Job title")]
+        public string Title { get; set; } = string.Empty;
+
+        [JsonPropertyName("summary")]
+        [Description("2-4 sentences on the person's key involvement, stated as fact; one line for background staff")]
+        public string Summary { get; set; } = string.Empty;
+
+        [JsonPropertyName("activeFrom")]
+        [Description("First date active in the story, YYYY-MM-DD")]
+        public string ActiveFrom { get; set; } = string.Empty;
+
+        [JsonPropertyName("activeTo")]
+        [Description("Last date active in the story, YYYY-MM-DD")]
+        public string ActiveTo { get; set; } = string.Empty;
+
+        [JsonPropertyName("voiceNote")]
+        [Description("1-2 lines on how this person writes email; empty for background staff")]
+        public string VoiceNote { get; set; } = string.Empty;
+
+        [JsonPropertyName("signatureStyle")]
+        [Description("Full, Short, NameOnly or MobileFooter")]
+        public SignatureStyle SignatureStyle { get; set; }
+    }
+
+    internal class FactEntryDto
+    {
+        [JsonPropertyName("date")]
+        [Description("YYYY-MM-DD")]
+        public string Date { get; set; } = string.Empty;
+
+        [JsonPropertyName("title")]
+        [Description("Short headline, at most 12 words")]
+        public string Title { get; set; } = string.Empty;
+
+        [JsonPropertyName("description")]
+        [Description("One to three sentences stating what happened as established fact: who did what, who knew, amounts")]
+        public string Description { get; set; } = string.Empty;
+
+        [JsonPropertyName("issueIds")]
+        [Description("Issue IDs from the list, e.g. ISS-01")]
+        public List<string> IssueIds { get; set; } = new();
+
+        [JsonPropertyName("actorIds")]
+        [Description("Cast IDs of the people who did it, e.g. CH-003")]
+        public List<string> ActorIds { get; set; } = new();
+
+        [JsonPropertyName("knownByIds")]
+        [Description("Cast IDs of everyone else who knew about it at the time")]
+        public List<string> KnownByIds { get; set; } = new();
+
+        [JsonPropertyName("significance")]
+        [Description("Hot, Key or Supporting")]
+        public FactSignificance Significance { get; set; }
+    }
+
+    internal class ValueEntryDto
+    {
         [JsonPropertyName("kind")]
         [Description("Amount, InvoiceNumber, ChangeOrderNumber, ContractNumber, PurchaseOrder, DocumentTitle, ProjectName, AccountNumber, Address or Other")]
         public ValueKind Kind { get; set; }

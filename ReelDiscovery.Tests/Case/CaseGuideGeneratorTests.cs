@@ -903,6 +903,396 @@ public class CaseGuideGeneratorTests
         Assert.All(guide.Cast, c => Assert.True(c.DetailsPending));
     }
 
+    // ---------- Facts fixtures ----------
+
+    // SampleGuidedDraft with issues and cast Ready and no facts or values yet
+    private static CaseDraft FactsReadyDraft()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var guide = draft.Guide!;
+        guide.Facts.Clear();
+        guide.Values.Clear();
+        guide.IdCounters["F"] = 0;
+        guide.IdCounters["V"] = 0;
+        guide.FactsState = new GuidePartState();
+        guide.ValuesState = new GuidePartState();
+        return draft;
+    }
+
+    private static string FactJson(string date, string title, string issues = "\"ISS-01\"", string actors = "\"CH-001\"", string knownBy = "", string significance = "Key", string existingId = "") =>
+        $$"""{ "existingId": "{{existingId}}", "date": "{{date}}", "title": "{{title}}", "description": "{{title}} on the Lakeview Tower project.", "issueIds": [{{issues}}], "actorIds": [{{actors}}], "knownByIds": [{{knownBy}}], "significance": "{{significance}}" }""";
+
+    private static string FactsJson(params string[] facts) => "{ \"facts\": [" + string.Join(", ", facts) + "] }";
+
+    private static bool IsFactsRequest(LlmProviderRequest r) => r.UserPrompt.Contains("State each fact as what happened");
+
+    private static FactSubsectionPlan Plan(int n, string start, string end, int paragraphs) => new()
+    {
+        Id = $"facts-{n}",
+        Heading = $"Period {n}",
+        StartDate = start,
+        EndDate = end,
+        TargetParagraphs = paragraphs,
+        Focus = $"Events of period {n}."
+    };
+
+    private static CaseDraft WithFactPlan(CaseDraft draft, params FactSubsectionPlan[] plans)
+    {
+        var doc = draft.CoreDocument!;
+        doc.FactPlan = plans.ToList();
+        doc.Sections.RemoveAll(s => s.Kind == SectionKind.FactualAllegations);
+        var at = doc.Sections.FindIndex(s => s.Kind == SectionKind.Count);
+        doc.Sections.InsertRange(at < 0 ? doc.Sections.Count : at, plans.Select(p => new CoreDocumentSection
+        {
+            Id = p.Id,
+            Kind = SectionKind.FactualAllegations,
+            Heading = p.Heading,
+            Paragraphs = new List<string> { $"Paragraph about {p.Heading}." },
+            Status = SectionStatus.Ready
+        }));
+        return draft;
+    }
+
+    // ---------- Facts: planning ----------
+
+    [Fact]
+    public void PlanFactCalls_Standard()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        draft.Complexity = ComplexityLevel.Standard;
+        WithFactPlan(draft,
+            Plan(1, "2024-01-01", "2024-03-31", 10),
+            Plan(2, "2024-04-01", "2024-06-30", 10),
+            Plan(3, "2024-07-01", "2024-09-30", 10),
+            Plan(4, "2024-10-01", "2024-12-31", 10));
+
+        var calls = CaseGuideGenerator.PlanFactCalls(draft);
+
+        Assert.Equal(4, calls.Count);
+        Assert.All(calls, c => Assert.Equal(10, c.Target));
+        Assert.Equal(new[] { "facts-1", "facts-2", "facts-3", "facts-4" }, calls.Select(c => c.Plan.Id));
+        Assert.Equal("2024-04-01", calls[1].From);
+        Assert.Equal("2024-06-30", calls[1].To);
+    }
+
+    [Fact]
+    public void PlanFactCalls_SplitsLargeSection()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        draft.Complexity = ComplexityLevel.Complex;
+        WithFactPlan(draft,
+            Plan(1, "2024-01-01", "2024-12-31", 20),
+            Plan(2, "2025-01-01", "2025-06-30", 10));
+
+        var calls = CaseGuideGenerator.PlanFactCalls(draft);
+
+        // 90 facts weighted 2:1 -> 60 + 30; the 60 is split into two calls over the two halves of the section
+        Assert.Equal(3, calls.Count);
+        Assert.Equal(new[] { 30, 30, 30 }, calls.Select(c => c.Target));
+        Assert.Equal(new[] { "facts-1", "facts-1", "facts-2" }, calls.Select(c => c.Plan.Id));
+        Assert.Equal(("2024-01-01", "2024-07-01"), (calls[0].From, calls[0].To));
+        Assert.Equal(("2024-07-02", "2024-12-31"), (calls[1].From, calls[1].To));
+        Assert.Equal(("2025-01-01", "2025-06-30"), (calls[2].From, calls[2].To));
+        Assert.All(calls, c => Assert.True(c.Target <= CaseGuideGenerator.MaxFactsPerCall));
+    }
+
+    [Fact]
+    public void PlanFactCalls_MinimumTwoAndBadDates()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        draft.Complexity = ComplexityLevel.Complex;
+        WithFactPlan(draft,
+            Plan(1, "early 2024", "late 2024", 50),
+            Plan(2, "2025-01-01", "2025-06-30", 0));
+
+        var calls = CaseGuideGenerator.PlanFactCalls(draft);
+
+        // Unparseable dates: one call capped at 30; a zero-weight section still gets 2
+        Assert.Equal(2, calls.Count);
+        Assert.Equal(30, calls[0].Target);
+        Assert.Equal("early 2024", calls[0].From);
+        Assert.Equal(2, calls[1].Target);
+        Assert.All(calls, c => Assert.True(c.Target >= 2));
+    }
+
+    // ---------- Facts: prompt ----------
+
+    [Fact]
+    public void FactsPrompt()
+    {
+        var draft = FactsReadyDraft();
+        var plan = draft.CoreDocument!.FactPlan[0];
+
+        var prompt = CaseGuidePrompts.BuildFactsPrompt(draft, plan, plan.StartDate, plan.EndDate, 8, Array.Empty<KeyFact>());
+
+        Assert.Contains("The Subcontract", prompt);
+        Assert.Contains("2024-01-08 to 2024-02-29", prompt);
+        Assert.Contains("Harmon engaged Brightline to furnish and install the window systems", prompt);
+        Assert.Contains("ISS-01 | Breach of Contract | ", prompt);
+        Assert.Contains("CH-001 | Maria Delgado | President | Brightline Glazing, LLC | active 2023-10-01 to 2024-12-31", prompt);
+        Assert.Contains("Harmon failed to pay approved change orders.", prompt);
+        Assert.Contains("Write about 8 facts", prompt);
+        Assert.Contains("State each fact as what happened", prompt);
+        Assert.Contains("Keep every name the document uses exactly as written", prompt);
+        Assert.Contains("Never use these real names: Acme Windows", prompt);
+        Assert.DoesNotContain("Existing facts", prompt);
+    }
+
+    [Fact]
+    public void FactsPrompt_ExistingAndHandEdited()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var plan = draft.CoreDocument!.FactPlan[1];
+        var existing = draft.Guide!.Facts.Where(f => f.SourceSectionId == plan.Id).ToList();
+        existing[0].IsUserEdited = true;
+
+        var prompt = CaseGuidePrompts.BuildFactsPrompt(draft, plan, plan.StartDate, plan.EndDate, 8, existing, "more about the invoice");
+
+        Assert.Contains("Existing facts (revise by existingId; return new facts with an empty existingId):", prompt);
+        Assert.Contains("F-004 | 2024-04-22 | Brightline completes the changed work", prompt);
+        Assert.Matches(@"Keep exactly; do not return these:\s*\r?\nF-003 \| 2024-03-18 \| Harmon approves Change Order 7", prompt);
+        Assert.Contains("Guidance from the user: more about the invoice", prompt);
+    }
+
+    [Fact]
+    public async Task Facts_Request()
+    {
+        var (inner, fake) = Gateway(
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-01-15", "Subcontract signed"))),
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-03-18", "Change order approved"))));
+        var gateway = new RecordingGateway(inner);
+        var draft = FactsReadyDraft();
+        var progress = new CaseTestData.SyncProgress<GuideProgress>();
+
+        await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft, progress);
+
+        Assert.Equal(new[] { "Case Guide - Facts (The Subcontract)", "Case Guide - Facts (Unpaid Change Orders)" }, gateway.Requests.Select(r => r.OperationName));
+        Assert.All(gateway.Requests, r => Assert.Equal(LlmTier.Story, r.Tier));
+        Assert.All(fake.Requests, r =>
+        {
+            Assert.Equal(16_000, r.MaxTokens);
+            Assert.Equal(CaseGuidePrompts.SystemPrompt, r.SystemPrompt);
+            CaseTestData.AssertNoJsonInstructions(r);
+        });
+        Assert.Contains("Write about 8 facts", fake.Requests[0].UserPrompt);
+        Assert.Contains(progress.Reports, p => p.Message == "Writing the key facts: The Subcontract (1 of 2)...");
+        Assert.Contains(progress.Reports, p => p.Message == "Writing the key facts: Unpaid Change Orders (2 of 2)...");
+    }
+
+    // ---------- Facts: mapping ----------
+
+    [Fact]
+    public async Task Facts_MapAndCheck()
+    {
+        var (gateway, _) = Gateway(
+            FakeLlmProvider.Ok(FactsJson(
+                FactJson("2024-01-15", "Subcontract signed", "\"ISS-1\", \"ISS-99\"", "\"CH-001\", \"Michael Scott\", \"CH-077\"", "\"CH-003\""),
+                FactJson("2024-02-01", "Harmon confirms the procedure", actors: "\"Lisa Chen\"", significance: "Hot"))),
+            FakeLlmProvider.Ok(FactsJson()));
+        var draft = FactsReadyDraft();
+
+        await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft);
+
+        var facts = draft.Guide!.Facts;
+        Assert.Equal(2, facts.Count);
+        var first = facts[0];
+        Assert.Equal("F-001", first.Id);
+        Assert.Equal(new[] { "ISS-01" }, first.IssueIds);
+        Assert.Equal(new[] { "CH-001" }, first.ActorIds);
+        Assert.Superset(new HashSet<string> { "CH-001", "CH-003" }, first.KnownByIds.ToHashSet());
+        Assert.Contains("Dropped unknown issue ISS-99.", first.MappingNotes);
+        Assert.Contains("Dropped unknown character CH-077.", first.MappingNotes);
+        Assert.Contains("Dropped unknown character Michael Scott.", first.MappingNotes);
+        Assert.Equal("facts-1", first.SourceSectionId);
+        Assert.Equal(FactSignificance.Key, first.Significance);
+        Assert.Equal("Subcontract signed on the Lakeview Tower project.", first.Description);
+
+        // Exact full-name match resolves to the cast id
+        var second = facts[1];
+        Assert.Equal(new[] { "CH-004" }, second.ActorIds);
+        Assert.Contains("CH-004", second.KnownByIds);
+        Assert.Equal(FactSignificance.Hot, second.Significance);
+        Assert.Empty(second.MappingNotes);
+    }
+
+    [Fact]
+    public async Task Facts_DateOrderIds()
+    {
+        var (gateway, _) = Gateway(
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-02-20", "Second"), FactJson("2024-01-10", "First"))),
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-05-01", "Fourth"), FactJson("2024-03-15", "Third"))));
+        var draft = FactsReadyDraft();
+
+        await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft);
+
+        var facts = draft.Guide!.Facts;
+        Assert.Equal(new[] { "First", "Second", "Third", "Fourth" }, facts.Select(f => f.Title));
+        Assert.Equal(new[] { "F-001", "F-002", "F-003", "F-004" }, facts.Select(f => f.Id));
+        Assert.Equal(new[] { "facts-1", "facts-1", "facts-2", "facts-2" }, facts.Select(f => f.SourceSectionId));
+    }
+
+    [Fact]
+    public async Task Facts_BadDateKept()
+    {
+        var (gateway, _) = Gateway(
+            FakeLlmProvider.Ok(FactsJson(FactJson("March 3", "Undated meeting"), FactJson("2024-01-10", "First"))),
+            FakeLlmProvider.Ok(FactsJson()));
+        var draft = FactsReadyDraft();
+
+        await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft);
+
+        var facts = draft.Guide!.Facts;
+        var bad = Assert.Single(facts, f => f.Title == "Undated meeting");
+        Assert.Equal("March 3", bad.Date);
+        Assert.Contains("The date \"March 3\" is not YYYY-MM-DD.", bad.MappingNotes);
+        // Undated facts sort last
+        Assert.Equal("First", facts[0].Title);
+    }
+
+    // ---------- Facts: outcomes ----------
+
+    [Fact]
+    public async Task Facts_PartialFailure()
+    {
+        var (gateway, fake) = Gateway(
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-01-15", "One"))),
+            FakeLlmProvider.Refused("Not this period."),
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-09-15", "Three"))));
+        var draft = WithFactPlan(FactsReadyDraft(),
+            Plan(1, "2024-01-01", "2024-03-31", 3),
+            Plan(2, "2024-04-01", "2024-06-30", 3),
+            Plan(3, "2024-07-01", "2024-09-30", 3));
+        var generator = new CaseGuideGenerator(gateway);
+
+        var result = await generator.GenerateFactsAsync(draft);
+
+        var guide = draft.Guide!;
+        Assert.False(result.Succeeded);
+        Assert.True(result.WasRefused);
+        Assert.Equal(GuidePartStatus.Failed, guide.FactsState.Status);
+        Assert.Equal("The model declined: Not this period.", guide.FactsState.FailureMessage);
+        Assert.Equal(guide.FactsState.FailureMessage, result.FailureMessage);
+        Assert.Equal(new[] { "One", "Three" }, guide.Facts.Select(f => f.Title));
+        Assert.Equal(new[] { "facts-1", "facts-3" }, guide.FactsState.CompletedUnits.OrderBy(u => u));
+        var before = fake.Requests.Count;
+
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(FactsJson(FactJson("2024-05-15", "Two"))));
+        var retry = await generator.GenerateFactsAsync(draft);
+
+        var request = Assert.Single(fake.Requests.Skip(before));
+        Assert.Contains("Period 2", request.UserPrompt);
+        Assert.True(retry.Succeeded);
+        Assert.Equal(new[] { "One", "Two", "Three" }, guide.Facts.Select(f => f.Title));
+        Assert.Equal(GuidePartStatus.Ready, guide.FactsState.Status);
+    }
+
+    [Fact]
+    public async Task Facts_SeveralFailed()
+    {
+        var (gateway, _) = Gateway(
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-01-15", "One"))),
+            FakeLlmProvider.Refused("Not this period."),
+            FakeLlmProvider.Refused("Not this one either."));
+        var draft = WithFactPlan(FactsReadyDraft(),
+            Plan(1, "2024-01-01", "2024-03-31", 3),
+            Plan(2, "2024-04-01", "2024-06-30", 3),
+            Plan(3, "2024-07-01", "2024-09-30", 3));
+
+        await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft);
+
+        Assert.Equal("2 periods were not written: The model declined: Not this period.", draft.Guide!.FactsState.FailureMessage);
+    }
+
+    [Fact]
+    public async Task Facts_Ready()
+    {
+        var (gateway, _) = Gateway(
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-01-15", "One"))),
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-03-15", "Two"))));
+        var draft = FactsReadyDraft();
+        var revision = draft.Revision;
+
+        var result = await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft);
+
+        var guide = draft.Guide!;
+        Assert.True(result.Succeeded);
+        Assert.Equal(GuidePart.Facts, result.Part);
+        Assert.Equal(GuidePartStatus.Ready, guide.FactsState.Status);
+        Assert.Equal("", guide.FactsState.FailureMessage);
+        Assert.Empty(guide.FactsState.CompletedUnits);
+        Assert.Equal(GuideStaleness.BasisFor(draft, GuidePart.Facts), guide.FactsState.BasisHash);
+        Assert.True(draft.Revision > revision);
+    }
+
+    [Fact]
+    public async Task Facts_NoCast()
+    {
+        var (gateway, fake) = Gateway(FakeLlmProvider.Ok(FactsJson()));
+        var draft = FactsReadyDraft();
+        draft.Guide!.Cast.Clear();
+
+        var result = await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Write the cast before the key facts.", result.FailureMessage);
+        Assert.Empty(fake.Requests);
+    }
+
+    [Fact]
+    public async Task Facts_Fatal()
+    {
+        var (gateway, fake) = Gateway(FakeLlmProvider.Failed(LlmFailureKind.Auth, "Invalid API key"));
+        var draft = FactsReadyDraft();
+
+        var result = await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft);
+
+        Assert.True(result.IsFatal);
+        Assert.Contains("Invalid API key", result.FatalError);
+        Assert.Equal(GuidePartStatus.Pending, draft.Guide!.FactsState.Status);
+        Assert.Single(fake.Requests);
+    }
+
+    [Fact]
+    public async Task Facts_UserCancel()
+    {
+        var (gateway, fake) = Gateway(
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-01-15", "One"))),
+            FakeLlmProvider.Ok(FactsJson(FactJson("2024-03-15", "Two"))));
+        using var cts = new CancellationTokenSource();
+        fake.OnSend = i =>
+        {
+            if (i == 1)
+                cts.Cancel();
+        };
+        var draft = FactsReadyDraft();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new CaseGuideGenerator(gateway).GenerateFactsAsync(draft, null, cts.Token));
+
+        // The finished section is kept for Retry
+        var guide = draft.Guide!;
+        Assert.Equal(GuidePartStatus.Pending, guide.FactsState.Status);
+        Assert.Equal(new[] { "One" }, guide.Facts.Select(f => f.Title));
+        Assert.Equal(new[] { "facts-1" }, guide.FactsState.CompletedUnits);
+    }
+
+    [Fact]
+    public async Task Facts_ParallelBound()
+    {
+        var fake = new FakeLlmProvider(LlmProviderKind.Anthropic);
+        var slow = new SlowProvider(fake);
+        var gateway = new LlmGateway(slow, CaseTestData.StoryModel(), CaseTestData.VolumeModel());
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(FactsJson(FactJson("2024-01-15", "Same"))));
+        var draft = WithFactPlan(FactsReadyDraft(), Enumerable.Range(1, 6)
+            .Select(n => Plan(n, $"2024-{n:D2}-01", $"2024-{n:D2}-28", 3)).ToArray());
+
+        await new CaseGuideGenerator(gateway).GenerateFactsAsync(draft);
+
+        Assert.Equal(6, fake.Requests.Count(IsFactsRequest));
+        Assert.InRange(slow.MaxConcurrent, 2, CaseGuideGenerator.MaxParallelCalls);
+        Assert.Equal(6, draft.Guide!.Facts.Count);
+        Assert.Equal(6, draft.Guide.Facts.Select(f => f.Id).Distinct().Count());
+    }
+
     /// <summary>
     /// Delays every send so parallel calls overlap, and records the peak number in flight.
     /// </summary>

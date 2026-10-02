@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-10-PLAN.md
-last_updated: "2026-10-02T20:49:42.627Z"
+stopped_at: Completed 04-11-PLAN.md
+last_updated: "2026-10-02T20:58:35.429Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 53
-  percent: 83
+  completed_plans: 54
+  percent: 84
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 12 of 22
+Plan: 13 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -103,6 +103,7 @@ Progress: [██████████] 98%
 | Phase 04 P08 | 12min | 2 tasks | 5 files |
 | Phase 04 P09 | 35min | 2 tasks | 2 files |
 | Phase 04 P10 | 25min | 2 tasks | 2 files |
+| Phase 04 P11 | 20min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -272,6 +273,8 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-10]: Decoys use knowers of a fact (2+ knowers preferred), start within +/-30 days of it clamped to the window, carry its IssueIds and never FactIds
 - [Phase 04]: [04-10]: Externals = clamp(bulk messages / 15, 3, 40) split 40/30/30 (spam first in the spam/vendor group), never reuse a case org or cast email domain; external-root threads are owned by the cast recipient; spam images are exactly 5% of spam messages when Image is enabled
 - [Phase 04]: [04-10]: Non-relevant threads use stable pools (active anchor..+30 days) and reschedule-to-fit (active ranges and window end) instead of swap/truncate repair; totals never change
+- [Phase 04]: [04-11]: Review Plan entry order: running, unreadable plan, no plan (AutoPlan or NoPlanCard on reopen), unapproved + settings changed -> AutoReplan, stale guide not dismissed -> StaleBanner (wins over settings changed), approved + settings changed -> SettingsBanner, else ShowPlan; WithdrawsApproval = approved and StaleBanner
+- [Phase 04]: [04-11]: MinPercentFor searches 5..60 so the D-07 warning never suggests a value the field clamps; PercentText shows whole values without decimals, else one decimal; Est. cost is N0 from $10 up, else 0.00
 
 ### Pending Todos
 
@@ -293,6 +296,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T20:49:42.623Z
-Stopped at: Completed 04-10-PLAN.md
+Last session: 2026-10-02T20:58:35.424Z
+Stopped at: Completed 04-11-PLAN.md
 Resume file: None

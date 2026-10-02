@@ -523,7 +523,8 @@ public partial class WizardForm : Form
 
         // Every case step commits its pending edits synchronously before its first await
         if (_currentStepIndex >= 0 && _currentStepIndex < _steps.Count
-            && _steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument or StepCaseGuide or StepCaseSummary) and IWizardStep step)
+            && _steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument or StepCaseGuide or StepCorpusSettings or StepReviewPlan or StepCaseSummary)
+                and IWizardStep step)
         {
             _ = step.OnLeaveStepAsync();
         }
@@ -539,7 +540,8 @@ public partial class WizardForm : Form
         if (_currentStepIndex < 0 || _currentStepIndex >= _steps.Count)
             return false;
 
-        return _steps[_currentStepIndex] is StepCoreDocument { IsGenerating: true } or StepCaseGuide { IsGenerating: true };
+        return _steps[_currentStepIndex] is StepCoreDocument { IsGenerating: true } or StepCaseGuide { IsGenerating: true }
+            or StepReviewPlan { IsPlanning: true };
     }
 
     // Disposing the running step cancels its token, so no further calls are billed (WR-07, T-03-61).
@@ -551,23 +553,29 @@ public partial class WizardForm : Form
 
         var step = _steps[_currentStepIndex];
         if (step is StepCaseGuide guide)
-        {
-            // Disabled while messages are pumped, so no click or second close re-enters the wizard
-            var wasEnabled = Enabled;
-            UseWaitCursor = true;
-            Enabled = false;
-            try
-            {
-                guide.CancelAndWaitForRun(TimeSpan.FromSeconds(10));
-            }
-            finally
-            {
-                Enabled = wasEnabled;
-                UseWaitCursor = false;
-            }
-        }
+            WaitWhileStopping(() => guide.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
+        else if (step is StepReviewPlan review)
+            // A planning run is cancelled and awaited, so no further calls are billed (T-04-61)
+            WaitWhileStopping(() => review.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
 
         step.Dispose();
+    }
+
+    private void WaitWhileStopping(Action stop)
+    {
+        // Disabled while messages are pumped, so no click or second close re-enters the wizard
+        var wasEnabled = Enabled;
+        UseWaitCursor = true;
+        Enabled = false;
+        try
+        {
+            stop();
+        }
+        finally
+        {
+            Enabled = wasEnabled;
+            UseWaitCursor = false;
+        }
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -583,7 +591,10 @@ public partial class WizardForm : Form
             {
                 if (decision == CloseDecision.AskDuringRun)
                 {
-                    var (runTitle, runText) = CaseGuideUiText.C12CloseDuringRun();
+                    // C-P2 ("Stop Planning?") while Review Plan is planning; C12 for the core document and guide runs
+                    var (runTitle, runText) = _steps[_currentStepIndex] is StepReviewPlan
+                        ? CorpusUiText.CP2ClosePlanning()
+                        : CaseGuideUiText.C12CloseDuringRun();
                     if (MessageBox.Show(this, runText, runTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question,
                             MessageBoxDefaultButton.Button2) != DialogResult.Yes)
                     {

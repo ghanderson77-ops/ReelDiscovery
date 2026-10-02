@@ -7,8 +7,8 @@ using ReelDiscovery.Tests.Case;
 namespace ReelDiscovery.Tests.Render;
 
 /// <summary>
-/// Renders the whole wizard window on the 5-step case flow at the active scaling (W5): header text,
-/// navigation button text, default window size and clipping for the last three steps.
+/// Renders the whole wizard window on the 7-step case flow at the active scaling (W5): header text,
+/// navigation button text, default window size and clipping for steps 3 to 7.
 /// </summary>
 [Trait("Category", "Render")]
 [Collection(RenderCollection.Name)]
@@ -17,26 +17,43 @@ public class WizardShellRenderTests
     [Fact]
     public void Shell_CaseGuideStep()
     {
-        RenderStep(3, "wizard-shell-case-guide", "Step 4 of 5: Case Guide", "Next >");
+        RenderStep(3, "wizard-shell-case-guide", "Step 4 of 7: Case Guide", "Next >");
+    }
+
+    [Fact]
+    public void Shell_CorpusSettingsStep()
+    {
+        // D-12: Corpus Settings is step 5 of the 7-step case flow
+        RenderStep(4, "wizard-shell-corpus-settings", "Step 5 of 7: Corpus Settings", "Next >");
+    }
+
+    [Fact]
+    public void Shell_ReviewPlanStep()
+    {
+        // The reopen flag keeps entering Review Plan from starting a planning run (no API calls in tests)
+        RenderStep(5, "wizard-shell-review-plan", "Step 6 of 7: Review Plan", "Next >",
+            state => state.SuppressAutoPlanOnce = true);
     }
 
     [Fact]
     public void Shell_CaseSummaryStep()
     {
-        RenderStep(4, "wizard-shell-case-summary", "Step 5 of 5: Case Summary", "Finish");
+        RenderStep(6, "wizard-shell-case-summary", "Step 7 of 7: Case Summary", "Finish");
     }
 
     [Fact]
     public void Shell_CoreDocumentStep()
     {
-        RenderStep(2, "wizard-shell-core-document", "Step 3 of 5: Review Core Document", "Next >");
+        RenderStep(2, "wizard-shell-core-document", "Step 3 of 7: Review Core Document", "Next >");
     }
 
-    private static void RenderStep(int index, string name, string expectedTitle, string expectedNext)
+    private static void RenderStep(int index, string name, string expectedTitle, string expectedNext,
+        Action<WizardState>? configure = null)
     {
         RenderHarness.RunSta(() =>
         {
             using var fixture = new ShellFixture();
+            configure?.Invoke(fixture.State);
             var title = string.Empty;
             var next = string.Empty;
             var nextHeight = 0;

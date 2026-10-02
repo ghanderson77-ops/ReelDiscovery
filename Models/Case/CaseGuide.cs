@@ -62,9 +62,79 @@ public class CaseGuide
     }
 
     /// <summary>
-    /// SHA-256 of the serialized guide; Phase 4 stamps its plan basis with it.
+    /// SHA-256 of the guide content (issues, organizations, cast, facts, values); the corpus plan stamps its basis with it.
+    /// Part states, review flags, edit markers, mapping notes, id counters and the dismissed stale key are excluded.
     /// </summary>
-    public string ComputeHash() => CaseDraft.ComputeHash(JsonSerializer.Serialize(this, CaseDraft.JsonOptions));
+    public string ComputeHash() =>
+        // Content only (RESEARCH Pitfall 1): UI/review state must not make a corpus plan stale
+        CaseDraft.ComputeHash(JsonSerializer.Serialize(new
+        {
+            Issues = (Issues ?? new()).Where(x => x != null).Select(x => new
+            {
+                x.Id,
+                x.CountId,
+                x.Number,
+                x.Title,
+                x.LegalBasis,
+                x.Summary,
+                AgainstPartyIds = x.AgainstPartyIds ?? new(),
+                x.Description,
+                Elements = x.Elements ?? new(),
+                x.RelevanceCriteria
+            }),
+            Organizations = (Organizations ?? new()).Where(x => x != null).Select(x => new
+            {
+                x.Id,
+                x.Name,
+                x.ShortName,
+                x.Kind,
+                x.PartyId,
+                RepresentsOrgIds = x.RepresentsOrgIds ?? new(),
+                x.Domain,
+                x.Location,
+                x.TimeZoneId
+            }),
+            Cast = (Cast ?? new()).Where(x => x != null).Select(x => new
+            {
+                x.Id,
+                x.FirstName,
+                x.LastName,
+                x.Title,
+                x.Department,
+                x.OrganizationId,
+                x.PartyId,
+                x.Tier,
+                x.Role,
+                x.Email,
+                x.Phone,
+                x.ActiveFrom,
+                x.ActiveTo,
+                x.Involvement,
+                x.VoiceNote,
+                x.SignatureStyle,
+                x.Signature
+            }),
+            Facts = (Facts ?? new()).Where(x => x != null).Select(x => new
+            {
+                x.Id,
+                x.Date,
+                x.Title,
+                x.Description,
+                IssueIds = x.IssueIds ?? new(),
+                ActorIds = x.ActorIds ?? new(),
+                KnownByIds = x.KnownByIds ?? new(),
+                x.Significance
+            }),
+            Values = (Values ?? new()).Where(x => x != null).Select(x => new
+            {
+                x.Id,
+                x.Kind,
+                x.Label,
+                x.Value,
+                x.Description,
+                FactIds = x.FactIds ?? new()
+            })
+        }, CaseDraft.JsonOptions));
 
     /// <summary>
     /// Repairs a guide loaded from untrusted case.json: null lists, strings and sub-objects become empty values; never throws.

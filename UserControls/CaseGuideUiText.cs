@@ -508,6 +508,8 @@ public static class CaseGuideUiText
         return stage switch
         {
             CaseStage.CaseGuide => "Case guide",
+            CaseStage.CorpusSettings => "Corpus settings",
+            CaseStage.ReviewPlan => "Plan review",
             CaseStage.Summary => "Complete",
             _ => "Core document"
         };

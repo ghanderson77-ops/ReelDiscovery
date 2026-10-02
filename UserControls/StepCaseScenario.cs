@@ -864,6 +864,7 @@ public class StepCaseScenario : UserControl, IWizardStep
             }
 
             _state.Case = result.Draft!;
+            MarkOpenedFromDisk(_state);
         }
 
         // OnLeaveStepAsync stores the textbox inputs into the draft; refresh them first or the loaded scenario is overwritten (Pitfall 5)
@@ -883,6 +884,11 @@ public class StepCaseScenario : UserControl, IWizardStep
             _state.PendingNotice = string.Empty;
         }
     }
+
+    /// <summary>
+    /// A case opened from disk never starts a planning run by itself: Review Plan shows "No corpus plan yet" once (T-04-62).
+    /// </summary>
+    internal static void MarkOpenedFromDisk(WizardState state) => state.SuppressAutoPlanOnce = true;
 
     /// <summary>
     /// Starts a fresh draft with no prompt (the current case is on disk); the previous case stays under Recent cases.

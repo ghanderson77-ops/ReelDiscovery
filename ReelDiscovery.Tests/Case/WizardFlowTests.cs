@@ -15,7 +15,7 @@ public class WizardFlowTests
             new[]
             {
                 typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
-                typeof(StepCaseSummary)
+                typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepCaseSummary)
             },
             WizardForm.StepTypesFor(WizardFlow.CaseDriven));
     }
@@ -24,6 +24,8 @@ public class WizardFlowTests
     [InlineData(CaseStage.Described, typeof(StepCaseScenario))]
     [InlineData(CaseStage.CoreDocument, typeof(StepCoreDocument))]
     [InlineData(CaseStage.CaseGuide, typeof(StepCaseGuide))]
+    [InlineData(CaseStage.CorpusSettings, typeof(StepCorpusSettings))]
+    [InlineData(CaseStage.ReviewPlan, typeof(StepReviewPlan))]
     [InlineData(CaseStage.Summary, typeof(StepCaseSummary))]
     public void StepTypeForStage_MapsEveryStage(CaseStage stage, Type expected)
     {
@@ -36,6 +38,16 @@ public class WizardFlowTests
     {
         // A tampered case.json stage never opens an arbitrary step (T-03-60)
         Assert.Equal(typeof(StepCaseScenario), WizardForm.StepTypeForStage((CaseStage)99));
+    }
+
+    [Fact]
+    public void CaseDriven_CorpusStepsSitBetweenGuideAndSummary()
+    {
+        // D-12: Corpus Settings is step 5 of 7 and Review Plan is step 6 of 7
+        var types = WizardForm.StepTypesFor(WizardFlow.CaseDriven);
+        Assert.Equal(7, types.Count);
+        Assert.Equal(4, types.ToList().IndexOf(typeof(StepCorpusSettings)));
+        Assert.Equal(5, types.ToList().IndexOf(typeof(StepReviewPlan)));
     }
 
     [Fact]

@@ -282,6 +282,8 @@ public class CaseGuideUiLogicTests
     [Theory]
     [InlineData(CaseStage.CaseGuide, false, "Case guide · opened Mar 3, 2024")]
     [InlineData(CaseStage.CaseGuide, true, "Case guide · open now")]
+    [InlineData(CaseStage.CorpusSettings, false, "Corpus settings · opened Mar 3, 2024")]
+    [InlineData(CaseStage.ReviewPlan, true, "Plan review · open now")]
     [InlineData(CaseStage.Summary, false, "Complete · opened Mar 3, 2024")]
     [InlineData(CaseStage.CoreDocument, false, "Core document · opened Mar 3, 2024")]
     [InlineData(CaseStage.Described, false, "Core document · opened Mar 3, 2024")]

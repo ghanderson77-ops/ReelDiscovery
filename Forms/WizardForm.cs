@@ -283,7 +283,8 @@ public partial class WizardForm : Form
         flow == WizardFlow.CaseDriven
             ? new[]
             {
-                typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide), typeof(StepCaseSummary)
+                typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
+                typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepCaseSummary)
             }
             : new[]
             {
@@ -298,6 +299,8 @@ public partial class WizardForm : Form
     {
         CaseStage.CoreDocument => typeof(StepCoreDocument),
         CaseStage.CaseGuide => typeof(StepCaseGuide),
+        CaseStage.CorpusSettings => typeof(StepCorpusSettings),
+        CaseStage.ReviewPlan => typeof(StepReviewPlan),
         CaseStage.Summary => typeof(StepCaseSummary),
         _ => typeof(StepCaseScenario)
     };

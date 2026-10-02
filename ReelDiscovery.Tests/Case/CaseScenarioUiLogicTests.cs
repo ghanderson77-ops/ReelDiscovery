@@ -1,4 +1,5 @@
 using ReelDiscovery.Helpers;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.UserControls;
 
@@ -106,6 +107,29 @@ public class CaseScenarioUiLogicTests
     public void CounterColor_OverCap_IsDanger()
     {
         Assert.Equal(Theme.Danger, StepCaseScenario.CounterColor(8001));
+    }
+
+    [Fact]
+    public void MarkOpenedFromDisk_SuppressesAutoPlanOnce()
+    {
+        // Opening a case never starts a billed planning run by itself (T-04-62)
+        var state = new WizardState();
+        Assert.False(state.SuppressAutoPlanOnce);
+        StepCaseScenario.MarkOpenedFromDisk(state);
+        Assert.True(state.SuppressAutoPlanOnce);
+    }
+
+    [Fact]
+    public void OpenCase_CallsMarkOpenedFromDiskAfterLoad()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "ReelDiscovery.csproj")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "UserControls", "StepCaseScenario.cs"));
+        var load = source.IndexOf("_state.Case = result.Draft!;", StringComparison.Ordinal);
+        var mark = source.IndexOf("MarkOpenedFromDisk(_state);", StringComparison.Ordinal);
+        Assert.True(load >= 0 && mark > load && mark - load < 120, "OpenCase must mark the case as opened from disk right after loading it");
     }
 
     [Fact]

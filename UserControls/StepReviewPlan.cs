@@ -43,6 +43,8 @@ public partial class StepReviewPlan : UserControl, IWizardStep
     // The Checks list shows two whole findings (about the UI-SPEC's 152 logical px card)
     private const int ChecksRows = 2;
     private const string ChecksCollapsedText = "Make the window taller to see the list.";
+    // UI-SPEC says 96; "Not relevant" needs a little more beside the header's sort-glyph reserve to stay on one line
+    private const int NotRelevantWidth = 108;
     private const string RelevantHeaderTooltip = "An email linked to two issues counts under both.";
 
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
@@ -631,7 +633,7 @@ public partial class StepReviewPlan : UserControl, IWizardStep
         AddTextColumn(_gridIssues, "Id", "ID", 64);
         AddFillColumn(_gridIssues, "Issue", "Issue", 120, 100);
         AddNumberColumn(_gridIssues, "Relevant", "Relevant", 80).HeaderCell.ToolTipText = RelevantHeaderTooltip;
-        AddNumberColumn(_gridIssues, "NotRelevant", "Not relevant", 96);
+        AddNumberColumn(_gridIssues, "NotRelevant", "Not relevant", NotRelevantWidth);
         AddNumberColumn(_gridIssues, "Total", "Total", 64);
 
         _gridFacts = NewCountsGrid();
@@ -646,7 +648,7 @@ public partial class StepReviewPlan : UserControl, IWizardStep
         GridStyle.Apply(_gridCustodians, this);
         AddFillColumn(_gridCustodians, "Custodian", "Custodian", 140, 100);
         AddNumberColumn(_gridCustodians, "Relevant", "Relevant", 80);
-        AddNumberColumn(_gridCustodians, "NotRelevant", "Not relevant", 96);
+        AddNumberColumn(_gridCustodians, "NotRelevant", "Not relevant", NotRelevantWidth);
         AddNumberColumn(_gridCustodians, "Total", "Total", 64);
 
         _grids[CountsTable.Issue] = _gridIssues;
@@ -668,6 +670,8 @@ public partial class StepReviewPlan : UserControl, IWizardStep
         var grid = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true, Margin = new Padding(0) };
         grid.AllowUserToResizeColumns = false;
         grid.ScrollBars = ScrollBars.Vertical;
+        // One-line headers: a wrapped "Not relevant" header drew off the right-aligned number line
+        grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False;
         return grid;
     }
 
@@ -1480,7 +1484,9 @@ public partial class StepReviewPlan : UserControl, IWizardStep
             var progressWidth = 0;
             if (_progressText.Length > 0)
             {
-                progressWidth = TextRenderer.MeasureText(_progressText, _progressFont, Size.Empty, flags).Width;
+                // Measured without EndEllipsis (it shortens the measured width) and with a pixel of slack
+                progressWidth = TextRenderer.MeasureText(_progressText, _progressFont, Size.Empty,
+                    TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine).Width + 2;
                 TextRenderer.DrawText(g, _progressText, _progressFont, new Rectangle(Width - progressWidth, 0, progressWidth, Height),
                     Theme.TextMuted, flags | TextFormatFlags.Right);
                 progressWidth += LogicalToDeviceUnits(Theme.SmallGap);

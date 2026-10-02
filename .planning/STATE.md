@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-10-02T19:39:32.000Z"
+stopped_at: Completed 04-21-PLAN.md
+last_updated: "2026-10-02T19:42:41.663Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 44
-  percent: 69
+  completed_plans: 45
+  percent: 70
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 3 of 22
+Plan: 4 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -94,6 +94,7 @@ Progress: [██████████] 98%
 | Phase 03 P19 | 35min | 2 tasks | 16 files |
 | Phase 04 P01 | 12min | 3 tasks | 16 files |
 | Phase 04 P02 | 14min | 3 tasks | 8 files |
+| Phase 04 P21 | 6min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -228,6 +229,7 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-02]: BusinessCalendar.ResolveId returns null for blank/unknown ids (failures not cached); Resolve falls back TimeZoneId -> Location zone -> America/New_York -> UTC
 - [Phase 04]: [04-02]: PlanCallRunner waits for a slot on run.Cts.Token and releases only when acquired, so a fatal stop frees queued callers
 - [Phase 04]: [04-02]: FakeLlmProvider calls OnSend outside its lock; Respond (request-based) overrides the response queue
+- [Phase 04]: [04-21]: CaseGuide.ComputeHash hashes a content projection only; part states, review flags, IsUserEdited/EmailIsUserEdited, DetailsPending, MappingNotes, SourceSectionId, IdCounters and DismissedStaleKey are excluded
 
 ### Pending Todos
 
@@ -249,6 +251,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T19:39:12.260Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-10-02T19:42:41.659Z
+Stopped at: Completed 04-21-PLAN.md
 Resume file: None

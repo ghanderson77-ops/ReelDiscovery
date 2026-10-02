@@ -81,10 +81,13 @@ public class NonRelevantSkeletonTests
         Assert.Equal(skeleton.Threads.Count, skeleton.Threads.Select(t => t.Id).Distinct().Count());
     }
 
-    [Fact]
-    public void Daily_SendersAreCastWeightedByRelevantVolume()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void Daily_SendersAreCastWeightedByRelevantVolume(int seed)
     {
-        var (ctx, relevant, skeleton) = Build(Mix(daily: 400));
+        var (ctx, relevant, skeleton) = Build(Mix(daily: 400), seed: seed);
         var daily = Of(skeleton, NonRelevantCategory.DailyBusiness);
 
         Assert.All(daily.SelectMany(t => t.Messages), m => Assert.True(ctx.CastById.ContainsKey(m.FromId)));
@@ -96,10 +99,13 @@ public class NonRelevantSkeletonTests
         Assert.Contains(topRelevant, topDaily);
     }
 
-    [Fact]
-    public void Daily_AboutAFifthOfThreadsIncludeAnotherOrganization()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void Daily_AboutAFifthOfThreadsIncludeAnotherOrganization(int seed)
     {
-        var (ctx, _, skeleton) = Build(Mix(daily: 400));
+        var (ctx, _, skeleton) = Build(Mix(daily: 400), seed: seed);
         var daily = Of(skeleton, NonRelevantCategory.DailyBusiness).Where(t => !t.IsPrivileged).ToList();
 
         var cross = daily.Count(t =>
@@ -110,20 +116,26 @@ public class NonRelevantSkeletonTests
         Assert.InRange(cross * 100.0 / daily.Count, 10, 30);
     }
 
-    [Fact]
-    public void Daily_DepthFollowsBusinessTable()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void Daily_DepthFollowsBusinessTable(int seed)
     {
-        var (_, _, skeleton) = Build(Mix(daily: 3000));
+        var (_, _, skeleton) = Build(Mix(daily: 3000), seed: seed);
         var shares = DepthShares(Of(skeleton, NonRelevantCategory.DailyBusiness), ThreadShapes.BusinessDepth);
 
         for (var i = 0; i < ThreadShapes.BusinessDepth.Length; i++)
             Assert.InRange(shares[i], ThreadShapes.BusinessDepth[i].Percent - 4, ThreadShapes.BusinessDepth[i].Percent + 4);
     }
 
-    [Fact]
-    public void Daily_SomeThreadsArePrivilegedInsideCounselOrganization()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void Daily_SomeThreadsArePrivilegedInsideCounselOrganization(int seed)
     {
-        var (ctx, _, skeleton) = Build(Mix(daily: 400));
+        var (ctx, _, skeleton) = Build(Mix(daily: 400), seed: seed);
         var daily = Of(skeleton, NonRelevantCategory.DailyBusiness);
         Assert.True(daily.Count >= 50);
 
@@ -142,10 +154,13 @@ public class NonRelevantSkeletonTests
         });
     }
 
-    [Fact]
-    public void Ancillary_BackgroundSendersWithKeyColleagues()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void Ancillary_BackgroundSendersWithKeyColleagues(int seed)
     {
-        var (ctx, _, skeleton) = Build(Mix(ancillary: 400));
+        var (ctx, _, skeleton) = Build(Mix(ancillary: 400), seed: seed);
         var ancillary = Of(skeleton, NonRelevantCategory.Ancillary);
 
         Assert.All(ancillary, t => Assert.Equal(CastTier.Background, ctx.CastById[t.Messages[0].FromId].Tier));
@@ -159,20 +174,26 @@ public class NonRelevantSkeletonTests
         Assert.True(withKey * 2 >= ancillary.Count, $"{withKey} of {ancillary.Count} ancillary threads include a key colleague.");
     }
 
-    [Fact]
-    public void Ancillary_DepthFollowsAncillaryTable()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void Ancillary_DepthFollowsAncillaryTable(int seed)
     {
-        var (_, _, skeleton) = Build(Mix(ancillary: 3000));
+        var (_, _, skeleton) = Build(Mix(ancillary: 3000), seed: seed);
         var shares = DepthShares(Of(skeleton, NonRelevantCategory.Ancillary), ThreadShapes.AncillaryDepth);
 
         for (var i = 0; i < ThreadShapes.AncillaryDepth.Length; i++)
             Assert.InRange(shares[i], ThreadShapes.AncillaryDepth[i].Percent - 4, ThreadShapes.AncillaryDepth[i].Percent + 4);
     }
 
-    [Fact]
-    public void Decoy_KnowersNearAFactWithItsIssues()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void Decoy_KnowersNearAFactWithItsIssues(int seed)
     {
-        var (ctx, _, skeleton) = Build(Mix(decoy: 300));
+        var (ctx, _, skeleton) = Build(Mix(decoy: 300), seed: seed);
         var decoys = Of(skeleton, NonRelevantCategory.Decoy);
         Assert.NotEmpty(decoys);
 
@@ -197,10 +218,13 @@ public class NonRelevantSkeletonTests
         });
     }
 
-    [Fact]
-    public void AllThreads_ParticipantsActiveAndBusinessTime()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void AllThreads_ParticipantsActiveAndBusinessTime(int seed)
     {
-        var (ctx, _, skeleton) = Build(Mix(daily: 1000, ancillary: 400, decoy: 200));
+        var (ctx, _, skeleton) = Build(Mix(daily: 1000, ancillary: 400, decoy: 200), seed: seed);
 
         Assert.All(skeleton.Threads, t =>
         {
@@ -214,11 +238,14 @@ public class NonRelevantSkeletonTests
         });
     }
 
-    [Fact]
-    public void Attachments_ShareMatchesSettingsPerCategory()
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    [InlineData(2024)]
+    public void Attachments_ShareMatchesSettingsPerCategory(int seed)
     {
         var settings = new CorpusSettings { AttachmentPercent = 25 };
-        var (ctx, _, skeleton) = Build(Mix(daily: 600, ancillary: 300, decoy: 200), settings: settings, media: true);
+        var (ctx, _, skeleton) = Build(Mix(daily: 600, ancillary: 300, decoy: 200), settings: settings, media: true, seed: seed);
 
         foreach (var category in BusinessLike)
         {

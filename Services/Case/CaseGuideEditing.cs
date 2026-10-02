@@ -366,6 +366,62 @@ public static partial class CaseGuideEditing
 
     private static string ChangedReason(string name) => $"{name} was changed after it was written.";
 
+    /// <summary>
+    /// Widens each generated (not hand-edited) character's active range so it covers the date of every fact they did or knew
+    /// about: ActiveFrom moves earlier and ActiveTo later, never the other way (yyyy-MM-dd). Facts with unparseable dates
+    /// are skipped. Hand-edited characters are never changed, so the validator still flags them. Applied like a cast hand
+    /// edit, so parts that were fresh stay fresh. True when any range changed.
+    /// </summary>
+    public static bool WidenActiveRanges(CaseDraft draft)
+    {
+        var guide = draft?.Guide;
+        if (draft == null || guide == null)
+            return false;
+
+        var facts = (guide.Facts ?? new List<KeyFact>())
+            .Where(f => f != null && CaseDraft.TryParseDate(f.Date, out _))
+            .Select(f =>
+            {
+                CaseDraft.TryParseDate(f.Date, out var date);
+                return (Date: date, People: (f.ActorIds ?? new List<string>()).Concat(f.KnownByIds ?? new List<string>()).ToHashSet(StringComparer.Ordinal));
+            })
+            .ToList();
+
+        var changes = new List<(CastMember Member, string From, string To)>();
+        foreach (var member in (guide.Cast ?? new List<CastMember>()).Where(c => c != null && !c.IsUserEdited && !string.IsNullOrEmpty(c.Id)))
+        {
+            var dates = facts.Where(f => f.People.Contains(member.Id)).Select(f => f.Date).ToList();
+            if (dates.Count == 0)
+                continue;
+
+            var first = dates.Min();
+            var last = dates.Max();
+            var from = CaseDraft.TryParseDate(member.ActiveFrom, out var currentFrom) && currentFrom <= first ? currentFrom : first;
+            var to = CaseDraft.TryParseDate(member.ActiveTo, out var currentTo) && currentTo >= last ? currentTo : last;
+
+            var fromText = FormatDate(from);
+            var toText = FormatDate(to);
+            if (fromText != member.ActiveFrom || toText != member.ActiveTo)
+                changes.Add((member, fromText, toText));
+        }
+
+        if (changes.Count == 0)
+            return false;
+
+        GuideStaleness.AbsorbHandEdit(draft, GuidePart.Cast, () =>
+        {
+            foreach (var (member, from, to) in changes)
+            {
+                member.ActiveFrom = from;
+                member.ActiveTo = to;
+            }
+        });
+
+        return true;
+    }
+
+    private static string FormatDate(DateTime date) => date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
     // ---- Facts ----
 
     public static KeyFact AddFact(CaseDraft draft)

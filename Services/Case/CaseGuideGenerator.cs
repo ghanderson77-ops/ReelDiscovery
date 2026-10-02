@@ -127,7 +127,8 @@ public class CaseGuideGenerator
         }
         finally
         {
-            if (result.PartsWritten.Count > 0)
+            // Generated characters stay active on every fact date they appear in
+            if (CaseGuideEditing.WidenActiveRanges(draft) || result.PartsWritten.Count > 0)
                 draft.Revision++;
         }
 
@@ -1557,6 +1558,8 @@ public class CaseGuideGenerator
             {
                 // Merge once on the calling thread: generator tests have no SynchronizationContext, so lambdas run on pool threads (RESEARCH Pattern 5)
                 changed = MergeFacts(guide, units, tasks);
+                // Generated characters stay active on every fact date they appear in (before the Facts stamp below)
+                changed |= CaseGuideEditing.WidenActiveRanges(draft);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -2011,12 +2014,18 @@ public class CaseGuideGenerator
         draft.Guide ??= new CaseGuide();
         guidance ??= string.Empty;
 
-        return part switch
+        var result = part switch
         {
             GuidePart.Cast => await RegenerateCastAsync(draft, guidance, replaceEdited, progress, ct),
             GuidePart.Facts => await RegenerateFactsAsync(draft, guidance, replaceEdited, progress, ct),
             _ => await RegenerateValuesAsync(draft, guidance, replaceEdited, progress, ct)
         };
+
+        // New facts or newly written cast dates: generated characters stay active on every fact date they appear in
+        if (part != GuidePart.Values && CaseGuideEditing.WidenActiveRanges(draft))
+            draft.Revision++;
+
+        return result;
     }
 
     // Whole Cast tab: organizations re-synced from the parties, key roster merged, counsel topped up, details written,
@@ -2696,6 +2705,8 @@ public class CaseGuideGenerator
             }
         }
 
+        // A rewritten fact date or character range: generated characters stay active on every fact date they appear in
+        CaseGuideEditing.WidenActiveRanges(draft);
         draft.Revision++;
     }
 

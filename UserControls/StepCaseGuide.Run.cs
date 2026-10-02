@@ -479,6 +479,12 @@ public partial class StepCaseGuide
         }
 
         Draft.AdvanceStage(CaseStage.CaseGuide);
+
+        // A guide saved before active ranges were widened: generated characters cover every fact date they appear in;
+        // the save below writes the change
+        if (Draft.Guide != null && CaseGuideEditing.WidenActiveRanges(Draft))
+            Draft.Revision++;
+
         RefreshAll();
         await SaveAsync();
         if (IsDisposed)

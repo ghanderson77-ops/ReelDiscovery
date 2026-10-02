@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-12-PLAN.md
-last_updated: "2026-10-02T21:15:28.462Z"
+stopped_at: Completed 04-13-PLAN.md
+last_updated: "2026-10-02T21:26:05.232Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 56
-  percent: 88
+  completed_plans: 57
+  percent: 89
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 15 of 22
+Plan: 16 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -106,6 +106,7 @@ Progress: [██████████] 98%
 | Phase 04 P11 | 20min | 2 tasks | 3 files |
 | Phase 04 P22 | 10min | 2 tasks | 3 files |
 | Phase 04 P12 | 35min | 2 tasks | 6 files |
+| Phase 04 P13 | 20min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -282,6 +283,9 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-12]: PercentSlider exposes internal ValueFromX/HandleKey/Commit; ValueChanged only on change, ValueCommitted on mouse-up and key-up (owner autosaves on commit)
 - [Phase 04]: [04-12]: MonthHistogram skips any x label that would come within 4 px of the previous one after edge clamping; odd axis maxima (1, 5) draw the middle gridline unlabeled
 - [Phase 04]: [04-12]: Ellipsizing label rows (StatTile) use fixed one-line Absolute rows measured before docking, with TopLeft text; MiddleLeft lifts ellipsized text half a line
+- [Phase 04]: [04-13]: Relevant chunks cut greedily in first-message order (<= 20 threads, <= 60 messages); window facts = facts dated within the chunk's sender-local days plus facts the threads carry, with up to 3 earlier facts as Already happened; only the last 40 earlier threads are listed
+- [Phase 04]: [04-13]: Re-ask triggers on blank subject/purpose/rationale or any message without intent/must-convey; refused chunks are not re-sent; any template use sets UsesFallbackContent
+- [Phase 04]: [04-13]: Attachment file names = SanitizeForFileName with dots/underscores trimmed, stem capped at 80, code extension by kind; blank titles keep the code default
 
 ### Pending Todos
 
@@ -303,6 +307,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T21:15:28.458Z
-Stopped at: Completed 04-12-PLAN.md
+Last session: 2026-10-02T21:26:05.227Z
+Stopped at: Completed 04-13-PLAN.md
 Resume file: None

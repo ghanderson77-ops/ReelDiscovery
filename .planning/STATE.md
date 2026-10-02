@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-16-PLAN.md
-last_updated: "2026-10-01T23:53:56.191Z"
-last_activity: 2026-10-01
+stopped_at: Completed 03-18-PLAN.md
+last_updated: "2026-10-02T00:05:39.884Z"
+last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 42
-  completed_plans: 39
-  percent: 93
+  completed_plans: 40
+  percent: 95
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 3 (Case Guide) — EXECUTING
-Plan: 17 of 20
+Plan: 19 of 20
 Status: Ready to execute
-Last activity: 2026-10-01
+Last activity: 2026-10-02
 
-Progress: [█████████░] 93%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -89,6 +89,7 @@ Progress: [█████████░] 93%
 | Phase 03 P14 | 25min | 2 tasks | 4 files |
 | Phase 03 P15 | 12min | 2 tasks | 3 files |
 | Phase 03 P16 | 26min | 3 tasks | 8 files |
+| Phase 03 P18 | 35min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,9 @@ Recent decisions affecting current work:
 - [03-13]: GuideTabPanel combos (AddCombo, AddPairedCombos) sit in the text fields' rounded 34 px border with text on the 10 px inner edge; a disabled combo is shown as a plain label (no grey system frame)
 - [03-13]: Grid Name edits commit as CastField.FullName (atomic split at the last space); detail fields rebuild only when the character or tier changes, combo commits are deferred with BeginInvoke
 - [03-13]: GUIDE-08/GUIDE-09 left Pending: the Facts/Values tabs and the step shell (stale banner) come in 03-14..03-16; GUIDE-02/03/04 marked Complete (generation done earlier, now visible in the Cast tab)
+- [03-18]: Wizard opens at a 1150x900 logical client (min 1000x700, clamped to the working area); 1100x750 folded the Case Guide Checks list once the shell chrome was subtracted
+- [03-18]: DecideClose: legacy closes; active run asks C12 first; no core document and no folder asks C11 when a scenario was typed; otherwise close on a successful save, else C10. Prompts only for CloseReason.UserClosing
+- [03-18]: StepCoreDocument.SaveAsync advances the stage to CoreDocument before every save; run autosaves fire when the section or ready count changes
 - [03-17]: Case Summary Finish/Back are disabled while an export or folder move runs (CanMoveNext = !_busy)
 - [03-17]: Export All stops at the first failure and keeps written documents; an open-in-Word target is detected via sharing/lock HResults or a FileShare.None probe
 - [03-17]: Data labels use UseMnemonic = false so "&" renders (Key Facts & Events, case titles, paths); Last saved falls back to case.json write time
@@ -230,6 +234,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-01T23:53:56.186Z
-Stopped at: Completed 03-16-PLAN.md
+Last session: 2026-10-02T00:05:39.879Z
+Stopped at: Completed 03-18-PLAN.md
 Resume file: None

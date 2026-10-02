@@ -15,3 +15,8 @@
 - **Values grid at 900x600:** the Canonical Values columns (28 + 64 + 112 + 140 + 120 + 56 = 520) are wider than the grid beside the detail card, so the grid scrolls sideways at the minimum window. 03-15 exempted this in `ValuesPanelRenderTests`, but the UI-SPEC allows that only on Key Facts. 03-16 renders Values only at 1100x750.
 - **Tab filters on case switch:** `OnEnterStepAsync` resets the selected tab and the run state when a different case is bound, but the Cast (All/Key/Background) and Key Facts (All/Needs review) filters have no public reset. `SelectEntity` already clears a filter that hides the target, so this only affects which rows show first.
 - **Render-harness artifact (again):** in the full-step PNGs, the detail panel's native scrollbar (and a multiline field's scrollbar) can be painted past the detail card edge as a thin grey strip, and TextBox placeholder text is not drawn. Both come from `DrawToBitmap` (WM_PRINT ignores child clipping and does not paint placeholders). They do not occur at runtime.
+
+## From 03-18
+
+- **Resolved:** the 03-16 "wizard window too small" item. WizardForm opens at a 1150x900 logical client (minimum 1000x700, both clamped to the working area); the Case Guide keeps its Checks list at the default size.
+- **NavigateToStage has no caller yet:** opening a recent case at its stage is wired by the case-opening plan.

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-10-02T19:32:31.905Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-10-02T19:39:32.000Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 43
-  percent: 67
+  completed_plans: 44
+  percent: 69
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 2 of 22
+Plan: 3 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -93,6 +93,7 @@ Progress: [██████████] 98%
 | Phase 03 P18 | 35min | 3 tasks | 6 files |
 | Phase 03 P19 | 35min | 2 tasks | 16 files |
 | Phase 04 P01 | 12min | 3 tasks | 16 files |
+| Phase 04 P02 | 14min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -223,6 +224,10 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-01]: CaseDraft.Normalize upgrades FormatVersion below current to current so v1 cases re-saved with Corpus are refused by older builds (T-04-03)
 - [Phase 04]: [04-01]: ClampWindow only widens toward the fact range; invalid dates are flagged and left as typed; EndBeforeStart compares the typed dates
 - [Phase 04]: [04-01]: Override ranges HotPerHotFact 1-5, PrivilegedPercent 0-30, AttachmentPercent 0-60; negative = automatic (null)
+- [Phase 04]: [04-02]: AddBusinessMinutes landing exactly on 17:00 rolls to 09:00 of the next business day (results always business time)
+- [Phase 04]: [04-02]: BusinessCalendar.ResolveId returns null for blank/unknown ids (failures not cached); Resolve falls back TimeZoneId -> Location zone -> America/New_York -> UTC
+- [Phase 04]: [04-02]: PlanCallRunner waits for a slot on run.Cts.Token and releases only when acquired, so a fatal stop frees queued callers
+- [Phase 04]: [04-02]: FakeLlmProvider calls OnSend outside its lock; Respond (request-based) overrides the response queue
 
 ### Pending Todos
 
@@ -244,6 +249,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T19:32:09.050Z
-Stopped at: Phase 4 context gathered
+Last session: 2026-10-02T19:39:12.260Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None

@@ -2129,6 +2129,11 @@ public class CaseGuideGenerator
             result.WasRefused = ex.Result.Outcome == LlmOutcome.Refused;
             result.FailureMessage = DescribeOutcome(ex.Result, RegenerateHint("Values"));
         }
+        catch (Exception ex)
+        {
+            // Any other failure (mapping, merge, gateway): never leave the part stuck in Generating (WR-04)
+            result.FailureMessage = ex.Message;
+        }
 
         // Failure: the values stay as they were
         state.Status = previous;

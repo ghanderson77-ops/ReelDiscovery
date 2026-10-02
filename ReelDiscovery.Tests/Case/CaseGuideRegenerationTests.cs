@@ -538,6 +538,33 @@ public class CaseGuideRegenerationTests
     }
 
     [Fact]
+    public async Task RegenValues_UnexpectedException_RestoresState()
+    {
+        // WR-04: a non-LlmCallException failure must not leave ValuesState stuck in Generating
+        var draft = CaseTestData.SampleGuidedDraft();
+        var guide = draft.Guide!;
+        StampAll(draft);
+        var values = JsonSerializer.Serialize(guide.Values, CaseDraft.JsonOptions);
+
+        var result = await new CaseGuideGenerator(new ThrowingGateway()).RegenerateTabAsync(draft, GuidePart.Values, "", replaceEdited: false);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Gateway exploded.", result.FailureMessage);
+        Assert.Equal(GuidePartStatus.Ready, guide.ValuesState.Status);
+        Assert.Equal(values, JsonSerializer.Serialize(guide.Values, CaseDraft.JsonOptions));
+    }
+
+    private sealed class ThrowingGateway : ILlmGateway
+    {
+        public LlmProviderKind Provider => LlmProviderKind.Anthropic;
+
+        public ReelDiscovery.Models.AIModelConfig ResolveModel(LlmTier tier) => CaseTestData.StoryModel();
+
+        public Task<LlmResult<T>> GenerateAsync<T>(LlmRequest request, CancellationToken ct = default) where T : class =>
+            throw new InvalidOperationException("Gateway exploded.");
+    }
+
+    [Fact]
     public async Task RegenIssues_Throws()
     {
         var (gateway, fake) = Gateway(FakeLlmProvider.Ok("{}"));

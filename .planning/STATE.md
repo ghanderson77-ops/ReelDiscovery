@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-08-PLAN.md
-last_updated: "2026-10-02T20:27:00.312Z"
+stopped_at: Completed 04-09-PLAN.md
+last_updated: "2026-10-02T20:38:30.057Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 51
-  percent: 80
+  completed_plans: 52
+  percent: 81
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 10 of 22
+Plan: 11 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -101,6 +101,7 @@ Progress: [██████████] 98%
 | Phase 04 P06 | 10min | 2 tasks | 4 files |
 | Phase 04 P07 | 14min | 2 tasks | 5 files |
 | Phase 04 P08 | 12min | 2 tasks | 5 files |
+| Phase 04 P09 | 35min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -261,6 +262,11 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-08]: PlanSummary month buckets span the settings window widened to every planned message (sums equal Emails); windows over 600 months are ignored
 - [Phase 04]: [04-08]: Fact rows count relevant threads listing the fact, relevant messages whose own FactIds carry it, and IsHot among those; HotEmails counts IsHot only in relevant threads
 - [Phase 04]: [04-08]: Custodians tile counts distinct cast CustodianIds; custodian rows = sender if cast else first cast recipient, Total desc then name
+- [Phase 04]: [04-09]: Multi-issue pairs need different issue sets, fact dates within 10 business days and >= 2 shared active knowers; merges keep one single-fact thread per fact; overflow above depth 12 spills to the dropped fact, then the kept fact, then a new thread
+- [Phase 04]: [04-09]: Merges, privilege and participant pools are decided on thread specs before messages are built
+- [Phase 04]: [04-09]: Privileged side mirrors validator rule 12 (in-house own org; outside firm + RepresentsOrgIds; plus firms representing those clients); candidates need counsel + 1 other active client-side knower; target round(threads x pct), min 1
+- [Phase 04]: [04-09]: Attachments are an exact share (round(messages x AttachmentPercent)) picked among messages that can carry an enabled type; invites only Seq 1, voicemail only single-message threads
+- [Phase 04]: [04-09]: Repair swaps an inactive person from that message onward (counsel for counsel on privileged threads), reschedules on sender swaps (3 passes), else truncates with a note and moves removed messages to a replacement thread of people active anchor..+30 days
 
 ### Pending Todos
 
@@ -282,6 +288,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T20:27:00.307Z
-Stopped at: Completed 04-08-PLAN.md
+Last session: 2026-10-02T20:38:30.052Z
+Stopped at: Completed 04-09-PLAN.md
 Resume file: None

@@ -131,7 +131,7 @@ Plans:
 - [x] 04-06-PLAN.md — AnswerKeyCsvWriter (RFC 4180 + OWASP) and AnswerKeyXlsxWriter (3 sheets) (Wave 2)
 - [x] 04-07-PLAN.md — CorpusPlanPrompts system prompt + ReviewProtocolBuilder (prose call, fallback, docx) (Wave 2)
 - [x] 04-08-PLAN.md — CorpusPlanStore (corpus-plan.json), PlanSummary, GenerationCostEstimator (Wave 2)
-- [ ] 04-09-PLAN.md — ThreadSkeletonBuilder: relevant threads, multi-issue, hot, privileged, attachments, repair (Wave 3)
+- [x] 04-09-PLAN.md — ThreadSkeletonBuilder: relevant threads, multi-issue, hot, privileged, attachments, repair (Wave 3)
 - [ ] 04-10-PLAN.md — NonRelevantSkeletonBuilder: daily, ancillary, newsletter/spam/personal, decoys, externals (Wave 3)
 - [ ] 04-11-PLAN.md — CorpusUiText: all Phase 4 copy + Review Plan entry/gate decisions (Wave 3)
 - [ ] 04-12-PLAN.md — PercentSlider, MonthHistogram, StatTile, ReplanDialog + 144-DPI renders (Wave 4)
@@ -205,7 +205,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
-| 4. Corpus Plan & Answer Key | 9/22 | In Progress|  |
+| 4. Corpus Plan & Answer Key | 10/22 | In Progress|  |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |

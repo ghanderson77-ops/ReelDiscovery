@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-14-PLAN.md
-last_updated: "2026-10-02T21:36:10.429Z"
+stopped_at: Completed 04-15-PLAN.md
+last_updated: "2026-10-02T21:44:37.455Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 58
-  percent: 91
+  completed_plans: 59
+  percent: 92
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 17 of 22
+Plan: 18 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -108,6 +108,7 @@ Progress: [██████████] 98%
 | Phase 04 P12 | 35min | 2 tasks | 6 files |
 | Phase 04 P13 | 20min | 2 tasks | 2 files |
 | Phase 04 P14 | 12min | 2 tasks | 3 files |
+| Phase 04 P15 | 15min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -289,6 +290,8 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-13]: Attachment file names = SanitizeForFileName with dots/underscores trimmed, stem capped at 80, code extension by kind; blank titles keep the code default
 - [Phase 04]: [04-14]: Everyday subject-seed prompts omit the case scenario (AppendNameRules includeScenario: false); decoy prompts keep it plus projects, organizations and the must-not-mention list (fact titles + fact-linked Amount/Invoice/CO/Contract/PO values)
 - [Phase 04]: [04-14]: Decoy seeds with a blank angle or any forbidden term count as missing (one re-ask, then '{Project} {routine topic}' template); externals renamed by the first accepted seed with folded slugs (<=30, 'mail' on collision with case/consumer/reserved/other domains)
+- [Phase 04]: 04-15: Case Summary answer-key row is Written only when both answer-key.csv and .xlsx exist with entries for the current plan; plan row staleness uses CorpusApproval.IsGuideStale (kept plan counts as current)
+- [Phase 04]: 04-15: Case Summary puts a divider above both group headings (Corpus, Case guide), deviating from UI-SPEC S3 'no divider above the first' so Case file does not merge into the Corpus group
 
 ### Pending Todos
 
@@ -310,6 +313,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T21:36:10.425Z
-Stopped at: Completed 04-14-PLAN.md
+Last session: 2026-10-02T21:44:37.448Z
+Stopped at: Completed 04-15-PLAN.md
 Resume file: None

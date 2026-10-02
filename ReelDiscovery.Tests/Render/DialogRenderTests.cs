@@ -8,6 +8,7 @@ namespace ReelDiscovery.Tests.Render;
 /// they are content-sized, unclipped and fit on the screen.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class DialogRenderTests
 {
     private static readonly string[] FactLines =

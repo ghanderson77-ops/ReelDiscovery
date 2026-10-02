@@ -10,6 +10,7 @@ namespace ReelDiscovery.Tests.Render;
 /// Renders the Cast tab at 144 DPI: key and background details, the Background filter, a field error and a run in progress.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class CastPanelRenderTests
 {
     [Fact]

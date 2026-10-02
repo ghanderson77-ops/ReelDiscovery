@@ -12,6 +12,7 @@ namespace ReelDiscovery.Tests.Render;
 /// LoadForRender never calls the generator; the case is saved under a temp root only.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class CaseGuideRenderTests
 {
     private const string FailureMessage = "The response was cut off. Click Retry Key Facts.";

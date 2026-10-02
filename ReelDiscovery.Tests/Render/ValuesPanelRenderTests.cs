@@ -11,6 +11,7 @@ namespace ReelDiscovery.Tests.Render;
 /// conflict with mapping notes, a value to review with its notice, and an empty registry.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class ValuesPanelRenderTests
 {
     private const string ReviewReason = "F-003 was changed after it was written.";

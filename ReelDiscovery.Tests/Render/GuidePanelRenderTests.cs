@@ -9,6 +9,7 @@ namespace ReelDiscovery.Tests.Render;
 /// Renders the shared Case Guide tab skeleton (Issues tab) and the LinkPicker at 144 DPI before the step shell exists.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class GuidePanelRenderTests
 {
     [Fact]

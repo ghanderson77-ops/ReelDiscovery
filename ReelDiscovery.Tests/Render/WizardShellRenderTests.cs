@@ -11,6 +11,7 @@ namespace ReelDiscovery.Tests.Render;
 /// navigation button text, default window size and clipping for the last three steps.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class WizardShellRenderTests
 {
     [Fact]

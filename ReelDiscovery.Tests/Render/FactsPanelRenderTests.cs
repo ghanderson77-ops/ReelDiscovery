@@ -10,6 +10,7 @@ namespace ReelDiscovery.Tests.Render;
 /// the Needs review filter and an empty timeline.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class FactsPanelRenderTests
 {
     private const string ReviewReason = "Maria Delgado was changed after it was written.";

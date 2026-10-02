@@ -10,6 +10,7 @@ namespace ReelDiscovery.Tests.Render;
 /// Renders the Case Summary step at 144 DPI with a case folder under a temp root (UI-SPEC S2).
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class CaseSummaryRenderTests
 {
     [Fact]

@@ -9,6 +9,7 @@ namespace ReelDiscovery.Tests.Render;
 /// .clip.txt files, not asserted: they are fixed in later Phase 3 plans.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class BaselineRenderTests
 {
     [Fact]

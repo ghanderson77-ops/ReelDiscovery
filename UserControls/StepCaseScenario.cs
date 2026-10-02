@@ -65,7 +65,7 @@ public class StepCaseScenario : UserControl, IWizardStep
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 9,
+            RowCount = 8,
             Padding = new Padding(0)
         };
         mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));                        // 0: Scenario
@@ -73,14 +73,28 @@ public class StepCaseScenario : UserControl, IWizardStep
 
         // Fixed rows size to their content so they grow with DPI scaling and font size
         mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 0: Scenario label
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 1: Scenario input | Recent cases card
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 2: Hint + counter | (card continues)
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 3: Complexity label
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 4: Complexity radios
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 5: Preset summary
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 6: Document and court label
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 7: Document/court/state combos
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 8: Status
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 1: Scenario input + hint | Recent cases card
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 2: Complexity label
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 3: Complexity radios
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 4: Preset summary
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 5: Document and court label
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 6: Document/court/state combos
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 7: Status
+
+        // Scenario card and hint share one cell, so the Recent cases card beside them spans no AutoSize row
+        // (a card spanning the hint row left that row at one line when the hint wrapped)
+        var scenarioColumn = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = new Padding(0),
+            Padding = new Padding(0)
+        };
+        scenarioColumn.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        scenarioColumn.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 0: Scenario input
+        scenarioColumn.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 1: Hint + counter
+        mainLayout.Controls.Add(scenarioColumn, 0, 1);
 
         mainLayout.Controls.Add(CreateCaptionLabel("Describe the dispute or investigation"), 0, 0);
 
@@ -107,7 +121,7 @@ public class StepCaseScenario : UserControl, IWizardStep
             Margin = new Padding(0)
         };
         scenarioCard.Controls.Add(_txtScenario);
-        mainLayout.Controls.Add(scenarioCard, 0, 1);
+        scenarioColumn.Controls.Add(scenarioCard, 0, 0);
 
         // Hint + counter
         var hintLayout = new TableLayoutPanel
@@ -140,15 +154,14 @@ public class StepCaseScenario : UserControl, IWizardStep
         };
         hintLayout.Controls.Add(lblHint, 0, 0);
         hintLayout.Controls.Add(_lblCounter, 1, 0);
-        mainLayout.Controls.Add(hintLayout, 0, 2);
+        scenarioColumn.Controls.Add(hintLayout, 0, 1);
 
-        // Recent cases card beside the scenario card (UI-SPEC S3); it spans the caption, card and hint rows
+        // Recent cases card beside the scenario card (UI-SPEC S3): top-aligned with it, ending with the hint row
         var recentCard = CreateRecentCasesCard();
-        mainLayout.Controls.Add(recentCard, 1, 0);
-        mainLayout.SetRowSpan(recentCard, 3);
+        mainLayout.Controls.Add(recentCard, 1, 1);
 
         var complexityCaption = CreateCaptionLabel("Complexity");
-        mainLayout.Controls.Add(complexityCaption, 0, 3);
+        mainLayout.Controls.Add(complexityCaption, 0, 2);
         mainLayout.SetColumnSpan(complexityCaption, 2);
 
         // Preset summary (created before the radios: their CheckedChanged updates it)
@@ -162,7 +175,7 @@ public class StepCaseScenario : UserControl, IWizardStep
             ForeColor = Theme.TextMuted,
             Text = ComplexityPreset.Get(ComplexityLevel.Standard).Summary
         };
-        mainLayout.Controls.Add(_lblPresetSummary, 0, 5);
+        mainLayout.Controls.Add(_lblPresetSummary, 0, 4);
         mainLayout.SetColumnSpan(_lblPresetSummary, 2);
 
         // Complexity radios
@@ -182,11 +195,11 @@ public class StepCaseScenario : UserControl, IWizardStep
         complexityPanel.Controls.Add(_rbSimple);
         complexityPanel.Controls.Add(_rbStandard);
         complexityPanel.Controls.Add(_rbComplex);
-        mainLayout.Controls.Add(complexityPanel, 0, 4);
+        mainLayout.Controls.Add(complexityPanel, 0, 3);
         mainLayout.SetColumnSpan(complexityPanel, 2);
 
         var documentCaption = CreateCaptionLabel("Document and court (optional)");
-        mainLayout.Controls.Add(documentCaption, 0, 6);
+        mainLayout.Controls.Add(documentCaption, 0, 5);
         mainLayout.SetColumnSpan(documentCaption, 2);
 
         // Document / court / state combos
@@ -221,7 +234,7 @@ public class StepCaseScenario : UserControl, IWizardStep
         preferencePanel.Controls.Add(_cmbCourt);
         preferencePanel.Controls.Add(CreateComboCaption("State:"));
         preferencePanel.Controls.Add(_cmbState);
-        mainLayout.Controls.Add(preferencePanel, 0, 7);
+        mainLayout.Controls.Add(preferencePanel, 0, 6);
         mainLayout.SetColumnSpan(preferencePanel, 2);
 
         // Status + "Review real names" and "Cancel check" links
@@ -252,7 +265,7 @@ public class StepCaseScenario : UserControl, IWizardStep
         statusLayout.Controls.Add(_lblStatus, 0, 0);
         statusLayout.Controls.Add(_lnkReviewNames, 1, 0);
         statusLayout.Controls.Add(_lnkCancelCheck, 2, 0);
-        mainLayout.Controls.Add(statusLayout, 0, 8);
+        mainLayout.Controls.Add(statusLayout, 0, 7);
         mainLayout.SetColumnSpan(statusLayout, 2);
 
         _loadingOverlay = new LoadingOverlay(LoadingOverlay.LoadingType.EntityCheck);
@@ -343,25 +356,29 @@ public class StepCaseScenario : UserControl, IWizardStep
         recentLayout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Theme.Border, Margin = new Padding(0) }, 0, 2);
 
         var buttonHeight = LogicalToDeviceUnits(34);
-        var footer = new FlowLayoutPanel
+        var footer = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false,
+            ColumnCount = 3,
+            RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(inset, LogicalToDeviceUnits(12), inset, LogicalToDeviceUnits(12)),
             Margin = new Padding(0),
             BackColor = Theme.Surface
         };
-        _btnOpenCase = ButtonHelper.CreateButton("Open Case...", 0, buttonHeight, ButtonStyle.Default);
-        _btnOpenCase.Margin = new Padding(0);
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); // 0: Spacer
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // 1: New Case
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));     // 2: Open Case...
         _btnNewCase = ButtonHelper.CreateButton("New Case", 0, buttonHeight, ButtonStyle.Default);
         _btnNewCase.Margin = new Padding(0, 0, LogicalToDeviceUnits(Theme.SmallGap), 0);
+        _btnNewCase.Anchor = AnchorStyles.Right;
         _btnNewCase.Visible = false;
-        // Right-to-left flow: Open Case... sits at the right edge, New Case to its left
-        footer.Controls.Add(_btnOpenCase);
-        footer.Controls.Add(_btnNewCase);
+        _btnOpenCase = ButtonHelper.CreateButton("Open Case...", 0, buttonHeight, ButtonStyle.Default);
+        _btnOpenCase.Margin = new Padding(0);
+        _btnOpenCase.Anchor = AnchorStyles.Right;
+        footer.Controls.Add(_btnNewCase, 1, 0);
+        footer.Controls.Add(_btnOpenCase, 2, 0);
         recentLayout.Controls.Add(footer, 0, 3);
 
         recentCard.Controls.Add(recentLayout);

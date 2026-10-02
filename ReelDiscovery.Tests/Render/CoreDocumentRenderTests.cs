@@ -11,6 +11,7 @@ namespace ReelDiscovery.Tests.Render;
 /// and no clipping at the active scaling. The 03-02 baseline findings must be gone.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class CoreDocumentRenderTests
 {
     private const string GuideNotice = "The case guide was built from this document. Edits will mark it out of date.";

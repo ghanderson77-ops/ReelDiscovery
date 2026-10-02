@@ -7,6 +7,7 @@ namespace ReelDiscovery.Tests.Render;
 /// left edges and heights can be checked at 144 DPI.
 /// </summary>
 [Trait("Category", "Render")]
+[Collection(RenderCollection.Name)]
 public class SharedHelperRenderTests
 {
     [Fact]

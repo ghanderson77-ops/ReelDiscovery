@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-22-PLAN.md
-last_updated: "2026-10-02T21:03:38.079Z"
+stopped_at: Completed 04-12-PLAN.md
+last_updated: "2026-10-02T21:15:28.462Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 55
-  percent: 86
+  completed_plans: 56
+  percent: 88
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 14 of 22
+Plan: 15 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -105,6 +105,7 @@ Progress: [██████████] 98%
 | Phase 04 P10 | 25min | 2 tasks | 2 files |
 | Phase 04 P11 | 20min | 2 tasks | 3 files |
 | Phase 04 P22 | 10min | 2 tasks | 3 files |
+| Phase 04 P12 | 35min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -278,6 +279,9 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-11]: MinPercentFor searches 5..60 so the D-07 warning never suggests a value the field clamps; PercentText shows whole values without decimals, else one decimal; Est. cost is N0 from $10 up, else 0.00
 - [Phase 04]: [04-22]: CorpusApproval staleness compares the loaded plan's GuideHash/SettingsHash, falling back to the case.json PlanGuideHash/PlanSettingsHash copy; no plan = never stale
 - [Phase 04]: [04-22]: Approval files are named from the case folder's own name and written to folder + constant names only; ApplyNewPlanAsync keeps WrittenFiles so old files read as from an earlier plan
+- [Phase 04]: [04-12]: PercentSlider exposes internal ValueFromX/HandleKey/Commit; ValueChanged only on change, ValueCommitted on mouse-up and key-up (owner autosaves on commit)
+- [Phase 04]: [04-12]: MonthHistogram skips any x label that would come within 4 px of the previous one after edge clamping; odd axis maxima (1, 5) draw the middle gridline unlabeled
+- [Phase 04]: [04-12]: Ellipsizing label rows (StatTile) use fixed one-line Absolute rows measured before docking, with TopLeft text; MiddleLeft lifts ellipsized text half a line
 
 ### Pending Todos
 
@@ -299,6 +303,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T21:03:38.074Z
-Stopped at: Completed 04-22-PLAN.md
+Last session: 2026-10-02T21:15:28.458Z
+Stopped at: Completed 04-12-PLAN.md
 Resume file: None

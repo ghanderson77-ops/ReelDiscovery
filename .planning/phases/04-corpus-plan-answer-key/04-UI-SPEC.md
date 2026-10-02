@@ -1,7 +1,8 @@
 ---
 phase: 4
 slug: corpus-plan-answer-key
-status: draft
+status: approved
+reviewed_at: 2026-10-02
 shadcn_initialized: false
 preset: none
 created: 2026-10-02

@@ -110,11 +110,25 @@ public static class CaseGuidePrompts
         AppendDocumentHeader(sb, doc);
         AppendTimeline(sb, doc);
         sb.AppendLine();
-        AppendOrganizations(sb, guide);
+        // Personal organizations are not offered: individual parties belong at their employer
+        AppendOrganizations(sb, guide, o => o.Kind != OrganizationKind.Individual);
+
+        var parties = doc.Parties.Where(p => p != null).ToList();
+        var individuals = parties.Where(CaseGuideGenerator.IsIndividual).ToList();
 
         sb.AppendLine("Parties:");
-        foreach (var party in doc.Parties.Where(p => p != null))
-            sb.AppendLine($"- {party.Name} ({party.ShortName}), {party.Role}, {party.EntityType}, {party.Domicile}: {party.Description}");
+        foreach (var party in parties.Except(individuals))
+            sb.AppendLine(PartyLine(party));
+
+        if (individuals.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Individual parties:");
+            foreach (var party in individuals)
+                sb.AppendLine(PartyLine(party));
+            sb.AppendLine("These parties are individual people. Each must be a key character, placed at the organization they work for (an existing organization ID, or add their employer under organizations). Never create an organization named after a person.");
+            sb.AppendLine("Only for an individual party who works for no organization, leave organizationRef empty; a law firm representing them lists their name under representsRefs.");
+        }
 
         var existing = guide.Cast.Where(c => c != null && c.Tier == CastTier.Key).ToList();
         AppendExisting(sb, "Current roster (revise by existingId; leave existingId empty for new people):",
@@ -131,8 +145,6 @@ public static class CaseGuidePrompts
         sb.AppendLine($"Name {preset.CharactersMin}-{preset.CharactersMax} key people who are not counsel: everyone the document or the scenario names, then the people the story needs.");
         foreach (var org in guide.Organizations.Where(o => o != null && o.Kind == OrganizationKind.Party))
             sb.AppendLine($"{org.Id} {org.Name}: one in-house counsel, and an outside law firm with at least one partner and one associate (add the firm under organizations).");
-        foreach (var org in guide.Organizations.Where(o => o != null && o.Kind == OrganizationKind.Individual))
-            sb.AppendLine($"{org.Id} {org.Name} (individual): an outside law firm with at least one partner and one associate.");
 
         if (CoreDocumentTemplates.IsPleading(doc.DocumentType))
         {
@@ -519,12 +531,15 @@ public static class CaseGuidePrompts
             : $"Filing date: {StoryEnd(doc)}");
     }
 
-    private static void AppendOrganizations(StringBuilder sb, CaseGuide guide)
+    private static void AppendOrganizations(StringBuilder sb, CaseGuide guide, Func<CaseOrganization, bool>? include = null)
     {
         sb.AppendLine("Organizations:");
-        foreach (var org in guide.Organizations.Where(o => o != null))
+        foreach (var org in guide.Organizations.Where(o => o != null && (include == null || include(o))))
             sb.AppendLine($"{org.Id} | {org.Name} | {org.Kind} | {org.Location}");
     }
+
+    private static string PartyLine(CaseParty party) =>
+        $"- {party.Name} ({party.ShortName}), {party.Role}, {party.EntityType}, {party.Domicile}: {party.Description}";
 
     // "CH-001 | Maria Delgado | President | ORG-01 | Party | involvement"
     private static string RosterLine(CastMember member) =>

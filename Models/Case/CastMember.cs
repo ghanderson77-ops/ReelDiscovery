@@ -40,6 +40,13 @@ public class CastMember
     public string Title { get; set; } = string.Empty;
     public string Department { get; set; } = string.Empty;
     public string OrganizationId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Core document party id (party-N) when this character is an individual party; empty otherwise.
+    /// Individual parties are people placed at their employer, not organizations of their own.
+    /// </summary>
+    public string PartyId { get; set; } = string.Empty;
+
     public CastTier Tier { get; set; }
     public CastRole Role { get; set; }
     public string Email { get; set; } = string.Empty;

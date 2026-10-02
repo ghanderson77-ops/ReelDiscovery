@@ -435,14 +435,32 @@ public class CaseGuideValidatorTests
     [Fact]
     public void IndividualPartyCounsel_OutsideOnly()
     {
+        // A private individual with no employer: their personal organization needs an outside firm, never in-house counsel
         var draft = Sample();
-        G(draft).Organizations.Add(new CaseOrganization { Id = "ORG-04", Name = "Dana Ortiz", Kind = OrganizationKind.Individual, Domain = "ortizfamily.com" });
+        draft.CoreDocument!.Parties.Add(new CaseParty { Id = "party-3", Name = "Dana Ortiz", ShortName = "Ortiz", Role = PartyRole.Defendant, EntityType = "individual" });
+        G(draft).Organizations.Add(new CaseOrganization { Id = "ORG-04", Name = "Dana Ortiz", Kind = OrganizationKind.Individual, PartyId = "party-3", Domain = "ortizfamily.com" });
+        AddMember(draft, "CH-010", "Dana", "Ortiz", "ORG-04", CastTier.Key, CastRole.Party).PartyId = "party-3";
 
         var findings = CaseGuideValidator.Validate(draft);
 
         AssertFinding(findings, IssueSeverity.Warning, GuideArea.Guide, "ORG-04", "Dana Ortiz has no outside law firm with a partner and an associate.");
         AssertNoMessage(findings, "Dana Ortiz has no in-house counsel.");
         Assert.DoesNotContain(findings, f => f.Message.StartsWith("Dana Ortiz has 0 background staff", StringComparison.Ordinal));
+        AssertNoMessage(findings, "Party Dana Ortiz is not in the cast. Click Update Guide or Regenerate Cast.");
+    }
+
+    [Fact]
+    public void IndividualPartyAtEmployer_NoCounselOfTheirOwn()
+    {
+        // An individual party placed at an employer is covered by the employer's counsel
+        var draft = Sample();
+        draft.CoreDocument!.Parties.Add(new CaseParty { Id = "party-3", Name = "Dana Ortiz", ShortName = "Ortiz", Role = PartyRole.Defendant, EntityType = "individual" });
+        AddMember(draft, "CH-010", "Dana", "Ortiz", "ORG-02", CastTier.Key, CastRole.Party).PartyId = "party-3";
+
+        var findings = CaseGuideValidator.Validate(draft);
+
+        Assert.DoesNotContain(findings, f => f.Message.StartsWith("Dana Ortiz has", StringComparison.Ordinal));
+        Assert.DoesNotContain(findings, f => f.Message.Contains("Dana Ortiz", StringComparison.Ordinal) && f.Severity == IssueSeverity.Error);
     }
 
     // ---- Rule 18: preset ----
@@ -689,6 +707,37 @@ public class CaseGuideValidatorTests
 
         AssertFinding(CaseGuideValidator.Validate(draft), IssueSeverity.Error, GuideArea.Guide, "",
             "Party Lakeview Tower Owner LLC has no organization. Click Update Guide or Regenerate Cast.");
+    }
+
+    [Theory]
+    [InlineData("party-3", "Someone Else", "")]  // linked by PartyId
+    [InlineData("", "Ryan Howard", "")]          // same full name
+    [InlineData("", "ryan  HOWARD.", "")]        // case, spacing and punctuation ignored
+    [InlineData("", "R. Howard", "Howard")]      // unambiguous last name = short name
+    public void IndividualPartyInCast_Satisfied(string partyId, string castName, string shortName)
+    {
+        var draft = Sample();
+        draft.CoreDocument!.Parties.Add(new CaseParty { Id = "party-3", Name = "Ryan Howard", ShortName = shortName, Role = PartyRole.Defendant, EntityType = "individual" });
+        var split = castName.LastIndexOf(' ');
+        AddMember(draft, "CH-010", castName[..split], castName[(split + 1)..], "ORG-02", CastTier.Key, CastRole.Party).PartyId = partyId;
+
+        var findings = CaseGuideValidator.Validate(draft);
+
+        AssertNoMessage(findings, "Party Ryan Howard is not in the cast. Click Update Guide or Regenerate Cast.");
+        AssertNoMessage(findings, "Party Ryan Howard has no organization. Click Update Guide or Regenerate Cast.");
+    }
+
+    [Fact]
+    public void IndividualPartyMissingFromCast_IsError()
+    {
+        var draft = Sample();
+        draft.CoreDocument!.Parties.Add(new CaseParty { Id = "party-3", Name = "Ryan Howard", ShortName = "Howard", Role = PartyRole.Defendant, EntityType = "Individual" });
+
+        var findings = CaseGuideValidator.Validate(draft);
+
+        AssertFinding(findings, IssueSeverity.Error, GuideArea.Guide, "", "Party Ryan Howard is not in the cast. Click Update Guide or Regenerate Cast.");
+        // People never need an organization of their own
+        AssertNoMessage(findings, "Party Ryan Howard has no organization. Click Update Guide or Regenerate Cast.");
     }
 
     [Fact]

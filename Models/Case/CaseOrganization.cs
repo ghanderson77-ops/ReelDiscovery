@@ -21,7 +21,8 @@ public class CaseOrganization
     public OrganizationKind Kind { get; set; }
 
     /// <summary>
-    /// Core document party id (party-N) for Kind Party; empty otherwise.
+    /// Core document party id (party-N) for Kind Party, and for the personal organization of an individual party with no
+    /// employer (Kind Individual); empty otherwise.
     /// </summary>
     public string PartyId { get; set; } = string.Empty;
 

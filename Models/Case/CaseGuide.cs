@@ -118,6 +118,7 @@ public class CaseGuide
             member.Title ??= string.Empty;
             member.Department ??= string.Empty;
             member.OrganizationId ??= string.Empty;
+            member.PartyId ??= string.Empty;
             member.Email ??= string.Empty;
             member.Phone ??= string.Empty;
             member.ActiveFrom ??= string.Empty;

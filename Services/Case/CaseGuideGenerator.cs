@@ -416,6 +416,12 @@ public class CaseGuideGenerator
                 if (run.IsFatal)
                     return FinishCast(draft, result, run, string.Empty, false, changed);
             }
+            else
+            {
+                // A resumed (or older) roster: individual parties are linked and empty person-named organizations removed
+                changed |= LinkIndividualParties(draft);
+                changed |= RemovePersonOrganizations(draft);
+            }
 
             // 2. Details for pending key characters, in batches
             changed |= await WriteDetailsAsync(draft, result, run, progress);
@@ -438,8 +444,9 @@ public class CaseGuideGenerator
     }
 
     /// <summary>
-    /// Mirrors the core document's parties as organizations. Existing ones are refreshed but keep their id and domain so
-    /// email addresses stay stable. Returns the ids of the organizations added.
+    /// Mirrors the core document's non-individual parties as organizations. Existing ones are refreshed but keep their id and
+    /// domain so email addresses stay stable. Returns the ids of the organizations added. Individual parties are people:
+    /// the roster places them at their employer (LinkIndividualParties), so no organization is created for them here.
     /// </summary>
     internal static List<string> SyncOrganizations(CaseDraft draft) => SyncOrganizations(draft, out _);
 
@@ -447,7 +454,9 @@ public class CaseGuideGenerator
     /// Matching (WR-03): same PartyId and name, then same name anywhere (party ids are positional, so a regenerated
     /// document can list the parties in a different order), then same PartyId with a new name (a renamed party).
     /// An organization whose party left the document is demoted to a third party so prompts and checks stop asking
-    /// for its counsel. <paramref name="modified"/> is true when an existing organization was re-pointed or demoted.
+    /// for its counsel. Personal (Individual) organizations are never matched or demoted: a link to a party that is no
+    /// longer an individual party is cleared, and RemovePersonOrganizations drops them once empty.
+    /// <paramref name="modified"/> is true when an existing organization was re-pointed, demoted or unlinked.
     /// </summary>
     internal static List<string> SyncOrganizations(CaseDraft draft, out bool modified)
     {
@@ -457,8 +466,20 @@ public class CaseGuideGenerator
         var added = new List<string>();
         modified = false;
 
-        var parties = doc.Parties.Where(p => p != null && !string.IsNullOrEmpty(p.Id)).ToList();
-        var mirrored = guide.Organizations.Where(o => o != null && !string.IsNullOrEmpty(o.PartyId)).ToList();
+        var allParties = doc.Parties.Where(p => p != null && !string.IsNullOrEmpty(p.Id)).ToList();
+        var parties = allParties.Where(p => !IsIndividual(p)).ToList();
+        var individualIds = allParties.Where(IsIndividual).Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var personal in guide.Organizations.Where(o => o != null && o.Kind == OrganizationKind.Individual
+            && !string.IsNullOrEmpty(o.PartyId) && !individualIds.Contains(o.PartyId)))
+        {
+            personal.PartyId = string.Empty;
+            modified = true;
+        }
+
+        var mirrored = guide.Organizations
+            .Where(o => o != null && !string.IsNullOrEmpty(o.PartyId) && o.Kind != OrganizationKind.Individual)
+            .ToList();
         var claimed = new HashSet<CaseOrganization>(ReferenceEqualityComparer.Instance);
         var matches = new CaseOrganization?[parties.Count];
 
@@ -529,10 +550,11 @@ public class CaseGuideGenerator
         }
 
         // Party removed from the core document: keep the organization (its cast and domain stay valid) but stop treating
-        // it as a party, so roster prompts, counsel top-ups and the counsel checks no longer cover it (WR-10)
+        // it as a party, so roster prompts, counsel top-ups and the counsel checks no longer cover it (WR-10).
+        // Personal organizations are not in this list, so a person never becomes a "removed party" third party
         foreach (var ghost in mirrored.Where(o => !claimed.Contains(o)))
         {
-            if (ghost.Kind is OrganizationKind.Party or OrganizationKind.Individual)
+            if (ghost.Kind == OrganizationKind.Party)
                 ghost.Kind = OrganizationKind.ThirdParty;
             ghost.PartyId = string.Empty;
             modified = true;
@@ -543,7 +565,8 @@ public class CaseGuideGenerator
 
     /// <summary>
     /// Missing counsel (GUIDE-03, D-15): in-house counsel for each Party organization, and an outside firm with a
-    /// partner and an associate for each Party and Individual organization. Same rule as the validator.
+    /// partner and an associate for each Party organization and each individual party's personal organization.
+    /// An individual party placed at an employer is covered by that employer's counsel. Same rule as the validator.
     /// </summary>
     internal static List<string> CounselGaps(CaseDraft draft)
     {
@@ -552,7 +575,7 @@ public class CaseGuideGenerator
         if (guide == null)
             return gaps;
 
-        foreach (var org in guide.Organizations.Where(o => o.Kind is OrganizationKind.Party or OrganizationKind.Individual))
+        foreach (var org in guide.Organizations.Where(NeedsCounsel))
         {
             var label = org.Kind == OrganizationKind.Individual ? $"{org.Id} {org.Name} (individual)" : $"{org.Id} {org.Name}";
 
@@ -578,7 +601,21 @@ public class CaseGuideGenerator
             && c.Role == CastRole.OutsideCounsel
             && (c.Title ?? string.Empty).Contains(titleWord, StringComparison.OrdinalIgnoreCase));
 
-    private static OrganizationKind KindFor(CaseParty party)
+    /// <summary>
+    /// Organizations the counsel rules cover: Party organizations and the personal organization of an individual party
+    /// with no employer (Kind Individual linked to a party). Shared with the validator (rule 17).
+    /// </summary>
+    internal static bool NeedsCounsel(CaseOrganization org) =>
+        org != null
+        && (org.Kind == OrganizationKind.Party
+            || (org.Kind == OrganizationKind.Individual && !string.IsNullOrEmpty(org.PartyId)));
+
+    /// <summary>
+    /// True for a party that is a person (KindFor gives Individual); such parties are key characters, not organizations.
+    /// </summary>
+    internal static bool IsIndividual(CaseParty party) => party != null && KindFor(party) == OrganizationKind.Individual;
+
+    internal static OrganizationKind KindFor(CaseParty party)
     {
         var entity = party.EntityType ?? string.Empty;
         if (entity.Contains("individual", StringComparison.OrdinalIgnoreCase) || entity.Contains("person", StringComparison.OrdinalIgnoreCase))
@@ -621,7 +658,7 @@ public class CaseGuideGenerator
     private static void MapRoster(CaseDraft draft, CastRosterDto dto, GuidePartResult result)
     {
         var guide = draft.Guide!;
-        MapOrganizations(guide, dto, result);
+        var pendingRefs = MapOrganizations(draft, dto, result);
 
         foreach (var person in dto.People ?? new List<RosterPersonDto>())
         {
@@ -634,9 +671,21 @@ public class CaseGuideGenerator
 
             AddRosterPerson(draft, person, result);
         }
+
+        FinishRosterMapping(draft, pendingRefs, result);
     }
 
-    // A new key character from a roster entry; skipped when the name is already in the cast, dropped with a note when the organization is unknown
+    // Individual parties linked (or given a personal organization), then the law firms' clients resolved, which may name a
+    // personal organization created just now, then empty person-named organizations removed
+    private static void FinishRosterMapping(CaseDraft draft, List<(CaseOrganization Org, List<string> Refs)> pendingRefs, GuidePartResult result)
+    {
+        LinkIndividualParties(draft);
+        ResolveRepresents(draft.Guide!, pendingRefs, result);
+        RemovePersonOrganizations(draft);
+    }
+
+    // A new key character from a roster entry; skipped when the name is already in the cast, dropped with a note when the
+    // organization is unknown. An individual party with no (known) employer gets their personal organization instead.
     private static void AddRosterPerson(CaseDraft draft, RosterPersonDto person, GuidePartResult result)
     {
         var guide = draft.Guide!;
@@ -646,30 +695,235 @@ public class CaseGuideGenerator
         if (fullName.Length == 0 || FindByName(guide, fullName) != null)
             return;
 
+        var party = IndividualPartyNamed(draft, fullName);
         var org = ResolveOrganization(guide, person.OrganizationRef);
+        if (org == null && party != null)
+            org = PersonalOrganization(guide, party);
+
         if (org == null)
         {
             result.Notes.Add($"Dropped {fullName}: unknown organization {Clean(person.OrganizationRef)}.");
             return;
         }
 
-        AddKeyMember(draft, first, last, Clean(person.Title), org, person.Role, Clean(person.Involvement));
+        var member = AddKeyMember(draft, first, last, Clean(person.Title), org, person.Role, Clean(person.Involvement));
+        if (party != null && !guide.Cast.Any(c => c != member && c.PartyId == party.Id))
+            member.PartyId = party.Id;
     }
 
     private static string RosterName(RosterPersonDto person) =>
         string.Join(" ", new[] { Clean(person.FirstName), Clean(person.LastName) }.Where(s => s.Length > 0));
 
-    // New organizations from a roster response (matched by name first), then their represented organizations
-    private static void MapOrganizations(CaseGuide guide, CastRosterDto dto, GuidePartResult result)
+    // ---------- Individual parties ----------
+
+    /// <summary>
+    /// Lower-case letters and digits separated by single spaces, so case, punctuation and spacing never block a name match.
+    /// </summary>
+    internal static string PersonKey(string? name)
     {
+        var sb = new System.Text.StringBuilder();
+        foreach (var ch in name ?? string.Empty)
+            sb.Append(char.IsLetterOrDigit(ch) ? char.ToLowerInvariant(ch) : ' ');
+        return string.Join(" ", sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static List<CaseParty> IndividualParties(CoreDocument? doc) =>
+        (doc?.Parties ?? new List<CaseParty>()).Where(p => p != null && !string.IsNullOrEmpty(p.Id) && IsIndividual(p)).ToList();
+
+    private static CaseParty? IndividualPartyNamed(CaseDraft draft, string fullName)
+    {
+        var key = PersonKey(fullName);
+        return key.Length == 0 ? null : IndividualParties(draft.CoreDocument).FirstOrDefault(p => PersonKey(p.Name) == key);
+    }
+
+    /// <summary>
+    /// The character who is this individual party: the one linked by PartyId, else the one whose full name matches the
+    /// party name, else the only character (key characters first) whose last name is the party's short name.
+    /// Characters linked to another party are never matched. Shared with the validator (rule 24).
+    /// </summary>
+    internal static CastMember? FindPartyMember(IEnumerable<CastMember> cast, CaseParty party)
+    {
+        if (party == null)
+            return null;
+
+        var partyId = party.Id ?? string.Empty;
+        var members = (cast ?? Enumerable.Empty<CastMember>())
+            .Where(c => c != null && (string.IsNullOrEmpty(c.PartyId) || (partyId.Length > 0 && c.PartyId == partyId)))
+            .ToList();
+
+        var linked = partyId.Length == 0 ? null : members.FirstOrDefault(c => c.PartyId == partyId);
+        if (linked != null)
+            return linked;
+
+        var key = PersonKey(party.Name);
+        if (key.Length > 0)
+        {
+            var byName = members.Where(c => PersonKey(c.FullName) == key).ToList();
+            if (byName.Count > 0)
+                return byName.FirstOrDefault(c => c.Tier == CastTier.Key) ?? byName[0];
+        }
+
+        // "Scott" or "Mr. Scott": the last word of the short name against last names, only when unambiguous
+        var shortKey = PersonKey(party.ShortName).Split(' ', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? string.Empty;
+        if (shortKey.Length == 0)
+            return null;
+
+        var byLast = members.Where(c => PersonKey(c.LastName) == shortKey).ToList();
+        var keyLast = byLast.Where(c => c.Tier == CastTier.Key).ToList();
+        if (keyLast.Count == 1)
+            return keyLast[0];
+        return keyLast.Count == 0 && byLast.Count == 1 ? byLast[0] : null;
+    }
+
+    /// <summary>
+    /// Links every individual party to the character who is that person (CastMember.PartyId). A party no character matches
+    /// is added as a key character at a personal organization (Kind Individual), the old behavior kept only for a private
+    /// individual with no employer. Links to parties that are gone or no longer individuals are cleared. True when anything changed.
+    /// </summary>
+    internal static bool LinkIndividualParties(CaseDraft draft)
+    {
+        var guide = draft.Guide;
+        if (draft.CoreDocument == null || guide == null)
+            return false;
+
+        var individuals = IndividualParties(draft.CoreDocument);
+        var ids = individuals.Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
+        var changed = false;
+
+        foreach (var member in guide.Cast.Where(c => c != null && !string.IsNullOrEmpty(c.PartyId) && !ids.Contains(c.PartyId)))
+        {
+            member.PartyId = string.Empty;
+            changed = true;
+        }
+
+        foreach (var party in individuals)
+        {
+            var member = FindPartyMember(guide.Cast, party);
+            if (member != null)
+            {
+                if (member.PartyId != party.Id)
+                {
+                    member.PartyId = party.Id;
+                    changed = true;
+                }
+
+                continue;
+            }
+
+            var org = PersonalOrganization(guide, party);
+            var (first, last) = SplitName(Clean(party.Name));
+            var added = AddKeyMember(draft, first, last, string.Empty, org, CastRole.Party, Clean(party.Description));
+            added.PartyId = party.Id;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    // The individual party's personal organization: the one already linked to the party, or a new one with a family domain
+    private static CaseOrganization PersonalOrganization(CaseGuide guide, CaseParty party)
+    {
+        var org = guide.Organizations.FirstOrDefault(o => o != null && o.Kind == OrganizationKind.Individual && o.PartyId == party.Id);
+        if (org != null)
+            return org;
+
+        org = new CaseOrganization
+        {
+            Name = Clean(party.Name),
+            ShortName = Clean(party.ShortName),
+            Kind = OrganizationKind.Individual,
+            PartyId = party.Id,
+            Location = Clean(party.Domicile),
+            TimeZoneId = UsTimeZones.ForLocation(party.Domicile)
+        };
+        org.Domain = EmailIdentity.DomainFor(org, TakenDomains(guide));
+        org.Id = IdAllocator.Next(guide, IdAllocator.Organization);
+        guide.Organizations.Add(org);
+        return org;
+    }
+
+    /// <summary>
+    /// Removes person-named organizations nobody works at (older guides filed individual parties under organizations named
+    /// after them): Individual organizations, and third parties demoted from them, with no characters, that do not mirror a
+    /// non-individual party and that no law firm represents. A firm's reference does not keep the organization once the
+    /// person it stood for sits at an employer; removed ids are stripped from every RepresentsOrgIds. True when any was removed.
+    /// </summary>
+    internal static bool RemovePersonOrganizations(CaseDraft draft)
+    {
+        var doc = draft.CoreDocument;
+        var guide = draft.Guide;
+        if (doc == null || guide == null)
+            return false;
+
+        var individuals = IndividualParties(doc);
+        var removed = new List<CaseOrganization>();
+
+        foreach (var org in guide.Organizations.Where(o => o != null))
+        {
+            var party = individuals.FirstOrDefault(p => !string.IsNullOrEmpty(org.PartyId) && p.Id == org.PartyId)
+                ?? individuals.FirstOrDefault(p => PersonKey(p.Name).Length > 0 && PersonKey(p.Name) == PersonKey(org.Name));
+
+            var isPersonOrg = org.Kind == OrganizationKind.Individual
+                || (org.Kind == OrganizationKind.ThirdParty && string.IsNullOrEmpty(org.PartyId) && (party != null || HasFamilyDomain(org)));
+            if (!isPersonOrg || guide.Cast.Any(c => c != null && c.OrganizationId == org.Id))
+                continue;
+
+            if (!string.IsNullOrEmpty(org.PartyId) && doc.Parties.Any(p => p != null && p.Id == org.PartyId && !IsIndividual(p)))
+                continue;
+
+            var represented = guide.Organizations.Any(f => f != null && f.RepresentsOrgIds.Contains(org.Id));
+            var placedElsewhere = party != null && guide.Cast.Any(c => c != null && c.PartyId == party.Id);
+            if (represented && !placedElsewhere)
+                continue;
+
+            removed.Add(org);
+        }
+
+        foreach (var org in removed)
+        {
+            guide.Organizations.Remove(org);
+            guide.CastState.CompletedUnits.RemoveAll(id => id == org.Id);
+            foreach (var other in guide.Organizations.Where(o => o != null))
+                other.RepresentsOrgIds.RemoveAll(id => id == org.Id);
+        }
+
+        return removed.Count > 0;
+    }
+
+    // "howardfamily.com" for "Ryan Howard": the domain EmailIdentity gives a personal organization
+    private static bool HasFamilyDomain(CaseOrganization org)
+    {
+        var stem = EmailIdentity.BaseName(new CaseOrganization { Name = org.Name, Kind = OrganizationKind.Individual });
+        return stem.Length > 0 && (org.Domain ?? string.Empty).StartsWith(stem, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------- Roster organizations ----------
+
+    // New organizations from a roster response (matched by name first); returns their represented-organization references,
+    // resolved by ResolveRepresents once the people (and any personal organizations) exist
+    private static List<(CaseOrganization Org, List<string> Refs)> MapOrganizations(CaseDraft draft, CastRosterDto dto, GuidePartResult result)
+    {
+        var guide = draft.Guide!;
         var taken = TakenDomains(guide);
         var pendingRefs = new List<(CaseOrganization Org, List<string> Refs)>();
+
+        // People are never organizations: names of individual parties and of the people in this response
+        var personKeys = IndividualParties(draft.CoreDocument).Select(p => PersonKey(p.Name))
+            .Concat((dto.People ?? new List<RosterPersonDto>()).Where(p => p != null).Select(p => PersonKey(RosterName(p))))
+            .Where(k => k.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
 
         foreach (var item in dto.Organizations ?? new List<NewOrganizationDto>())
         {
             var name = Clean(item?.Name);
             if (item == null || name.Length == 0)
                 continue;
+
+            if (personKeys.Contains(PersonKey(name)))
+            {
+                result.Notes.Add($"Ignored organization {name}: it is named after a person.");
+                continue;
+            }
 
             var shortName = Clean(item.ShortName);
             var org = FindOrganizationByName(guide, name) ?? (shortName.Length > 0 ? FindOrganizationByName(guide, shortName) : null);
@@ -691,7 +945,12 @@ public class CaseGuideGenerator
             pendingRefs.Add((org, item.RepresentsRefs ?? new List<string>()));
         }
 
-        // Represented organizations resolve after every new organization exists
+        return pendingRefs;
+    }
+
+    // Represented organizations resolve after every new organization exists
+    private static void ResolveRepresents(CaseGuide guide, List<(CaseOrganization Org, List<string> Refs)> pendingRefs, GuidePartResult result)
+    {
         foreach (var (org, refs) in pendingRefs)
         {
             foreach (var reference in refs)
@@ -1863,7 +2122,7 @@ public class CaseGuideGenerator
     private static void MergeRoster(CaseDraft draft, CastRosterDto dto, bool replaceEdited, GuidePartResult result)
     {
         var guide = draft.Guide!;
-        MapOrganizations(guide, dto, result);
+        var pendingRefs = MapOrganizations(draft, dto, result);
 
         var people = (dto.People ?? new List<RosterPersonDto>()).Where(p => p != null && RosterName(p).Length > 0).ToList();
         var removed = MergeEntries(
@@ -1888,6 +2147,9 @@ public class CaseGuideGenerator
                 continue;
             RemoveCastMember(guide, member);
         }
+
+        // Individual parties moved to their employer leave their old person-named organizations empty: removed here
+        FinishRosterMapping(draft, pendingRefs, result);
     }
 
     // Same name test SeedAuthor uses to decide the author is already in the cast
@@ -2570,7 +2832,7 @@ public class CaseGuideGenerator
         public OrganizationKind Kind { get; set; }
 
         [JsonPropertyName("representsRefs")]
-        [Description("For a law firm: IDs of the organizations it represents, e.g. ORG-01; empty otherwise")]
+        [Description("For a law firm: IDs of the organizations it represents, e.g. ORG-01, or the name of an individual client who works for no organization; empty otherwise")]
         public List<string> RepresentsRefs { get; set; } = new();
 
         [JsonPropertyName("location")]
@@ -2597,7 +2859,7 @@ public class CaseGuideGenerator
         public string Title { get; set; } = string.Empty;
 
         [JsonPropertyName("organizationRef")]
-        [Description("Organization ID from the request, e.g. ORG-02, or the exact name of an organization added in this response")]
+        [Description("Organization ID from the request, e.g. ORG-02, or the exact name of an organization added in this response; empty only for an individual party who works for no organization")]
         public string OrganizationRef { get; set; } = string.Empty;
 
         [JsonPropertyName("role")]

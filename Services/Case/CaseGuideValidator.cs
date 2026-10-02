@@ -375,9 +375,11 @@ public static partial class CaseGuideValidator
 
     // ---- Rule 17: counsel coverage (GUIDE-03, D-15) ----
 
+    // Party organizations and an individual party's personal organization; an individual placed at an employer is covered
+    // by the employer's counsel
     private static void CheckCounsel(Context ctx, List<GuideFinding> findings)
     {
-        foreach (var org in ctx.Organizations.Where(o => o.Kind is OrganizationKind.Party or OrganizationKind.Individual))
+        foreach (var org in ctx.Organizations.Where(CaseGuideGenerator.NeedsCounsel))
         {
             var id = S(org.Id);
             var name = S(org.Name);
@@ -636,7 +638,7 @@ public static partial class CaseGuideValidator
         }
     }
 
-    // ---- Rule 24: core document parties vs organizations ----
+    // ---- Rule 24: core document parties vs organizations (individual parties vs the cast) ----
 
     private static void CheckParties(Context ctx, List<GuideFinding> findings)
     {
@@ -645,6 +647,16 @@ public static partial class CaseGuideValidator
         foreach (var party in parties)
         {
             var partyId = S(party.Id);
+
+            // An individual party is a person: some character must be them (linked by PartyId, or by name)
+            if (CaseGuideGenerator.IsIndividual(party))
+            {
+                if (CaseGuideGenerator.FindPartyMember(ctx.Cast, party) == null)
+                    findings.Add(Error(GuideArea.Guide, string.Empty,
+                        $"Party {S(party.Name)} is not in the cast. Click Update Guide or Regenerate Cast."));
+                continue;
+            }
+
             if (!ctx.Organizations.Any(o => partyId.Length > 0 && S(o.PartyId) == partyId))
                 findings.Add(Error(GuideArea.Guide, string.Empty,
                     $"Party {S(party.Name)} has no organization. Click Update Guide or Regenerate Cast."));

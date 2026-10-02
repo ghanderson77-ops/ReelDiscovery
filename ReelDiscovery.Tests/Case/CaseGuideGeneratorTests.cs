@@ -365,7 +365,8 @@ public class CaseGuideGeneratorTests
         }
         """;
 
-    // Gap roster for a draft with an individual party (ORG-03 Walter White): Harmon has no in-house counsel and Walter White no firm
+    // Gap roster for a draft with an individual party who works for no organization (Walter White, organizationRef empty, so he
+    // gets personal organization ORG-05 after the firms ORG-03/ORG-04): Harmon has no in-house counsel and Walter White no firm
     private const string GapRosterJson = """
         {
           "organizations": [
@@ -375,7 +376,7 @@ public class CaseGuideGeneratorTests
           "people": [
             { "existingId": "", "firstName": "Maria", "lastName": "Delgado", "title": "President", "organizationRef": "ORG-01", "role": "Party", "involvement": "Ran the job." },
             { "existingId": "", "firstName": "Raymond", "lastName": "Harmon", "title": "Chief Executive Officer", "organizationRef": "ORG-02", "role": "Party", "involvement": "Refused to pay." },
-            { "existingId": "", "firstName": "Walter", "lastName": "White", "title": "Owner", "organizationRef": "ORG-03", "role": "Party", "involvement": "Guaranteed the subcontract." },
+            { "existingId": "", "firstName": "Walter", "lastName": "White", "title": "Owner", "organizationRef": "", "role": "Party", "involvement": "Guaranteed the subcontract." },
             { "existingId": "", "firstName": "Karen", "lastName": "Walsh", "title": "General Counsel", "organizationRef": "ORG-01", "role": "InHouseCounsel", "involvement": "Sent the demand letter." },
             { "existingId": "", "firstName": "Morgan", "lastName": "Ellis", "title": "Partner", "organizationRef": "Ellis & Park LLP", "role": "OutsideCounsel", "involvement": "Signed the complaint." },
             { "existingId": "", "firstName": "Evan", "lastName": "Price", "title": "Associate", "organizationRef": "Ellis & Park LLP", "role": "OutsideCounsel", "involvement": "Drafted the complaint." },
@@ -388,7 +389,7 @@ public class CaseGuideGeneratorTests
     private const string TopUpJson = """
         {
           "organizations": [
-            { "name": "Okafor & Lind LLP", "shortName": "Okafor & Lind", "kind": "LawFirm", "representsRefs": ["ORG-03"], "location": "Albuquerque, New Mexico" }
+            { "name": "Okafor & Lind LLP", "shortName": "Okafor & Lind", "kind": "LawFirm", "representsRefs": ["ORG-05"], "location": "Albuquerque, New Mexico" }
           ],
           "people": [
             { "existingId": "", "firstName": "Paul", "lastName": "Novak", "title": "General Counsel", "organizationRef": "ORG-02", "role": "InHouseCounsel", "involvement": "Answered the demand." },
@@ -464,7 +465,7 @@ public class CaseGuideGeneratorTests
         var added = CaseGuideGenerator.SyncOrganizations(draft);
 
         var orgs = draft.Guide!.Organizations;
-        Assert.Equal(new[] { "ORG-01", "ORG-02", "ORG-03", "ORG-04" }, added);
+        Assert.Equal(new[] { "ORG-01", "ORG-02", "ORG-03" }, added);
         Assert.Equal("Brightline Glazing, LLC", orgs[0].Name);
         Assert.Equal(OrganizationKind.Party, orgs[0].Kind);
         Assert.Equal("party-1", orgs[0].PartyId);
@@ -472,10 +473,10 @@ public class CaseGuideGeneratorTests
         Assert.Equal("America/Chicago", orgs[0].TimeZoneId);
         Assert.Equal("Chicago, Illinois", orgs[0].Location);
         Assert.Equal("Harmon Builders, Inc.", orgs[1].Name);
-        Assert.Equal(OrganizationKind.Individual, orgs[2].Kind);
-        Assert.Equal("whitefamily.com", orgs[2].Domain);
-        Assert.Equal(OrganizationKind.Agency, orgs[3].Kind);
-        Assert.EndsWith(".gov", orgs[3].Domain);
+        // The individual party Walter White is a person, placed at an employer by the roster, never an organization
+        Assert.DoesNotContain(orgs, o => o.Kind == OrganizationKind.Individual || o.Name == "Walter White" || o.PartyId == "party-3");
+        Assert.Equal(OrganizationKind.Agency, orgs[2].Kind);
+        Assert.EndsWith(".gov", orgs[2].Domain);
     }
 
     [Fact]
@@ -659,8 +660,14 @@ public class CaseGuideGeneratorTests
 
         var prompt = CaseGuidePrompts.BuildRosterPrompt(draft, "add a site superintendent");
 
-        Assert.Contains("ORG-03 Walter White (individual): an outside law firm with at least one partner and one associate.", prompt);
-        Assert.DoesNotContain("ORG-03 Walter White: one in-house counsel", prompt);
+        // Individual parties are listed apart from the organization parties, as people placed at their employer
+        Assert.Matches(@"Individual parties:\r?\n- Walter White \(White\), Defendant, individual, Albuquerque, New Mexico: Personal guarantor", prompt);
+        Assert.Contains("These parties are individual people. Each must be a key character, placed at the organization they work for (an existing organization ID, or add their employer under organizations). Never create an organization named after a person.", prompt);
+        var parties = prompt[prompt.IndexOf("Parties:", StringComparison.Ordinal)..prompt.IndexOf("Individual parties:", StringComparison.Ordinal)];
+        Assert.DoesNotContain("Walter White", parties);
+        Assert.DoesNotContain("(individual): an outside law firm", prompt);
+        Assert.DoesNotContain("Walter White: one in-house counsel", prompt);
+        Assert.Contains("Keep every name the document uses exactly as written", prompt);
         Assert.Contains("Guidance from the user: add a site superintendent", prompt);
     }
 
@@ -752,7 +759,7 @@ public class CaseGuideGeneratorTests
         var topUps = gateway.Requests.Where(r => r.OperationName == "Case Guide - Counsel top-up").ToList();
         var topUp = Assert.Single(topUps);
         Assert.Contains("ORG-02 Harmon Builders, Inc. needs in-house counsel", topUp.UserPrompt);
-        Assert.Contains("ORG-03 Walter White (individual) needs an outside law firm with a partner and an associate", topUp.UserPrompt);
+        Assert.Contains("ORG-05 Walter White (individual) needs an outside law firm with a partner and an associate", topUp.UserPrompt);
         Assert.DoesNotContain("ORG-01 Brightline Glazing, LLC needs", topUp.UserPrompt);
         Assert.Contains("Keep every name the document uses exactly as written", topUp.UserPrompt);
         Assert.Equal(CaseGuideGenerator.RosterMaxOutputTokens, topUp.MaxOutputTokens);
@@ -761,8 +768,15 @@ public class CaseGuideGeneratorTests
         var novak = Assert.Single(guide.Cast, c => c.FullName == "Paul Novak");
         Assert.Equal(CastRole.InHouseCounsel, novak.Role);
         Assert.Equal("ORG-02", novak.OrganizationId);
+        // A private individual with no employer keeps the personal organization (old behavior)
+        var white = Assert.Single(guide.Cast, c => c.FullName == "Walter White");
+        Assert.Equal("party-3", white.PartyId);
+        Assert.Equal("ORG-05", white.OrganizationId);
+        Assert.Equal("Owner", white.Title);
+        Assert.Equal(OrganizationKind.Individual, guide.FindOrganization("ORG-05")!.Kind);
+        Assert.Equal("walter.white@whitefamily.com", white.Email);
         var okafor = guide.Organizations.Single(o => o.Name == "Okafor & Lind LLP");
-        Assert.Equal(new[] { "ORG-03" }, okafor.RepresentsOrgIds);
+        Assert.Equal(new[] { "ORG-05" }, okafor.RepresentsOrgIds);
         Assert.Empty(CaseGuideGenerator.CounselGaps(draft));
         Assert.Equal(2, fake.Requests.Count(IsDetailsRequest));
     }

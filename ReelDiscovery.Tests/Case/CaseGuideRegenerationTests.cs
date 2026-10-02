@@ -908,7 +908,8 @@ public class CaseGuideRegenerationTests
         var people = BasePeople();
         people.Add(Person("", "Ada", "Okafor", "Partner", "Okafor & Lind LLP", "OutsideCounsel"));
         people.Add(Person("", "Ben", "Lind", "Associate", "Okafor & Lind LLP", "OutsideCounsel"));
-        var roster = Roster(people, Firm("Okafor & Lind LLP", "Okafor & Lind", "ORG-05"));
+        // Walter White works for no organization: he gets a personal organization, which the firm names as its client
+        var roster = Roster(people, Firm("Okafor & Lind LLP", "Okafor & Lind", "Walter White"));
         var responses = CastResponses(roster, background: 5).Concat(KeepFactsResponses()).Append(KeepValuesResponse()).ToArray();
         var (gateway, fake) = Gateway(responses);
 
@@ -920,8 +921,11 @@ public class CaseGuideRegenerationTests
         Assert.Equal("Harmon Construction Group, Inc.", guide.FindOrganization("ORG-02")!.Name);
         var white = guide.Organizations.Single(o => o.PartyId == "party-3");
         Assert.Equal(OrganizationKind.Individual, white.Kind);
+        Assert.Equal(white.Id, Assert.Single(guide.Cast, c => c.PartyId == "party-3").OrganizationId);
+        Assert.Equal(new[] { white.Id }, guide.Organizations.Single(o => o.Name == "Okafor & Lind LLP").RepresentsOrgIds);
         var findings = CaseGuideValidator.Validate(draft);
         Assert.DoesNotContain(findings, f => f.Severity == IssueSeverity.Error && f.Message.Contains("has no organization"));
+        Assert.DoesNotContain(findings, f => f.Message.Contains("is not in the cast"));
         Assert.DoesNotContain(findings, f => f.Message.Contains("name differs from party"));
     }
 

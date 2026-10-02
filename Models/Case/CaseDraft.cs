@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ReelDiscovery.Models.Corpus;
 
 namespace ReelDiscovery.Models.Case;
 
@@ -27,7 +28,7 @@ public enum CourtPreference
 public class CaseDraft
 {
     public const int MaxScenarioLength = 8_000;
-    public const int CurrentFormatVersion = 1;
+    public const int CurrentFormatVersion = 2;
 
     // Shared with Phase 3 case.json; enums as strings
     public static readonly JsonSerializerOptions JsonOptions = new()
@@ -68,6 +69,11 @@ public class CaseDraft
     public int Revision { get; set; }
 
     public CaseGuide? Guide { get; set; }
+
+    /// <summary>
+    /// Corpus settings, plan reference and approval state (D-04); the plan itself lives in corpus-plan.json.
+    /// </summary>
+    public CorpusState? Corpus { get; set; }
 
     /// <summary>
     /// Case folder on disk; set by the case store when loading or saving, never written into case.json.
@@ -130,8 +136,11 @@ public class CaseDraft
         }
 
         Guide?.Normalize();
+        Corpus?.Normalize();
 
-        if (FormatVersion <= 0)
+        // Older files are upgraded on load so a saved file carries the current version and older builds refuse it
+        // instead of silently dropping Corpus (T-04-03); newer files never get here (CaseStore checks first)
+        if (FormatVersion < CurrentFormatVersion)
             FormatVersion = CurrentFormatVersion;
         if (CaseId == Guid.Empty)
             CaseId = Guid.NewGuid();

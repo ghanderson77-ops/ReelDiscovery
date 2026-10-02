@@ -16,12 +16,18 @@ public class CorpusControlsTests
     [InlineData(2, 2)]
     [InlineData(3, 5)]
     [InlineData(7, 10)]
+    [InlineData(21, 25)]
     [InlineData(46, 50)]
     [InlineData(120, 200)]
     [InlineData(166, 200)]
     [InlineData(200, 200)]
+    [InlineData(201, 250)]
+    [InlineData(210, 250)]
+    [InlineData(250, 250)]
+    [InlineData(251, 500)]
     [InlineData(501, 1000)]
-    public void NiceAxisMax_RoundsUpToOneTwoFive(int max, int expected)
+    [InlineData(2100, 2500)]
+    public void NiceAxisMax_RoundsUpToOneTwoTwoAndAHalfFive(int max, int expected)
     {
         Assert.Equal(expected, MonthHistogram.NiceAxisMax(max));
     }

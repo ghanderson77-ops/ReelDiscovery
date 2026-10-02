@@ -7,7 +7,7 @@ namespace ReelDiscovery.UserControls;
 
 /// <summary>
 /// Custom-painted stacked month histogram (UI-SPEC MonthHistogram): one bucket per calendar month,
-/// Relevant (Accent) at the bottom and Not relevant (TextDisabled) on top, a nice y-axis max with three
+/// Relevant (Accent) at the bottom and Not relevant (TextDisabled) on top, a nice (1/2/2.5/5) y-axis max with three
 /// gridlines, non-overlapping "MMM yy" labels and a hover tooltip per month.
 /// </summary>
 public class MonthHistogram : Control
@@ -45,7 +45,8 @@ public class MonthHistogram : Control
     }
 
     /// <summary>
-    /// Smallest 1, 2 or 5 x 10^k that is at least <paramref name="max"/> (never below 1).
+    /// Smallest 1, 2, 2.5 or 5 x 10^k that is at least <paramref name="max"/> (never below 1); 2.5 is used only
+    /// where it is a whole number (k >= 1), so 210 rounds to 250 rather than 500.
     /// </summary>
     public static int NiceAxisMax(int max)
     {
@@ -54,9 +55,13 @@ public class MonthHistogram : Control
         long magnitude = 1;
         while (true)
         {
-            foreach (var factor in new[] { 1, 2, 5 })
+            // Tenths of the magnitude: 1, 2, 2.5 and 5
+            foreach (var tenths in new[] { 10, 20, 25, 50 })
             {
-                var candidate = factor * magnitude;
+                var scaled = tenths * magnitude;
+                if (scaled % 10 != 0)
+                    continue;
+                var candidate = scaled / 10;
                 if (candidate >= max)
                     return (int)Math.Min(candidate, int.MaxValue);
             }

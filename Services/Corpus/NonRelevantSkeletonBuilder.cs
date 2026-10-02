@@ -1,6 +1,8 @@
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.Services.Corpus;
 
@@ -46,6 +48,42 @@ public static class NonRelevantSkeletonBuilder
 
     // Tries to find a decoy fact with someone active near it
     private const int MaxDecoyPicks = 10;
+
+    // Newsletter / spam-vendor / personal share of the category, by messages
+    private static readonly double[] BulkKindWeights = { 40, 30, 30 };
+
+    // One outside sender per this many category messages, clamped to [MinExternals, MaxExternals]
+    private const int MessagesPerExternal = 15;
+    private const int MinExternals = 3;
+    private const int MaxExternals = 40;
+
+    // Personal mail gets one reply from the custodian this often
+    private const int PersonalReplyPercent = 10;
+
+    // Bulk mail goes to key characters three times as often as to background staff
+    private const int KeyRecipientWeight = 3;
+    private const int BackgroundRecipientWeight = 1;
+
+    // Share of spam messages carrying an image (only when images are enabled); newsletters never have attachments
+    public const double SpamImageShare = 0.05;
+
+    public static readonly string[] DefaultNewsletterNames =
+        { "Commercial Builder Weekly", "Regional Business Journal", "Facilities Insider", "Project Delivery Digest", "Office Supply Trends" };
+
+    public static readonly string[] DefaultVendorNames = { "Summit Office Solutions", "BrightPath Travel", "Keystone Benefits", "Metro Catering Co." };
+
+    public static readonly string[] DefaultSpamNames = { "Daily Deal Alerts", "Rewards Center", "Premier Travel Club", "Executive Wellness Offers" };
+
+    public static readonly string[] DefaultPersonalFirstNames =
+        { "Jamie", "Chris", "Dana", "Morgan", "Alex", "Taylor", "Jordan", "Casey", "Robin", "Sam" };
+
+    public static readonly string[] DefaultPersonalLastNames =
+        { "Ellison", "Fairbanks", "Gruber", "Holloway", "Ingram", "Jessup", "Kowalski", "Lindqvist", "Mercer", "Okafor" };
+
+    public static readonly string[] PersonalDomains = { "gmail.com", "outlook.com", "yahoo.com" };
+
+    // Prefix for repeated default names ("Midwest Facilities Insider")
+    private static readonly string[] NameQualifiers = { "National", "Midwest", "Western", "Eastern", "Southern", "Northern", "Metro", "Global" };
 
     private class Spec
     {
@@ -94,6 +132,7 @@ public static class NonRelevantSkeletonBuilder
 
         var daily = BuildDaily(run, Count(messages, NonRelevantCategory.DailyBusiness), relevantThreads);
         var ancillary = BuildAncillary(run, Count(messages, NonRelevantCategory.Ancillary));
+        var bulk = BuildBulk(run, Count(messages, NonRelevantCategory.NewsletterSpamPersonal), result.Externals);
         var decoy = BuildDecoys(run, Count(messages, NonRelevantCategory.Decoy));
 
         // Same exact-share attachment rule as relevant threads, applied per category
@@ -103,6 +142,7 @@ public static class NonRelevantSkeletonBuilder
 
         result.Threads.AddRange(daily);
         result.Threads.AddRange(ancillary);
+        result.Threads.AddRange(bulk);
         result.Threads.AddRange(decoy);
         return result;
     }
@@ -353,6 +393,220 @@ public static class NonRelevantSkeletonBuilder
         var previous = PreviousBusinessDay(day);
         return previous >= low ? previous : next;
     }
+
+    // ----- Newsletters, spam and personal mail -----
+
+    // Externals are never custodians (CONTEXT resolved: custodians): the cast recipient owns every external-root thread
+    private static List<PlannedThread> BuildBulk(Run run, int messages, List<ExternalParty> externals)
+    {
+        var ctx = run.Ctx;
+        var threads = new List<PlannedThread>();
+        if (messages <= 0)
+            return threads;
+
+        externals.AddRange(CreateExternals(Math.Clamp(messages / MessagesPerExternal, MinExternals, MaxExternals), ctx));
+        var newsletters = externals.Where(e => e.Kind == ExternalKind.Newsletter).ToList();
+        var offers = externals.Where(e => e.Kind is ExternalKind.Spam or ExternalKind.Vendor).ToList();
+        var personal = externals.Where(e => e.Kind == ExternalKind.Personal).ToList();
+
+        var recipients = ctx.CastById.Values.Where(c => Eligible(run, c.Id).Count > 0).ToList();
+        if (recipients.Count == 0)
+            recipients = ctx.CastById.Values.ToList();
+        var weights = recipients.Select(c => c.Tier == CastTier.Key ? KeyRecipientWeight : BackgroundRecipientWeight).ToList();
+
+        var groups = Apportion.Largest(messages, BulkKindWeights);
+
+        // Newsletters and spam/vendor mail are single messages
+        foreach (var _ in BudgetAllocator.SplitIntoThreads(groups[0], ThreadShapeClass.Bulk, ctx.Random))
+            threads.Add(BuildExternalThread(run, Pick(newsletters, ctx.Random), recipients, weights, reply: false));
+        foreach (var _ in BudgetAllocator.SplitIntoThreads(groups[1], ThreadShapeClass.Bulk, ctx.Random))
+            threads.Add(BuildExternalThread(run, Pick(offers, ctx.Random), recipients, weights, reply: false));
+
+        // Personal mail: about 10% get one reply from the custodian; the category total stays exact
+        var remaining = groups[2];
+        while (remaining > 0)
+        {
+            var reply = remaining >= 2 && ThreadShapes.Chance(PersonalReplyPercent, ctx.Random);
+            threads.Add(BuildExternalThread(run, Pick(personal, ctx.Random), recipients, weights, reply));
+            remaining -= reply ? 2 : 1;
+        }
+
+        AssignSpamImages(threads, externals, ctx);
+        return threads;
+    }
+
+    private static PlannedThread BuildExternalThread(Run run, ExternalParty sender, List<CastMember> recipients, List<int> weights, bool reply)
+    {
+        var ctx = run.Ctx;
+        var recipient = recipients[WeightedIndex(weights, ctx.Random)].Id;
+        var anchor = PickDay(run, recipient);
+        run.Counter++;
+        var thread = new PlannedThread
+        {
+            Id = $"N-{run.Counter:0000}",
+            Relevance = ThreadRelevance.NotRelevant,
+            Category = NonRelevantCategory.NewsletterSpamPersonal,
+            OwnerCustodianId = recipient
+        };
+
+        thread.Messages.Add(new PlannedMessage
+        {
+            Seq = 1,
+            ReplyToSeq = 0,
+            Kind = MessageKind.New,
+            FromId = sender.Id,
+            ToIds = new List<string> { recipient },
+            Basis = RelevanceBasis.None
+        });
+        if (reply)
+        {
+            thread.Messages.Add(new PlannedMessage
+            {
+                Seq = 2,
+                ReplyToSeq = 1,
+                Kind = MessageKind.Reply,
+                FromId = recipient,
+                ToIds = new List<string> { sender.Id },
+                Basis = RelevanceBasis.None
+            });
+        }
+
+        for (var i = 0; i < thread.Messages.Count; i++)
+            thread.Messages[i].Id = $"{thread.Id}-M{i + 1:00}";
+
+        // External senders use ctx.ZoneFor(EXT id) = UsTimeZones.Default, the zone validator rule 6 checks
+        ScheduleToFit(run, thread, anchor, ctx.WindowStart);
+        return thread;
+    }
+
+    private static void AssignSpamImages(List<PlannedThread> threads, List<ExternalParty> externals, SkeletonContext ctx)
+    {
+        if (!ctx.EnabledTypes.Contains(AttachmentType.Image))
+            return;
+
+        var spamIds = externals.Where(e => e.Kind == ExternalKind.Spam).Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+        var spam = threads.SelectMany(t => t.Messages).Where(m => spamIds.Contains(m.FromId)).ToList();
+        var target = (int)Math.Round(spam.Count * SpamImageShare, MidpointRounding.AwayFromZero);
+        Shuffle(spam, ctx.Random);
+        foreach (var message in spam.Take(target))
+            AddAttachment(message, AttachmentType.Image);
+    }
+
+    /// <summary>
+    /// Code-generated outside senders EXT-001..: about 40% newsletters, 30% spam and vendors (spam first), 30% personal
+    /// contacts, at least one of each group. Newsletter/vendor/spam domains are folded name slugs (.com) that never equal a
+    /// case organization domain; personal contacts use consumer mail domains. 04-14 may rename them later.
+    /// </summary>
+    public static List<ExternalParty> CreateExternals(int count, SkeletonContext ctx)
+    {
+        var result = new List<ExternalParty>();
+        if (count <= 0)
+            return result;
+
+        // Case domains (organizations and cast addresses) are never reused (T-04-30)
+        var caseDomains = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var org in ctx.Guide.Organizations ?? new())
+        {
+            if (!string.IsNullOrWhiteSpace(org?.Domain))
+                caseDomains.Add(org.Domain.Trim());
+        }
+
+        foreach (var member in ctx.CastById.Values)
+        {
+            var domain = EmailIdentity.DomainOf(member.Email);
+            if (domain.Length > 0)
+                caseDomains.Add(domain);
+        }
+
+        var takenDomains = new HashSet<string>(caseDomains, StringComparer.OrdinalIgnoreCase);
+        var takenAddresses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var personalDomains = PersonalDomains.Where(d => !caseDomains.Contains(d)).ToList();
+
+        var groups = Apportion.Largest(count, BulkKindWeights, 1);
+        for (var i = 0; i < groups[0]; i++)
+            result.Add(Business(ExternalKind.Newsletter, DefaultName(DefaultNewsletterNames, i), "news", takenDomains, takenAddresses));
+
+        int spamIndex = 0, vendorIndex = 0;
+        for (var i = 0; i < groups[1]; i++)
+        {
+            result.Add(i % 2 == 0
+                ? Business(ExternalKind.Spam, DefaultName(DefaultSpamNames, spamIndex++), "offers", takenDomains, takenAddresses)
+                : Business(ExternalKind.Vendor, DefaultName(DefaultVendorNames, vendorIndex++), "offers", takenDomains, takenAddresses));
+        }
+
+        // Personal contacts never share a full name with the cast
+        var usedNames = ctx.CastById.Values.Select(c => c.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < groups[2]; i++)
+        {
+            var (first, last) = PersonalName(ctx.Random, usedNames, i);
+            var domain = personalDomains.Count > 0 ? personalDomains[ctx.Random.Next(personalDomains.Count)] : FallbackDomain(takenDomains);
+            result.Add(new ExternalParty
+            {
+                Name = $"{first} {last}",
+                Email = EmailIdentity.AddressFor(first, last, domain, takenAddresses),
+                Domain = domain,
+                Kind = ExternalKind.Personal
+            });
+        }
+
+        for (var i = 0; i < result.Count; i++)
+            result[i].Id = $"EXT-{i + 1:000}";
+        return result;
+    }
+
+    private static ExternalParty Business(ExternalKind kind, string name, string mailbox, HashSet<string> takenDomains, HashSet<string> takenAddresses)
+    {
+        var slug = EmailIdentity.Fold(name);
+        if (slug.Length == 0)
+            slug = "mail";
+
+        // Collision with a case organization or another external: append "news", then a digit
+        var domain = slug + ".com";
+        if (takenDomains.Contains(domain))
+            domain = slug + "news.com";
+        for (var n = 2; takenDomains.Contains(domain); n++)
+            domain = slug + "news" + n + ".com";
+        takenDomains.Add(domain);
+
+        var email = mailbox + "@" + domain;
+        takenAddresses.Add(email);
+        return new ExternalParty { Name = name, Email = email, Domain = domain, Kind = kind };
+    }
+
+    // Built-in names first; later rounds get a regional prefix so names stay distinct
+    private static string DefaultName(string[] names, int index)
+    {
+        var round = index / names.Length;
+        var name = names[index % names.Length];
+        return round == 0 ? name : $"{NameQualifiers[(round - 1) % NameQualifiers.Length]} {name}";
+    }
+
+    private static (string First, string Last) PersonalName(Random random, HashSet<string> usedNames, int index)
+    {
+        var total = DefaultPersonalFirstNames.Length * DefaultPersonalLastNames.Length;
+        var start = random.Next(total);
+        for (var k = 0; k < total; k++)
+        {
+            var n = (start + k) % total;
+            var first = DefaultPersonalFirstNames[n % DefaultPersonalFirstNames.Length];
+            var last = DefaultPersonalLastNames[n / DefaultPersonalFirstNames.Length];
+            if (usedNames.Add($"{first} {last}"))
+                return (first, last);
+        }
+
+        // Every combination used (cannot happen under the 40-external cap); AddressFor still keeps the email unique
+        return (DefaultPersonalFirstNames[index % DefaultPersonalFirstNames.Length], DefaultPersonalLastNames[index % DefaultPersonalLastNames.Length]);
+    }
+
+    private static string FallbackDomain(HashSet<string> takenDomains)
+    {
+        var domain = "personalmail.com";
+        for (var n = 2; takenDomains.Contains(domain); n++)
+            domain = $"personalmail{n}.com";
+        return domain;
+    }
+
+    private static T Pick<T>(List<T> items, Random random) => items[random.Next(items.Count)];
 
     // ----- Thread structure (same shape rules as ThreadSkeletonBuilder) -----
 

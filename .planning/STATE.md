@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-16-PLAN.md
-last_updated: "2026-10-02T21:52:37.688Z"
+stopped_at: Completed 04-17-PLAN.md
+last_updated: "2026-10-02T22:21:56.081Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 60
-  percent: 94
+  completed_plans: 61
+  percent: 95
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 19 of 22
+Plan: 20 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -110,6 +110,7 @@ Progress: [██████████] 98%
 | Phase 04 P14 | 12min | 2 tasks | 3 files |
 | Phase 04 P15 | 15min | 2 tasks | 4 files |
 | Phase 04 P16 | 9min | 2 tasks | 3 files |
+| Phase 04 P17 | 25min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -296,6 +297,8 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-16]: CorpusPlanner returns a new plan or classified failure (fatal / refusal majority (fill+seed refused)*2 > total / no dated facts); draft only read, settings JSON-cloned; progress Done monotonic over chunks + batches + 2
 - [Phase 04]: [04-16]: D-15 merge rule (04-09) yields 0 multi-issue threads on RichDraft at 250-5000 emails (closest cross-issue pairs 13-15 business days apart); rule not loosened; PLAN-03 left pending
 - [Phase 04]: [04-16 gap fix]: D-15 resolved: multi-issue pairs need different issue sets, <= 20 business days and >= 1 shared knower active on the merged anchor; a top-up pass uses nearest pairs (<= 30 business days) until 10% of relevant threads (cap 15%); single-issue / no-pair guides plan none with a note; RichDraft measures 12-14% at 250-5000 emails; PLAN-03 complete
+- [Phase 04]: [04-17]: Corpus Settings fields commit on Leave/Enter only (slider on mouse-up/key-up/Leave) and save only when a value changed; disabled Images/Voicemail never overwrite the saved choice — Autosave storm mitigation (T-04-54) and D-11 saved-choice re-application
+- [Phase 04]: [04-17]: Code-built wrapping labels pin MinimumSize = MaximumSize to (width, measured height) and code-sized rows call the root PerformLayout; Padding=1 cards inset top/bottom by the corner radius — AutoSize TLP rows kept stale wrap heights (150 px gap at 144 DPI) and full-bleed content covered rounded corners
 
 ### Pending Todos
 
@@ -317,6 +320,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T21:52:37.683Z
-Stopped at: Completed 04-16-PLAN.md
+Last session: 2026-10-02T22:21:46.380Z
+Stopped at: Completed 04-17-PLAN.md
 Resume file: None

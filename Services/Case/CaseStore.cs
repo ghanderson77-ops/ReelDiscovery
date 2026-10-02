@@ -255,8 +255,20 @@ public class CaseStore
     }
 
     /// <summary>
+    /// Old folder the last cross-volume move copied from but could not fully delete (a file open elsewhere); empty otherwise.
+    /// </summary>
+    public string LastMoveLeftover { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// Tests only: take the cross-volume copy-then-delete path on a single volume.
+    /// </summary>
+    internal bool CopyOnMove { get; set; }
+
+    /// <summary>
     /// Moves the case folder under targetParent (D-09); returns the new folder. Throws IOException /
-    /// UnauthorizedAccessException with the OS reason so the UI can show it.
+    /// UnauthorizedAccessException with the OS reason so the UI can show it; the case is then still in its old folder.
+    /// After a cross-volume copy the case points at the new folder even when the old one cannot be fully deleted
+    /// (see <see cref="LastMoveLeftover"/>).
     /// </summary>
     public string MoveFolder(CaseDraft draft, string targetParent)
     {
@@ -272,16 +284,27 @@ public class CaseStore
             Directory.CreateDirectory(targetParent);
             var target = CaseFolderNaming.UniqueFolderPath(targetParent, Path.GetFileName(source));
 
-            if (string.Equals(Path.GetPathRoot(source), Path.GetPathRoot(target), StringComparison.OrdinalIgnoreCase))
+            LastMoveLeftover = string.Empty;
+            var crossVolume = CopyOnMove || !string.Equals(Path.GetPathRoot(source), Path.GetPathRoot(target), StringComparison.OrdinalIgnoreCase);
+            if (!crossVolume)
             {
                 Directory.Move(source, target);
             }
             else
             {
-                CopyDirectory(source, target);
-                Directory.Delete(source, recursive: true);
+                try
+                {
+                    CopyDirectory(source, target);
+                }
+                catch (Exception)
+                {
+                    // A partial copy is removed so the next attempt does not land in "<name> (2)"; the case stays where it was
+                    TryDeleteDirectory(target);
+                    throw;
+                }
             }
 
+            // Point the case at the complete copy before touching the source, so a failed delete never splits the case (WR-05)
             draft.FolderPath = target;
             lock (_pendingLock)
             {
@@ -291,6 +314,20 @@ public class CaseStore
 
             RemoveRecent(oldCaseFile);
             TouchRecent(draft);
+
+            if (crossVolume)
+            {
+                try
+                {
+                    Directory.Delete(source, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Best effort: the case already lives in the target; report the leftover copy instead of failing the move
+                    LastMoveLeftover = source;
+                }
+            }
+
             return target;
         }
         finally
@@ -511,6 +548,19 @@ public class CaseStore
             File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
         foreach (var dir in Directory.GetDirectories(source))
             CopyDirectory(dir, Path.Combine(target, Path.GetFileName(dir)));
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best effort: the copy error is what the user needs to see
+        }
     }
 
     private static string TempPathFor(string path)

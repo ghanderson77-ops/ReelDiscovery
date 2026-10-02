@@ -483,6 +483,10 @@ public static class CaseGuideUiText
 
     public static string MovedText(string displayPath) => $"Moved the case folder to {displayPath}.";
 
+    // WR-05: the case moved, but files open elsewhere kept part of the old folder
+    public static string MovedWithLeftoverText(string displayPath, string leftoverPath) =>
+        $"Moved the case folder to {displayPath}. Some files in {leftoverPath} were open and could not be removed; close them and delete that folder.";
+
     public static string NewCaseText(string previousTitle) =>
         $"Started a new case. {previousTitle} is saved and listed under Recent cases.";
 

@@ -364,6 +364,52 @@ public class CaseStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Move_CopyPath_LockedSourceFile_CaseFollowsCopy()
+    {
+        // WR-05: an export open in Word blocks deleting the old folder; the case must already point at the full copy
+        var store = CreateStore();
+        store.CopyOnMove = true;
+        var draft = CaseTestData.SampleGuidedDraft();
+        Assert.True(await store.SaveAsync(draft));
+        var oldFolder = draft.FolderPath;
+        var export = Path.Combine(oldFolder, "Brightline v. Harmon - Core Document.docx");
+        File.WriteAllText(export, "docx");
+        var target = Path.Combine(_temp, "Elsewhere");
+
+        string newFolder;
+        using (new FileStream(export, FileMode.Open, FileAccess.Read, FileShare.Read))
+            newFolder = store.MoveFolder(draft, target);
+
+        Assert.Equal(newFolder, draft.FolderPath);
+        Assert.True(File.Exists(Path.Combine(newFolder, "case.json")));
+        Assert.True(File.Exists(Path.Combine(newFolder, Path.GetFileName(export))));
+        Assert.Equal(Path.GetFullPath(oldFolder), store.LastMoveLeftover);
+        Assert.Equal(Path.Combine(newFolder, "case.json"), Assert.Single(store.GetRecentCases()).Path);
+
+        // Later saves go to the copy, never back into the half-deleted source
+        draft.CoreDocument!.Title = "After move";
+        Assert.True(await store.SaveAsync(draft));
+        Assert.Equal("After move", ReadBack(draft).CoreDocument!.Title);
+        Assert.False(File.Exists(Path.Combine(oldFolder, "case.json")));
+    }
+
+    [Fact]
+    public async Task Move_CopyPath_CleanSourceIsRemoved()
+    {
+        var store = CreateStore();
+        store.CopyOnMove = true;
+        var draft = CaseTestData.SampleGuidedDraft();
+        Assert.True(await store.SaveAsync(draft));
+        var oldFolder = draft.FolderPath;
+
+        var newFolder = store.MoveFolder(draft, Path.Combine(_temp, "Elsewhere"));
+
+        Assert.False(Directory.Exists(oldFolder));
+        Assert.Equal(string.Empty, store.LastMoveLeftover);
+        Assert.True(File.Exists(Path.Combine(newFolder, "case.json")));
+    }
+
+    [Fact]
     public void WriteAtomic_ReplacesContent()
     {
         Directory.CreateDirectory(_temp);

@@ -865,7 +865,11 @@ public class StepCaseSummary : UserControl, IWizardStep
             if (IsDisposed)
                 return;
 
-            SetStatus(CaseGuideUiText.MovedText(CaseGuideUiText.DisplayPath(newFolder, MyDocuments)), Theme.Success);
+            var leftover = store.LastMoveLeftover;
+            if (leftover.Length > 0)
+                SetStatus(CaseGuideUiText.MovedWithLeftoverText(CaseGuideUiText.DisplayPath(newFolder, MyDocuments), CaseGuideUiText.DisplayPath(leftover, MyDocuments)), Theme.Warning);
+            else
+                SetStatus(CaseGuideUiText.MovedText(CaseGuideUiText.DisplayPath(newFolder, MyDocuments)), Theme.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {

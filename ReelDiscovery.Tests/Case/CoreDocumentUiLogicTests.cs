@@ -1,4 +1,5 @@
 using System.Drawing;
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.UserControls;
@@ -52,11 +53,11 @@ public class CoreDocumentUiLogicTests
     {
         var none = Array.Empty<CoreDocumentIssue>();
         Assert.Equal(Accent, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Writing), none));
-        Assert.Equal(Color.DimGray, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Pending), none));
-        Assert.Equal(Color.Red, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Failed), none));
-        Assert.Equal(Color.Red, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Ready), new[] { Warning(), Error() }));
-        Assert.Equal(Color.DarkOrange, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Ready), new[] { Warning() }));
-        Assert.Equal(SystemColors.ControlText, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Ready, edited: true), none));
+        Assert.Equal(Theme.TextMuted, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Pending), none));
+        Assert.Equal(Theme.Danger, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Failed), none));
+        Assert.Equal(Theme.Danger, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Ready), new[] { Warning(), Error() }));
+        Assert.Equal(Theme.Warning, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Ready), new[] { Warning() }));
+        Assert.Equal(Theme.Text, StepCoreDocument.SectionSuffixColor(Section(SectionStatus.Ready, edited: true), none));
     }
 
     [Fact]
@@ -92,7 +93,7 @@ public class CoreDocumentUiLogicTests
         var (text, color) = StepCoreDocument.ReadyStatus(draft, Array.Empty<CoreDocumentIssue>());
 
         Assert.Equal(expected, text);
-        Assert.Equal(Color.Green, color);
+        Assert.Equal(Theme.Success, color);
     }
 
     [Fact]
@@ -103,7 +104,7 @@ public class CoreDocumentUiLogicTests
         var (text, color) = StepCoreDocument.ReadyStatus(draft, new[] { Error(), Warning(), Warning() });
 
         Assert.Equal("Document ready with 1 errors and 2 warnings. Review the Issues list.", text);
-        Assert.Equal(Color.DarkOrange, color);
+        Assert.Equal(Theme.Warning, color);
     }
 
     [Fact]

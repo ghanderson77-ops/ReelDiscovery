@@ -21,6 +21,7 @@ public class StepCoreDocument : UserControl, IWizardStep
     private WizardState _state = null!;
     private Label _lblTitle = null!;
     private Label _lblSubtitle = null!;
+    private Label _lblGuideNotice = null!;
     private Button _btnRegenerateAll = null!;
     private Button _btnResumeAll = null!;
     private Panel _bodyHost = null!;
@@ -60,6 +61,7 @@ public class StepCoreDocument : UserControl, IWizardStep
     private string _editorSectionId = string.Empty;
     private string _editorOriginalText = string.Empty;
     private string _declinedStaleHash = string.Empty;
+    private Guid _boundCaseId = Guid.Empty;
 
     public string StepTitle => "Review Core Document";
 
@@ -69,8 +71,8 @@ public class StepCoreDocument : UserControl, IWizardStep
     public bool CanMoveNext => !_isGenerating && _state?.Case.CoreDocument != null;
     public bool CanMoveBack => !_isGenerating;
 
-    // Last case-flow step in Phase 2; Phase 3 changes this to "Next >"
-    public string NextButtonText => "Finish";
+    // The Case Guide follows (D-12)
+    public string NextButtonText => "Next >";
 
     public event EventHandler? StateChanged;
 
@@ -86,6 +88,8 @@ public class StepCoreDocument : UserControl, IWizardStep
         this.BackColor = Theme.Background;
         var gap = LogicalToDeviceUnits(Theme.Gap);
         var pad = LogicalToDeviceUnits(Theme.CardPadding);
+        // Content x inside Padding = 1 cards: 15 + the card's 1 px = 16 from the card edge (UI-SPEC)
+        var inset = LogicalToDeviceUnits(15);
         var buttonHeight = LogicalToDeviceUnits(34);
 
         var mainLayout = new TableLayoutPanel
@@ -108,7 +112,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 2,
+            RowCount = 3,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Margin = new Padding(0, 0, 0, gap)
@@ -117,6 +121,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 0: Title
         headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 1: Subtitle
+        headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 2: Guide notice
 
         _lblTitle = new Label
         {
@@ -142,6 +147,21 @@ public class StepCoreDocument : UserControl, IWizardStep
         };
         _lblSubtitle.Height = _lblSubtitle.PreferredHeight;
 
+        // D-20: shown only once a case guide exists, so the user knows edits here make it stale
+        _lblGuideNotice = new Label
+        {
+            Text = "The case guide was built from this document. Edits will mark it out of date.",
+            AutoSize = false,
+            AutoEllipsis = true,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.TopLeft,
+            Margin = new Padding(0, LogicalToDeviceUnits(2), 0, 0),
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.TextMuted,
+            Visible = false
+        };
+        _lblGuideNotice.Height = _lblGuideNotice.PreferredHeight;
+
         var headerButtons = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.LeftToRight,
@@ -162,6 +182,8 @@ public class StepCoreDocument : UserControl, IWizardStep
 
         headerLayout.Controls.Add(_lblTitle, 0, 0);
         headerLayout.Controls.Add(_lblSubtitle, 0, 1);
+        headerLayout.Controls.Add(_lblGuideNotice, 0, 2);
+        headerLayout.SetColumnSpan(_lblGuideNotice, 2);
         headerLayout.Controls.Add(headerButtons, 1, 0);
         headerLayout.SetRowSpan(headerButtons, 2);
         mainLayout.Controls.Add(headerLayout, 0, 0);
@@ -193,7 +215,7 @@ public class StepCoreDocument : UserControl, IWizardStep
             RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(pad, LogicalToDeviceUnits(14), pad, LogicalToDeviceUnits(10)),
+            Padding = new Padding(inset, LogicalToDeviceUnits(14), inset, LogicalToDeviceUnits(10)),
             Margin = new Padding(0)
         };
         sectionsHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -428,42 +450,17 @@ public class StepCoreDocument : UserControl, IWizardStep
         {
             Text = "Issues",
             AutoSize = true,
-            Margin = new Padding(pad - 1, LogicalToDeviceUnits(12), pad, LogicalToDeviceUnits(8)),
+            Margin = new Padding(inset, LogicalToDeviceUnits(12), inset, LogicalToDeviceUnits(8)),
             Font = Theme.LabelFont(),
             ForeColor = Theme.Text
         };
         issuesLayout.Controls.Add(_lblIssues, 0, 0);
 
         var issuesHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6)), BackColor = Theme.Surface };
-        _gridIssues = new DataGridView
-        {
-            Dock = DockStyle.Fill,
-            ReadOnly = true,
-            AutoGenerateColumns = false,
-            AllowUserToAddRows = false,
-            AllowUserToDeleteRows = false,
-            AllowUserToResizeRows = false,
-            RowHeadersVisible = false,
-            MultiSelect = false,
-            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            BackgroundColor = Theme.Surface,
-            BorderStyle = BorderStyle.None,
-            CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-            GridColor = Theme.Border,
-            EnableHeadersVisualStyles = false,
-            ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
-            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
-            Font = Theme.BodyFont()
-        };
-        _gridIssues.ColumnHeadersDefaultCellStyle.BackColor = Theme.SurfaceMuted;
-        _gridIssues.ColumnHeadersDefaultCellStyle.ForeColor = Theme.TextMuted;
-        _gridIssues.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.SurfaceMuted;
-        _gridIssues.ColumnHeadersDefaultCellStyle.Font = Theme.SmallFont();
-        _gridIssues.ColumnHeadersDefaultCellStyle.Padding = new Padding(pad - 4, LogicalToDeviceUnits(6), 0, LogicalToDeviceUnits(6));
-        _gridIssues.DefaultCellStyle.Padding = new Padding(pad - 4, 0, 0, 0);
-        _gridIssues.DefaultCellStyle.SelectionBackColor = Theme.AccentSoft;
-        _gridIssues.DefaultCellStyle.SelectionForeColor = Theme.Text;
-        _gridIssues.RowTemplate.Height = LogicalToDeviceUnits(32);
+        _gridIssues = new DataGridView { Dock = DockStyle.Fill };
+        // Shared grid look: header and cell text on Content x
+        GridStyle.Apply(_gridIssues, this);
+        _gridIssues.ReadOnly = true;
         _gridIssues.Columns.Add(new DataGridViewTextBoxColumn { Name = "Severity", HeaderText = "Severity", Width = LogicalToDeviceUnits(96) });
         _gridIssues.Columns.Add(new DataGridViewTextBoxColumn { Name = "Section", HeaderText = "Section", Width = LogicalToDeviceUnits(240) });
         _gridIssues.Columns.Add(new DataGridViewTextBoxColumn
@@ -477,7 +474,7 @@ public class StepCoreDocument : UserControl, IWizardStep
             Text = "No issues found. No case-law citations or real names detected.",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.TopLeft,
-            Padding = new Padding(pad - 1, 0, pad, 0),
+            Padding = new Padding(inset, 0, inset, 0),
             Font = Theme.BodyFont(),
             ForeColor = Theme.Success,
             Visible = false
@@ -590,11 +587,11 @@ public class StepCoreDocument : UserControl, IWizardStep
         return s.Status switch
         {
             SectionStatus.Writing => Accent,
-            SectionStatus.Pending => Color.DimGray,
-            SectionStatus.Failed => Color.Red,
-            _ when sectionIssues.Any(i => i.Severity == IssueSeverity.Error) => Color.Red,
-            _ when sectionIssues.Count > 0 => Color.DarkOrange,
-            _ => SystemColors.ControlText
+            SectionStatus.Pending => Theme.TextMuted,
+            SectionStatus.Failed => Theme.Danger,
+            _ when sectionIssues.Any(i => i.Severity == IssueSeverity.Error) => Theme.Danger,
+            _ when sectionIssues.Count > 0 => Theme.Warning,
+            _ => Theme.Text
         };
     }
 
@@ -666,16 +663,16 @@ public class StepCoreDocument : UserControl, IWizardStep
             if (doc?.DocumentType == CoreDocumentType.InvestigationMemo)
             {
                 var memoParagraphs = doc.Sections.Sum(sec => sec.Paragraphs.Count);
-                return ($"Document ready: {sections} sections, {memoParagraphs} paragraphs.", Color.Green);
+                return ($"Document ready: {sections} sections, {memoParagraphs} paragraphs.", Theme.Success);
             }
 
             var paragraphs = doc == null ? 0 : CoreDocumentAssembler.CountNumberedParagraphs(doc);
-            return ($"Document ready: {sections} sections, {paragraphs} numbered paragraphs.", Color.Green);
+            return ($"Document ready: {sections} sections, {paragraphs} numbered paragraphs.", Theme.Success);
         }
 
         var errors = CoreDocumentValidator.CountErrors(issues);
         var warnings = CoreDocumentValidator.CountWarnings(issues);
-        return ($"Document ready with {errors} errors and {warnings} warnings. Review the Issues list.", Color.DarkOrange);
+        return ($"Document ready with {errors} errors and {warnings} warnings. Review the Issues list.", Theme.Warning);
     }
 
     /// <summary>
@@ -718,6 +715,7 @@ public class StepCoreDocument : UserControl, IWizardStep
 
         _lblTitle.Text = doc == null ? "Core Document" : DocumentTypeLabel(doc);
         _lblSubtitle.Text = doc == null ? string.Empty : DocumentSubtitle(doc);
+        _lblGuideNotice.Visible = _state.Case.Guide != null;
 
         // Rebind the section list only when the section objects changed; otherwise just repaint
         var sections = doc?.Sections ?? new List<CoreDocumentSection>();
@@ -756,7 +754,7 @@ public class StepCoreDocument : UserControl, IWizardStep
                 issue.Message);
             var row = _gridIssues.Rows[rowIndex];
             row.Tag = issue.SectionId;
-            row.DefaultCellStyle.ForeColor = issue.Severity == IssueSeverity.Error ? Color.Red : Color.DarkOrange;
+            row.DefaultCellStyle.ForeColor = issue.Severity == IssueSeverity.Error ? Theme.Danger : Theme.Warning;
         }
         _gridIssues.ClearSelection(); // Keep severity colors visible on the first row
         _gridIssues.Visible = visibleIssues.Count > 0;
@@ -842,17 +840,11 @@ public class StepCoreDocument : UserControl, IWizardStep
         }
 
         var sectionIssues = IssuesFor(section.Id);
-        var pad = LogicalToDeviceUnits(Theme.CardPadding);
+        // Content x: dot and text inset 15 inside the Padding = 1 Sections card
+        var pad = LogicalToDeviceUnits(15);
 
-        // Status dot
-        var dot = LogicalToDeviceUnits(8);
-        var dotRect = new Rectangle(bounds.X + pad, bounds.Y + (bounds.Height - dot) / 2, dot, dot);
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        using (var dotBrush = new SolidBrush(StatusDotColor(section, sectionIssues)))
-        {
-            g.FillEllipse(dotBrush, dotRect);
-        }
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.Default;
+        // Status dot (drawn at inset 15)
+        Theme.DrawStatusDot(g, bounds, StatusDotColor(section, sectionIssues), this);
 
         const TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
             TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
@@ -871,7 +863,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         }
 
         // Heading fills the space between the dot and the status
-        var textLeft = dotRect.Right + LogicalToDeviceUnits(10);
+        var textLeft = bounds.X + pad + LogicalToDeviceUnits(8) + LogicalToDeviceUnits(10);
         var textRight = bounds.Right - pad - (statusWidth > 0 ? statusWidth + LogicalToDeviceUnits(12) : 0);
         var headingBounds = new Rectangle(textLeft, bounds.Y, Math.Max(0, textRight - textLeft), bounds.Height);
         TextRenderer.DrawText(g, section.Heading, font, headingBounds, selected ? Theme.Accent : Theme.Text, flags | TextFormatFlags.Left);
@@ -951,7 +943,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         if (section == null)
             return;
 
-        CoreDocumentEditing.ApplyEdit(_state.Case, _editorSectionId, _txtEditor.Text);
+        var applied = CoreDocumentEditing.ApplyEdit(_state.Case, _editorSectionId, _txtEditor.Text);
 
         // Show the normalized text (also when only whitespace changed and nothing was applied)
         _txtEditor.Text = CoreDocumentEditing.JoinParagraphs(section.Paragraphs);
@@ -960,6 +952,28 @@ public class StepCoreDocument : UserControl, IWizardStep
         if (section.Status == SectionStatus.Ready)
             _btnRegenerateSection.Text = "Regenerate Section";
         RefreshAll();
+
+        // D-10: every applied edit is saved
+        if (applied)
+            _ = SaveAsync();
+    }
+
+    /// <summary>
+    /// Writes case.json (the case folder is created on the first save once the core document exists, D-09).
+    /// Saving is core work, so a failure is always shown and never swallowed.
+    /// </summary>
+    private async Task SaveAsync()
+    {
+        if (_state == null || !CaseStore.CanSave(_state.Case))
+            return;
+
+        _state.Case.AdvanceStage(CaseStage.CoreDocument);
+        var ok = await _state.CaseStore.SaveAsync(_state.Case);
+        if (IsDisposed)
+            return;
+
+        if (!ok)
+            SetStatus(CaseGuideUiText.SaveFailedText(_state.CaseStore.LastSaveError), Theme.Danger);
     }
 
     private void SetSectionHint(string text)
@@ -1075,6 +1089,8 @@ public class StepCoreDocument : UserControl, IWizardStep
         try
         {
             var generator = new CoreDocumentGenerator(_state.CreateGateway());
+            var savedSections = -1;
+            var savedReady = -1;
             var progress = new Progress<string>(msg =>
             {
                 if (IsDisposed)
@@ -1084,6 +1100,15 @@ public class StepCoreDocument : UserControl, IWizardStep
                 var doc = _state.Case.CoreDocument;
                 var max = Math.Max(1, doc?.Sections.Count ?? 1);
                 var ready = doc?.Sections.Count(s => s.Status == SectionStatus.Ready) ?? 0;
+
+                // Autosave once the outline exists and after each section completes; the store coalesces (D-10)
+                var sectionCount = doc?.Sections.Count ?? 0;
+                if (doc != null && (sectionCount != savedSections || ready != savedReady))
+                {
+                    savedSections = sectionCount;
+                    savedReady = ready;
+                    _ = SaveAsync();
+                }
                 _progress.Marquee = doc == null || doc.Sections.Count == 0;
                 _progress.Maximum = max;
                 _progress.Value = Math.Min(max, ready);
@@ -1117,12 +1142,12 @@ public class StepCoreDocument : UserControl, IWizardStep
             var failed = _state.Case.CoreDocument?.Sections.FirstOrDefault(s => s.Status == SectionStatus.Failed);
             if (result.IsFatal)
             {
-                SetStatus(FatalText(result.FatalError), Color.Red);
+                SetStatus(FatalText(result.FatalError), Theme.Danger);
                 SetEmptyBody($"Generation stopped: {result.FatalError}. Fix the problem on the API Configuration step.");
             }
             else if (failed != null)
             {
-                SetStatus($"{failed.Heading} failed: {failed.FailureMessage}. Select it and click Retry Section.", Color.Red);
+                SetStatus($"{failed.Heading} failed: {failed.FailureMessage}. Select it and click Retry Section.", Theme.Danger);
             }
             else
             {
@@ -1132,25 +1157,25 @@ public class StepCoreDocument : UserControl, IWizardStep
         }
         catch (OperationCanceledException)
         {
-            SetStatus(CancelledText, Color.DarkOrange);
+            SetStatus(CancelledText, Theme.Warning);
             SetEmptyBody("Generation cancelled.");
         }
         catch (LlmCallException ex) when (ex.Result.Outcome == LlmOutcome.Refused)
         {
             var refusedText = $"The model declined to write this scenario: {ex.Result.Message}. Go Back and rephrase it. Keep criminal methods general and focus on who knew what, when, and where the money went.";
             // Always shown: a refused Regenerate All keeps the old document visible, so the status explains why
-            SetStatus(refusedText, Color.Red);
+            SetStatus(refusedText, Theme.Danger);
             if (!IsDisposed && _state.Case.CoreDocument == null)
                 _lblEmptyBody.Text = refusedText;
         }
         catch (LlmCallException ex) when (ex.Result.IsFatal)
         {
-            SetStatus(FatalText(ex.Result.Message ?? ex.Message), Color.Red);
+            SetStatus(FatalText(ex.Result.Message ?? ex.Message), Theme.Danger);
             SetEmptyBody($"Generation stopped: {ex.Result.Message ?? ex.Message}. Fix the problem on the API Configuration step.");
         }
         catch (Exception ex)
         {
-            SetStatus(ErrorText(ex), Color.Red);
+            SetStatus(ErrorText(ex), Theme.Danger);
         }
         finally
         {
@@ -1162,6 +1187,7 @@ public class StepCoreDocument : UserControl, IWizardStep
                 RefreshAll();
                 ReloadEditorAfterRun();
                 StateChanged?.Invoke(this, EventArgs.Empty);
+                _ = SaveAsync();
             }
         }
     }
@@ -1206,23 +1232,24 @@ public class StepCoreDocument : UserControl, IWizardStep
             _txtGuidance.Clear();
             var (text, color) = ReadyStatus(_state.Case, CoreDocumentValidator.Validate(_state.Case));
             SetStatus(text, color);
+            _ = SaveAsync();
         }
         catch (OperationCanceledException)
         {
-            SetStatus(CancelledText, Color.DarkOrange);
+            SetStatus(CancelledText, Theme.Warning);
         }
         catch (LlmCallException ex) when (ex.Result.IsFatal)
         {
-            SetStatus(FatalText(ex.Result.Message ?? ex.Message), Color.Red);
+            SetStatus(FatalText(ex.Result.Message ?? ex.Message), Theme.Danger);
         }
         catch (LlmCallException ex)
         {
             // The generator keeps the old text on failure
-            SetStatus($"{s.Heading} failed: {ex.Result.Message ?? ex.Message}. Select it and click Retry Section.", Color.Red);
+            SetStatus($"{s.Heading} failed: {ex.Result.Message ?? ex.Message}. Select it and click Retry Section.", Theme.Danger);
         }
         catch (Exception ex)
         {
-            SetStatus(ErrorText(ex), Color.Red);
+            SetStatus(ErrorText(ex), Theme.Danger);
         }
         finally
         {
@@ -1288,12 +1315,12 @@ public class StepCoreDocument : UserControl, IWizardStep
 
         if (_state.Case.CoreDocument != null)
         {
-            var answer = MessageBox.Show(
-                "Regenerate the whole document? Every section, including your edits, will be replaced. This makes a new set of Story-model calls.",
-                "Regenerate Document",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button2);
+            // C9 when a guide exists: the user is told the guide will be marked out of date (D-20)
+            var (title, text) = _state.Case.Guide != null
+                ? CaseGuideUiText.C9RegenerateDocumentWithGuide()
+                : ("Regenerate Document",
+                    "Regenerate the whole document? Every section, including your edits, will be replaced. This makes a new set of Story-model calls.");
+            var answer = MessageBox.Show(text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
             if (answer != DialogResult.Yes)
                 return;
         }
@@ -1313,7 +1340,23 @@ public class StepCoreDocument : UserControl, IWizardStep
         if (_isGenerating)
             return;
 
+        // Another case was opened: drop the previous case's selection, editor text and declined prompt (Pitfall 5)
+        if (_state.Case.CaseId != _boundCaseId)
+        {
+            _boundCaseId = _state.Case.CaseId;
+            ResetForNewCase();
+        }
+
+        if (!string.IsNullOrWhiteSpace(_state.PendingNotice))
+        {
+            SetStatus(_state.PendingNotice, Theme.Success);
+            _state.PendingNotice = string.Empty;
+        }
+
         var doc = _state.Case.CoreDocument;
+        if (doc != null)
+            _state.Case.AdvanceStage(CaseStage.CoreDocument);
+
         if (doc == null)
         {
             // Auto-generate on first entry, inline (partial results stay visible)
@@ -1328,17 +1371,47 @@ public class StepCoreDocument : UserControl, IWizardStep
         var currentHash = _state.Case.ComputeSourceHash();
         if (doc.SourceHash != currentHash && currentHash != _declinedStaleHash)
         {
-            var answer = MessageBox.Show(
-                "Your scenario or settings changed after this document was written. Regenerate it now? Your edits will be replaced.",
-                "Scenario Changed",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question,
-                MessageBoxDefaultButton.Button2);
+            // With a guide, C9 tells the user the guide will be marked out of date (D-20)
+            var answer = _state.Case.Guide != null
+                ? ShowC9()
+                : MessageBox.Show(
+                    "Your scenario or settings changed after this document was written. Regenerate it now? Your edits will be replaced.",
+                    "Scenario Changed",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2);
             if (answer == DialogResult.Yes)
                 await RunGenerationAsync(fullRegenerate: true);
             else
                 _declinedStaleHash = currentHash; // The validator reports the stale document as a Warning
         }
+    }
+
+    private static DialogResult ShowC9()
+    {
+        var (title, text) = CaseGuideUiText.C9RegenerateDocumentWithGuide();
+        return MessageBox.Show(text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+    }
+
+    private void ResetForNewCase()
+    {
+        _declinedStaleHash = string.Empty;
+        _editorSectionId = string.Empty;
+        _editorOriginalText = string.Empty;
+        _suppressSelection = true;
+        try
+        {
+            _lstSections.Items.Clear();
+            _txtEditor.Text = string.Empty;
+            _txtGuidance.Clear();
+        }
+        finally
+        {
+            _suppressSelection = false;
+        }
+
+        SetPreviewMode(false);
+        SetStatus(string.Empty, Theme.TextMuted);
     }
 
     public Task OnLeaveStepAsync()
@@ -1357,7 +1430,7 @@ public class StepCoreDocument : UserControl, IWizardStep
 
         if (_state.Case.CoreDocument == null)
         {
-            MessageBox.Show("Generate the core document before finishing.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show("Generate the core document before continuing.", "Validation", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return Task.FromResult(false);
         }
 
@@ -1366,7 +1439,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         if (citationErrors > 0)
         {
             MessageBox.Show(
-                $"The document cites {citationErrors} court decisions. Case-law citations are not allowed because they may be invented. Edit or regenerate the sections listed under Issues, then click Finish again.",
+                $"The document cites {citationErrors} court decisions. Case-law citations are not allowed because they may be invented. Edit or regenerate the sections listed under Issues, then click Next again.",
                 "Case Citations Found",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -1377,7 +1450,7 @@ public class StepCoreDocument : UserControl, IWizardStep
         if (errors > 0)
         {
             MessageBox.Show(
-                $"The document has {errors} errors (listed under Issues). Fix or regenerate those sections, then click Finish again.",
+                $"The document has {errors} errors (listed under Issues). Fix or regenerate those sections, then click Next again.",
                 "Validation",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);

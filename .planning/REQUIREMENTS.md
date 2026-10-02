@@ -101,7 +101,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [ ] **KEY-01**: System produces an answer key in CSV and Excel with one row per document (emails and attachments)
 - [x] **KEY-02**: Each row includes DocID, file path, custodian, date, from/to, subject, thread ID, family/parent ID, relevance category, issue codes, linked fact IDs, hot flag, privilege flag and a one-sentence rationale
 - [x] **KEY-03**: Labels come from the plan at generation time, with family-level relevance propagated to attachments and quoted replies
-- [ ] **KEY-04**: Excel key includes a corpus statistics sheet (counts by custodian, issue, relevance category, date)
+- [x] **KEY-04**: Excel key includes a corpus statistics sheet (counts by custodian, issue, relevance category, date)
 - [ ] **KEY-05**: System generates a review protocol / coding manual document describing issues and relevance criteria for reviewers
 
 ### Corpus QA
@@ -237,7 +237,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | KEY-01 | Phase 4 | Pending |
 | KEY-02 | Phase 4 | Complete |
 | KEY-03 | Phase 4 | Complete |
-| KEY-04 | Phase 4 | Pending |
+| KEY-04 | Phase 4 | Complete |
 | KEY-05 | Phase 4 | Pending |
 | QA-01 | Phase 7 | Pending |
 | QA-02 | Phase 7 | Pending |

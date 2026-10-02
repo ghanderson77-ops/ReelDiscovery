@@ -59,7 +59,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Corpus Planning
 
-- [ ] **PLAN-01**: User sets the corpus size (up to ~5,000 emails) and the relevant vs. non-relevant proportion
+- [x] **PLAN-01**: User sets the corpus size (up to ~5,000 emails) and the relevant vs. non-relevant proportion
 - [ ] **PLAN-02**: System plans every thread and message in code before any prose is written: date/time, sender, recipients (To/CC), reply/forward structure, linked facts and issues, relevance label, attachments
 - [ ] **PLAN-03**: Relevant threads are scheduled against the key-facts timeline so overlapping issues run concurrently among shared characters without contradiction
 - [ ] **PLAN-04**: Timestamps are realistic (business hours, time zones, weekends/holidays, reply latency)
@@ -99,7 +99,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Answer Key
 
 - [ ] **KEY-01**: System produces an answer key in CSV and Excel with one row per document (emails and attachments)
-- [ ] **KEY-02**: Each row includes DocID, file path, custodian, date, from/to, subject, thread ID, family/parent ID, relevance category, issue codes, linked fact IDs, hot flag, privilege flag and a one-sentence rationale
+- [x] **KEY-02**: Each row includes DocID, file path, custodian, date, from/to, subject, thread ID, family/parent ID, relevance category, issue codes, linked fact IDs, hot flag, privilege flag and a one-sentence rationale
 - [ ] **KEY-03**: Labels come from the plan at generation time, with family-level relevance propagated to attachments and quoted replies
 - [ ] **KEY-04**: Excel key includes a corpus statistics sheet (counts by custodian, issue, relevance category, date)
 - [ ] **KEY-05**: System generates a review protocol / coding manual document describing issues and relevance criteria for reviewers
@@ -207,7 +207,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ANC-03 | Phase 8 | Pending |
 | ANC-04 | Phase 8 | Pending |
 | ANC-05 | Phase 8 | Pending |
-| PLAN-01 | Phase 4 | Pending |
+| PLAN-01 | Phase 4 | Complete |
 | PLAN-02 | Phase 4 | Pending |
 | PLAN-03 | Phase 4 | Pending |
 | PLAN-04 | Phase 4 | Pending |
@@ -235,7 +235,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ATT-03 | Phase 6 | Pending |
 | ATT-04 | Phase 6 | Pending |
 | KEY-01 | Phase 4 | Pending |
-| KEY-02 | Phase 4 | Pending |
+| KEY-02 | Phase 4 | Complete |
 | KEY-03 | Phase 4 | Pending |
 | KEY-04 | Phase 4 | Pending |
 | KEY-05 | Phase 4 | Pending |

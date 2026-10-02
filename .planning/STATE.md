@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 4 context gathered
-last_updated: "2026-10-02T19:23:39.849Z"
-last_activity: 2026-10-02 -- Phase 4 planning complete
+last_updated: "2026-10-02T19:32:31.905Z"
+last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 42
-  percent: 66
+  completed_plans: 43
+  percent: 67
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-29)
 
 **Core value:** Every relevant email in a multi-thousand-document corpus must stay faithful to one consistent case story (core pleading + key-facts timeline).
-**Current focus:** Phase 3 — Case Guide
+**Current focus:** Phase 4 — Corpus Plan & Answer Key
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
+Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
+Plan: 2 of 22
 Status: Ready to execute
-Last activity: 2026-10-02 -- Phase 4 planning complete
+Last activity: 2026-10-02
 
 Progress: [██████████] 98%
 
@@ -92,6 +92,7 @@ Progress: [██████████] 98%
 | Phase 03 P16 | 26min | 3 tasks | 8 files |
 | Phase 03 P18 | 35min | 3 tasks | 6 files |
 | Phase 03 P19 | 35min | 2 tasks | 16 files |
+| Phase 04 P01 | 12min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -219,6 +220,9 @@ Recent decisions affecting current work:
 - [03-16]: Regenerate Cast/Facts/Values failure reads 'The {part} was/were not regenerated: ... The previous {entries} were kept.'; Retry Issue Details failure reads 'The issue details were not written: ... Click Retry Issue Details.'
 - [03-16]: Detail card minimum is 344 (UI-SPEC 320) so Delete Character and Regenerate Character sit 8 apart; Cast grid minimums are Name 96, Title 80, Organization 96, Tier 96 so the grid fits beside it with a vertical scrollbar
 - [03-16]: The wizard's 900x600 default window is too small for the Case Guide; 03-18 should open the case flow at about 1100x750 (deferred-items.md)
+- [Phase 04]: [04-01]: CaseDraft.Normalize upgrades FormatVersion below current to current so v1 cases re-saved with Corpus are refused by older builds (T-04-03)
+- [Phase 04]: [04-01]: ClampWindow only widens toward the fact range; invalid dates are flagged and left as typed; EndBeforeStart compares the typed dates
+- [Phase 04]: [04-01]: Override ranges HotPerHotFact 1-5, PrivilegedPercent 0-30, AttachmentPercent 0-60; negative = automatic (null)
 
 ### Pending Todos
 
@@ -240,6 +244,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T18:00:11.025Z
+Last session: 2026-10-02T19:32:09.050Z
 Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-corpus-plan-answer-key/04-CONTEXT.md
+Resume file: None

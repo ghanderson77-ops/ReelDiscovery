@@ -1796,7 +1796,27 @@ public class CaseGuideGenerator
             result.Notes);
 
         foreach (var member in removed)
+        {
+            // The signing attorney or memo author is never dropped: SeedAuthor would only re-add them under a new id,
+            // and the facts citing them would lose their links (WR-07)
+            if (IsDocumentAuthor(draft, member))
+                continue;
             RemoveCastMember(guide, member);
+        }
+    }
+
+    // Same name test SeedAuthor uses to decide the author is already in the cast
+    private static bool IsDocumentAuthor(CaseDraft draft, CastMember member)
+    {
+        var doc = draft.CoreDocument;
+        if (doc == null || member.FullName.Length == 0)
+            return false;
+
+        if (CoreDocumentTemplates.IsPleading(doc.DocumentType))
+            return string.Equals(member.FullName, Clean(doc.Counsel.AttorneyName), StringComparison.OrdinalIgnoreCase);
+
+        var from = Clean(doc.Memo.From);
+        return from.Length > 0 && from.Contains(member.FullName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void UpdateKeyMember(CaseDraft draft, CastMember member, RosterPersonDto person)

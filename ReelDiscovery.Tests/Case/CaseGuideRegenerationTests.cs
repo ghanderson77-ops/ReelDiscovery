@@ -221,6 +221,24 @@ public class CaseGuideRegenerationTests
     }
 
     [Fact]
+    public async Task RegenCast_OmittedSigningAttorneyKeepsIdAndLinks()
+    {
+        // WR-07: the model leaving out the signing attorney must not churn their CH id or strip their fact links
+        var draft = CaseTestData.SampleCounselDraft();
+        var f1 = draft.Guide!.FindFact("F-001")!;
+        f1.KnownByIds.Add("CH-006");
+        var (gateway, _) = CastGateway(Roster(BasePeople("CH-006")), background: 4);
+
+        var result = await new CaseGuideGenerator(gateway).RegenerateTabAsync(draft, GuidePart.Cast, "", replaceEdited: false);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+        var morgan = Assert.Single(draft.Guide.Cast, c => c.FullName == "Morgan Ellis");
+        Assert.Equal("CH-006", morgan.Id);
+        Assert.Contains("CH-006", f1.KnownByIds);
+        Assert.False(f1.NeedsReview);
+    }
+
+    [Fact]
     public async Task RegenCast_ReplaceEdited()
     {
         var draft = CaseTestData.SampleCounselDraft();

@@ -9,7 +9,7 @@ namespace ReelDiscovery.Forms;
 
 public partial class WizardForm : Form
 {
-    private readonly WizardState _state = new();
+    private readonly WizardState _state;
     private readonly List<UserControl> _steps = new();
     private int _currentStepIndex = 0;
     private WizardFlow _builtFlow;
@@ -27,17 +27,44 @@ public partial class WizardForm : Form
     private System.Windows.Forms.Timer _costUpdateTimer = null!;
 
     public WizardForm()
+        : this(new WizardState(), forRender: false)
     {
-        InitializeComponent();
-        InitializeWizardUI();
-        LoadSteps();
-        InitializeCostTracker();
-        LoadIcon();
     }
 
-    // Case Guide needs room for its grid beside the detail card (03-16): open at about 1100x750 logical
-    private static readonly Size PreferredClientSize = new(1100, 750);
-    private static readonly Size MinimumClientSize = new(1000, 700);
+    private WizardForm(WizardState state, bool forRender)
+    {
+        _state = state;
+        InitializeComponent();
+        InitializeWizardUI();
+        LoadSteps(showFirstStep: !forRender);
+        InitializeCostTracker();
+        if (!forRender)
+            LoadIcon();
+    }
+
+    /// <summary>
+    /// Test-only: a case-flow wizard over the given state with its steps built but none entered,
+    /// so no saved API keys are loaded. Closing it never prompts.
+    /// </summary>
+    internal static WizardForm CreateForRender(WizardState state)
+    {
+        state.Flow = WizardFlow.CaseDriven;
+        var form = new WizardForm(state, forRender: true);
+        form._currentStepIndex = -1;
+        // Render tests close the form programmatically; a prompt would block the test thread
+        form._closeConfirmed = true;
+        return form;
+    }
+
+    /// <summary>
+    /// Test-only: shows a step without validating the current one.
+    /// </summary>
+    internal void ShowStepForRender(int index) => ShowStep(index);
+
+    // The Case Guide needs room for its grid, detail card and Checks list (03-16). The header band, nav bar and
+    // footer take about 48 x 184 logical, so a 1150 x 900 window client gives the step about 1100 x 716
+    internal static readonly Size PreferredClientSize = new(1150, 900);
+    internal static readonly Size MinimumClientSize = new(1000, 700);
 
     protected override void OnLoad(EventArgs e)
     {
@@ -136,7 +163,8 @@ public partial class WizardForm : Form
             Dock = DockStyle.Fill,
             ForeColor = Color.White,
             Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-            TextAlign = ContentAlignment.MiddleLeft
+            TextAlign = ContentAlignment.MiddleLeft,
+            Name = "lblStepTitle"
         };
         _stepIndicatorPanel.Controls.Add(_lblStepTitle);
 
@@ -213,14 +241,17 @@ public partial class WizardForm : Form
         var buttonHeight = LogicalToDeviceUnits(34);
         _btnCancel = ButtonHelper.CreateButton("Cancel", buttonWidth, buttonHeight, ButtonStyle.Default);
         _btnCancel.Margin = new Padding(0);
+        _btnCancel.Name = "btnCancel";
         _btnCancel.Click += BtnCancel_Click;
 
         _btnBack = ButtonHelper.CreateButton("< Back", buttonWidth, buttonHeight, ButtonStyle.Default);
         _btnBack.Margin = new Padding(0, 0, LogicalToDeviceUnits(Theme.SmallGap), 0);
+        _btnBack.Name = "btnBack";
         _btnBack.Click += BtnBack_Click;
 
         _btnNext = ButtonHelper.CreateButton("Next >", buttonWidth, buttonHeight, ButtonStyle.Primary);
         _btnNext.Margin = new Padding(0);
+        _btnNext.Name = "btnNext";
         _btnNext.Click += BtnNext_Click;
 
         navigation.Controls.Add(_btnCancel, 0, 0);
@@ -283,12 +314,13 @@ public partial class WizardForm : Form
             ShowStep(index);
     }
 
-    private void LoadSteps()
+    private void LoadSteps(bool showFirstStep)
     {
         _steps.Add(new StepApiConfiguration());
         WireStep(_steps[0]);
         BuildSteps(_state.Flow);
-        ShowStep(0);
+        if (showFirstStep)
+            ShowStep(0);
     }
 
     private void WireStep(UserControl step)
@@ -357,6 +389,10 @@ public partial class WizardForm : Form
 
     private void UpdateNavigationButtons()
     {
+        // No step shown yet (render-only forms)
+        if (_currentStepIndex < 0 || _currentStepIndex >= _steps.Count)
+            return;
+
         _btnBack.Enabled = _currentStepIndex > 0;
 
         if (_steps[_currentStepIndex] is IWizardStep wizard)

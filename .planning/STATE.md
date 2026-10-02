@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-10-02T19:50:25.295Z"
+last_updated: "2026-10-02T19:50:51.108Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
@@ -231,6 +231,12 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-02]: PlanCallRunner waits for a slot on run.Cts.Token and releases only when acquired, so a fatal stop frees queued callers
 - [Phase 04]: [04-02]: FakeLlmProvider calls OnSend outside its lock; Respond (request-based) overrides the response queue
 - [Phase 04]: [04-21]: CaseGuide.ComputeHash hashes a content projection only; part states, review flags, IsUserEdited/EmailIsUserEdited, DetailsPending, MappingNotes, SourceSectionId, IdCounters and DismissedStaleKey are excluded
+- [Phase 04]: [04-03]: SampleKind's parentRecipients = parent To + CC count; ThreadShapes.ResolveKind exposes the degraded kind (ReplyAll without others -> Reply, Forward without target -> Reply, New on non-root -> Reply) so builders can set Kind consistently with RecipientsFor
+- [Phase 04]: [04-03]: A Reply from the parent's own sender (follow-up) addresses the parent's To; if nobody is left it is a note to self
+- [Phase 04]: [04-03]: SampleLatencyMinutes draws identically for internal/external; external = round(internal x 1.5)
+- [Phase 04]: [04-03]: SkeletonContext window falls back settings -> DefaultWindow -> last three months (with a Note); ids outside the cast are always active and use UsTimeZones.Default
+- [Phase 04]: [04-03]: ThreadScheduler bump rule: if the sampled reply time is < parent + 1 min or <= previous + 1 min, AddBusinessMinutes(later of parent/previous, 2..20) in the sender zone
+- [Phase 04]: [04-03]: BudgetAllocator adjusts to the exact target by adding to the shortest thread below 12 and trimming the longest above 1 (fact-then-thread order); full threads add a thread to the fact with the most weight per thread; all-singleton overshoot drops Supporting threads first
 
 ### Pending Todos
 

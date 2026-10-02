@@ -446,7 +446,7 @@ public class CaseGuideValidatorTests
         AssertFinding(findings, IssueSeverity.Warning, GuideArea.Guide, "ORG-04", "Dana Ortiz has no outside law firm with a partner and an associate.");
         AssertNoMessage(findings, "Dana Ortiz has no in-house counsel.");
         Assert.DoesNotContain(findings, f => f.Message.StartsWith("Dana Ortiz has 0 background staff", StringComparison.Ordinal));
-        AssertNoMessage(findings, "Party Dana Ortiz is not in the cast. Click Update Guide or Regenerate Cast.");
+        AssertNoMessage(findings, "Party Dana Ortiz is not in the cast.");
     }
 
     [Fact]
@@ -593,7 +593,7 @@ public class CaseGuideValidatorTests
 
         var findings = CaseGuideValidator.Validate(draft);
 
-        AssertFinding(findings, IssueSeverity.Warning, GuideArea.Guide, "", "The issue details were not written. Click Retry Issue Details.");
+        AssertFinding(findings, IssueSeverity.Warning, GuideArea.Guide, "", "The issue details were not written.");
         Assert.Empty(Errors(findings));
     }
 
@@ -610,7 +610,7 @@ public class CaseGuideValidatorTests
 
         var findings = CaseGuideValidator.Validate(draft);
 
-        AssertFinding(findings, IssueSeverity.Warning, GuideArea.Guide, "", "The issue details were not written. Click Retry Issue Details.");
+        AssertFinding(findings, IssueSeverity.Warning, GuideArea.Guide, "", "The issue details were not written.");
     }
 
     // ---- Rule 22: staleness and review ----
@@ -706,7 +706,7 @@ public class CaseGuideValidatorTests
         draft.CoreDocument!.Parties.Add(new CaseParty { Id = "party-3", Name = "Lakeview Tower Owner LLC", Role = PartyRole.Defendant });
 
         AssertFinding(CaseGuideValidator.Validate(draft), IssueSeverity.Error, GuideArea.Guide, "",
-            "Party Lakeview Tower Owner LLC has no organization. Click Update Guide or Regenerate Cast.");
+            "Party Lakeview Tower Owner LLC has no organization.");
     }
 
     [Theory]
@@ -723,8 +723,8 @@ public class CaseGuideValidatorTests
 
         var findings = CaseGuideValidator.Validate(draft);
 
-        AssertNoMessage(findings, "Party Ryan Howard is not in the cast. Click Update Guide or Regenerate Cast.");
-        AssertNoMessage(findings, "Party Ryan Howard has no organization. Click Update Guide or Regenerate Cast.");
+        AssertNoMessage(findings, "Party Ryan Howard is not in the cast.");
+        AssertNoMessage(findings, "Party Ryan Howard has no organization.");
     }
 
     [Fact]
@@ -735,9 +735,9 @@ public class CaseGuideValidatorTests
 
         var findings = CaseGuideValidator.Validate(draft);
 
-        AssertFinding(findings, IssueSeverity.Error, GuideArea.Guide, "", "Party Ryan Howard is not in the cast. Click Update Guide or Regenerate Cast.");
+        AssertFinding(findings, IssueSeverity.Error, GuideArea.Guide, "", "Party Ryan Howard is not in the cast.");
         // People never need an organization of their own
-        AssertNoMessage(findings, "Party Ryan Howard has no organization. Click Update Guide or Regenerate Cast.");
+        AssertNoMessage(findings, "Party Ryan Howard has no organization.");
     }
 
     [Fact]
@@ -748,7 +748,7 @@ public class CaseGuideValidatorTests
         draft.CoreDocument!.Parties.RemoveAt(1);
 
         AssertFinding(CaseGuideValidator.Validate(draft), IssueSeverity.Warning, GuideArea.Guide, "ORG-02",
-            "Harmon Builders, Inc. is no longer a party in the core document. Click Update Guide or Regenerate Cast.");
+            "Harmon Builders, Inc. is no longer a party in the core document.");
     }
 
     [Fact]

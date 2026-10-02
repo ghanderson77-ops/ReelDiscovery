@@ -18,6 +18,12 @@ public class ApprovalResult
     public bool FileOpenElsewhere { get; set; }
 }
 
+public class PlanApplyResult
+{
+    public bool Saved { get; set; }
+    public string Error { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// Review Plan state transitions (D-04, D-18, D-25, D-26) without UI: answer-key/protocol writes and approval.
 /// </summary>
@@ -110,4 +116,101 @@ public static class CorpusApproval
             RecordApproval(draft, plan, result.Files, DateTime.UtcNow);
         return result;
     }
+
+    /// <summary>
+    /// Saves a newly built plan to corpus-plan.json first, then points the draft at it and resets approval (D-18, T-04-69).
+    /// A failed save leaves the draft (and any previous plan with its approval) untouched. A cancelled or failed planning
+    /// run must not call this method, so the previous plan stays in place. The caller saves case.json afterwards.
+    /// </summary>
+    public static async Task<PlanApplyResult> ApplyNewPlanAsync(string caseFolder, CaseDraft draft, CorpusPlan plan,
+        PlanSaver? saver = null, CancellationToken ct = default)
+    {
+        saver ??= CorpusPlanStore.SaveAsync;
+        try
+        {
+            await saver(caseFolder, plan, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new PlanApplyResult { Saved = false, Error = ex.Message };
+        }
+
+        draft.Corpus ??= new CorpusState();
+        var corpus = draft.Corpus;
+        corpus.Plan = plan;
+        corpus.PlanId = plan.PlanId;
+        corpus.PlanGuideHash = plan.GuideHash;
+        corpus.PlanSettingsHash = plan.SettingsHash;
+        corpus.PlanCreatedUtc = plan.CreatedUtc;
+        corpus.Approved = false;
+        corpus.ApprovedUtc = null;
+        corpus.DismissedStaleGuideHash = string.Empty;
+        corpus.DismissedSettingsHash = string.Empty;
+        // WrittenFiles kept: files from the previous plan now read as written for an earlier plan
+        // D-04 decision: the stage advances as soon as a plan is first saved
+        draft.AdvanceStage(CaseStage.ReviewPlan);
+        return new PlanApplyResult { Saved = true };
+    }
+
+    /// <summary>
+    /// True when the plan was built from a different guide (content-only hash) and that guide was not kept (D-25).
+    /// </summary>
+    public static bool IsGuideStale(CaseDraft draft)
+    {
+        var corpus = draft.Corpus;
+        if (corpus == null || !corpus.HasPlan)
+            return false;
+        var current = (draft.Guide ?? new CaseGuide()).ComputeHash();
+        return PlanGuideHash(corpus) != current && corpus.DismissedStaleGuideHash != current;
+    }
+
+    /// <summary>
+    /// True when the settings changed since the plan was built and the change was not kept (D-26 settings banner).
+    /// </summary>
+    public static bool IsSettingsChanged(CaseDraft draft)
+    {
+        var corpus = draft.Corpus;
+        if (corpus == null || !corpus.HasPlan)
+            return false;
+        var current = (corpus.Settings ?? new CorpusSettings()).ComputeHash();
+        return PlanSettingsHash(corpus) != current && corpus.DismissedSettingsHash != current;
+    }
+
+    /// <summary>
+    /// Withdraws approval while the guide is stale and not kept; returns true when approval was withdrawn.
+    /// </summary>
+    public static bool WithdrawApprovalIfStale(CaseDraft draft)
+    {
+        if (draft.Corpus == null || !draft.Corpus.Approved || !IsGuideStale(draft))
+            return false;
+        draft.Corpus.Approved = false;
+        return true;
+    }
+
+    /// <summary>
+    /// Keep This Plan: dismisses the stale banner for the current guide hash only.
+    /// </summary>
+    public static void KeepStalePlan(CaseDraft draft)
+    {
+        draft.Corpus ??= new CorpusState();
+        draft.Corpus.DismissedStaleGuideHash = (draft.Guide ?? new CaseGuide()).ComputeHash();
+    }
+
+    /// <summary>
+    /// Dismisses the settings-changed banner for the current settings hash only.
+    /// </summary>
+    public static void KeepSettingsChange(CaseDraft draft)
+    {
+        draft.Corpus ??= new CorpusState();
+        draft.Corpus.DismissedSettingsHash = (draft.Corpus.Settings ?? new CorpusSettings()).ComputeHash();
+    }
+
+    // The loaded plan's own stamp wins; the case.json copy covers a plan not yet loaded
+    private static string PlanGuideHash(CorpusState corpus) => corpus.Plan?.GuideHash ?? corpus.PlanGuideHash;
+
+    private static string PlanSettingsHash(CorpusState corpus) => corpus.Plan?.SettingsHash ?? corpus.PlanSettingsHash;
 }

@@ -15,12 +15,16 @@ public static class CaseGuidePrompts
     // Source text caps keep one request well inside the model's context
     private const int IssueSourceMaxChars = 60_000;
     private const int RosterSourceMaxChars = 120_000;
+    private const int ScenarioMaxChars = 8_000;
 
     /// <summary>
-    /// Name rules for every guide prompt: keep the document's names, the applied substitutions and the names the user kept (D-01, CASE-03).
+    /// Name rules for every guide prompt: the user's scenario (after real-name substitution), then keep the scenario's and
+    /// the document's names, the applied substitutions and the names the user kept (D-01, CASE-03).
+    /// The scenario goes in the user prompt only; the shared system prompt stays byte-stable.
     /// </summary>
     internal static void AppendNameRules(StringBuilder sb, CaseDraft draft)
     {
+        AppendScenario(sb, draft);
         sb.AppendLine("Keep every name the document uses exactly as written, including names from films, TV series, books or games.");
 
         var applied = draft.Substitutions
@@ -40,6 +44,23 @@ public static class CaseGuidePrompts
             .ToList();
         if (kept.Count > 0)
             sb.AppendLine($"The user has approved keeping these names exactly as written; use them unchanged as an exception to the fictional-names rule: {string.Join(", ", kept)}");
+    }
+
+    /// <summary>
+    /// The effective (substituted) scenario with the instruction to keep every name it gives, so people and companies the
+    /// scenario names but the document does not are never replaced by invented names (D-01). Nothing when the scenario is blank.
+    /// </summary>
+    internal static void AppendScenario(StringBuilder sb, CaseDraft draft)
+    {
+        var scenario = draft.EffectiveScenario;
+        if (string.IsNullOrWhiteSpace(scenario))
+            return;
+
+        sb.AppendLine();
+        sb.AppendLine("Scenario from the user (keep every person and company it names, exactly as written, including names from films, TV series, books or games):");
+        sb.AppendLine(Cap(scenario.Trim(), ScenarioMaxChars));
+        sb.AppendLine();
+        sb.AppendLine("Keep every name the scenario uses exactly as written. When the case needs a person or company the scenario names, use that name; invent a name only for someone neither the scenario nor the document names.");
     }
 
     /// <summary>
@@ -107,7 +128,7 @@ public static class CaseGuidePrompts
         sb.AppendLine();
 
         sb.AppendLine("Requirements:");
-        sb.AppendLine($"Name {preset.CharactersMin}-{preset.CharactersMax} key people who are not counsel: everyone the document names, then the people the story needs.");
+        sb.AppendLine($"Name {preset.CharactersMin}-{preset.CharactersMax} key people who are not counsel: everyone the document or the scenario names, then the people the story needs.");
         foreach (var org in guide.Organizations.Where(o => o != null && o.Kind == OrganizationKind.Party))
             sb.AppendLine($"{org.Id} {org.Name}: one in-house counsel, and an outside law firm with at least one partner and one associate (add the firm under organizations).");
         foreach (var org in guide.Organizations.Where(o => o != null && o.Kind == OrganizationKind.Individual))

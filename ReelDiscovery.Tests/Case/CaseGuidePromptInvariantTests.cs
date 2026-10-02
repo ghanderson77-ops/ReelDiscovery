@@ -8,7 +8,7 @@ namespace ReelDiscovery.Tests.Case;
 
 /// <summary>
 /// W1 / D-01: every case guide request path sends the byte-identical shared system prompt (no run data in it) and carries
-/// the name rules, including the user's kept names, in the user prompt. Prompts never ask for JSON (strict schemas do).
+/// the effective scenario and the name rules, including the user's kept names, in the user prompt. Prompts never ask for JSON (strict schemas do).
 /// </summary>
 public class CaseGuidePromptInvariantTests
 {
@@ -43,6 +43,11 @@ public class CaseGuidePromptInvariantTests
             Assert.Equal(CaseGuidePrompts.SystemPrompt, request.SystemPrompt, StringComparer.Ordinal);
             Assert.DoesNotContain(draft.EffectiveScenario, request.SystemPrompt);
             Assert.Contains("Keep every name the document uses exactly as written", request.UserPrompt);
+            // CR-01 / D-01: the effective scenario reaches every user prompt, so scenario-only names are kept
+            Assert.Contains(draft.EffectiveScenario, request.UserPrompt);
+            Assert.Contains("Oscar Martinez", request.UserPrompt);
+            Assert.Contains("Keep every name the scenario uses exactly as written", request.UserPrompt);
+            Assert.DoesNotContain("Oscar Martinez", request.SystemPrompt);
             Assert.Contains("The user has approved keeping these names exactly as written", request.UserPrompt);
             CaseTestData.AssertNoJsonInstructions(request);
         });

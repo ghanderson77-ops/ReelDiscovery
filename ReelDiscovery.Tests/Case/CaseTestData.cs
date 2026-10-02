@@ -51,7 +51,7 @@ internal static class CaseTestData
 
     public static CaseDraft SampleComplaintDraft()
     {
-        const string scenario = "Window subcontractor Brightline Glazing, LLC sues general contractor Harmon Builders, Inc. over unpaid change orders on the Lakeview Tower project in Chicago.";
+        const string scenario = "Window subcontractor Brightline Glazing, LLC sues general contractor Harmon Builders, Inc. over unpaid change orders on the Lakeview Tower project in Chicago. Brightline's controller Oscar Martinez tracked every unpaid invoice.";
 
         var draft = new CaseDraft
         {

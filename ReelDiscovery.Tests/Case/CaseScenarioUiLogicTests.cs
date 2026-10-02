@@ -1,3 +1,4 @@
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.UserControls;
 
@@ -88,23 +89,65 @@ public class CaseScenarioUiLogicTests
     [Theory]
     [InlineData(0)]
     [InlineData(7200)]
-    public void CounterColor_AtOrBelowNinetyPercent_IsDimGray(int length)
+    public void CounterColor_AtOrBelowNinetyPercent_IsTextMuted(int length)
     {
-        Assert.Equal(Color.DimGray, StepCaseScenario.CounterColor(length));
+        Assert.Equal(Theme.TextMuted, StepCaseScenario.CounterColor(length));
     }
 
     [Theory]
     [InlineData(7201)]
     [InlineData(8000)]
-    public void CounterColor_AboveNinetyPercent_IsDarkOrange(int length)
+    public void CounterColor_AboveNinetyPercent_IsWarning(int length)
     {
-        Assert.Equal(Color.DarkOrange, StepCaseScenario.CounterColor(length));
+        Assert.Equal(Theme.Warning, StepCaseScenario.CounterColor(length));
     }
 
     [Fact]
-    public void CounterColor_OverCap_IsRed()
+    public void CounterColor_OverCap_IsDanger()
     {
-        Assert.Equal(Color.Red, StepCaseScenario.CounterColor(8001));
+        Assert.Equal(Theme.Danger, StepCaseScenario.CounterColor(8001));
+    }
+
+    [Fact]
+    public void NeedsOpenConfirmation_NewDraft_IsFalse()
+    {
+        Assert.False(StepCaseScenario.NeedsOpenConfirmation(new CaseDraft()));
+    }
+
+    [Fact]
+    public void NeedsOpenConfirmation_TypedScenarioWithoutFolder_IsTrue()
+    {
+        Assert.True(StepCaseScenario.NeedsOpenConfirmation(new CaseDraft { Scenario = "A dispute." }));
+    }
+
+    [Fact]
+    public void NeedsOpenConfirmation_SavedFolder_IsFalse()
+    {
+        var draft = new CaseDraft { Scenario = "A dispute.", FolderPath = @"C:\Cases\Brightline v. Harmon" };
+
+        Assert.False(StepCaseScenario.NeedsOpenConfirmation(draft));
+    }
+
+    [Fact]
+    public void NeedsOpenConfirmation_WithCoreDocument_IsFalse()
+    {
+        var draft = CaseTestData.SampleComplaintDraft();
+        draft.Scenario = "A dispute.";
+        draft.FolderPath = string.Empty;
+
+        Assert.False(StepCaseScenario.NeedsOpenConfirmation(draft));
+    }
+
+    [Fact]
+    public void NeedsOpenConfirmation_Null_IsFalse()
+    {
+        Assert.False(StepCaseScenario.NeedsOpenConfirmation(null));
+    }
+
+    [Fact]
+    public void RecentEmptyText_MatchesUiSpec()
+    {
+        Assert.Equal("No saved cases yet. A case is saved automatically once its core document is written.", StepCaseScenario.RecentEmptyText);
     }
 
     [Fact]

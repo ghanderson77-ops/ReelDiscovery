@@ -23,6 +23,9 @@ internal static class RenderHarness
     public static readonly Size Large = new(1100, 750);
     public static readonly Size Small = new(900, 600);
 
+    // Step area at the 1000x700 minimum window (04-UI-SPEC)
+    public static readonly Size WizardMin = new(1000, 540);
+
     // PER_MONITOR_AWARE_V2
     private static readonly IntPtr PerMonitorAwareV2 = new(-4);
     private static readonly object InitLock = new();

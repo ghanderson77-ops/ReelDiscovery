@@ -177,6 +177,62 @@ public class PlanCallRunnerTests
     }
 
     [Fact]
+    public void RichDraft_IsConsistent()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var guide = draft.Guide!;
+
+        Assert.Equal(8, guide.Facts.Count);
+        Assert.Equal(8, CorpusTestData.DatedFactCount(draft));
+        Assert.Equal(2, guide.Issues.Count);
+        Assert.Equal(DayOfWeek.Saturday, DateOnly.Parse(guide.Facts.Single(f => f.Id == "F-007").Date).DayOfWeek);
+        Assert.Equal("2024-07-04", guide.Facts.Single(f => f.Id == "F-008").Date);
+        Assert.Equal(new[] { "CH-008" }, guide.Facts.Single(f => f.Id == "F-008").KnownByIds);
+        Assert.Contains(guide.Facts, f => f.Significance == Models.Case.FactSignificance.Hot);
+        Assert.All(guide.Facts, f => Assert.All(f.IssueIds, id => Assert.Contains(guide.Issues, i => i.Id == id)));
+        Assert.Equal("America/Phoenix", BusinessCalendar.Resolve(guide.FindOrganization("ORG-02")).Id);
+        Assert.Equal("2024-06-15", guide.Cast.Single(c => c.Id == "CH-009").ActiveTo);
+        Assert.Equal(8, guide.IdCounters["F"]);
+        Assert.Equal(2, guide.IdCounters["ISS"]);
+    }
+
+    [Fact]
+    public void PromptIdHelpers_ParseIds()
+    {
+        const string prompt = "T-0001 msg 1 | Maria\nT-0001 msg 2 | Tom\n  T-0003 msg 1 | Lisa\nslot S-0002 then S-0001 and S-0002\nsee T-0001";
+
+        Assert.Equal(new[] { "T-0001", "T-0003" }, CorpusTestData.ThreadIdsIn(prompt));
+        Assert.Equal(new[] { "S-0002", "S-0001" }, CorpusTestData.SlotIdsIn(prompt));
+        var seqs = CorpusTestData.ThreadSeqsIn(prompt);
+        Assert.Equal(2, seqs.Count);
+        Assert.Equal(new[] { 1, 2 }, seqs[0].Seqs);
+        Assert.Equal("T-0003", seqs[1].ThreadId);
+    }
+
+    [Fact]
+    public async Task Respond_IsUsedAndThreadSafe()
+    {
+        var (gateway, fake) = CorpusTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Refused("queue must be ignored"));
+        fake.Respond = request => FakeLlmProvider.Ok($$"""{ "text": "{{request.UserPrompt}}" }""");
+        using var run = new PlanCallRun(CancellationToken.None, 3, Hint);
+
+        var tasks = Enumerable.Range(1, 3)
+            .Select(i => Task.Run(() => PlanCallRunner.RunAsync<EchoDto>(gateway, new LlmRequest
+            {
+                Tier = LlmTier.Story,
+                OperationName = "Plan Test",
+                SystemPrompt = "system",
+                UserPrompt = $"prompt {i}"
+            }, run)))
+            .ToArray();
+        var outcomes = await Task.WhenAll(tasks);
+
+        Assert.Equal(3, fake.Requests.Count);
+        Assert.Equal(new[] { "prompt 1", "prompt 2", "prompt 3" }, outcomes.Select(o => o.Value!.Text));
+    }
+
+    [Fact]
     public void FillResult_IsFatalFollowsFatalError()
     {
         var result = new FillResult();

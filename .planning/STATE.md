@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-10-02T19:59:25.449Z"
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-10-02T20:07:24.748Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 47
-  percent: 73
+  completed_plans: 48
+  percent: 75
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 6 of 22
+Plan: 7 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -97,6 +97,7 @@ Progress: [██████████] 98%
 | Phase 04 P21 | 6min | 1 tasks | 3 files |
 | Phase 04 P03 | 22min | 3 tasks | 7 files |
 | Phase 04 P04 | 15min | 2 tasks | 3 files |
+| Phase 04 P05 | 8min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -243,6 +244,10 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-04]: DocID rule checks set equality with {prefix}-000001..n plus attachment {parent}.{k:0000}, not strict chronological order
 - [Phase 04]: [04-04]: Leakage metrics (depth per thread, attachment share, To+CC, sender hour) are skipped when either group value is 0; relevant vs DailyBusiness+Decoy, both >= 5 messages
 - [Phase 04]: [04-04]: CorpusPlanValidator reads plan.Settings/ToIds/CcIds as stored (no Normalize); null Settings skips settings rules
+- [Phase 04]: [04-05]: DocID prefix: producing-party initials (non-ASCII letters dropped per word, single word -> first two letters), settings override wins, RD fallback
+- [Phase 04]: [04-05]: Custodian folders assigned in cast order (first wins; later duplicates and reserved names get -{CH id}); no cast participant -> Mailboxes/Unassigned/Inbox
+- [Phase 04]: [04-05]: Relevant thread roots are always Own; Own issue codes = issue ids of the message facts (fallback thread issues); quoted replies and attachments use thread codes
+- [Phase 04]: [04-05]: Hot is Y only on IsHot emails of relevant threads and their attachments; non-relevant attachments read 'family coded Not Relevant'
 
 ### Pending Todos
 
@@ -264,6 +269,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T19:59:25.444Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-10-02T20:07:24.744Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None

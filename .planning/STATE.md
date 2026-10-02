@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-15-PLAN.md
-last_updated: "2026-10-02T21:44:37.455Z"
+stopped_at: Completed 04-16-PLAN.md
+last_updated: "2026-10-02T21:52:37.688Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 59
-  percent: 92
+  completed_plans: 60
+  percent: 94
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 18 of 22
+Plan: 19 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -109,6 +109,7 @@ Progress: [██████████] 98%
 | Phase 04 P13 | 20min | 2 tasks | 2 files |
 | Phase 04 P14 | 12min | 2 tasks | 3 files |
 | Phase 04 P15 | 15min | 2 tasks | 4 files |
+| Phase 04 P16 | 9min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -292,6 +293,8 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-14]: Decoy seeds with a blank angle or any forbidden term count as missing (one re-ask, then '{Project} {routine topic}' template); externals renamed by the first accepted seed with folded slugs (<=30, 'mail' on collision with case/consumer/reserved/other domains)
 - [Phase 04]: 04-15: Case Summary answer-key row is Written only when both answer-key.csv and .xlsx exist with entries for the current plan; plan row staleness uses CorpusApproval.IsGuideStale (kept plan counts as current)
 - [Phase 04]: 04-15: Case Summary puts a divider above both group headings (Corpus, Case guide), deviating from UI-SPEC S3 'no divider above the first' so Case file does not merge into the Corpus group
+- [Phase 04]: [04-16]: CorpusPlanner returns a new plan or classified failure (fatal / refusal majority (fill+seed refused)*2 > total / no dated facts); draft only read, settings JSON-cloned; progress Done monotonic over chunks + batches + 2
+- [Phase 04]: [04-16]: D-15 merge rule (04-09) yields 0 multi-issue threads on RichDraft at 250-5000 emails (closest cross-issue pairs 13-15 business days apart); rule not loosened; PLAN-03 left pending
 
 ### Pending Todos
 
@@ -304,6 +307,7 @@ None yet.
 - [Phase 7]: Verify the OpenAI .NET batch/file surface (experimental OPENAI001) and Anthropic cache_control pass-through before planning.
 - [Phase 8]: Jurisdiction-specific discovery limits (interrogatory caps, RFA numbering, transcript line counts) need verification.
 - [Timing]: .NET 8 reaches EOL on 2026-11-10, so Phase 1's retarget is time-sensitive.
+- D-15: ThreadSkeletonBuilder.MergeMultiIssue produces 0 merged multi-issue threads on RichDraft (10-business-day window + 2 shared knowers too strict); decide whether to widen window / relax knowers (see 04-16-SUMMARY)
 
 ## Deferred Items
 
@@ -313,6 +317,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T21:44:37.448Z
-Stopped at: Completed 04-15-PLAN.md
+Last session: 2026-10-02T21:52:37.683Z
+Stopped at: Completed 04-16-PLAN.md
 Resume file: None

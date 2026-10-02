@@ -192,8 +192,118 @@ public class ThreadSkeletonTests
             var b = ctx.DatedFacts.Single(f => f.Id == thread.FactIds[1]);
             Assert.False(a.IssueIds.ToHashSet().SetEquals(b.IssueIds));
             Assert.True(thread.IssueIds.Count >= 2);
-            Assert.True(BusinessDaysBetween(FactDate(ctx, a.Id), FactDate(ctx, b.Id)) <= ThreadSkeletonBuilder.MultiIssueWindowBusinessDays);
+            Assert.True(BusinessDaysBetween(FactDate(ctx, a.Id), FactDate(ctx, b.Id)) <= ThreadSkeletonBuilder.MultiIssueFallbackWindowBusinessDays);
         }
+    }
+
+    // ----- D-15 gap fix: deliberate multi-issue threads on the unmodified RichDraft -----
+
+    /// <summary>
+    /// A thread that deliberately conveys two separate facts whose issue sets differ.
+    /// </summary>
+    private static bool IsMultiIssue(SkeletonContext ctx, PlannedThread thread)
+    {
+        var facts = thread.FactIds.Distinct().Select(id => ctx.DatedFacts.Single(f => f.Id == id)).ToList();
+        for (var i = 0; i < facts.Count; i++)
+        {
+            for (var j = i + 1; j < facts.Count; j++)
+            {
+                if (!facts[i].IssueIds.ToHashSet().SetEquals(facts[j].IssueIds))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(42)]
+    [InlineData(99)]
+    public void BuildRelevant_RichDraft1000Emails_MultiIssueShareTenToFifteenPercent(int seed)
+    {
+        // 1,000 emails at 20% relevant = 200 relevant messages
+        var (ctx, budget, threads) = Build(relevant: 200, seed: seed);
+
+        Assert.Equal(budget.TotalMessages, threads.Sum(t => t.Messages.Count));
+        foreach (var fact in ctx.DatedFacts)
+            Assert.Contains(threads, t => t.FactIds.Contains(fact.Id));
+
+        var multi = threads.Where(t => IsMultiIssue(ctx, t)).ToList();
+        var share = multi.Count / (double)threads.Count;
+        Assert.InRange(share, 0.10, 0.15);
+
+        foreach (var thread in multi)
+        {
+            var facts = thread.FactIds.Select(id => ctx.DatedFacts.Single(f => f.Id == id)).ToList();
+            Assert.Equal(2, facts.Count);
+            Assert.True(thread.IssueIds.Count >= 2, $"{thread.Id} carries {thread.IssueIds.Count} issue(s)");
+            Assert.True(BusinessDaysBetween(FactDate(ctx, facts[0].Id), FactDate(ctx, facts[1].Id)) <= ThreadSkeletonBuilder.MultiIssueFallbackWindowBusinessDays);
+
+            // Anchored on or after the later fact; every participant knew both facts and was active that day
+            var latest = facts.Max(f => FactDate(ctx, f.Id));
+            Assert.True(LocalDay(ctx, thread.Messages[0]) >= latest, $"{thread.Id} starts before {latest}");
+            Assert.Equal(thread.FactIds, thread.Messages[0].FactIds);
+            foreach (var m in thread.Messages)
+            {
+                var day = LocalDay(ctx, m);
+                foreach (var id in Participants(m))
+                {
+                    Assert.All(facts, f => Assert.Contains(id, Knowers(f)));
+                    Assert.True(ctx.IsActive(id, day), $"{m.Id}: {id} inactive on {day}");
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(50)]
+    [InlineData(500)]
+    [InlineData(1000)]
+    public void BuildRelevant_RichDraftAnySize_MultiIssueWithinCapAndTotalsExact(int relevant)
+    {
+        var (ctx, budget, threads) = Build(relevant: relevant);
+
+        Assert.Equal(budget.TotalMessages, threads.Sum(t => t.Messages.Count));
+        var multi = threads.Count(t => IsMultiIssue(ctx, t));
+        Assert.True(multi >= 1, $"no multi-issue thread among {threads.Count}");
+        Assert.InRange(multi / (double)threads.Count, 0.05, 0.15);
+    }
+
+    [Fact]
+    public void BuildRelevant_SingleIssueGuide_NoMultiIssueThreads_AndNote()
+    {
+        var draft = CorpusTestData.RichDraft();
+        foreach (var fact in draft.Guide!.Facts)
+            fact.IssueIds = new List<string> { "ISS-01" };
+
+        var (ctx, budget, threads) = Build(draft);
+
+        Assert.Equal(budget.TotalMessages, threads.Sum(t => t.Messages.Count));
+        Assert.DoesNotContain(threads, t => t.FactIds.Count > 1);
+        Assert.Single(ctx.Notes, n => n == "The case guide has only one issue with dated facts, so no thread combines two issues.");
+    }
+
+    [Fact]
+    public void BuildRelevant_NoSharedKnower_NoMultiIssueThreads_AndNote()
+    {
+        // Nobody who knew an ISS-01-only fact also knew a fact with a different issue set
+        var draft = CorpusTestData.RichDraft();
+        foreach (var fact in draft.Guide!.Facts.Where(f => f.Id is "F-005" or "F-006"))
+        {
+            fact.ActorIds = new List<string> { "CH-005" };
+            fact.KnownByIds = new List<string> { "CH-005" };
+        }
+        var f007 = draft.Guide.Facts.Single(f => f.Id == "F-007");
+        f007.ActorIds = new List<string> { "CH-008" };
+        f007.KnownByIds = new List<string> { "CH-008" };
+        draft.Guide.Facts.Single(f => f.Id == "F-001").KnownByIds.Remove("CH-005");
+
+        var (ctx, budget, threads) = Build(draft);
+
+        Assert.Equal(budget.TotalMessages, threads.Sum(t => t.Messages.Count));
+        Assert.DoesNotContain(threads, t => IsMultiIssue(ctx, t));
+        Assert.Contains(ctx.Notes, n => n.StartsWith("No two facts from different issues happen within 30 business days"));
     }
 
     [Fact]

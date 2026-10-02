@@ -228,6 +228,54 @@ public partial class CorpusPlannerTests
             _output.WriteLine($"Finding: {finding.Where}: {finding.Message}");
     }
 
+    [Theory]
+    [InlineData(250)]
+    [InlineData(1000)]
+    [InlineData(2500)]
+    [InlineData(5000)]
+    public async Task PlanAsync_RichDraft_PlansDeliberateMultiIssueThreads_WithoutKnowledgeOrActiveFindings(int total)
+    {
+        var draft = Draft(total);
+        var (planner, fake) = Planner();
+        fake.Respond = Responder();
+
+        var result = await planner.PlanAsync(draft, false, string.Empty);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+        var plan = result.Plan!;
+        var factById = draft.Guide!.Facts.ToDictionary(f => f.Id);
+        var relevant = plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant).ToList();
+        Assert.Equal(CorpusSettings.RelevantCount(total, 20), relevant.Sum(t => t.Messages.Count));
+
+        // Deliberate D-15 threads: two separate facts whose issue sets differ
+        var multi = relevant.Where(t =>
+        {
+            var facts = t.FactIds.Distinct().Select(id => factById[id]).ToList();
+            return facts.Count >= 2 && facts.Skip(1).Any(f => !f.IssueIds.ToHashSet().SetEquals(facts[0].IssueIds));
+        }).ToList();
+        var share = multi.Count / (double)relevant.Count;
+        _output.WriteLine($"{total} emails: relevant threads {relevant.Count}; deliberate multi-issue {multi.Count} ({share:P1})");
+
+        Assert.NotEmpty(multi);
+        Assert.InRange(share, 0.05, 0.15);
+        foreach (var thread in multi)
+        {
+            var knowers = thread.FactIds.Select(id => factById[id].ActorIds.Concat(factById[id].KnownByIds).ToHashSet()).ToList();
+            foreach (var message in thread.Messages)
+            {
+                foreach (var id in new[] { message.FromId }.Concat(message.ToIds).Concat(message.CcIds))
+                    Assert.All(knowers, k => Assert.Contains(id, k));
+            }
+
+            Assert.DoesNotContain(result.Findings, f => f.Message.Contains($"is on thread {thread.Id} but did not know about"));
+            Assert.DoesNotContain(result.Findings, f => f.Message.Contains($"Thread {thread.Id} mentions"));
+        }
+
+        // Rule 3 (active ranges) and rule 11 (knowledge) are clean for the whole plan
+        Assert.DoesNotContain(result.Findings, f => f.Message.Contains(" but is only active "));
+        Assert.DoesNotContain(result.Findings, f => f.Message.Contains(" but did not know about "));
+    }
+
     [Fact]
     public async Task PlanAsync_DocIdsAreContiguousInOrder()
     {

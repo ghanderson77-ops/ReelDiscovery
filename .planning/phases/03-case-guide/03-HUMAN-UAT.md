@@ -46,3 +46,15 @@ skipped: 0
 blocked: 0
 
 ## Gaps
+
+## UAT gap fixes (2026-10-02)
+
+### Individual parties became their own organizations — resolved (0ed4eff)
+- reported: The Office run created organizations "Ryan Howard" (howardfamily.com), "Michael Scott" and "David Wallace" and filed each person there instead of at Dunder Mifflin.
+- fix: individual parties are people, not organizations. `CastMember.PartyId` links a key character to the party they are; `SyncOrganizations` no longer creates organizations for individual parties; the roster prompt lists them separately ("placed at the organization they work for ... Never create an organization named after a person"); after the roster they are linked by name, and only an unmatched party gets a personal organization (a private individual with no employer). Regenerate Cast / Update Guide on an older guide moves the people to their employer (email and signature recomputed) and removes the empty person-named organizations. Counsel rules cover Party organizations and personal organizations only; validator rule 24 now reports "Party X is not in the cast" for a missing individual.
+- retest: Regenerate Cast (or Update Guide) on the saved Office case; expect ryan.howard@dundermifflin.com etc. and no person-named organizations.
+
+### Character active ranges did not cover their facts — resolved (ba4ecdd)
+- reported: Errors like "F-001 is dated 2007-01-08, but David Wallace (CH-003) is only active 2007-03-01 to 2008-07-31."
+- fix: `CaseGuideEditing.WidenActiveRanges` widens every generated (not hand-edited) character's range to cover each fact they did or knew about. Runs after fact generation, Regenerate Cast/Facts, single-entry regeneration, Update Guide, and once when the Case Guide step opens an existing guide (autosaved). Hand-edited characters are left for the validator to flag.
+- retest: reopen the saved Office case; the active-range Errors for generated characters are gone.

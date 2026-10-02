@@ -148,6 +148,127 @@ public class CaseGuideModelTests
     }
 
     [Fact]
+    public void ComputeHash_IgnoresUiState()
+    {
+        var mutations = new (string Name, Action<CaseGuide> Apply)[]
+        {
+            ("DismissedStaleKey", g => g.DismissedStaleKey = "stale-key"),
+            ("IdCounters", g => g.IdCounters["F"] = 999),
+            ("IssuesState.Status", g => g.IssuesState.Status = GuidePartStatus.Failed),
+            ("IssueDetailsState.FailureMessage", g => g.IssueDetailsState.FailureMessage = "boom"),
+            ("CastState.BasisHash", g => g.CastState.BasisHash = "abc"),
+            ("FactsState.BasisComponents", g => g.FactsState.BasisComponents["core"] = "def"),
+            ("FactsState.GeneratedUtc", g => g.FactsState.GeneratedUtc = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc)),
+            ("ValuesState.CompletedUnits", g => g.ValuesState.CompletedUnits.Add("unit-1")),
+            ("Fact.NeedsReview", g => g.Facts[0].NeedsReview = !g.Facts[0].NeedsReview),
+            ("Fact.ReviewReason", g => g.Facts[0].ReviewReason = "Check this."),
+            ("Fact.IsUserEdited", g => g.Facts[0].IsUserEdited = !g.Facts[0].IsUserEdited),
+            ("Fact.MappingNotes", g => g.Facts[0].MappingNotes.Add("note")),
+            ("Fact.SourceSectionId", g => g.Facts[0].SourceSectionId = "S-99"),
+            ("Cast.IsUserEdited", g => g.Cast[0].IsUserEdited = !g.Cast[0].IsUserEdited),
+            ("Cast.EmailIsUserEdited", g => g.Cast[0].EmailIsUserEdited = !g.Cast[0].EmailIsUserEdited),
+            ("Cast.DetailsPending", g => g.Cast[0].DetailsPending = !g.Cast[0].DetailsPending),
+            ("Value.NeedsReview", g => g.Values[0].NeedsReview = !g.Values[0].NeedsReview),
+            ("Value.ReviewReason", g => g.Values[0].ReviewReason = "Check this."),
+            ("Value.IsUserEdited", g => g.Values[0].IsUserEdited = !g.Values[0].IsUserEdited),
+            ("Value.MappingNotes", g => g.Values[0].MappingNotes.Add("note"))
+        };
+
+        foreach (var (name, apply) in mutations)
+        {
+            var guide = CaseTestData.SampleGuidedDraft().Guide!;
+            var before = guide.ComputeHash();
+            apply(guide);
+            Assert.True(before == guide.ComputeHash(), $"{name} changed the hash");
+        }
+    }
+
+    [Fact]
+    public void ComputeHash_ChangesOnContent()
+    {
+        var mutations = new (string Name, Action<CaseGuide> Apply)[]
+        {
+            ("Fact.Date", g => g.Facts[0].Date = "2001-01-01"),
+            ("Fact.Title", g => g.Facts[0].Title += " x"),
+            ("Fact.Description", g => g.Facts[0].Description += " x"),
+            ("Fact.IssueIds", g => g.Facts[0].IssueIds.Add("ISS-99")),
+            ("Fact.ActorIds", g => g.Facts[0].ActorIds.Add("CH-99")),
+            ("Fact.KnownByIds", g => g.Facts[0].KnownByIds.Add("CH-98")),
+            ("Fact.Significance", g => g.Facts[0].Significance = g.Facts[0].Significance == FactSignificance.Hot ? FactSignificance.Supporting : FactSignificance.Hot),
+            ("Cast.FirstName", g => g.Cast[0].FirstName += "x"),
+            ("Cast.LastName", g => g.Cast[0].LastName += "x"),
+            ("Cast.Email", g => g.Cast[0].Email = "someone.else@example.com"),
+            ("Cast.ActiveFrom", g => g.Cast[0].ActiveFrom = "2001-01-01"),
+            ("Cast.ActiveTo", g => g.Cast[0].ActiveTo = "2031-01-01"),
+            ("Cast.Role", g => g.Cast[0].Role = g.Cast[0].Role == CastRole.Staff ? CastRole.Party : CastRole.Staff),
+            ("Cast.Tier", g => g.Cast[0].Tier = g.Cast[0].Tier == CastTier.Key ? CastTier.Background : CastTier.Key),
+            ("Cast.OrganizationId", g => g.Cast[0].OrganizationId = "ORG-99"),
+            ("Org.TimeZoneId", g => g.Organizations[0].TimeZoneId = "Pacific Standard Time"),
+            ("Org.Domain", g => g.Organizations[0].Domain = "other.example"),
+            ("Org.Name", g => g.Organizations[0].Name += " x"),
+            ("Issue.Title", g => g.Issues[0].Title += " x"),
+            ("Issue.RelevanceCriteria", g => g.Issues[0].RelevanceCriteria += " x"),
+            ("Value.Value", g => g.Values[0].Value += "1")
+        };
+
+        foreach (var (name, apply) in mutations)
+        {
+            var guide = CaseTestData.SampleGuidedDraft().Guide!;
+            var before = guide.ComputeHash();
+            apply(guide);
+            Assert.True(before != guide.ComputeHash(), $"{name} did not change the hash");
+        }
+    }
+
+    [Fact]
+    public void ComputeHash_NullListsAndEntries_DoNotThrow()
+    {
+        var guide = new CaseGuide
+        {
+            Issues = null!,
+            Organizations = new() { null! },
+            Cast = null!,
+            Facts = new() { null!, new KeyFact { IssueIds = null!, ActorIds = null!, KnownByIds = null! } },
+            Values = null!
+        };
+
+        var hash = guide.ComputeHash();
+
+        Assert.False(string.IsNullOrEmpty(hash));
+    }
+
+    [Fact]
+    public void CaseStage_OrderAndAdvance()
+    {
+        Assert.Equal(
+            new[] { CaseStage.Described, CaseStage.CoreDocument, CaseStage.CaseGuide, CaseStage.CorpusSettings, CaseStage.ReviewPlan, CaseStage.Summary },
+            Enum.GetValues<CaseStage>());
+
+        var draft = CaseTestData.SampleGuidedDraft();
+        Assert.Equal(CaseStage.CaseGuide, draft.Stage);
+
+        draft.AdvanceStage(CaseStage.CorpusSettings);
+        Assert.Equal(CaseStage.CorpusSettings, draft.Stage);
+
+        draft.AdvanceStage(CaseStage.ReviewPlan);
+        draft.AdvanceStage(CaseStage.CaseGuide);
+        Assert.Equal(CaseStage.ReviewPlan, draft.Stage);
+    }
+
+    [Fact]
+    public void CaseStage_StoredByName_SummaryStillLoads()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        draft.AdvanceStage(CaseStage.Summary);
+
+        var json = draft.ToJson();
+        Assert.Contains("\"Summary\"", json);
+
+        var copy = CaseDraft.FromJson(json);
+        Assert.Equal(CaseStage.Summary, copy.Stage);
+    }
+
+    [Fact]
     public void State_MapsEachPart()
     {
         var guide = new CaseGuide();

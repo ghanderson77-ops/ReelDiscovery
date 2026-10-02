@@ -549,6 +549,26 @@ public class CaseGuideGeneratorTests
     }
 
     [Fact]
+    public void SyncOrganizations_RemovedPartyIsDemoted()
+    {
+        // WR-10: the organization stays (cast and domain intact) but is no longer a party that needs counsel
+        var draft = CaseTestData.SampleComplaintDraft();
+        CaseGuideGenerator.SyncOrganizations(draft);
+        draft.CoreDocument!.Parties.RemoveAt(1);
+
+        var added = CaseGuideGenerator.SyncOrganizations(draft, out var modified);
+
+        Assert.Empty(added);
+        Assert.True(modified);
+        var harmon = draft.Guide!.FindOrganization("ORG-02")!;
+        Assert.Equal(OrganizationKind.ThirdParty, harmon.Kind);
+        Assert.Equal(string.Empty, harmon.PartyId);
+        Assert.Equal("harmon.com", harmon.Domain);
+        Assert.DoesNotContain(CaseGuideGenerator.CounselGaps(draft), g => g.Contains("Harmon", StringComparison.Ordinal));
+        Assert.DoesNotContain("ORG-02 Harmon", CaseGuidePrompts.BuildRosterPrompt(draft)[CaseGuidePrompts.BuildRosterPrompt(draft).IndexOf("Requirements:", StringComparison.Ordinal)..]);
+    }
+
+    [Fact]
     public async Task Issues_RetitledCountFlagsLinkedFacts()
     {
         // WR-03: ISS-01 keeps its id for a retitled count-1, so the facts linked to it ask for review

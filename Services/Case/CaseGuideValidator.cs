@@ -654,7 +654,12 @@ public static partial class CaseGuideValidator
         {
             var party = parties.FirstOrDefault(p => S(p.Id) == S(org.PartyId));
             if (party == null)
+            {
+                // The party left the core document; until the guide is updated the organization still drives counsel checks (WR-10)
+                findings.Add(Warning(GuideArea.Guide, S(org.Id),
+                    $"{S(org.Name).Trim()} is no longer a party in the core document. Click Update Guide or Regenerate Cast."));
                 continue;
+            }
 
             if (!string.Equals(S(org.Name).Trim(), S(party.Name).Trim(), StringComparison.OrdinalIgnoreCase))
                 // "Inc." already ends the sentence; avoid a doubled period

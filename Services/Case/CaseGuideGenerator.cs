@@ -528,6 +528,16 @@ public class CaseGuideGenerator
             added.Add(org.Id);
         }
 
+        // Party removed from the core document: keep the organization (its cast and domain stay valid) but stop treating
+        // it as a party, so roster prompts, counsel top-ups and the counsel checks no longer cover it (WR-10)
+        foreach (var ghost in mirrored.Where(o => !claimed.Contains(o)))
+        {
+            if (ghost.Kind is OrganizationKind.Party or OrganizationKind.Individual)
+                ghost.Kind = OrganizationKind.ThirdParty;
+            ghost.PartyId = string.Empty;
+            modified = true;
+        }
+
         return added;
     }
 

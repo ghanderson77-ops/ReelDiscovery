@@ -692,6 +692,17 @@ public class CaseGuideValidatorTests
     }
 
     [Fact]
+    public void OrganizationWhosePartyWasRemoved_IsWarning()
+    {
+        // WR-10: an organization still mirroring a party the core document no longer has
+        var draft = Sample();
+        draft.CoreDocument!.Parties.RemoveAt(1);
+
+        AssertFinding(CaseGuideValidator.Validate(draft), IssueSeverity.Warning, GuideArea.Guide, "ORG-02",
+            "Harmon Builders, Inc. is no longer a party in the core document. Click Update Guide or Regenerate Cast.");
+    }
+
+    [Fact]
     public void PartyRenamed_IsWarning()
     {
         var draft = Sample();

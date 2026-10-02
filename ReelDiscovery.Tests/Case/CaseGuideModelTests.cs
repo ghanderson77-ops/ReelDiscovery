@@ -13,7 +13,7 @@ public class CaseGuideModelTests
 
         Assert.Equal(CaseStage.CaseGuide, copy.Stage);
         Assert.Equal(original.CaseId, copy.CaseId);
-        Assert.Equal(1, copy.FormatVersion);
+        Assert.Equal(CaseDraft.CurrentFormatVersion, copy.FormatVersion);
         Assert.NotNull(copy.Guide);
 
         var guide = original.Guide!;
@@ -85,7 +85,7 @@ public class CaseGuideModelTests
 
         draft.Normalize();
 
-        Assert.Equal(1, draft.FormatVersion);
+        Assert.Equal(CaseDraft.CurrentFormatVersion, draft.FormatVersion);
         Assert.NotEqual(Guid.Empty, draft.CaseId);
     }
 

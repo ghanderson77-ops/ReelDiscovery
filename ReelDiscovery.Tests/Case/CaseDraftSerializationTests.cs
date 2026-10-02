@@ -1,9 +1,99 @@
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.Tests.Case;
 
 public class CaseDraftSerializationTests
 {
+    [Fact]
+    public void FormatVersion_IsTwo()
+    {
+        Assert.Equal(2, CaseDraft.CurrentFormatVersion);
+        Assert.Contains("\"FormatVersion\": 2", new CaseDraft().ToJson());
+    }
+
+    [Fact]
+    public void Corpus_RoundTrips_PlanNotSerialized()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        var planId = Guid.NewGuid();
+        draft.Corpus = new CorpusState
+        {
+            Settings = new CorpusSettings { TotalEmails = 2_500, RelevantPercent = 30, WindowStart = "2023-12-15", WindowEnd = "2024-08-20", PrivilegedPercent = 10, DocIdPrefix = "BL" },
+            PlanId = planId,
+            PlanGuideHash = "g",
+            PlanSettingsHash = "s",
+            Approved = true,
+            WrittenFiles = { new WrittenCorpusFile { Kind = CorpusFileKind.AnswerKeyXlsx, FileName = "Answer Key.xlsx", PlanId = planId, WrittenUtc = new DateTime(2026, 10, 2, 0, 0, 0, DateTimeKind.Utc) } },
+            Plan = new CorpusPlan { PlanId = planId, Notes = { "plan-only-note" } }
+        };
+
+        var json = draft.ToJson();
+        var copy = CaseDraft.FromJson(json);
+
+        Assert.DoesNotContain("plan-only-note", json);
+        Assert.Contains("\"AnswerKeyXlsx\"", json);
+        Assert.NotNull(copy.Corpus);
+        Assert.Null(copy.Corpus!.Plan);
+        Assert.Equal(planId, copy.Corpus.PlanId);
+        Assert.True(copy.Corpus.Approved);
+        Assert.Equal("g", copy.Corpus.PlanGuideHash);
+        Assert.Equal(draft.Corpus.Settings.ComputeHash(), copy.Corpus.Settings.ComputeHash());
+        var file = Assert.Single(copy.Corpus.WrittenFiles);
+        Assert.Equal(CorpusFileKind.AnswerKeyXlsx, file.Kind);
+        Assert.Equal("Answer Key.xlsx", file.FileName);
+        Assert.Equal(planId, file.PlanId);
+    }
+
+    [Fact]
+    public void Normalize_RepairsCorpus()
+    {
+        var draft = CaseDraft.FromJson("{\"FormatVersion\":2,\"Corpus\":{\"Settings\":null,\"WrittenFiles\":null}}");
+
+        draft.Normalize();
+
+        Assert.NotNull(draft.Corpus!.Settings);
+        Assert.Equal(1_000, draft.Corpus.Settings.TotalEmails);
+        Assert.Empty(draft.Corpus.WrittenFiles);
+    }
+
+    [Fact]
+    public void Normalize_WithoutCorpus_StaysNull()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+
+        draft.Normalize();
+
+        Assert.Null(draft.Corpus);
+    }
+
+    [Fact]
+    public void Load_VersionOneFile_LoadsAndUpgradesVersion()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "rd-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(temp);
+            var store = new CaseStore(Path.Combine(temp, "cases"), Path.Combine(temp, "app"));
+            var path = Path.Combine(temp, "case.json");
+            File.WriteAllText(path, "{\"FormatVersion\":1,\"Scenario\":\"x\",\"Guide\":{\"Cast\":[]}}");
+
+            var result = store.Load(path);
+
+            Assert.True(result.Succeeded, result.Message);
+            Assert.Null(result.Draft!.Corpus);
+            Assert.Equal("x", result.Draft.Scenario);
+            // Saved files carry v2 so older builds refuse them instead of dropping Corpus (T-04-03)
+            Assert.Equal(CaseDraft.CurrentFormatVersion, result.Draft.FormatVersion);
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+                Directory.Delete(temp, true);
+        }
+    }
+
     [Fact]
     public void RoundTrip_PreservesEverything()
     {

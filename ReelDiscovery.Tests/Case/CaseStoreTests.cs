@@ -268,7 +268,7 @@ public class CaseStoreTests : IDisposable
         var store = CreateStore();
         Directory.CreateDirectory(_temp);
         var path = Path.Combine(_temp, "case.json");
-        File.WriteAllText(path, "{\"FormatVersion\":2,\"Scenario\":\"x\"}");
+        File.WriteAllText(path, $"{{\"FormatVersion\":{CaseDraft.CurrentFormatVersion + 1},\"Scenario\":\"x\"}}");
 
         var result = store.Load(path);
 

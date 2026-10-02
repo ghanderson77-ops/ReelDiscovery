@@ -486,6 +486,10 @@ public class CaseGuideRegenerationTests
         Assert.True(guide.FindFact("F-005")!.IsUserEdited);
         Assert.Equal(new[] { "CH-004", "CH-002" }, guide.FindFact("F-003")!.KnownByIds);
         Assert.Equal(new[] { "F-001" }, guide.FindValue("V-003")!.FactIds);
+        // WR-09: a value that cited a dropped fact asks for review, like a hand delete
+        Assert.True(guide.FindValue("V-003")!.NeedsReview);
+        Assert.Equal("F-004 was removed when the facts were regenerated.", guide.FindValue("V-003")!.ReviewReason);
+        Assert.False(guide.FindValue("V-001")!.NeedsReview);
         Assert.Equal(new[] { "F-001", "F-007", "F-003", "F-005", "F-006" }, guide.Facts.Select(f => f.Id));
 
         Assert.Equal(GuidePartStatus.Ready, guide.FactsState.Status);

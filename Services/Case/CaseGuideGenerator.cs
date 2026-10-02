@@ -2040,6 +2040,8 @@ public class CaseGuideGenerator
         foreach (var fact in removed)
         {
             guide.Facts.Remove(fact);
+            // Values that cited the removed fact ask for review, like a hand delete (WR-09, W3)
+            CaseGuideEditing.FlagValues(guide, fact.Id, $"{fact.Id} was removed when the facts were regenerated.");
             foreach (var value in guide.Values.Where(v => v != null))
                 value.FactIds.RemoveAll(id => id == fact.Id);
         }

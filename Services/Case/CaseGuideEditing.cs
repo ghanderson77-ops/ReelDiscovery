@@ -526,7 +526,7 @@ public static partial class CaseGuideEditing
     // Canonical values citing an edited fact may no longer match its text (W3)
     internal static void FlagValues(CaseGuide guide, string factId, string reason)
     {
-        foreach (var value in guide.Values.Where(v => v.FactIds.Contains(factId)))
+        foreach (var value in guide.Values.Where(v => v != null && v.FactIds != null && v.FactIds.Contains(factId)))
         {
             value.NeedsReview = true;
             value.ReviewReason = reason;

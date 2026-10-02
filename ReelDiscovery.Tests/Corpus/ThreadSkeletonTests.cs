@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Services.Corpus;
@@ -217,5 +218,190 @@ public class ThreadSkeletonTests
         var (_, budget, threads) = Build(relevant: relevant);
         Assert.Equal(budget.TotalMessages, threads.Sum(t => t.Messages.Count));
         Assert.All(threads, t => Assert.InRange(t.Messages.Count, 1, ThreadShapes.MaxThreadDepth));
+    }
+
+    // ----- Task 2: hot, privileged, attachments, repair -----
+
+    private static HashSet<string> SideOf(SkeletonContext ctx, CastMember counsel)
+    {
+        var orgs = ctx.Guide.Organizations;
+        var clients = new HashSet<string>(StringComparer.Ordinal) { counsel.OrganizationId };
+        if (counsel.Role == CastRole.OutsideCounsel)
+            clients.UnionWith(orgs.Single(o => o.Id == counsel.OrganizationId).RepresentsOrgIds);
+
+        var side = new HashSet<string>(clients, StringComparer.Ordinal);
+        foreach (var org in orgs.Where(o => o.RepresentsOrgIds.Any(clients.Contains)))
+            side.Add(org.Id);
+        return side;
+    }
+
+    private static bool IsCounsel(CastMember m) => m.Role is CastRole.InHouseCounsel or CastRole.OutsideCounsel;
+
+    private static void AssertHot(List<PlannedThread> threads, string hotFact, int expected)
+    {
+        var hot = threads.SelectMany(t => t.Messages.Where(m => m.IsHot)).ToList();
+        Assert.Equal(expected, hot.Count);
+        Assert.All(hot, m =>
+        {
+            Assert.Equal(RelevanceBasis.Own, m.Basis);
+            Assert.Contains(hotFact, m.FactIds);
+        });
+
+        var candidates = threads.SelectMany(t => t.Messages).Where(m => m.Basis == RelevanceBasis.Own && m.FactIds.Contains(hotFact)).ToList();
+        var minHot = hot.Min(m => Participants(m).Distinct().Count());
+        var maxOther = candidates.Where(m => !m.IsHot).Select(m => Participants(m).Distinct().Count()).DefaultIfEmpty(0).Max();
+        Assert.True(minHot >= maxOther, $"hot messages have {minHot} participants, another candidate has {maxOther}");
+    }
+
+    [Fact]
+    public void Hot_TwoWhenHotFactHasThreeOrMoreThreads()
+    {
+        var (_, _, threads) = Build();
+        Assert.True(threads.Count(t => t.FactIds.Contains("F-003")) >= 3);
+        AssertHot(threads, "F-003", 2);
+    }
+
+    [Fact]
+    public void Hot_OneWhenHotFactHasFewerThanThreeThreads()
+    {
+        var (_, _, threads) = Build(relevant: 12);
+        Assert.InRange(threads.Count(t => t.FactIds.Contains("F-003")), 1, 2);
+        AssertHot(threads, "F-003", 1);
+    }
+
+    [Fact]
+    public void Hot_OverrideThree()
+    {
+        var (_, _, threads) = Build(settings: new CorpusSettings { HotPerHotFact = 3 });
+        AssertHot(threads, "F-003", 3);
+    }
+
+    [Fact]
+    public void Privileged_AboutEightPercent_CounselAndClientSideOnly()
+    {
+        var (ctx, _, threads) = Build();
+
+        var privileged = threads.Where(t => t.IsPrivileged).ToList();
+        Assert.NotEmpty(privileged);
+        Assert.InRange(privileged.Count / (double)threads.Count, 0.04, 0.14);
+
+        foreach (var thread in privileged)
+        {
+            var people = thread.Messages.SelectMany(Participants).Distinct().Select(id => ctx.CastById[id]).ToList();
+            var counsel = people.Where(IsCounsel).ToList();
+            Assert.NotEmpty(counsel);
+            Assert.Contains(counsel, c =>
+            {
+                var side = SideOf(ctx, c);
+                return people.All(p => side.Contains(p.OrganizationId));
+            });
+            Assert.True(ThreadScheduler.CheckInvariants(thread, ctx.ZoneFor, out var problem), problem);
+        }
+    }
+
+    [Fact]
+    public void Privileged_OverrideZero_None()
+    {
+        var (_, _, threads) = Build(settings: new CorpusSettings { PrivilegedPercent = 0 });
+        Assert.DoesNotContain(threads, t => t.IsPrivileged);
+    }
+
+    [Fact]
+    public void Privileged_NoCounsel_None()
+    {
+        var draft = CorpusTestData.RichDraft();
+        foreach (var member in draft.Guide!.Cast.Where(IsCounsel))
+            member.Role = CastRole.Staff;
+
+        var (_, _, threads) = Build(draft);
+        Assert.DoesNotContain(threads, t => t.IsPrivileged);
+    }
+
+    [Fact]
+    public void Attachments_OfficeOnly_OnlyOfficeKinds()
+    {
+        var settings = new CorpusSettings { IncludeCalendar = false, IncludeImages = false, IncludeVoicemail = false };
+        var (_, _, threads) = Build(settings: settings, media: true);
+
+        var attachments = threads.SelectMany(t => t.Messages).SelectMany(m => m.Attachments).ToList();
+        Assert.NotEmpty(attachments);
+        Assert.All(attachments, a => Assert.Contains(a.Kind, new[] { AttachmentType.Word, AttachmentType.Excel, AttachmentType.PowerPoint }));
+    }
+
+    [Fact]
+    public void Attachments_ShareKindsAndFileNames()
+    {
+        var (ctx, _, threads) = Build(media: true);
+        var messages = threads.SelectMany(t => t.Messages).ToList();
+
+        var share = 100.0 * messages.Count(m => m.Attachments.Count > 0) / messages.Count;
+        Assert.InRange(share, ctx.AttachmentPercent - 5, ctx.AttachmentPercent + 5);
+
+        foreach (var thread in threads)
+        {
+            foreach (var m in thread.Messages)
+            {
+                Assert.InRange(m.Attachments.Count, 0, 3);
+                foreach (var a in m.Attachments)
+                {
+                    if (a.Kind == AttachmentType.CalendarInvite)
+                        Assert.Equal(1, m.Seq);
+                    if (a.Kind == AttachmentType.Voicemail)
+                        Assert.Single(thread.Messages);
+
+                    var ext = a.Kind switch
+                    {
+                        AttachmentType.Word => ".docx",
+                        AttachmentType.Excel => ".xlsx",
+                        AttachmentType.PowerPoint => ".pptx",
+                        AttachmentType.CalendarInvite => ".ics",
+                        AttachmentType.Image => ".png",
+                        _ => ".mp3"
+                    };
+                    Assert.False(string.IsNullOrWhiteSpace(a.FileName));
+                    Assert.EndsWith(ext, a.FileName);
+                    Assert.Equal(string.Empty, a.Title);
+                }
+
+                Assert.Equal(m.Attachments.Count, m.Attachments.Select(a => a.FileName).Distinct().Count());
+            }
+        }
+
+        var kinds = messages.SelectMany(m => m.Attachments).Select(a => a.Kind).Distinct().ToList();
+        Assert.Contains(AttachmentType.Word, kinds);
+        Assert.Contains(AttachmentType.Excel, kinds);
+    }
+
+    [Fact]
+    public void Repair_InactiveParticipant_SwappedOrTruncated_TotalsKept()
+    {
+        var draft = CorpusTestData.RichDraft();
+        draft.Guide!.Cast.Single(c => c.Id == "CH-002").ActiveTo = "2024-05-01";
+
+        var (ctx, budget, threads) = Build(draft);
+
+        Assert.Equal(budget.TotalMessages, threads.Sum(t => t.Messages.Count));
+        foreach (var thread in threads)
+        {
+            var facts = thread.FactIds.Select(id => ctx.DatedFacts.Single(f => f.Id == id)).ToList();
+            Assert.True(ThreadScheduler.CheckInvariants(thread, ctx.ZoneFor, out var problem), problem);
+            for (var i = 0; i < thread.Messages.Count; i++)
+            {
+                var m = thread.Messages[i];
+                Assert.Equal(i + 1, m.Seq);
+                Assert.Equal($"{thread.Id}-M{i + 1:00}", m.Id);
+                var day = LocalDay(ctx, m);
+                foreach (var id in Participants(m))
+                {
+                    Assert.True(ctx.IsActive(id, day), $"{m.Id}: {id} inactive on {day}");
+                    Assert.All(facts, f => Assert.Contains(id, Knowers(f)));
+                }
+
+                if (day > new DateOnly(2024, 5, 1))
+                    Assert.DoesNotContain("CH-002", Participants(m));
+            }
+        }
+
+        Assert.Contains(ctx.Notes, n => n.Contains("was shortened because Tom Becker was not active on 2024-05-"));
     }
 }

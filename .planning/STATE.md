@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-10-02T20:13:32.307Z"
+stopped_at: Completed 04-07-PLAN.md
+last_updated: "2026-10-02T20:20:32.549Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 49
-  percent: 77
+  completed_plans: 50
+  percent: 78
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 8 of 22
+Plan: 9 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -99,6 +99,7 @@ Progress: [██████████] 98%
 | Phase 04 P04 | 15min | 2 tasks | 3 files |
 | Phase 04 P05 | 8min | 2 tasks | 5 files |
 | Phase 04 P06 | 10min | 2 tasks | 4 files |
+| Phase 04 P07 | 14min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -252,6 +253,9 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-06]: Statistics sections are title + header + data rows separated by one skipped row; By Custodian ends with Total; blank custodian = (No custodian), bad Date Sent = (Undated), both sorted last
 - [Phase 04]: [04-06]: Not Relevant = every row whose Relevance is not Relevant, so Relevant + Not Relevant equals the row count per custodian and month; by-issue counts rows whose Issue Codes contain the id
 - [Phase 04]: [04-06]: XLSX cells are inline strings only (no CellFormula), StripInvalidXmlChars then capped at 32,767 without splitting a surrogate pair
+- [Phase 04]: [04-07]: Protocol prose with any blank top-level section is replaced by FallbackProse; an issue missing from the response gets the criteria-only example while the rest of the prose is kept (IsFallback false)
+- [Phase 04]: [04-07]: Protocol issue ids match guide ids by trim + case-insensitive compare; unknown ids dropped; DocID tokens ([A-Z]{2,6}-######[.####]) stripped from all model prose
+- [Phase 04]: [04-07]: CorpusPlanPrompts.AppendCast role text is Party / In-house counsel / Outside counsel / Staff, plus ', background' for Background-tier members
 
 ### Pending Todos
 
@@ -273,6 +277,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T20:13:32.302Z
-Stopped at: Completed 04-06-PLAN.md
+Last session: 2026-10-02T20:20:32.544Z
+Stopped at: Completed 04-07-PLAN.md
 Resume file: None

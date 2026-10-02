@@ -1,5 +1,7 @@
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Tests.Corpus;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Case;
@@ -90,5 +92,115 @@ public class CaseSummaryLogicTests
         {
             Directory.Delete(folder, recursive: true);
         }
+    }
+
+    // ----- Corpus rows (04-15) -----
+
+    private static readonly Guid CurrentPlan = Guid.NewGuid();
+
+    private static CorpusState CorpusWith(params WrittenCorpusFile[] files) => new()
+    {
+        PlanId = CurrentPlan,
+        WrittenFiles = files.ToList()
+    };
+
+    private static WrittenCorpusFile Written(CorpusFileKind kind, Guid planId) => new()
+    {
+        Kind = kind,
+        FileName = "ignored-by-the-summary.csv",
+        PlanId = planId,
+        WrittenUtc = new DateTime(2024, 3, 18, 14, 5, 0, DateTimeKind.Utc)
+    };
+
+    [Fact]
+    public void FileStatusFor_NoCorpus_IsNotWritten()
+    {
+        Assert.Equal(CorpusFileStatus.NotWritten, StepCaseSummary.FileStatusFor(null, CorpusFileKind.AnswerKeyCsv, fileExists: true));
+    }
+
+    [Fact]
+    public void FileStatusFor_NoEntryForKind_IsNotWritten()
+    {
+        var corpus = CorpusWith(Written(CorpusFileKind.AnswerKeyXlsx, CurrentPlan));
+        Assert.Equal(CorpusFileStatus.NotWritten, StepCaseSummary.FileStatusFor(corpus, CorpusFileKind.AnswerKeyCsv, fileExists: true));
+    }
+
+    [Fact]
+    public void FileStatusFor_EntryForOldPlan_IsEarlierPlan()
+    {
+        var corpus = CorpusWith(Written(CorpusFileKind.ReviewProtocol, Guid.NewGuid()));
+        Assert.Equal(CorpusFileStatus.EarlierPlan, StepCaseSummary.FileStatusFor(corpus, CorpusFileKind.ReviewProtocol, fileExists: true));
+    }
+
+    [Fact]
+    public void FileStatusFor_EntryForCurrentPlanWithFile_IsWritten()
+    {
+        var corpus = CorpusWith(Written(CorpusFileKind.AnswerKeyCsv, CurrentPlan));
+        Assert.Equal(CorpusFileStatus.Written, StepCaseSummary.FileStatusFor(corpus, CorpusFileKind.AnswerKeyCsv, fileExists: true));
+    }
+
+    [Fact]
+    public void FileStatusFor_EntryButFileMissing_IsNotWritten()
+    {
+        var corpus = CorpusWith(Written(CorpusFileKind.AnswerKeyCsv, CurrentPlan));
+        Assert.Equal(CorpusFileStatus.NotWritten, StepCaseSummary.FileStatusFor(corpus, CorpusFileKind.AnswerKeyCsv, fileExists: false));
+    }
+
+    [Fact]
+    public void CombinedStatus_WeakestStateWins()
+    {
+        Assert.Equal(CorpusFileStatus.Written, StepCaseSummary.CombinedStatus(new[] { CorpusFileStatus.Written, CorpusFileStatus.Written }));
+        Assert.Equal(CorpusFileStatus.EarlierPlan, StepCaseSummary.CombinedStatus(new[] { CorpusFileStatus.Written, CorpusFileStatus.EarlierPlan }));
+        Assert.Equal(CorpusFileStatus.NotWritten, StepCaseSummary.CombinedStatus(new[] { CorpusFileStatus.EarlierPlan, CorpusFileStatus.NotWritten }));
+    }
+
+    [Theory]
+    [InlineData(CorpusFileStatus.Written, "Success")]
+    [InlineData(CorpusFileStatus.NotWritten, "BorderStrong")]
+    [InlineData(CorpusFileStatus.EarlierPlan, "Warning")]
+    [InlineData(CorpusFileStatus.Failed, "Danger")]
+    public void CorpusDotState_FollowsUiSpec(CorpusFileStatus status, string expected)
+    {
+        Assert.Equal(expected, StepCaseSummary.CorpusDotState(status));
+    }
+
+    [Theory]
+    [InlineData(false, false, false, "BorderStrong")]
+    [InlineData(true, false, false, "BorderStrong")]
+    [InlineData(true, true, false, "Success")]
+    [InlineData(true, true, true, "Warning")]
+    public void PlanDotState_StaleWinsOverApproval(bool hasPlan, bool approved, bool stale, string expected)
+    {
+        Assert.Equal(expected, StepCaseSummary.PlanDotState(hasPlan, approved, stale));
+    }
+
+    [Fact]
+    public void WrittenLocal_IsNewestEntryInLocalTime()
+    {
+        var corpus = CorpusWith(Written(CorpusFileKind.AnswerKeyCsv, CurrentPlan));
+        var expected = new DateTime(2024, 3, 18, 14, 5, 0, DateTimeKind.Utc).ToLocalTime();
+        Assert.Equal(expected, StepCaseSummary.WrittenLocal(corpus, CorpusFileKind.AnswerKeyCsv, CorpusFileKind.AnswerKeyXlsx));
+        Assert.Null(StepCaseSummary.WrittenLocal(corpus, CorpusFileKind.ReviewProtocol));
+    }
+
+    [Fact]
+    public void PlanRowStale_DismissedHashCountsAsCurrent()
+    {
+        var draft = CorpusTestData.RichDraft();
+        draft.Corpus = new CorpusState
+        {
+            PlanId = CurrentPlan,
+            PlanGuideHash = draft.Guide!.ComputeHash(),
+            Approved = true
+        };
+        Assert.False(StepCaseSummary.PlanRowStale(draft));
+
+        // Guide edited after planning: the plan is out of date
+        draft.Guide.Facts[0].Title += " (revised)";
+        Assert.True(StepCaseSummary.PlanRowStale(draft));
+
+        // Keep This Plan for the edited guide: the row counts the plan as current again
+        draft.Corpus.DismissedStaleGuideHash = draft.Guide.ComputeHash();
+        Assert.False(StepCaseSummary.PlanRowStale(draft));
     }
 }

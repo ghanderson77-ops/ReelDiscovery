@@ -310,6 +310,9 @@ public static class CorpusUiText
 
     public const string NotPlannedLine = "Not planned yet";
 
+    // Answer key line 2 before there is a plan to count rows from
+    public const string AnswerKeyFilesLine = "answer-key.csv and answer-key.xlsx";
+
     public static string CorpusPlanLine(int emails, int threads, decimal relevantPercent, DateTime first, DateTime last)
     {
         var emailText = CaseGuideUiText.Plural(emails, "email", "emails");

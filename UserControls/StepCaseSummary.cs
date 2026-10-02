@@ -1,9 +1,12 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Services.Corpus;
 
 namespace ReelDiscovery.UserControls;
 
@@ -32,6 +35,14 @@ public class StepCaseSummary : UserControl, IWizardStep
     private ContentRow _rowCaseFile = null!;
     private ContentRow _rowValues = null!;
     private ContentRow _rowChecks = null!;
+    private ContentRow _rowPlan = null!;
+    private ContentRow _rowAnswerKey = null!;
+    private ContentRow _rowProtocol = null!;
+    private Button _btnReviewPlan = null!;
+    private Button _btnPlanCorpus = null!;
+    private Button _btnOpenCsv = null!;
+    private Button _btnOpenXlsx = null!;
+    private Button _btnOpenProtocol = null!;
     private readonly Dictionary<CaseExportKind, ContentRow> _exportRows = new();
     private readonly HashSet<CaseExportKind> _failedExports = new();
 
@@ -96,6 +107,92 @@ public class StepCaseSummary : UserControl, IWizardStep
         var path = Path.Combine(folder, fileName);
         return File.Exists(path) ? File.GetLastWriteTime(path) : null;
     }
+
+    /// <summary>
+    /// State of one corpus file: no entry or no file on disk = not written; an entry stamped with another plan = written
+    /// for an earlier plan. WrittenFiles.FileName is never used; the caller checks the known file in the case folder.
+    /// </summary>
+    public static CorpusFileStatus FileStatusFor(CorpusState? corpus, CorpusFileKind kind, bool fileExists)
+    {
+        var entry = WrittenEntry(corpus, kind);
+        if (entry == null || !fileExists)
+            return CorpusFileStatus.NotWritten;
+        return entry.PlanId != corpus!.PlanId ? CorpusFileStatus.EarlierPlan : CorpusFileStatus.Written;
+    }
+
+    /// <summary>
+    /// Combined state of several files shown on one row (answer-key.csv and .xlsx): the weakest state wins.
+    /// </summary>
+    public static CorpusFileStatus CombinedStatus(IEnumerable<CorpusFileStatus> statuses)
+    {
+        var list = statuses.ToList();
+        if (list.Count == 0 || list.Contains(CorpusFileStatus.NotWritten))
+            return CorpusFileStatus.NotWritten;
+        if (list.Contains(CorpusFileStatus.Failed))
+            return CorpusFileStatus.Failed;
+        return list.Contains(CorpusFileStatus.EarlierPlan) ? CorpusFileStatus.EarlierPlan : CorpusFileStatus.Written;
+    }
+
+    /// <summary>
+    /// Dot state name (Theme color) for a corpus file row: Success written, Warning earlier plan, Danger failed,
+    /// BorderStrong not written (UI-SPEC S3).
+    /// </summary>
+    public static string CorpusDotState(CorpusFileStatus status) => status switch
+    {
+        CorpusFileStatus.Written => nameof(Theme.Success),
+        CorpusFileStatus.EarlierPlan => nameof(Theme.Warning),
+        CorpusFileStatus.Failed => nameof(Theme.Danger),
+        _ => nameof(Theme.BorderStrong)
+    };
+
+    /// <summary>
+    /// Dot state name for the Corpus plan row: out of date wins over approval (D-25).
+    /// </summary>
+    public static string PlanDotState(bool hasPlan, bool approved, bool stale)
+    {
+        if (!hasPlan)
+            return nameof(Theme.BorderStrong);
+        if (stale)
+            return nameof(Theme.Warning);
+        return approved ? nameof(Theme.Success) : nameof(Theme.BorderStrong);
+    }
+
+    /// <summary>
+    /// The plan row's stale flag. Uses CorpusApproval.IsGuideStale, so a plan the user kept counts as current
+    /// (same rule as validator rule 19); hashes are never compared here.
+    /// </summary>
+    public static bool PlanRowStale(CaseDraft draft) => CorpusApproval.IsGuideStale(draft);
+
+    /// <summary>
+    /// Local time of the newest written entry for the kinds, or null.
+    /// </summary>
+    public static DateTime? WrittenLocal(CorpusState? corpus, params CorpusFileKind[] kinds)
+    {
+        var times = kinds.Select(k => WrittenEntry(corpus, k)).Where(e => e != null).Select(e => e!.WrittenUtc).ToList();
+        if (times.Count == 0)
+            return null;
+        var newest = times.Max();
+        return newest == default ? null : DateTime.SpecifyKind(newest, DateTimeKind.Utc).ToLocalTime();
+    }
+
+    private static WrittenCorpusFile? WrittenEntry(CorpusState? corpus, CorpusFileKind kind) =>
+        corpus?.WrittenFiles?.LastOrDefault(f => f != null && f.Kind == kind);
+
+    private static Color DotColor(string state) => state switch
+    {
+        nameof(Theme.Success) => Theme.Success,
+        nameof(Theme.Warning) => Theme.Warning,
+        nameof(Theme.Danger) => Theme.Danger,
+        _ => Theme.BorderStrong
+    };
+
+    private static Color FileLineColor(CorpusFileStatus status) => status switch
+    {
+        CorpusFileStatus.Written => Theme.Success,
+        CorpusFileStatus.EarlierPlan => Theme.Warning,
+        CorpusFileStatus.Failed => Theme.Danger,
+        _ => Theme.TextMuted
+    };
 
     // ----- Layout -----
 
@@ -301,18 +398,43 @@ public class StepCaseSummary : UserControl, IWizardStep
         _exportRows[CaseExportKind.KeyFacts] = CreateRow("Key Facts & Events", hasLine3: true, hasButtons: true, buttonHeight);
         _rowValues = CreateRow("Canonical values", hasLine3: false, hasButtons: false, buttonHeight);
         _rowChecks = CreateRow("Guide checks", hasLine3: false, hasButtons: false, buttonHeight);
+        _rowPlan = CreateRow("Corpus plan", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Review Plan", "Plan Corpus" });
+        _rowAnswerKey = CreateRow("Answer key", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open CSV", "Open in Excel" });
+        _rowProtocol = CreateRow("Review protocol", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open in Word" });
+        _btnReviewPlan = _rowPlan.Buttons[0];
+        _btnPlanCorpus = _rowPlan.Buttons[1];
+        _btnOpenCsv = _rowAnswerKey.Buttons[0];
+        _btnOpenXlsx = _rowAnswerKey.Buttons[1];
+        _btnOpenProtocol = _rowProtocol.Buttons[0];
         _rowCaseFile.Line2.Text = CaseGuideUiText.CaseFileDescription;
 
-        var rows = new[] { _rowCaseFile, _exportRows[CaseExportKind.CoreDocument], _exportRows[CaseExportKind.Cast], _exportRows[CaseExportKind.KeyFacts], _rowValues, _rowChecks };
-        for (var i = 0; i < rows.Length; i++)
+        // Case file (ungrouped) · Corpus group · Case guide group (UI-SPEC S3); null = group heading
+        var items = new (ContentRow? Row, string Heading)[]
         {
-            if (i > 0)
+            (_rowCaseFile, ""),
+            (null, "Corpus"),
+            (_rowPlan, ""),
+            (_rowAnswerKey, ""),
+            (_rowProtocol, ""),
+            (null, "Case guide"),
+            (_exportRows[CaseExportKind.CoreDocument], ""),
+            (_exportRows[CaseExportKind.Cast], ""),
+            (_exportRows[CaseExportKind.KeyFacts], ""),
+            (_rowValues, ""),
+            (_rowChecks, "")
+        };
+        for (var i = 0; i < items.Length; i++)
+        {
+            // A divider separates rows and sits above each group heading; a heading joins its first row without one
+            var afterHeading = i > 0 && items[i - 1].Row == null;
+            if (i > 0 && !afterHeading)
             {
                 rowsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 1)); // Divider
                 rowsLayout.Controls.Add(Divider(), 0, rowsLayout.RowStyles.Count - 1);
             }
-            rowsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Content row
-            rowsLayout.Controls.Add(rows[i].Layout, 0, rowsLayout.RowStyles.Count - 1);
+            rowsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // Content row or group heading
+            Control item = items[i].Row != null ? items[i].Row!.Layout : GroupHeading(items[i].Heading);
+            rowsLayout.Controls.Add(item, 0, rowsLayout.RowStyles.Count - 1);
         }
         rowsLayout.RowCount = rowsLayout.RowStyles.Count;
         rowsHost.Controls.Add(rowsLayout);
@@ -354,8 +476,15 @@ public class StepCaseSummary : UserControl, IWizardStep
         this.Controls.Add(mainLayout);
 
         // Wire handlers only after every control exists (handlers read other controls)
-        foreach (var row in rows)
+        // Rows always span the host's client width, so the contents never scroll sideways (also after the vertical bar appears)
+        rowsHost.ClientSizeChanged += (s, e) => rowsLayout.Width = rowsHost.ClientSize.Width;
+        foreach (var row in items.Where(i => i.Row != null).Select(i => i.Row!))
             row.Dot.Paint += (s, e) => PaintDot(row, e);
+        _btnReviewPlan.Click += (s, e) => (FindForm() as WizardForm)?.NavigateToStage(CaseStage.ReviewPlan);
+        _btnPlanCorpus.Click += (s, e) => (FindForm() as WizardForm)?.NavigateToStage(CaseStage.CorpusSettings);
+        _btnOpenCsv.Click += (s, e) => OpenCorpusFile(CorpusFileKind.AnswerKeyCsv);
+        _btnOpenXlsx.Click += (s, e) => OpenCorpusFile(CorpusFileKind.AnswerKeyXlsx);
+        _btnOpenProtocol.Click += (s, e) => OpenCorpusFile(CorpusFileKind.ReviewProtocol);
         foreach (var kind in ExportKinds)
         {
             var row = _exportRows[kind];
@@ -369,7 +498,29 @@ public class StepCaseSummary : UserControl, IWizardStep
 
     private Panel Divider() => new() { Dock = DockStyle.Fill, Height = 1, BackColor = Theme.Border, Margin = new Padding(0) };
 
-    private ContentRow CreateRow(string title, bool hasLine3, bool hasButtons, int buttonHeight)
+    private Label GroupHeading(string text)
+    {
+        var inset = LogicalToDeviceUnits(Theme.CardPadding) - 1;
+        var label = new Label
+        {
+            Text = text,
+            AutoSize = true,
+            UseMnemonic = false,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top,
+            // Content x: 15 inside the card's 1 px border, like the rows
+            Padding = new Padding(inset, LogicalToDeviceUnits(12), inset, LogicalToDeviceUnits(4)),
+            Margin = new Padding(0),
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Surface
+        };
+        return label;
+    }
+
+    // Default captions keep the guide-document rows unchanged: Open in Word (hidden until exported), Export to Word
+    private static readonly string[] DefaultRowButtons = { "Open in Word", "Export to Word" };
+
+    private ContentRow CreateRow(string title, bool hasLine3, bool hasButtons, int buttonHeight, IReadOnlyList<string>? buttonCaptions = null)
     {
         var inset = LogicalToDeviceUnits(Theme.CardPadding) - 1;
         var lineGap = LogicalToDeviceUnits(2);
@@ -428,13 +579,21 @@ public class StepCaseSummary : UserControl, IWizardStep
                 BackColor = Theme.Surface,
                 Margin = new Padding(LogicalToDeviceUnits(Theme.Gap), 0, 0, 0)
             };
-            row.Open = ButtonHelper.CreateButton("Open in Word", 0, buttonHeight, ButtonStyle.Default);
-            row.Open.Margin = new Padding(0, 0, LogicalToDeviceUnits(Theme.SmallGap), 0);
-            row.Open.Visible = false;
-            row.Export = ButtonHelper.CreateButton("Export to Word", 0, buttonHeight, ButtonStyle.Default);
-            row.Export.Margin = new Padding(0);
-            buttons.Controls.Add(row.Open);
-            buttons.Controls.Add(row.Export);
+            foreach (var caption in buttonCaptions ?? DefaultRowButtons)
+            {
+                var button = ButtonHelper.CreateButton(caption, 0, buttonHeight, ButtonStyle.Default);
+                // 8 px on the left of every button after the first, none on the right: the last visible button
+                // always ends at the row's right inset, whichever buttons are hidden
+                button.Margin = new Padding(row.Buttons.Count > 0 ? LogicalToDeviceUnits(Theme.SmallGap) : 0, 0, 0, 0);
+                row.Buttons.Add(button);
+                buttons.Controls.Add(button);
+            }
+            if (buttonCaptions == null)
+            {
+                row.Open = row.Buttons[0];
+                row.Open.Visible = false;
+                row.Export = row.Buttons[1];
+            }
             row.Layout.Controls.Add(buttons, 2, 0);
             row.Layout.SetRowSpan(buttons, 3);
         }
@@ -546,7 +705,116 @@ public class StepCaseSummary : UserControl, IWizardStep
         _rowChecks.Line2.ForeColor = checksColor;
         SetDot(_rowChecks, checksColor);
 
+        RefreshCorpusRows(folder, guide);
         UpdateButtons();
+    }
+
+    private static string FolderName(string folder) => Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
+
+    // Known file names only; WrittenFiles.FileName from case.json never builds a path (T-04-45)
+    private static string CorpusFileName(CorpusFileKind kind, string folder) => kind switch
+    {
+        CorpusFileKind.AnswerKeyCsv => AnswerKeyCsvWriter.FileName,
+        CorpusFileKind.AnswerKeyXlsx => AnswerKeyXlsxWriter.FileName,
+        _ => ReviewProtocolBuilder.FileNameFor(FolderName(folder))
+    };
+
+    private static bool CorpusFileExists(CorpusFileKind kind, string folder) =>
+        folder.Length > 0 && File.Exists(Path.Combine(folder, CorpusFileName(kind, folder)));
+
+    /// <summary>
+    /// Corpus plan, Answer key and Review protocol rows (UI-SPEC S3). Never throws: EnsureLoaded catches load failures.
+    /// </summary>
+    private void RefreshCorpusRows(string folder, CaseGuide guide)
+    {
+        var draft = Draft;
+        var corpus = draft.Corpus;
+        var load = CorpusPlanStore.EnsureLoaded(draft);
+        var plan = load.Plan;
+
+        // Corpus plan
+        if (plan != null)
+        {
+            var summary = PlanSummary.From(plan, guide);
+            var (first, last) = PlanMonths(summary, plan);
+            var stale = PlanRowStale(draft);
+            var approved = corpus!.Approved;
+            var approvedLocal = corpus.ApprovedUtc.HasValue
+                ? DateTime.SpecifyKind(corpus.ApprovedUtc.Value, DateTimeKind.Utc).ToLocalTime()
+                : (DateTime?)null;
+            _rowPlan.Line2.Text = CorpusUiText.CorpusPlanLine(summary.Emails, summary.Threads, summary.RelevantPercent, first, last);
+            _rowPlan.Line2.ForeColor = Theme.TextMuted;
+            _rowPlan.Line3!.Text = CorpusUiText.PlanStatusLine(approved, approvedLocal, stale);
+            _rowPlan.Line3.ForeColor = stale ? Theme.Warning : approved ? Theme.Success : Theme.TextMuted;
+            _rowPlan.Line3.Visible = true;
+            SetDot(_rowPlan, DotColor(PlanDotState(hasPlan: true, approved, stale)));
+            _btnReviewPlan.Visible = true;
+            _btnPlanCorpus.Visible = false;
+        }
+        else if (!string.IsNullOrWhiteSpace(load.Reason))
+        {
+            // case.json names a plan that could not be read: Review Plan shows the unreadable card
+            _rowPlan.Line2.Text = load.Reason;
+            _rowPlan.Line2.ForeColor = Theme.Danger;
+            _rowPlan.Line3!.Visible = false;
+            SetDot(_rowPlan, Theme.Danger);
+            _btnReviewPlan.Visible = true;
+            _btnPlanCorpus.Visible = false;
+        }
+        else
+        {
+            _rowPlan.Line2.Text = CorpusUiText.NotPlannedLine;
+            _rowPlan.Line2.ForeColor = Theme.TextMuted;
+            _rowPlan.Line3!.Visible = false;
+            SetDot(_rowPlan, DotColor(PlanDotState(hasPlan: false, approved: false, stale: false)));
+            _btnReviewPlan.Visible = false;
+            _btnPlanCorpus.Visible = true;
+        }
+
+        // Answer key: both files must exist for Written
+        var csvExists = CorpusFileExists(CorpusFileKind.AnswerKeyCsv, folder);
+        var xlsxExists = CorpusFileExists(CorpusFileKind.AnswerKeyXlsx, folder);
+        var keyStatus = CombinedStatus(new[]
+        {
+            FileStatusFor(corpus, CorpusFileKind.AnswerKeyCsv, csvExists),
+            FileStatusFor(corpus, CorpusFileKind.AnswerKeyXlsx, xlsxExists)
+        });
+        _rowAnswerKey.Line2.Text = plan != null
+            ? CorpusUiText.AnswerKeyLine(plan.EmailCount + plan.AttachmentCount, plan.EmailCount, plan.AttachmentCount)
+            : CorpusUiText.AnswerKeyFilesLine;
+        _rowAnswerKey.Line3!.Text = CorpusUiText.FileStatusLine(keyStatus,
+            WrittenLocal(corpus, CorpusFileKind.AnswerKeyCsv, CorpusFileKind.AnswerKeyXlsx), string.Empty);
+        _rowAnswerKey.Line3.ForeColor = FileLineColor(keyStatus);
+        SetDot(_rowAnswerKey, DotColor(CorpusDotState(keyStatus)));
+        _btnOpenCsv.Visible = csvExists;
+        _btnOpenXlsx.Visible = xlsxExists;
+
+        // Review protocol
+        var protocolExists = CorpusFileExists(CorpusFileKind.ReviewProtocol, folder);
+        var protocolStatus = FileStatusFor(corpus, CorpusFileKind.ReviewProtocol, protocolExists);
+        var protocolName = folder.Length > 0
+            ? ReviewProtocolBuilder.FileNameFor(FolderName(folder))
+            : ReviewProtocolBuilder.FileNameFor(CaseFolderNaming.DefaultFolderName(draft));
+        _rowProtocol.Line2.Text = CorpusUiText.ProtocolLine(guide.Issues.Count, protocolName);
+        _rowProtocol.Line3!.Text = CorpusUiText.FileStatusLine(protocolStatus, WrittenLocal(corpus, CorpusFileKind.ReviewProtocol), string.Empty);
+        _rowProtocol.Line3.ForeColor = FileLineColor(protocolStatus);
+        SetDot(_rowProtocol, DotColor(CorpusDotState(protocolStatus)));
+        _btnOpenProtocol.Visible = protocolExists;
+    }
+
+    // First and last month of the histogram; an empty plan falls back to the plan's window
+    private static (DateTime First, DateTime Last) PlanMonths(PlanSummary summary, CorpusPlan plan)
+    {
+        if (summary.Months.Count > 0)
+        {
+            var first = summary.Months.Min(m => m.Month);
+            var last = summary.Months.Max(m => m.Month);
+            return (first.ToDateTime(TimeOnly.MinValue), last.ToDateTime(TimeOnly.MinValue));
+        }
+
+        var start = CaseDraft.TryParseDate(plan.Settings?.WindowStart, out var s) ? s : DateTime.Today;
+        var end = CaseDraft.TryParseDate(plan.Settings?.WindowEnd, out var e) ? e : start;
+        return (start, end);
     }
 
     private void UpdateButtons()
@@ -563,6 +831,8 @@ public class StepCaseSummary : UserControl, IWizardStep
             row.Export!.Enabled = !_busy && draft.CoreDocument != null && (kind == CaseExportKind.CoreDocument || draft.Guide != null);
             row.Open!.Enabled = !_busy;
         }
+        foreach (var button in _rowPlan.Buttons.Concat(_rowAnswerKey.Buttons).Concat(_rowProtocol.Buttons))
+            button.Enabled = !_busy;
     }
 
     /// <summary>
@@ -801,6 +1071,38 @@ public class StepCaseSummary : UserControl, IWizardStep
         }
     }
 
+    /// <summary>
+    /// Opens an answer-key or review-protocol file through the shell. The path is the verified case folder plus the
+    /// known file name, never a name read from case.json (T-04-45).
+    /// </summary>
+    private void OpenCorpusFile(CorpusFileKind kind)
+    {
+        var folder = CaseFolder;
+        if (folder.Length == 0)
+        {
+            RefreshAll();
+            return;
+        }
+
+        var fileName = CorpusFileName(kind, folder);
+        var path = Path.Combine(folder, fileName);
+        if (!File.Exists(path))
+        {
+            RefreshAll();
+            SetStatus(CorpusUiText.MissingFileText(fileName), Theme.Danger);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            SetStatus($"Could not open {fileName}: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
+        }
+    }
+
     private void OpenCaseFolder()
     {
         var folder = CaseFolder;
@@ -902,6 +1204,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         public Label? Line3;
         public Button? Open;
         public Button? Export;
+        public List<Button> Buttons = new();
         public Color DotColor = Theme.BorderStrong;
     }
 

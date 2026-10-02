@@ -310,6 +310,28 @@ public class CorpusApprovalTests : IDisposable
     }
 
     [Fact]
+    public async Task Approve_AfterKeepingStalePlan_StaysCurrent()
+    {
+        // Keep This Plan, then Approve Plan: the approved plan must not read as stale again on the next entry (D-25)
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+        draft.Guide!.Facts[0].Title += " (revised)";
+        CorpusApproval.KeepStalePlan(draft);
+
+        var result = await CorpusApproval.ApproveAsync(_folder, draft, plan, (path, bytes, ct) => Task.CompletedTask);
+
+        Assert.True(result.Succeeded);
+        Assert.True(draft.Corpus!.Approved);
+        Assert.False(CorpusApproval.IsGuideStale(draft));
+        Assert.False(CorpusApproval.WithdrawApprovalIfStale(draft));
+        Assert.True(draft.Corpus.Approved);
+
+        // A later guide change makes it stale again
+        draft.Guide.Facts[0].Title += " again";
+        Assert.True(CorpusApproval.IsGuideStale(draft));
+    }
+
+    [Fact]
     public async Task IsSettingsChanged_DetectsAndKeeps()
     {
         var (draft, plan) = Setup();

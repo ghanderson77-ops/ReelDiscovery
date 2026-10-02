@@ -100,7 +100,10 @@ public static class CorpusApproval
         draft.Corpus.Approved = true;
         draft.Corpus.ApprovedUtc = utcNow;
         draft.Corpus.WrittenFiles = files.ToList();
-        draft.Corpus.DismissedStaleGuideHash = string.Empty;
+        // Approving a plan the user kept against a changed guide accepts that guide: keep its hash dismissed, so the next
+        // entry does not withdraw the new approval again (D-25). A plan built from the current guide needs no dismissal.
+        var current = (draft.Guide ?? new CaseGuide()).ComputeHash();
+        draft.Corpus.DismissedStaleGuideHash = (plan.GuideHash ?? string.Empty) == current ? string.Empty : current;
         // No-op once the plan was first saved (D-04 decision); kept so approval always lands at ReviewPlan
         draft.AdvanceStage(CaseStage.ReviewPlan);
     }

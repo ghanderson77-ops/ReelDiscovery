@@ -29,7 +29,8 @@ public class CorpusPlanner
     public const string ProtocolFallbackNote = "The review protocol uses standard wording because the model did not write it.";
 
     private readonly ILlmGateway _llm;
-    private readonly Random _random;
+    // Used only on the calling thread (skeletons are built before any parallel call); never stored on the plan (D-20)
+    private readonly Random _rng;
 
     internal static IReadOnlyList<Type> SchemaTypes { get; } = new[] { typeof(GuidanceWeightsDto) }
         .Concat(RelevantThreadFiller.SchemaTypes)
@@ -40,7 +41,7 @@ public class CorpusPlanner
     public CorpusPlanner(ILlmGateway llm, Random? random = null)
     {
         _llm = llm;
-        _random = random ?? Random.Shared;
+        _rng = random ?? Random.Shared;
     }
 
     /// <summary>
@@ -89,8 +90,8 @@ public class CorpusPlanner
 
         // 3. Allocation and skeletons
         var relevantEmails = CorpusSettings.RelevantCount(settings.TotalEmails, settings.RelevantPercent);
-        var ctx = SkeletonContext.Create(draft, settings, mediaAvailable, _random);
-        var budget = BudgetAllocator.AllocateRelevant(ctx.DatedFacts, relevantEmails, multipliers, _random);
+        var ctx = SkeletonContext.Create(draft, settings, mediaAvailable, _rng);
+        var budget = BudgetAllocator.AllocateRelevant(ctx.DatedFacts, relevantEmails, multipliers, _rng);
         if (budget.Shortfall > 0)
             notes.Add(ShortfallNote);
         var relevant = ThreadSkeletonBuilder.BuildRelevant(ctx, budget);

@@ -78,11 +78,19 @@ public class CaseStore
 
     /// <summary>
     /// Returns the case folder, creating a unique one under CasesRoot on first use and setting draft.FolderPath.
+    /// A case that already has a folder is never forked into a new one: when that folder is missing (drive unplugged,
+    /// cloud folder offline, renamed) this throws, so the save reports "Not saved" instead of writing elsewhere (WR-06).
     /// </summary>
     public string EnsureFolder(CaseDraft draft)
     {
-        if (!string.IsNullOrEmpty(draft.FolderPath) && Directory.Exists(draft.FolderPath))
-            return draft.FolderPath;
+        if (!string.IsNullOrEmpty(draft.FolderPath))
+        {
+            if (Directory.Exists(draft.FolderPath))
+                return draft.FolderPath;
+
+            throw new DirectoryNotFoundException(
+                $"The case folder {draft.FolderPath} is not available. Reconnect the drive or restore the folder; the case saves again on the next change.");
+        }
 
         var folder = CaseFolderNaming.UniqueFolderPath(CasesRoot, CaseFolderNaming.DefaultFolderName(draft));
         Directory.CreateDirectory(folder);

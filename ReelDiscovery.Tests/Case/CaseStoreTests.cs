@@ -177,6 +177,25 @@ public class CaseStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Save_MissingCaseFolder_FailsWithoutForking()
+    {
+        // WR-06: a folder that went away (drive unplugged, renamed) must not silently become "<name> (2)"
+        var store = CreateStore();
+        var draft = CaseTestData.SampleGuidedDraft();
+        Assert.True(await store.SaveAsync(draft));
+        var folder = draft.FolderPath;
+        Directory.Delete(folder, recursive: true);
+
+        Assert.False(await store.SaveAsync(draft));
+        Assert.False(store.SaveNow(draft));
+
+        Assert.Equal(folder, draft.FolderPath);
+        Assert.Contains("is not available", store.LastSaveError);
+        Assert.Empty(Directory.GetDirectories(_casesRoot));
+        Assert.Throws<DirectoryNotFoundException>(() => store.EnsureFolder(draft));
+    }
+
+    [Fact]
     public async Task Save_UpdatesUpdatedUtc_AndHasNoSecrets()
     {
         var store = CreateStore();

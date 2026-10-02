@@ -32,7 +32,7 @@ public class CorpusApprovalTests : IDisposable
         plan.PlanId = Guid.NewGuid();
         plan.CreatedUtc = new DateTime(2024, 9, 1, 12, 0, 0, DateTimeKind.Utc);
         draft.Corpus ??= new CorpusState();
-        draft.Corpus.Settings = plan.Settings;
+        draft.Corpus.Settings = PlanFixtures.Clone(plan).Settings;
         draft.AdvanceStage(CaseStage.CorpusSettings);
         return (draft, plan);
     }
@@ -174,5 +174,155 @@ public class CorpusApprovalTests : IDisposable
         }
 
         Assert.False(FileLockDetector.IsFileOpenElsewhere(new UnauthorizedAccessException(), path));
+    }
+
+    // ---- Task 2: apply new plan, staleness and keep-plan rules ----
+
+    [Fact]
+    public async Task ApplyNewPlan_SavesBeforeAssigning_AndResetsApproval()
+    {
+        var (draft, old) = Setup();
+        Attach(draft, old);
+        Assert.True((await CorpusApproval.ApproveAsync(_folder, draft, old)).Succeeded);
+        draft.Corpus!.DismissedSettingsHash = "s";
+        draft.Corpus.DismissedStaleGuideHash = "g";
+        draft.Stage = CaseStage.CorpusSettings;
+
+        var next = PlanFixtures.Clone(old);
+        next.PlanId = Guid.NewGuid();
+        next.CreatedUtc = new DateTime(2024, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+        next.GuideHash = "new-guide";
+        next.SettingsHash = "new-settings";
+        var savedWhileOld = false;
+        PlanSaver saver = (folder, plan, ct) =>
+        {
+            savedWhileOld = draft.Corpus.PlanId == old.PlanId && ReferenceEquals(draft.Corpus.Plan, old);
+            return Task.CompletedTask;
+        };
+
+        var result = await CorpusApproval.ApplyNewPlanAsync(_folder, draft, next, saver);
+
+        Assert.True(result.Saved);
+        Assert.True(savedWhileOld);
+        Assert.Same(next, draft.Corpus.Plan);
+        Assert.Equal(next.PlanId, draft.Corpus.PlanId);
+        Assert.Equal("new-guide", draft.Corpus.PlanGuideHash);
+        Assert.Equal("new-settings", draft.Corpus.PlanSettingsHash);
+        Assert.Equal(next.CreatedUtc, draft.Corpus.PlanCreatedUtc);
+        Assert.False(draft.Corpus.Approved);
+        Assert.Null(draft.Corpus.ApprovedUtc);
+        Assert.Equal(string.Empty, draft.Corpus.DismissedStaleGuideHash);
+        Assert.Equal(string.Empty, draft.Corpus.DismissedSettingsHash);
+        Assert.Equal(3, draft.Corpus.WrittenFiles.Count);
+        Assert.All(draft.Corpus.WrittenFiles, f => Assert.Equal(old.PlanId, f.PlanId));
+        Assert.Equal(CaseStage.ReviewPlan, draft.Stage);
+    }
+
+    [Fact]
+    public async Task ApplyNewPlan_SaverFails_DraftUnchanged()
+    {
+        var (draft, old) = Setup();
+        Attach(draft, old);
+        Assert.True((await CorpusApproval.ApproveAsync(_folder, draft, old)).Succeeded);
+        var before = draft.ToJson();
+
+        var next = PlanFixtures.Clone(old);
+        next.PlanId = Guid.NewGuid();
+        PlanSaver saver = (folder, plan, ct) => throw new IOException("Disk full");
+
+        var result = await CorpusApproval.ApplyNewPlanAsync(_folder, draft, next, saver);
+
+        Assert.False(result.Saved);
+        Assert.Equal("Disk full", result.Error);
+        Assert.Equal(before, draft.ToJson());
+        Assert.Same(old, draft.Corpus!.Plan);
+        Assert.Equal(old.PlanId, draft.Corpus.PlanId);
+        Assert.True(draft.Corpus.Approved);
+    }
+
+    [Fact]
+    public async Task ApplyNewPlan_DefaultSaver_WritesPlanFile()
+    {
+        var (draft, plan) = Setup();
+
+        var result = await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan);
+
+        Assert.True(result.Saved);
+        Assert.True(CorpusPlanStore.Load(_folder, plan.PlanId).Succeeded);
+        Assert.Equal(plan.PlanId, draft.Corpus!.PlanId);
+    }
+
+    [Fact]
+    public async Task IsGuideStale_ContentOnlyAndDismissible()
+    {
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+        Assert.False(CorpusApproval.IsGuideStale(draft));
+
+        var fact = draft.Guide!.Facts[0];
+        fact.NeedsReview = !fact.NeedsReview;
+        Assert.False(CorpusApproval.IsGuideStale(draft));
+
+        fact.Title += " (revised)";
+        Assert.True(CorpusApproval.IsGuideStale(draft));
+
+        CorpusApproval.KeepStalePlan(draft);
+        Assert.False(CorpusApproval.IsGuideStale(draft));
+
+        fact.Title += " again";
+        Assert.True(CorpusApproval.IsGuideStale(draft));
+    }
+
+    [Fact]
+    public void IsGuideStale_NoPlan_False()
+    {
+        var (draft, _) = Setup();
+        Assert.False(CorpusApproval.IsGuideStale(draft));
+        Assert.False(CorpusApproval.IsSettingsChanged(draft));
+    }
+
+    [Fact]
+    public async Task WithdrawApprovalIfStale_ApprovedAndStale_Withdraws()
+    {
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+        draft.Corpus!.Approved = true;
+
+        Assert.False(CorpusApproval.WithdrawApprovalIfStale(draft));
+        Assert.True(draft.Corpus.Approved);
+
+        draft.Guide!.Facts[0].Title += " (revised)";
+        Assert.True(CorpusApproval.WithdrawApprovalIfStale(draft));
+        Assert.False(draft.Corpus.Approved);
+    }
+
+    [Fact]
+    public async Task WithdrawApprovalIfStale_Dismissed_Unchanged()
+    {
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+        draft.Corpus!.Approved = true;
+        draft.Guide!.Facts[0].Title += " (revised)";
+        CorpusApproval.KeepStalePlan(draft);
+
+        Assert.False(CorpusApproval.WithdrawApprovalIfStale(draft));
+        Assert.True(draft.Corpus.Approved);
+    }
+
+    [Fact]
+    public async Task IsSettingsChanged_DetectsAndKeeps()
+    {
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+        Assert.False(CorpusApproval.IsSettingsChanged(draft));
+
+        draft.Corpus!.Settings.TotalEmails += 100;
+        Assert.True(CorpusApproval.IsSettingsChanged(draft));
+
+        CorpusApproval.KeepSettingsChange(draft);
+        Assert.False(CorpusApproval.IsSettingsChanged(draft));
+
+        draft.Corpus.Settings.TotalEmails += 100;
+        Assert.True(CorpusApproval.IsSettingsChanged(draft));
     }
 }

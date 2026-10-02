@@ -11,9 +11,14 @@ namespace ReelDiscovery.Services.Corpus;
 /// </summary>
 public static class ThreadSkeletonBuilder
 {
-    // Share of relevant threads that carry two concurrent facts from different issues (RESEARCH Pattern 4, assumed 10-15%)
-    public const double MultiIssueShare = 0.12;
-    public const int MultiIssueWindowBusinessDays = 10;
+    // Share of relevant threads that carry two concurrent facts from different issues (D-15, RESEARCH A5: 10-15%)
+    public const double MultiIssueTargetShare = 0.12;
+    public const double MultiIssueMinShare = 0.10;
+    public const double MultiIssueMaxShare = 0.15;
+
+    // Normal pairs are this close; the top-up pass may use the nearest pairs up to the fallback window
+    public const int MultiIssueWindowBusinessDays = 20;
+    public const int MultiIssueFallbackWindowBusinessDays = 30;
 
     // Anchor offset after the fact date: 60% within 0..2 business days, otherwise 3..15
     private const int NearAnchorPercent = 60;
@@ -35,8 +40,9 @@ public static class ThreadSkeletonBuilder
     // A replacement thread for truncated messages uses people active from the anchor through this many days later
     private const int StablePoolDays = 30;
 
-    // Facts further apart than this are never compared for multi-issue pairing (keeps the business-day walk bounded)
-    private const int MaxPairCalendarDays = 31;
+    // Facts further apart than this are never compared for multi-issue pairing (keeps the business-day walk bounded;
+    // 30 business days is at most 6 weeks plus a few holidays)
+    private const int MaxPairCalendarDays = 46;
 
     private class ThreadSpec
     {
@@ -143,68 +149,144 @@ public static class ThreadSkeletonBuilder
 
     // ----- Multi-issue threads (D-15) -----
 
+    private class IssuePair
+    {
+        public KeyFact A { get; set; } = null!;
+        public KeyFact B { get; set; } = null!;
+        public int Gap { get; set; }
+    }
+
+    /// <summary>
+    /// Merges single-fact specs of two concurrent facts from different issues into one thread (D-15). Normal pairs are
+    /// within <see cref="MultiIssueWindowBusinessDays"/>; when they fall short of <see cref="MultiIssueMinShare"/>, the
+    /// nearest pairs up to <see cref="MultiIssueFallbackWindowBusinessDays"/> top it up. Every pair needs at least one
+    /// person who knew both facts and is active on the merged anchor, so no knowledge is invented.
+    /// </summary>
     private static void MergeMultiIssue(SkeletonContext ctx, List<ThreadSpec> specs)
     {
-        var target = (int)Math.Round(specs.Count * MultiIssueShare, MidpointRounding.AwayFromZero);
-        if (target <= 0)
+        if (specs.Count == 0)
             return;
 
-        var pairs = new List<(KeyFact A, KeyFact B)>();
+        var issues = ctx.DatedFacts.SelectMany(f => Clean(f.IssueIds)).Distinct(StringComparer.Ordinal).Count();
+        if (issues < 2)
+        {
+            ctx.Notes.Add("The case guide has only one issue with dated facts, so no thread combines two issues.");
+            return;
+        }
+
+        var normal = new List<IssuePair>();
+        var fallback = new List<IssuePair>();
         var facts = ctx.DatedFacts;
         for (var i = 0; i < facts.Count; i++)
         {
             for (var j = i + 1; j < facts.Count; j++)
             {
-                if (IsMultiIssuePair(ctx, facts[i], facts[j]))
-                    pairs.Add((facts[i], facts[j]));
+                var gap = MultiIssueGap(ctx, facts[i], facts[j]);
+                if (gap == null)
+                    continue;
+
+                var pair = new IssuePair { A = facts[i], B = facts[j], Gap = gap.Value };
+                (gap.Value <= MultiIssueWindowBusinessDays ? normal : fallback).Add(pair);
             }
         }
 
-        if (pairs.Count == 0)
-            return;
-        Shuffle(pairs, ctx.Random);
-
-        var merges = 0;
-        var progress = true;
-        // Each merge removes one single-fact spec, so this is bounded by the spec count
-        while (merges < target && progress)
+        if (normal.Count == 0 && fallback.Count == 0)
         {
-            progress = false;
-            foreach (var (a, b) in pairs)
-            {
-                if (merges >= target)
-                    break;
+            ctx.Notes.Add($"No two facts from different issues happen within {MultiIssueFallbackWindowBusinessDays} business days " +
+                          "with someone who knew both, so no thread combines two issues. Add people under Who knew to connect them.");
+            return;
+        }
 
-                var specsA = SingleFactSpecs(specs, a);
-                var specsB = SingleFactSpecs(specs, b);
+        Shuffle(normal, ctx.Random);
+        var merged = MergePairs(ctx, specs, normal, 0, MultiIssueTargetShare);
 
-                // Keep at least one single-fact thread for each fact
-                if (specsA.Count < 2 || specsB.Count < 2)
-                    continue;
-
-                var keep = specsA[ctx.Random.Next(specsA.Count)];
-                var drop = specsB[ctx.Random.Next(specsB.Count)];
-                Merge(ctx, specs, keep, drop);
-                merges++;
-                progress = true;
-            }
+        // Top up with the nearest cross-issue pairs (smallest gap first) only when the normal pairs fall short
+        if (merged < Target(specs.Count, MultiIssueMinShare))
+        {
+            var nearest = normal.Concat(fallback)
+                .OrderBy(p => p.Gap)
+                .ThenBy(p => p.A.Id, StringComparer.Ordinal)
+                .ThenBy(p => p.B.Id, StringComparer.Ordinal)
+                .ToList();
+            MergePairs(ctx, specs, nearest, merged, MultiIssueMinShare);
         }
     }
 
-    private static bool IsMultiIssuePair(SkeletonContext ctx, KeyFact a, KeyFact b)
+    // Round-robin over the pairs until merged specs reach share x the current spec count; returns the merged total
+    private static int MergePairs(SkeletonContext ctx, List<ThreadSpec> specs, List<IssuePair> pairs, int merged, double share)
+    {
+        var progress = true;
+        // Each merge turns a single-fact spec into a merged one and never adds a merged spec, so this is bounded
+        while (progress && merged < Target(specs.Count, share))
+        {
+            progress = false;
+            foreach (var pair in pairs)
+            {
+                if (merged >= Target(specs.Count, share))
+                    break;
+                if (!TryMerge(ctx, specs, pair))
+                    continue;
+
+                merged++;
+                progress = true;
+            }
+        }
+
+        return merged;
+    }
+
+    // Merged specs wanted for this share of the current spec count, never above the maximum share
+    private static int Target(int specCount, double share)
+    {
+        var wanted = (int)Math.Ceiling(specCount * share - 1e-9);
+        var cap = (int)Math.Floor(specCount * MultiIssueMaxShare + 1e-9);
+        return Math.Min(wanted, cap);
+    }
+
+    private static bool TryMerge(SkeletonContext ctx, List<ThreadSpec> specs, IssuePair pair)
+    {
+        var specsA = SingleFactSpecs(specs, pair.A);
+        var specsB = SingleFactSpecs(specs, pair.B);
+
+        // Keep at least one single-fact thread for each fact
+        if (specsA.Count < 2 || specsB.Count < 2)
+            return false;
+
+        var keep = specsA[ctx.Random.Next(specsA.Count)];
+        var drop = specsB[ctx.Random.Next(specsB.Count)];
+
+        // Someone who knew both facts must be active on the merged anchor, or the thread would invent knowledge
+        var anchor = drop.Anchor > keep.Anchor ? drop.Anchor : keep.Anchor;
+        if (!KnowerPool(ctx, new List<KeyFact> { pair.A, pair.B }).Any(id => ctx.IsActive(id, anchor)))
+            return false;
+
+        Merge(ctx, specs, keep, drop);
+        return true;
+    }
+
+    /// <summary>
+    /// Business days between two facts that may share a thread: different issue sets, both dated, at most
+    /// <see cref="MultiIssueFallbackWindowBusinessDays"/> apart, and at least one shared knower active on the later
+    /// fact's date. Null when the pair does not qualify.
+    /// </summary>
+    private static int? MultiIssueGap(SkeletonContext ctx, KeyFact a, KeyFact b)
     {
         var issuesA = Clean(a.IssueIds);
         var issuesB = Clean(b.IssueIds);
         if (issuesA.Count == 0 || issuesB.Count == 0 || issuesA.ToHashSet(StringComparer.Ordinal).SetEquals(issuesB))
-            return false;
+            return null;
 
         var dateA = SkeletonContext.FactDate(a);
         var dateB = SkeletonContext.FactDate(b);
-        if (dateA == null || dateB == null || BusinessDaysBetween(dateA.Value, dateB.Value) > MultiIssueWindowBusinessDays)
-            return false;
+        if (dateA == null || dateB == null)
+            return null;
 
-        // Two people who knew both facts, so the thread is a real conversation among shared characters
-        return KnowerPool(ctx, new List<KeyFact> { a, b }).Count >= 2;
+        var gap = BusinessDaysBetween(dateA.Value, dateB.Value);
+        if (gap > MultiIssueFallbackWindowBusinessDays)
+            return null;
+
+        var later = BusinessCalendar.NextBusinessDay(dateA.Value > dateB.Value ? dateA.Value : dateB.Value);
+        return KnowerPool(ctx, new List<KeyFact> { a, b }).Any(id => ctx.IsActive(id, later)) ? gap : null;
     }
 
     private static List<ThreadSpec> SingleFactSpecs(List<ThreadSpec> specs, KeyFact fact) =>

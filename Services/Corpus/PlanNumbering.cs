@@ -7,7 +7,7 @@ namespace ReelDiscovery.Services.Corpus;
 
 /// <summary>
 /// Fixes the identity of every planned document (D-28..D-30): chronological thread ids, message ids, DocIDs, custodians
-/// and opaque planned paths. Ids are formatted locally, never via IdAllocator (Pitfall 2), so the guide is never touched.
+/// and opaque planned paths. Ids are formatted locally, never via the guide id counters (Pitfall 2), so the guide is never touched.
 /// </summary>
 public static class PlanNumbering
 {

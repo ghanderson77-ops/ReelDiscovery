@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-07-PLAN.md
-last_updated: "2026-10-02T20:20:32.549Z"
+stopped_at: Completed 04-08-PLAN.md
+last_updated: "2026-10-02T20:27:00.312Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 50
-  percent: 78
+  completed_plans: 51
+  percent: 80
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 9 of 22
+Plan: 10 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -100,6 +100,7 @@ Progress: [██████████] 98%
 | Phase 04 P05 | 8min | 2 tasks | 5 files |
 | Phase 04 P06 | 10min | 2 tasks | 4 files |
 | Phase 04 P07 | 14min | 2 tasks | 5 files |
+| Phase 04 P08 | 12min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -256,6 +257,10 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-07]: Protocol prose with any blank top-level section is replaced by FallbackProse; an issue missing from the response gets the criteria-only example while the rest of the prose is kept (IsFallback false)
 - [Phase 04]: [04-07]: Protocol issue ids match guide ids by trim + case-insensitive compare; unknown ids dropped; DocID tokens ([A-Z]{2,6}-######[.####]) stripped from all model prose
 - [Phase 04]: [04-07]: CorpusPlanPrompts.AppendCast role text is Party / In-house counsel / Outside counsel / Staff, plus ', background' for Background-tier members
+- [Phase 04]: [04-08]: CorpusPlanStore.EnsureLoaded with no corpus or no PlanId returns an empty-Reason result; callers detect failure by a non-empty Reason
+- [Phase 04]: [04-08]: PlanSummary month buckets span the settings window widened to every planned message (sums equal Emails); windows over 600 months are ignored
+- [Phase 04]: [04-08]: Fact rows count relevant threads listing the fact, relevant messages whose own FactIds carry it, and IsHot among those; HotEmails counts IsHot only in relevant threads
+- [Phase 04]: [04-08]: Custodians tile counts distinct cast CustodianIds; custodian rows = sender if cast else first cast recipient, Total desc then name
 
 ### Pending Todos
 
@@ -277,6 +282,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T20:20:32.544Z
-Stopped at: Completed 04-07-PLAN.md
+Last session: 2026-10-02T20:27:00.307Z
+Stopped at: Completed 04-08-PLAN.md
 Resume file: None

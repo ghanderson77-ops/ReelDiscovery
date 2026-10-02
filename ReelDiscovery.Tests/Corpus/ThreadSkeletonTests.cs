@@ -372,11 +372,14 @@ public class ThreadSkeletonTests
         Assert.Contains(AttachmentType.Excel, kinds);
     }
 
-    [Fact]
-    public void Repair_InactiveParticipant_SwappedOrTruncated_TotalsKept()
+    [Theory]
+    [InlineData("2024-05-01", false)]
+    [InlineData("2024-04-23", true)]
+    public void Repair_InactiveParticipant_SwappedOrTruncated_TotalsKept(string activeTo, bool expectTruncation)
     {
         var draft = CorpusTestData.RichDraft();
-        draft.Guide!.Cast.Single(c => c.Id == "CH-002").ActiveTo = "2024-05-01";
+        draft.Guide!.Cast.Single(c => c.Id == "CH-002").ActiveTo = activeTo;
+        var lastDay = DateOnly.Parse(activeTo, System.Globalization.CultureInfo.InvariantCulture);
 
         var (ctx, budget, threads) = Build(draft);
 
@@ -397,11 +400,16 @@ public class ThreadSkeletonTests
                     Assert.All(facts, f => Assert.Contains(id, Knowers(f)));
                 }
 
-                if (day > new DateOnly(2024, 5, 1))
+                if (day > lastDay)
                     Assert.DoesNotContain("CH-002", Participants(m));
             }
         }
 
-        Assert.Contains(ctx.Notes, n => n.Contains("was shortened because Tom Becker was not active on 2024-05-"));
+        // F-004 (2024-04-22) is known only by CH-002 and CH-004, so a thread that outlives CH-002 cannot swap and is shortened
+        if (expectTruncation)
+        {
+            Assert.Contains(ctx.Notes, n => n.StartsWith("Thread T-") && n.Contains(" was shortened because Tom Becker was not active on 2024-04-"));
+            Assert.Contains(threads, t => t.FactIds.SequenceEqual(new[] { "F-004" }) && t.Messages.All(m => m.FromId == "CH-004"));
+        }
     }
 }

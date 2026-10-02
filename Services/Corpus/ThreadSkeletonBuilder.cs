@@ -1,3 +1,4 @@
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 
@@ -25,6 +26,15 @@ public static class ThreadSkeletonBuilder
     // A later sender is picked from the parent CC instead of the parent To 25% of the time (when there is a CC)
     private const int SenderFromCcPercent = 25;
 
+    // Default share of relevant threads that are privileged (RESEARCH Pattern 4 step 8, assumed)
+    public const int DefaultPrivilegedPercent = 8;
+
+    // Repair passes per thread before truncating (each sender swap reschedules the thread)
+    private const int MaxRepairPasses = 3;
+
+    // A replacement thread for truncated messages uses people active from the anchor through this many days later
+    private const int StablePoolDays = 30;
+
     // Facts further apart than this are never compared for multi-issue pairing (keeps the business-day walk bounded)
     private const int MaxPairCalendarDays = 31;
 
@@ -33,6 +43,14 @@ public static class ThreadSkeletonBuilder
         public List<KeyFact> Facts { get; set; } = new();
         public int Size { get; set; }
         public DateOnly Anchor { get; set; }
+        public bool IsPrivileged { get; set; }
+        public string? CounselId { get; set; }
+
+        // Restricted people (privileged side or a replacement thread's stable pool); null = everyone who knew the facts
+        public List<string>? Pool { get; set; }
+
+        // Replacement thread for messages removed by repair; never rebalanced again
+        public bool IsReplacement { get; set; }
     }
 
     private class BuiltThread
@@ -50,6 +68,7 @@ public static class ThreadSkeletonBuilder
     {
         var specs = CreateSpecs(ctx, budget);
         MergeMultiIssue(ctx, specs);
+        AssignPrivileged(ctx, specs);
 
         var built = new List<BuiltThread>();
         var notedSingle = new HashSet<string>(StringComparer.Ordinal);
@@ -63,7 +82,12 @@ public static class ThreadSkeletonBuilder
         foreach (var item in built)
             ThreadScheduler.Schedule(item.Thread, item.Spec.Anchor, ctx, LatestFactDate(item.Spec));
 
-        return built.Select(b => b.Thread).ToList();
+        Repair(ctx, built, notedSingle);
+
+        var threads = built.Where(b => b.Thread.Messages.Count > 0).Select(b => b.Thread).ToList();
+        AssignHot(threads, ctx);
+        AssignAttachments(threads, ctx);
+        return threads;
     }
 
     // ----- Specs: one per budget thread, in fact date order -----
@@ -234,10 +258,10 @@ public static class ThreadSkeletonBuilder
 
     private static BuiltThread? BuildThread(SkeletonContext ctx, ThreadSpec spec, string threadId, HashSet<string> notedSingle)
     {
-        var pool = KnowerPool(ctx, spec.Facts);
+        var pool = spec.Pool ?? KnowerPool(ctx, spec.Facts);
         var label = string.Join(" and ", spec.Facts.Select(f => f.Id));
 
-        if (pool.Count == 1 && spec.Facts.Count == 1 && notedSingle.Add(spec.Facts[0].Id))
+        if (spec.Pool == null && pool.Count == 1 && spec.Facts.Count == 1 && notedSingle.Add(spec.Facts[0].Id))
         {
             ctx.Notes.Add($"{spec.Facts[0].Id} has only one person who knew about it, so its emails are notes to self. " +
                           "Add people under Who knew to get real threads.");
@@ -274,11 +298,13 @@ public static class ThreadSkeletonBuilder
             Id = threadId,
             Relevance = ThreadRelevance.Relevant,
             Category = NonRelevantCategory.None,
+            IsPrivileged = spec.IsPrivileged,
             FactIds = spec.Facts.Select(f => f.Id).ToList(),
             IssueIds = spec.Facts.SelectMany(f => Clean(f.IssueIds)).Distinct(StringComparer.Ordinal).ToList()
         };
 
-        BuildMessages(ctx, thread, spec, active, null);
+        var counsel = spec.CounselId != null && active.Contains(spec.CounselId) ? spec.CounselId : null;
+        BuildMessages(ctx, thread, spec, active, counsel);
         return new BuiltThread { Thread = thread, Spec = spec, Pool = pool };
     }
 
@@ -294,7 +320,10 @@ public static class ThreadSkeletonBuilder
 
         var actors = ActorsIn(spec.Facts, people);
         var keyActors = actors.Where(id => ctx.CastById.TryGetValue(id, out var m) && m.Tier == CastTier.Key).ToList();
-        var senderPool = keyActors.Count > 0 ? keyActors : actors.Count > 0 ? actors : people;
+        var senderPool = keyActors.Count > 0 ? keyActors
+            : actors.Count > 0 ? actors
+            : mustInclude != null ? new List<string> { mustInclude }
+            : people;
         var sender = senderPool[random.Next(senderPool.Count)];
 
         var others = people.Where(id => id != sender).ToList();
@@ -367,6 +396,303 @@ public static class ThreadSkeletonBuilder
             thread.Messages[i].Id = $"{thread.Id}-M{i + 1:00}";
         }
     }
+
+    // ----- Privileged threads (D-09) -----
+
+    private static void AssignPrivileged(SkeletonContext ctx, List<ThreadSpec> specs)
+    {
+        var percent = ctx.Settings.PrivilegedPercent ?? DefaultPrivilegedPercent;
+        if (percent <= 0 || specs.Count == 0)
+            return;
+
+        var candidates = new List<(ThreadSpec Spec, string Counsel, List<string> Pool)>();
+        foreach (var spec in specs)
+        {
+            var pool = KnowerPool(ctx, spec.Facts);
+            foreach (var counsel in pool.Where(id => IsCounsel(ctx, id) && ctx.IsActive(id, spec.Anchor)))
+            {
+                var side = SideOf(ctx, counsel);
+                var restricted = pool.Where(id => side.Contains(ctx.CastById[id].OrganizationId ?? string.Empty)).ToList();
+
+                // Counsel plus at least one active client-side person, so the thread is a real privileged exchange
+                if (restricted.Count(id => ctx.IsActive(id, spec.Anchor)) >= 2)
+                {
+                    candidates.Add((spec, counsel, restricted));
+                    break;
+                }
+            }
+        }
+
+        if (candidates.Count == 0)
+            return;
+
+        var target = (int)Math.Round(specs.Count * percent / 100.0, MidpointRounding.AwayFromZero);
+        target = Math.Min(Math.Max(target, 1), candidates.Count);
+        Shuffle(candidates, ctx.Random);
+        foreach (var (spec, counsel, pool) in candidates.Take(target))
+        {
+            spec.IsPrivileged = true;
+            spec.CounselId = counsel;
+            spec.Pool = pool;
+        }
+    }
+
+    private static bool IsCounsel(SkeletonContext ctx, string id) =>
+        ctx.CastById.TryGetValue(id, out var member) && member.Role is CastRole.InHouseCounsel or CastRole.OutsideCounsel;
+
+    /// <summary>
+    /// Organizations on a counsel's client side (same rule as validator rule 12): in-house = own organization; outside
+    /// counsel = the firm and the organizations in its RepresentsOrgIds; plus any law firm representing one of those clients.
+    /// </summary>
+    private static HashSet<string> SideOf(SkeletonContext ctx, string counselId)
+    {
+        var member = ctx.CastById[counselId];
+        var organizations = (ctx.Guide.Organizations ?? new()).Where(o => o != null && !string.IsNullOrEmpty(o.Id)).ToList();
+        var orgId = member.OrganizationId ?? string.Empty;
+
+        var clients = new HashSet<string>(StringComparer.Ordinal);
+        if (orgId.Length > 0)
+            clients.Add(orgId);
+        if (member.Role == CastRole.OutsideCounsel)
+        {
+            var firm = organizations.FirstOrDefault(o => o.Id == orgId);
+            if (firm != null)
+                clients.UnionWith(Clean(firm.RepresentsOrgIds));
+        }
+
+        var side = new HashSet<string>(clients, StringComparer.Ordinal);
+        foreach (var org in organizations.Where(o => Clean(o.RepresentsOrgIds).Any(clients.Contains)))
+            side.Add(org.Id);
+        return side;
+    }
+
+    // ----- Repair (D-19) -----
+
+    private static void Repair(SkeletonContext ctx, List<BuiltThread> built, HashSet<string> notedSingle)
+    {
+        // Replacement threads are appended while iterating; they are never rebalanced again, so this terminates
+        for (var i = 0; i < built.Count; i++)
+        {
+            var item = built[i];
+            var removed = RepairThread(ctx, item);
+            if (removed == 0)
+                continue;
+
+            var label = string.Join(" and ", item.Spec.Facts.Select(f => f.Id));
+            if (item.Spec.IsReplacement)
+            {
+                ctx.Notes.Add($"{removed} relevant emails for {label} could not be planned because nobody who knew about it was active long enough.");
+                continue;
+            }
+
+            var replacement = ReplacementThread(ctx, item, removed, ThreadId(built.Count + 1), notedSingle);
+            if (replacement == null)
+            {
+                ctx.Notes.Add($"{removed} relevant emails for {label} could not be planned because nobody who knew about it was active.");
+                continue;
+            }
+
+            ThreadScheduler.Schedule(replacement.Thread, replacement.Spec.Anchor, ctx, LatestFactDate(replacement.Spec));
+            built.Add(replacement);
+        }
+    }
+
+    /// <summary>
+    /// Swaps participants who are not active on the sender-local date for active eligible people; truncates the thread
+    /// at the first message nobody can fix. Returns the number of messages removed.
+    /// </summary>
+    private static int RepairThread(SkeletonContext ctx, BuiltThread item)
+    {
+        var messages = item.Thread.Messages;
+        for (var pass = 0; pass < MaxRepairPasses; pass++)
+        {
+            var senderSwapped = false;
+            for (var index = 0; index < messages.Count; index++)
+            {
+                var message = messages[index];
+                var day = BusinessCalendar.LocalDate(message.SentAt, ctx.ZoneFor(message.FromId));
+                foreach (var person in Participants(message).Distinct(StringComparer.Ordinal).ToList())
+                {
+                    if (ctx.IsActive(person, day))
+                        continue;
+
+                    var replacement = PickReplacement(ctx, item, index, person, day);
+                    if (replacement == null)
+                        return Truncate(ctx, item, index, person, day);
+
+                    senderSwapped |= Swap(messages, index, person, replacement);
+                }
+            }
+
+            if (!senderSwapped)
+                return 0;
+
+            // A new sender means a new zone and latency: reschedule and check again
+            ThreadScheduler.Schedule(item.Thread, item.Spec.Anchor, ctx, LatestFactDate(item.Spec));
+        }
+
+        for (var index = 0; index < messages.Count; index++)
+        {
+            var message = messages[index];
+            var day = BusinessCalendar.LocalDate(message.SentAt, ctx.ZoneFor(message.FromId));
+            var inactive = Participants(message).FirstOrDefault(p => !ctx.IsActive(p, day));
+            if (inactive != null)
+                return Truncate(ctx, item, index, inactive, day);
+        }
+
+        return 0;
+    }
+
+    private static string? PickReplacement(SkeletonContext ctx, BuiltThread item, int index, string person, DateOnly day)
+    {
+        var used = item.Thread.Messages.Skip(index).SelectMany(Participants).ToHashSet(StringComparer.Ordinal);
+        var mustBeCounsel = item.Thread.IsPrivileged && IsCounsel(ctx, person);
+        var candidates = item.Pool
+            .Where(id => !used.Contains(id) && ctx.IsActive(id, day) && (!mustBeCounsel || IsCounsel(ctx, id)))
+            .ToList();
+        return candidates.Count > 0 ? candidates[ctx.Random.Next(candidates.Count)] : null;
+    }
+
+    // Replaces the person from message index onward so the reply structure stays coherent; true when a sender changed
+    private static bool Swap(List<PlannedMessage> messages, int index, string person, string replacement)
+    {
+        var senderChanged = false;
+        for (var i = index; i < messages.Count; i++)
+        {
+            var message = messages[i];
+            if (message.FromId == person)
+            {
+                message.FromId = replacement;
+                senderChanged = true;
+            }
+
+            message.ToIds = message.ToIds.Select(id => id == person ? replacement : id).Distinct(StringComparer.Ordinal).ToList();
+            var to = message.ToIds;
+            message.CcIds = message.CcIds.Select(id => id == person ? replacement : id)
+                .Where(id => !to.Contains(id)).Distinct(StringComparer.Ordinal).ToList();
+        }
+
+        return senderChanged;
+    }
+
+    private static int Truncate(SkeletonContext ctx, BuiltThread item, int index, string person, DateOnly day)
+    {
+        var messages = item.Thread.Messages;
+        var removed = messages.Count - index;
+        messages.RemoveRange(index, removed);
+        var name = ctx.CastById.TryGetValue(person, out var member) && member.FullName.Length > 0 ? member.FullName : person;
+        ctx.Notes.Add($"Thread {item.Thread.Id} was shortened because {name} was not active on {day:yyyy-MM-dd}.");
+        return removed;
+    }
+
+    /// <summary>
+    /// A new thread of the same facts carrying the removed messages, among people active from the anchor through
+    /// <see cref="StablePoolDays"/> days later, so the totals stay exact.
+    /// </summary>
+    private static BuiltThread? ReplacementThread(SkeletonContext ctx, BuiltThread item, int size, string threadId, HashSet<string> notedSingle)
+    {
+        var anchor = item.Spec.Anchor;
+        var stable = item.Pool.Where(id => ctx.IsActive(id, anchor) && ctx.IsActive(id, anchor.AddDays(StablePoolDays))).ToList();
+        if (stable.Count == 0)
+            stable = item.Pool.Where(id => ctx.IsActive(id, anchor)).ToList();
+        if (stable.Count == 0)
+            return null;
+
+        var counsel = item.Spec.CounselId;
+        var privileged = item.Spec.IsPrivileged && counsel != null && stable.Contains(counsel) && stable.Count >= 2;
+        var spec = new ThreadSpec
+        {
+            Facts = item.Spec.Facts,
+            Size = size,
+            Anchor = anchor,
+            IsPrivileged = privileged,
+            CounselId = privileged ? counsel : null,
+            Pool = stable,
+            IsReplacement = true
+        };
+        return BuildThread(ctx, spec, threadId, notedSingle);
+    }
+
+    // ----- Hot documents (D-09) -----
+
+    private static void AssignHot(List<PlannedThread> threads, SkeletonContext ctx)
+    {
+        foreach (var fact in ctx.DatedFacts.Where(f => f.Significance == FactSignificance.Hot))
+        {
+            var threadsOfFact = threads.Count(t => t.FactIds.Contains(fact.Id));
+            if (threadsOfFact == 0)
+                continue;
+
+            var count = ctx.Settings.HotPerHotFact ?? (threadsOfFact >= 3 ? 2 : 1);
+            var picks = threads
+                .SelectMany(t => t.Messages)
+                .Where(m => m.Basis == RelevanceBasis.Own && m.FactIds.Contains(fact.Id) && !m.IsHot)
+                .OrderByDescending(m => Participants(m).Distinct(StringComparer.Ordinal).Count())
+                .ThenBy(m => m.SentAt)
+                .ThenBy(m => m.Id, StringComparer.Ordinal)
+                .Take(Math.Max(0, count))
+                .ToList();
+            foreach (var message in picks)
+                message.IsHot = true;
+        }
+    }
+
+    // ----- Attachments (D-11, PLAN-05) -----
+
+    private static void AssignAttachments(List<PlannedThread> threads, SkeletonContext ctx)
+    {
+        if (ctx.EnabledTypes.Count == 0 || ctx.AttachmentPercent <= 0)
+            return;
+
+        var total = threads.Sum(t => t.Messages.Count);
+        var eligible = threads
+            .SelectMany(t => t.Messages.Select(m => (Message: m, Allowed: AllowedTypes(ctx, t, m))))
+            .Where(x => x.Allowed.Count > 0)
+            .ToList();
+
+        // Exact share: round(messages x percent) attached messages, chosen at random among those that can carry one
+        var target = Math.Min(eligible.Count, (int)Math.Round(total * ctx.AttachmentPercent / 100.0, MidpointRounding.AwayFromZero));
+        Shuffle(eligible, ctx.Random);
+        foreach (var (message, allowed) in eligible.Take(target))
+        {
+            var count = ThreadShapes.SampleAttachmentCount(ctx.Random);
+            for (var k = 0; k < count; k++)
+            {
+                var kind = ThreadShapes.SampleAttachmentType(allowed, message.Seq == 1, ctx.Random);
+                if (kind == null)
+                    break;
+
+                var n = message.Attachments.Count(a => a.Kind == kind.Value) + 1;
+                message.Attachments.Add(new PlannedAttachment
+                {
+                    Kind = kind.Value,
+                    FileName = DefaultFileName(kind.Value, n),
+                    Title = string.Empty
+                });
+            }
+        }
+    }
+
+    // Enabled types this message can carry (ctx.EnabledTypes): calendar invites only on roots, voicemail only on single-message threads
+    private static List<AttachmentType> AllowedTypes(SkeletonContext ctx, PlannedThread thread, PlannedMessage message) =>
+        ctx.EnabledTypes
+            .Where(t => (t != AttachmentType.CalendarInvite || message.Seq == 1)
+                        && (t != AttachmentType.Voicemail || thread.Messages.Count == 1))
+            .ToList();
+
+    /// <summary>
+    /// Code default file name ("Document 1.docx", "Meeting.ics", "Voicemail.mp3"); the LLM title comes later (04-13).
+    /// </summary>
+    private static string DefaultFileName(AttachmentType kind, int n) => kind switch
+    {
+        AttachmentType.Word => $"Document {n}.docx",
+        AttachmentType.Excel => $"Spreadsheet {n}.xlsx",
+        AttachmentType.PowerPoint => $"Presentation {n}.pptx",
+        AttachmentType.Image => $"Photo {n}.png",
+        AttachmentType.CalendarInvite => n == 1 ? "Meeting.ics" : $"Meeting {n}.ics",
+        AttachmentType.Voicemail => n == 1 ? "Voicemail.mp3" : $"Voicemail {n}.mp3",
+        _ => $"Attachment {n}.bin"
+    };
 
     // ----- Helpers -----
 

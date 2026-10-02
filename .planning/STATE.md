@@ -295,6 +295,7 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-15: Case Summary puts a divider above both group headings (Corpus, Case guide), deviating from UI-SPEC S3 'no divider above the first' so Case file does not merge into the Corpus group
 - [Phase 04]: [04-16]: CorpusPlanner returns a new plan or classified failure (fatal / refusal majority (fill+seed refused)*2 > total / no dated facts); draft only read, settings JSON-cloned; progress Done monotonic over chunks + batches + 2
 - [Phase 04]: [04-16]: D-15 merge rule (04-09) yields 0 multi-issue threads on RichDraft at 250-5000 emails (closest cross-issue pairs 13-15 business days apart); rule not loosened; PLAN-03 left pending
+- [Phase 04]: [04-16 gap fix]: D-15 resolved: multi-issue pairs need different issue sets, <= 20 business days and >= 1 shared knower active on the merged anchor; a top-up pass uses nearest pairs (<= 30 business days) until 10% of relevant threads (cap 15%); single-issue / no-pair guides plan none with a note; RichDraft measures 12-14% at 250-5000 emails; PLAN-03 complete
 
 ### Pending Todos
 
@@ -307,7 +308,6 @@ None yet.
 - [Phase 7]: Verify the OpenAI .NET batch/file surface (experimental OPENAI001) and Anthropic cache_control pass-through before planning.
 - [Phase 8]: Jurisdiction-specific discovery limits (interrogatory caps, RFA numbering, transcript line counts) need verification.
 - [Timing]: .NET 8 reaches EOL on 2026-11-10, so Phase 1's retarget is time-sensitive.
-- D-15: ThreadSkeletonBuilder.MergeMultiIssue produces 0 merged multi-issue threads on RichDraft (10-business-day window + 2 shared knowers too strict); decide whether to widen window / relax knowers (see 04-16-SUMMARY)
 
 ## Deferred Items
 

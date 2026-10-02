@@ -115,3 +115,31 @@ None.
 
 - FOUND: Services/Corpus/CorpusPlanner.cs, ReelDiscovery.Tests/Corpus/CorpusPlannerTests.cs, ReelDiscovery.Tests/Case/CaseSchemaTests.cs
 - FOUND commits: db40d15, ea2995a, 4c42e5f, b0fd7a3
+
+## Gap fix: D-15 multi-issue threads
+
+This resolves the zero-merge finding above. It is a deviation fix credited to 04-09/04-16, with no new PLAN file.
+
+**[Rule 1 - Bug] The relevant-thread planner never produced deliberate multi-issue threads (D-15, ROADMAP Phase 4 criterion 2)**
+- **Fix (`Services/Corpus/ThreadSkeletonBuilder.cs`):**
+  - **Which pairs qualify:** the two facts have different issue sets, their dates are no more than 20 business days apart (was 10), and at least 1 person who knew both facts is active on the merged thread's anchor (was 2 or more).
+  - **Top-up:** if normal pairing gives less than 10% of relevant threads, the builder pairs the nearest remaining cross-issue facts (smallest date gap first, up to 30 business days, same knower rule) until the share reaches 10%. The share is capped at 15%; normal pairing aims for 12%.
+  - **When there are no pairs:** a guide with only one issue, or with no qualifying pair, gets zero merged threads and a plan note. The builder never makes up knowledge to force a pair.
+  - **Merged threads:** a merged thread starts on or after the later fact's date, carries both facts' FactIds and IssueIds, and its participants are people who knew both facts. Message totals stay exactly equal to the budget (overflow above depth 12 is moved to other threads, as before). Every fact keeps at least one single-fact thread. All randomness comes from `ctx.Random`.
+- **Measured on unmodified RichDraft** (end-to-end `PlanAsync`, 20% relevant, seed 42):
+
+| Corpus size | Relevant threads | Deliberate multi-issue threads | Share |
+|---|---|---|---|
+| 250 | 15 | 2 | 13.3% |
+| 1,000 | 59 | 8 | 13.6% |
+| 2,500 | 149 | 18 | 12.1% |
+| 5,000 | 297 | 36 | 12.1% |
+
+- At 1,000 emails, the builder-level result stays between 10% and 15% for seeds 1, 42 and 99.
+- **Validator:** rule 3 (active range), rule 10 (fact mentioned before its date) and rule 11 (participant did not know the fact) report nothing at any of the four sizes.
+- **Caveat:** in RichDraft, every qualifying pair (F-004/F-005, F-005/F-007, F-007/F-006) has only one person who knew both facts, either CH-004 or CH-001. So RichDraft's merged threads are notes to self by that person. When pairs share two or more knowers (`ConcurrentDraft` in ThreadSkeletonTests), merged threads are real conversations.
+- **Tests:** RED `65b0dc0` adds 13 test cases:
+  - `ThreadSkeletonTests`: share at 1,000 emails across three seeds, cap and exact totals at three sizes, a single-issue guide, and a guide with no shared knower.
+  - `CorpusPlannerTests`: end to end at 250, 1,000, 2,500 and 5,000 emails.
+  - GREEN is `d5d3cfe`. Corpus suite: 586/586 passed. Full suite excluding Render tests: 1,912/1,912 passed. Build: 0 warnings.
+- **PLAN-03** is now marked complete.

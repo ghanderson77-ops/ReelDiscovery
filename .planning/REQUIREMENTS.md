@@ -61,7 +61,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 - [x] **PLAN-01**: User sets the corpus size (up to ~5,000 emails) and the relevant vs. non-relevant proportion
 - [x] **PLAN-02**: System plans every thread and message in code before any prose is written: date/time, sender, recipients (To/CC), reply/forward structure, linked facts and issues, relevance label, attachments
-- [ ] **PLAN-03**: Relevant threads are scheduled against the key-facts timeline so overlapping issues run concurrently among shared characters without contradiction
+- [x] **PLAN-03**: Relevant threads are scheduled against the key-facts timeline so overlapping issues run concurrently among shared characters without contradiction
 - [ ] **PLAN-04**: Timestamps are realistic (business hours, time zones, weekends/holidays, reply latency)
 - [ ] **PLAN-05**: Plan includes realistic distributions for thread depth, reply vs. reply-all vs. forward, CC patterns and attachment rate
 - [x] **PLAN-06**: A validator checks the plan (counts, ratio, dates within character active ranges, every key fact covered by evidence)
@@ -209,7 +209,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ANC-05 | Phase 8 | Pending |
 | PLAN-01 | Phase 4 | Complete |
 | PLAN-02 | Phase 4 | Complete |
-| PLAN-03 | Phase 4 | Pending |
+| PLAN-03 | Phase 4 | Complete |
 | PLAN-04 | Phase 4 | Pending |
 | PLAN-05 | Phase 4 | Pending |
 | PLAN-06 | Phase 4 | Complete |

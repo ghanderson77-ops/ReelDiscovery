@@ -144,7 +144,7 @@ Plans:
 - [ ] 04-19-PLAN.md — WizardForm 7-step flow, stage mapping, C-P2, reopen without auto-plan (Wave 7)
 - [ ] 04-20-PLAN.md — Phase gate: full suites + human check at 150% (Wave 8)
 - [x] 04-21-PLAN.md — CaseStage CorpusSettings/ReviewPlan + content-only CaseGuide.ComputeHash (Wave 1)
-- [ ] 04-22-PLAN.md — CorpusApproval service: approve writes, apply new plan (plan file first, stage -> ReviewPlan), staleness rules, FileLockDetector (Wave 3)
+- [x] 04-22-PLAN.md — CorpusApproval service: approve writes, apply new plan (plan file first, stage -> ReviewPlan), staleness rules, FileLockDetector (Wave 3)
 **UI hint**: yes
 
 ### Phase 5: Relevant Evidence Generation & Narrative Ledger
@@ -205,7 +205,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
-| 4. Corpus Plan & Answer Key | 12/22 | In Progress|  |
+| 4. Corpus Plan & Answer Key | 13/22 | In Progress|  |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |

@@ -21,7 +21,10 @@ public class BaselineRenderTests
                 var result = RenderHarness.RenderControl(() =>
                 {
                     var step = new StepCaseScenario();
-                    step.BindState(new WizardState { Case = CaseTestData.SampleComplaintDraft() });
+                    // The step reads the recent-cases list on enter; point it at an empty temp root, never the user's list
+                    var root = Path.Combine(Path.GetTempPath(), "rd-baseline-" + Guid.NewGuid().ToString("N"));
+                    var store = new Services.Case.CaseStore(Path.Combine(root, "Cases"), Path.Combine(root, "AppData"));
+                    step.BindState(new WizardState { Case = CaseTestData.SampleComplaintDraft(), CaseStore = store });
                     return step;
                 }, "step-case-scenario", size, control =>
                 {

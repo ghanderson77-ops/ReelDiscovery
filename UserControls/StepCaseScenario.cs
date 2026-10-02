@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
@@ -8,12 +9,15 @@ using ReelDiscovery.Services.Case;
 namespace ReelDiscovery.UserControls;
 
 /// <summary>
-/// Case scenario step (UI-SPEC S1): free-text scenario, complexity preset, optional
-/// document/court preferences and the real-name pre-flight check on Next.
+/// Case scenario step (UI-SPEC S1/S3): free-text scenario, complexity preset, optional
+/// document/court preferences, the real-name pre-flight check on Next, and the Recent cases card
+/// that reopens saved cases (D-11).
 /// </summary>
 public class StepCaseScenario : UserControl, IWizardStep
 {
     private const string AutoState = "Auto";
+
+    public static readonly string RecentEmptyText = "No saved cases yet. A case is saved automatically once its core document is written.";
 
     private WizardState _state = null!;
     private TextBox _txtScenario = null!;
@@ -29,6 +33,14 @@ public class StepCaseScenario : UserControl, IWizardStep
     private LinkLabel _lnkReviewNames = null!;
     private LinkLabel _lnkCancelCheck = null!;
     private LoadingOverlay _loadingOverlay = null!;
+    private ListBox _lstRecent = null!;
+    private Label _lblRecentEmpty = null!;
+    private Button _btnNewCase = null!;
+    private Button _btnOpenCase = null!;
+    private ToolTip _recentToolTip = null!;
+    private List<RecentCase> _recentCases = new();
+    private int _hoverIndex = -1;
+    private int _toolTipIndex = -1;
     private CancellationTokenSource? _checkCts;
     private bool _isChecking;
 
@@ -52,15 +64,17 @@ public class StepCaseScenario : UserControl, IWizardStep
         var mainLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,
+            ColumnCount = 2,
             RowCount = 9,
             Padding = new Padding(0)
         };
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));                        // 0: Scenario
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(296))); // 1: Recent cases card
 
         // Fixed rows size to their content so they grow with DPI scaling and font size
         mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 0: Scenario label
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 1: Scenario input
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 2: Hint + counter
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 1: Scenario input | Recent cases card
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 2: Hint + counter | (card continues)
         mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 3: Complexity label
         mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 4: Complexity radios
         mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 5: Preset summary
@@ -84,11 +98,6 @@ public class StepCaseScenario : UserControl, IWizardStep
             Font = Theme.EditorFont(),
             ForeColor = Theme.Text,
             BackColor = Theme.Surface
-        };
-        _txtScenario.TextChanged += (s, e) =>
-        {
-            UpdateCounter();
-            StateChanged?.Invoke(this, EventArgs.Empty);
         };
         // Borderless editor inside a rounded card, matching the core document editor
         var scenarioCard = new CardPanel
@@ -118,22 +127,29 @@ public class StepCaseScenario : UserControl, IWizardStep
             AutoSize = true,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 9F),
-            ForeColor = Color.DimGray
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.TextMuted
         };
         _lblCounter = new Label
         {
             AutoSize = true,
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleRight,
-            Font = new Font("Segoe UI", 9F),
-            ForeColor = Color.DimGray
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.TextMuted
         };
         hintLayout.Controls.Add(lblHint, 0, 0);
         hintLayout.Controls.Add(_lblCounter, 1, 0);
         mainLayout.Controls.Add(hintLayout, 0, 2);
 
-        mainLayout.Controls.Add(CreateCaptionLabel("Complexity"), 0, 3);
+        // Recent cases card beside the scenario card (UI-SPEC S3); it spans the caption, card and hint rows
+        var recentCard = CreateRecentCasesCard();
+        mainLayout.Controls.Add(recentCard, 1, 0);
+        mainLayout.SetRowSpan(recentCard, 3);
+
+        var complexityCaption = CreateCaptionLabel("Complexity");
+        mainLayout.Controls.Add(complexityCaption, 0, 3);
+        mainLayout.SetColumnSpan(complexityCaption, 2);
 
         // Preset summary (created before the radios: their CheckedChanged updates it)
         _lblPresetSummary = new Label
@@ -142,10 +158,12 @@ public class StepCaseScenario : UserControl, IWizardStep
             Dock = DockStyle.Fill,
             Margin = new Padding(3, 4, 3, 8),
             TextAlign = ContentAlignment.TopLeft,
-            Font = new Font("Segoe UI", 9F),
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.TextMuted,
             Text = ComplexityPreset.Get(ComplexityLevel.Standard).Summary
         };
         mainLayout.Controls.Add(_lblPresetSummary, 0, 5);
+        mainLayout.SetColumnSpan(_lblPresetSummary, 2);
 
         // Complexity radios
         var complexityPanel = new FlowLayoutPanel
@@ -165,8 +183,11 @@ public class StepCaseScenario : UserControl, IWizardStep
         complexityPanel.Controls.Add(_rbStandard);
         complexityPanel.Controls.Add(_rbComplex);
         mainLayout.Controls.Add(complexityPanel, 0, 4);
+        mainLayout.SetColumnSpan(complexityPanel, 2);
 
-        mainLayout.Controls.Add(CreateCaptionLabel("Document and court (optional)"), 0, 6);
+        var documentCaption = CreateCaptionLabel("Document and court (optional)");
+        mainLayout.Controls.Add(documentCaption, 0, 6);
+        mainLayout.SetColumnSpan(documentCaption, 2);
 
         // Document / court / state combos
         var preferencePanel = new FlowLayoutPanel
@@ -186,7 +207,6 @@ public class StepCaseScenario : UserControl, IWizardStep
         _cmbCourt.Items.AddRange(new object[] { "Auto", "Federal", "State" });
         _cmbCourt.SelectedIndex = 0;
         _cmbCourt.Margin = new Padding(0, 4, 16, 0);
-        _cmbCourt.SelectedIndexChanged += (s, e) => UpdateStateComboEnabled();
 
         _cmbState = CreateComboBox(160);
         _cmbState.Items.Add(AutoState);
@@ -202,6 +222,7 @@ public class StepCaseScenario : UserControl, IWizardStep
         preferencePanel.Controls.Add(CreateComboCaption("State:"));
         preferencePanel.Controls.Add(_cmbState);
         mainLayout.Controls.Add(preferencePanel, 0, 7);
+        mainLayout.SetColumnSpan(preferencePanel, 2);
 
         // Status + "Review real names" and "Cancel check" links
         var statusLayout = new TableLayoutPanel
@@ -222,37 +243,129 @@ public class StepCaseScenario : UserControl, IWizardStep
             MinimumSize = new Size(0, 20),
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI", 9F)
+            Font = Theme.SmallFont()
         };
         // Reopens the substitution decisions without editing the scenario (WR-06)
-        _lnkReviewNames = new LinkLabel
-        {
-            Text = "Review real names",
-            AutoSize = true,
-            Anchor = AnchorStyles.Right,
-            Font = new Font("Segoe UI", 9F),
-            Visible = false
-        };
-        _lnkReviewNames.LinkClicked += (s, e) => ReviewRealNames();
+        _lnkReviewNames = CreateLink("Review real names");
         // Shown only while the real-name check runs (WR-07)
-        _lnkCancelCheck = new LinkLabel
-        {
-            Text = "Cancel check",
-            AutoSize = true,
-            Anchor = AnchorStyles.Right,
-            Font = new Font("Segoe UI", 9F),
-            Visible = false
-        };
-        _lnkCancelCheck.LinkClicked += (s, e) => CancelCheck();
+        _lnkCancelCheck = CreateLink("Cancel check");
         statusLayout.Controls.Add(_lblStatus, 0, 0);
         statusLayout.Controls.Add(_lnkReviewNames, 1, 0);
         statusLayout.Controls.Add(_lnkCancelCheck, 2, 0);
         mainLayout.Controls.Add(statusLayout, 0, 8);
+        mainLayout.SetColumnSpan(statusLayout, 2);
 
         _loadingOverlay = new LoadingOverlay(LoadingOverlay.LoadingType.EntityCheck);
+        _recentToolTip = new ToolTip();
 
         this.Controls.Add(mainLayout);
+
+        // Wire handlers only after every control exists (handlers read other controls)
+        _txtScenario.TextChanged += (s, e) =>
+        {
+            UpdateCounter();
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        };
+        _cmbCourt.SelectedIndexChanged += (s, e) => UpdateStateComboEnabled();
+        _lnkReviewNames.LinkClicked += (s, e) => ReviewRealNames();
+        _lnkCancelCheck.LinkClicked += (s, e) => CancelCheck();
+        _lstRecent.DrawItem += LstRecent_DrawItem;
+        _lstRecent.MouseMove += LstRecent_MouseMove;
+        _lstRecent.MouseLeave += (s, e) => SetHoverIndex(-1);
+        _lstRecent.MouseClick += LstRecent_MouseClick;
+        _lstRecent.KeyDown += LstRecent_KeyDown;
+        _btnOpenCase.Click += (s, e) => BrowseForCase();
+        _btnNewCase.Click += (s, e) => StartNewCase();
+
         UpdateCounter();
+    }
+
+    private CardPanel CreateRecentCasesCard()
+    {
+        var inset = LogicalToDeviceUnits(15);
+        var recentCard = new CardPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(1),
+            Margin = new Padding(LogicalToDeviceUnits(Theme.Gap), 0, 0, 0)
+        };
+        var recentLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Theme.Surface, Margin = new Padding(0) };
+        recentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        recentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                          // 0: Card header
+        recentLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));                      // 1: Recent list or empty label
+        recentLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(1))); // 2: Divider
+        recentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                          // 3: Footer buttons
+
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(inset, LogicalToDeviceUnits(14), inset, LogicalToDeviceUnits(10)),
+            Margin = new Padding(0)
+        };
+        header.Controls.Add(new Label { Text = "Recent cases", AutoSize = true, Font = Theme.LabelFont(), ForeColor = Theme.Text, Margin = new Padding(0) }, 0, 0);
+        recentLayout.Controls.Add(header, 0, 0);
+
+        // Row 1 hosts either the list or the empty-state label
+        var listHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface, Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6)) };
+        _lstRecent = new ListBox
+        {
+            Dock = DockStyle.Fill,
+            DrawMode = DrawMode.OwnerDrawFixed,
+            ItemHeight = LogicalToDeviceUnits(52),
+            Font = Theme.BodyFont(),
+            BackColor = Theme.Surface,
+            ForeColor = Theme.Text,
+            BorderStyle = BorderStyle.None,
+            IntegralHeight = false,
+            Cursor = Cursors.Hand,
+            Margin = new Padding(0)
+        };
+        _lblRecentEmpty = new Label
+        {
+            Text = RecentEmptyText,
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            Font = Theme.BodyFont(),
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Surface,
+            TextAlign = ContentAlignment.TopLeft,
+            Padding = new Padding(inset, 0, inset, inset),
+            Visible = false
+        };
+        listHost.Controls.Add(_lstRecent);
+        listHost.Controls.Add(_lblRecentEmpty);
+        recentLayout.Controls.Add(listHost, 0, 1);
+
+        recentLayout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Theme.Border, Margin = new Padding(0) }, 0, 2);
+
+        var buttonHeight = LogicalToDeviceUnits(34);
+        var footer = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(inset, LogicalToDeviceUnits(12), inset, LogicalToDeviceUnits(12)),
+            Margin = new Padding(0),
+            BackColor = Theme.Surface
+        };
+        _btnOpenCase = ButtonHelper.CreateButton("Open Case...", 0, buttonHeight, ButtonStyle.Default);
+        _btnOpenCase.Margin = new Padding(0);
+        _btnNewCase = ButtonHelper.CreateButton("New Case", 0, buttonHeight, ButtonStyle.Default);
+        _btnNewCase.Margin = new Padding(0, 0, LogicalToDeviceUnits(Theme.SmallGap), 0);
+        _btnNewCase.Visible = false;
+        // Right-to-left flow: Open Case... sits at the right edge, New Case to its left
+        footer.Controls.Add(_btnOpenCase);
+        footer.Controls.Add(_btnNewCase);
+        recentLayout.Controls.Add(footer, 0, 3);
+
+        recentCard.Controls.Add(recentLayout);
+        return recentCard;
     }
 
     private Label CreateCaptionLabel(string text) => new()
@@ -261,15 +374,28 @@ public class StepCaseScenario : UserControl, IWizardStep
         AutoSize = true,
         Margin = new Padding(3, 8, 3, 4),
         TextAlign = ContentAlignment.BottomLeft,
-        Font = new Font(this.Font, FontStyle.Bold)
+        Font = Theme.LabelFont(),
+        ForeColor = Theme.Text
     };
 
     private static Label CreateComboCaption(string text) => new()
     {
         Text = text,
         AutoSize = true,
-        Font = new Font("Segoe UI", 9F),
+        Font = Theme.BodyFont(),
+        ForeColor = Theme.Text,
         Margin = new Padding(0, 8, 4, 0)
+    };
+
+    private static LinkLabel CreateLink(string text) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        Anchor = AnchorStyles.Right,
+        Font = Theme.SmallFont(),
+        LinkColor = Theme.Accent,
+        ActiveLinkColor = Theme.AccentPressed,
+        Visible = false
     };
 
     private RadioButton CreateRadio(string text)
@@ -278,7 +404,8 @@ public class StepCaseScenario : UserControl, IWizardStep
         {
             Text = text,
             AutoSize = true,
-            Font = new Font("Segoe UI", 9F),
+            Font = Theme.BodyFont(),
+            ForeColor = Theme.Text,
             Margin = new Padding(0, 4, 16, 0)
         };
         radio.CheckedChanged += (s, e) =>
@@ -295,7 +422,7 @@ public class StepCaseScenario : UserControl, IWizardStep
     {
         Width = width,
         DropDownStyle = ComboBoxStyle.DropDownList,
-        Font = new Font("Segoe UI", 10F)
+        Font = Theme.BodyFont()
     };
 
     /// <summary>
@@ -306,7 +433,7 @@ public class StepCaseScenario : UserControl, IWizardStep
 
     // 7,200 = 90% of the cap
     public static Color CounterColor(int length) =>
-        length > CaseDraft.MaxScenarioLength ? Color.Red : length > 7_200 ? Color.DarkOrange : Color.DimGray;
+        length > CaseDraft.MaxScenarioLength ? Theme.Danger : length > 7_200 ? Theme.Warning : Theme.TextMuted;
 
     private void UpdateCounter()
     {
@@ -334,7 +461,16 @@ public class StepCaseScenario : UserControl, IWizardStep
         _cmbDocument.Enabled = enabled;
         _cmbCourt.Enabled = enabled;
         _lnkReviewNames.Enabled = enabled;
+        _lstRecent.Enabled = enabled;
+        _btnOpenCase.Enabled = enabled;
+        _btnNewCase.Enabled = enabled;
         UpdateStateComboEnabled();
+    }
+
+    private void SetStatus(string text, Color color)
+    {
+        _lblStatus.Text = text;
+        _lblStatus.ForeColor = color;
     }
 
     private void CancelCheck()
@@ -356,6 +492,7 @@ public class StepCaseScenario : UserControl, IWizardStep
             // Closing the wizard or switching flows stops the in-flight check (WR-07)
             CancelCheck();
             _loadingOverlay?.Dispose();
+            _recentToolTip?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -378,8 +515,7 @@ public class StepCaseScenario : UserControl, IWizardStep
 
         // EffectiveScenario is rebuilt from these decisions on Next; the unchanged hash skips a new LLM check
         draft.Substitutions = dlg.Entities;
-        _lblStatus.Text = "Real-name decisions updated. Click Next to continue.";
-        _lblStatus.ForeColor = Color.Green;
+        SetStatus("Real-name decisions updated. Click Next to continue.", Theme.Success);
     }
 
     public void BindState(WizardState state)
@@ -389,8 +525,34 @@ public class StepCaseScenario : UserControl, IWizardStep
 
     public Task OnEnterStepAsync()
     {
-        var draft = _state.Case;
+        LoadInputs(_state.Case);
+        RefreshRecentList();
 
+        if (!string.IsNullOrWhiteSpace(_state.PendingNotice))
+        {
+            SetStatus(_state.PendingNotice, Theme.Success);
+            _state.PendingNotice = string.Empty;
+        }
+
+        _txtScenario.Focus();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Test-only: binds the state and fills the inputs and the recent list without entering the step.
+    /// </summary>
+    internal void LoadForRender(WizardState state)
+    {
+        BindState(state);
+        LoadInputs(state.Case);
+        RefreshRecentList();
+    }
+
+    /// <summary>
+    /// Fills the scenario, complexity and document/court inputs from a draft (on enter, after opening a case and on New Case).
+    /// </summary>
+    internal void LoadInputs(CaseDraft draft)
+    {
         _txtScenario.Text = draft.Scenario;
 
         switch (draft.Complexity)
@@ -400,8 +562,9 @@ public class StepCaseScenario : UserControl, IWizardStep
             default: _rbStandard.Checked = true; break;
         }
 
-        _cmbDocument.SelectedIndex = (int)draft.DocumentPreference;
-        _cmbCourt.SelectedIndex = (int)draft.CourtPreference;
+        // A hand-edited case.json may carry an out-of-range enum value
+        _cmbDocument.SelectedIndex = Math.Clamp((int)draft.DocumentPreference, 0, _cmbDocument.Items.Count - 1);
+        _cmbCourt.SelectedIndex = Math.Clamp((int)draft.CourtPreference, 0, _cmbCourt.Items.Count - 1);
         var stateIndex = string.IsNullOrEmpty(draft.StatePreference) ? -1 : _cmbState.Items.IndexOf(draft.StatePreference);
         _cmbState.SelectedIndex = stateIndex >= 0 ? stateIndex : 0;
         UpdateStateComboEnabled();
@@ -409,9 +572,7 @@ public class StepCaseScenario : UserControl, IWizardStep
         _lblPresetSummary.Text = ComplexityPreset.Get(SelectedLevel()).Summary;
         UpdateCounter();
         UpdateReviewNamesLink();
-        _txtScenario.Focus();
-
-        return Task.CompletedTask;
+        _btnNewCase.Visible = !string.IsNullOrEmpty(draft.FolderPath);
     }
 
     public Task OnLeaveStepAsync()
@@ -439,6 +600,293 @@ public class StepCaseScenario : UserControl, IWizardStep
             : string.Empty;
     }
 
+    // ----- Recent cases, Open Case..., New Case (D-11, UI-SPEC S3) -----
+
+    /// <summary>
+    /// True when opening another case would discard a typed scenario that was never saved (C8):
+    /// some scenario text, no case folder and no core document yet.
+    /// </summary>
+    public static bool NeedsOpenConfirmation(CaseDraft? current) =>
+        current != null
+        && !string.IsNullOrWhiteSpace(current.Scenario)
+        && string.IsNullOrEmpty(current.FolderPath)
+        && current.CoreDocument == null;
+
+    private string? OpenCasePath()
+    {
+        var folder = _state?.Case.FolderPath;
+        return string.IsNullOrEmpty(folder) ? null : Path.Combine(folder, CaseStore.CaseFileName);
+    }
+
+    private static bool SamePath(string? a, string? b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+            return false;
+        try
+        {
+            return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            // A malformed recent entry never matches the open case
+            return false;
+        }
+    }
+
+    private bool IsOpenCase(RecentCase recent) => SamePath(recent.Path, OpenCasePath());
+
+    private void RefreshRecentList()
+    {
+        if (_state == null)
+            return;
+
+        // The store already prunes missing paths and caps the list at 8
+        _recentCases = _state.CaseStore.GetRecentCases().Take(CaseStore.MaxRecentCases).ToList();
+        _hoverIndex = -1;
+        _toolTipIndex = -1;
+        _recentToolTip.SetToolTip(_lstRecent, string.Empty);
+
+        _lstRecent.BeginUpdate();
+        _lstRecent.Items.Clear();
+        foreach (var recent in _recentCases)
+            _lstRecent.Items.Add(recent.Title);
+        _lstRecent.EndUpdate();
+        _lstRecent.SelectedIndex = -1;
+
+        var hasItems = _recentCases.Count > 0;
+        _lstRecent.Visible = hasItems;
+        _lblRecentEmpty.Visible = !hasItems;
+        _btnNewCase.Visible = !string.IsNullOrEmpty(_state.Case.FolderPath);
+    }
+
+    private void LstRecent_DrawItem(object? sender, DrawItemEventArgs e)
+    {
+        if (e.Index < 0 || e.Index >= _recentCases.Count)
+            return;
+
+        var recent = _recentCases[e.Index];
+        var isOpen = IsOpenCase(recent);
+        var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+        var g = e.Graphics;
+        var bounds = e.Bounds;
+
+        // Keyboard selection reads like hover; the open case keeps the Accent selection look
+        var background = isOpen ? Theme.AccentSoft
+            : e.Index == _hoverIndex || selected ? Theme.SurfaceMuted
+            : Theme.Surface;
+        using (var brush = new SolidBrush(background))
+        {
+            g.FillRectangle(brush, bounds);
+        }
+        if (isOpen)
+        {
+            using var bar = new SolidBrush(Theme.Accent);
+            g.FillRectangle(bar, bounds.X, bounds.Y, LogicalToDeviceUnits(3), bounds.Height);
+        }
+
+        // The open case shows its live title and stage; the others show what recent.json recorded
+        var title = isOpen ? CaseFolderNaming.CaseTitle(_state.Case) : recent.Title;
+        var stage = isOpen ? _state.Case.Stage : recent.Stage;
+        var line2 = CaseGuideUiText.RecentItemSecondLine(stage, recent.LastOpenedUtc.ToLocalTime(), isOpen);
+
+        const TextFormatFlags flags = TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix |
+            TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.Left | TextFormatFlags.Top;
+
+        var titleFont = e.Font ?? _lstRecent.Font;
+        using var small = Theme.SmallFont();
+        var titleHeight = TextRenderer.MeasureText(g, "Ag", titleFont, Size.Empty, flags).Height;
+        var line2Height = TextRenderer.MeasureText(g, "Ag", small, Size.Empty, flags).Height;
+        var lineGap = LogicalToDeviceUnits(3);
+
+        // Content x: text inset 15 inside the Padding = 1 card; the two lines are centered as a pair
+        var pad = LogicalToDeviceUnits(15);
+        var width = Math.Max(0, bounds.Width - pad * 2);
+        var top = bounds.Y + (bounds.Height - (titleHeight + lineGap + line2Height)) / 2;
+        TextRenderer.DrawText(g, title, titleFont, new Rectangle(bounds.X + pad, top, width, titleHeight),
+            isOpen ? Theme.Accent : Theme.Text, flags);
+        TextRenderer.DrawText(g, line2, small, new Rectangle(bounds.X + pad, top + titleHeight + lineGap, width, line2Height),
+            Theme.TextMuted, flags);
+    }
+
+    private int RecentIndexAt(Point location)
+    {
+        var index = _lstRecent.IndexFromPoint(location);
+        if (index < 0 || index >= _recentCases.Count)
+            return -1;
+        return _lstRecent.GetItemRectangle(index).Contains(location) ? index : -1;
+    }
+
+    private void SetHoverIndex(int index)
+    {
+        if (index == _hoverIndex)
+            return;
+
+        var previous = _hoverIndex;
+        _hoverIndex = index;
+        if (previous >= 0 && previous < _lstRecent.Items.Count)
+            _lstRecent.Invalidate(_lstRecent.GetItemRectangle(previous));
+        if (index >= 0 && index < _lstRecent.Items.Count)
+            _lstRecent.Invalidate(_lstRecent.GetItemRectangle(index));
+    }
+
+    private void LstRecent_MouseMove(object? sender, MouseEventArgs e)
+    {
+        var index = RecentIndexAt(e.Location);
+        SetHoverIndex(index);
+
+        // The tooltip shows the full folder path of the hovered case
+        if (index != _toolTipIndex)
+        {
+            _toolTipIndex = index;
+            var folder = index >= 0 ? Path.GetDirectoryName(_recentCases[index].Path) ?? string.Empty : string.Empty;
+            _recentToolTip.SetToolTip(_lstRecent, folder);
+        }
+    }
+
+    private void LstRecent_MouseClick(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left)
+            return;
+
+        var index = RecentIndexAt(e.Location);
+        if (index >= 0)
+            OpenRecent(index);
+    }
+
+    private void LstRecent_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode != Keys.Enter || _lstRecent.SelectedIndex < 0)
+            return;
+
+        e.Handled = true;
+        e.SuppressKeyPress = true;
+        OpenRecent(_lstRecent.SelectedIndex);
+    }
+
+    private void OpenRecent(int index)
+    {
+        if (index < 0 || index >= _recentCases.Count)
+            return;
+
+        var recent = _recentCases[index];
+        OpenCase(recent.Path, recent.Title);
+    }
+
+    private void BrowseForCase()
+    {
+        if (_state == null || _isChecking)
+            return;
+
+        using var dlg = new OpenFileDialog
+        {
+            Title = "Open Case",
+            Filter = "ReelDiscovery case (case.json)|case.json|JSON files (*.json)|*.json",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (Directory.Exists(_state.CaseStore.CasesRoot))
+            dlg.InitialDirectory = _state.CaseStore.CasesRoot;
+
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        // The folder name stands in for the case title in C8 until the file is loaded
+        var folderName = Path.GetFileName(Path.GetDirectoryName(dlg.FileName));
+        OpenCase(dlg.FileName, string.IsNullOrWhiteSpace(folderName) ? CaseStore.CaseFileName : folderName);
+    }
+
+    /// <summary>
+    /// Brings this step's inputs into a saved case and writes it before another case replaces it.
+    /// Returns false (with the reason in the status line) when the save failed.
+    /// </summary>
+    private bool FlushCurrentCase()
+    {
+        var current = _state.Case;
+        if (string.IsNullOrEmpty(current.FolderPath) || !CaseStore.CanSave(current))
+            return true;
+
+        StoreInputs(current, _txtScenario.Text, SelectedLevel(), _cmbDocument.SelectedIndex, _cmbCourt.SelectedIndex, _cmbState.SelectedItem as string);
+        if (_state.CaseStore.SaveNow(current))
+            return true;
+
+        SetStatus(CaseGuideUiText.SaveFailedText(_state.CaseStore.LastSaveError), Theme.Danger);
+        return false;
+    }
+
+    /// <summary>
+    /// Opens a case.json (D-11): asks C8 over an unsaved typed scenario, loads the file, refreshes this step's
+    /// inputs, then jumps to the furthest stage reached. Load errors show here in Danger and the list is refreshed.
+    /// </summary>
+    internal void OpenCase(string path, string title)
+    {
+        if (_state == null || _isChecking)
+            return;
+
+        // The case that is already open just continues at its stage; reloading it could drop edits made on this step
+        if (!SamePath(path, OpenCasePath()))
+        {
+            if (NeedsOpenConfirmation(_state.Case))
+            {
+                var (caption, text) = CaseGuideUiText.C8OpenOverUnsaved(title);
+                if (MessageBox.Show(this, text, caption, MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                        MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    return;
+            }
+            else if (!FlushCurrentCase())
+            {
+                return;
+            }
+
+            // Recent paths and dialog picks only reach CaseStore.Load (size cap, version check, never throws)
+            var result = _state.CaseStore.Load(path);
+            if (!result.Succeeded)
+            {
+                SetStatus(result.Message, Theme.Danger);
+                RefreshRecentList();
+                return;
+            }
+
+            _state.Case = result.Draft!;
+        }
+
+        // OnLeaveStepAsync stores the textbox inputs into the draft; refresh them first or the loaded scenario is overwritten (Pitfall 5)
+        LoadInputs(_state.Case);
+        RefreshRecentList();
+        _state.PendingNotice = CaseGuideUiText.OpenedCaseText(CaseFolderNaming.CaseTitle(_state.Case));
+        StateChanged?.Invoke(this, EventArgs.Empty);
+
+        if (FindForm() is WizardForm wizard)
+        {
+            // A Described case maps back to this step, which shows the notice when it is entered again
+            wizard.NavigateToStage(_state.Case.Stage);
+        }
+        else
+        {
+            SetStatus(_state.PendingNotice, Theme.Success);
+            _state.PendingNotice = string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Starts a fresh draft with no prompt (the current case is on disk); the previous case stays under Recent cases.
+    /// </summary>
+    internal void StartNewCase()
+    {
+        if (_state == null || _isChecking)
+            return;
+
+        if (!FlushCurrentCase())
+            return;
+
+        var previousTitle = CaseFolderNaming.CaseTitle(_state.Case);
+        _state.Case = new CaseDraft();
+        LoadInputs(_state.Case);
+        RefreshRecentList();
+        SetStatus(CaseGuideUiText.NewCaseText(previousTitle), Theme.Success);
+        _txtScenario.Focus();
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public async Task<bool> ValidateStepAsync()
     {
         var text = _txtScenario.Text.Trim();
@@ -458,8 +906,7 @@ public class StepCaseScenario : UserControl, IWizardStep
         {
             _isChecking = true;
             SetInputsEnabled(false);
-            _lblStatus.Text = "Checking the scenario for real names...";
-            _lblStatus.ForeColor = Color.FromArgb(0, 120, 215);
+            SetStatus("Checking the scenario for real names...", Theme.Accent);
             _loadingOverlay.Show(_txtScenario);
             var checkCts = new CancellationTokenSource();
             _checkCts = checkCts;
@@ -491,8 +938,7 @@ public class StepCaseScenario : UserControl, IWizardStep
                 else
                 {
                     draft.Substitutions = new();
-                    _lblStatus.Text = "No real names found.";
-                    _lblStatus.ForeColor = Color.Green;
+                    SetStatus("No real names found.", Theme.Success);
                 }
 
                 draft.EntityCheckHash = hash;
@@ -501,8 +947,7 @@ public class StepCaseScenario : UserControl, IWizardStep
             {
                 if (!IsDisposed)
                 {
-                    _lblStatus.Text = "Real-name check cancelled. Click Next to check again.";
-                    _lblStatus.ForeColor = Color.DarkOrange;
+                    SetStatus("Real-name check cancelled. Click Next to check again.", Theme.Warning);
                 }
                 return false;
             }
@@ -514,8 +959,7 @@ public class StepCaseScenario : UserControl, IWizardStep
                 var message = ex.InnerException != null
                     ? $"{ex.Message} ({ex.InnerException.Message})"
                     : ex.Message;
-                _lblStatus.Text = $"Could not check the scenario for real names: {message}. Click Next to try again.";
-                _lblStatus.ForeColor = Color.Red;
+                SetStatus($"Could not check the scenario for real names: {message}. Click Next to try again.", Theme.Danger);
                 return false;
             }
             finally
@@ -541,8 +985,7 @@ public class StepCaseScenario : UserControl, IWizardStep
         catch (RegexMatchTimeoutException)
         {
             // Never let a regex timeout escape into the async void Next handler (WR-04)
-            _lblStatus.Text = "Could not apply the substitute names to this scenario. Shorten it and click Next again.";
-            _lblStatus.ForeColor = Color.Red;
+            SetStatus("Could not apply the substitute names to this scenario. Shorten it and click Next again.", Theme.Danger);
             return false;
         }
 

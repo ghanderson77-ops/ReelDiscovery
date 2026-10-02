@@ -24,6 +24,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
     private Label _lblSubtitle = null!;
     private Button _btnResetDefaults = null!;
     private Label _lblNotice = null!;
+    private RowStyle _noticeRow = null!;
     private Panel _scrollHost = null!;
     private TableLayoutPanel _inner = null!;
     private CardPanel _cardSize = null!;
@@ -61,6 +62,8 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
     // Advanced
     private TableLayoutPanel _advancedLayout = null!;
+    private TableLayoutPanel _advancedHeader = null!;
+    private int _cornerInset;
     private Label _lblAdvancedSummary = null!;
     private Button _btnAdvanced = null!;
     private Panel _advancedDivider = null!;
@@ -184,7 +187,9 @@ public class StepCorpusSettings : UserControl, IWizardStep
         };
         _root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Header
-        _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 1: Notice line
+        // Sized in SizeNoticeRow from the wrapped text: an AutoSize row kept a height measured at an earlier width
+        _noticeRow = new RowStyle(SizeType.Absolute, 0);
+        _root.RowStyles.Add(_noticeRow);                          // 1: Notice line
         _root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 2: Scroll host
         _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 3: Status strip
 
@@ -239,6 +244,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
         // ----- Row 1, notice line (wraps; width follows the step in UpdateWidths) -----
         _lblNotice = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, 0, 0, gap));
+        _lblNotice.Anchor = AnchorStyles.Left | AnchorStyles.Top;
         _root.Controls.Add(_lblNotice, 0, 1);
 
         // ----- Row 2, scroll host: inner layout spans the client width, so it only ever scrolls vertically -----
@@ -315,7 +321,6 @@ public class StepCorpusSettings : UserControl, IWizardStep
         // Wire handlers only after every control exists (handlers read other controls)
         _scrollHost.ClientSizeChanged += (s, e) => UpdateWidths();
         this.SizeChanged += (s, e) => UpdateWidths();
-        _advancedLayout.SizeChanged += (s, e) => ClipToCard(_advancedLayout, _cardAdvanced.Radius);
         _btnResetDefaults.Click += (s, e) => ResetDefaults();
 
         foreach (var toggle in _sizeToggles)
@@ -545,7 +550,10 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
     private CardPanel BuildAdvancedCard(int gap, int smallGap, int inset, int xs, int buttonHeight)
     {
-        var card = NewCard(new Padding(1));
+        // Full-bleed sides (Padding 1) but top and bottom inset by the corner radius, so the white content never covers
+        // the rounded corners (deferred-items 04-12); the header and body paddings subtract that inset
+        _cornerInset = LogicalToDeviceUnits(8);
+        var card = NewCard(new Padding(1, _cornerInset, 1, _cornerInset));
         _advancedLayout = NewCardLayout(1);
         _advancedLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 0: Header
         _advancedDividerRow = new RowStyle(SizeType.Absolute, 0);
@@ -554,8 +562,8 @@ public class StepCorpusSettings : UserControl, IWizardStep
         _advancedLayout.RowCount = 3;
 
         // Header: caption · summary (ellipsis) · Show / Hide Advanced
-        var header = NewRowLayout(3);
-        header.Padding = new Padding(inset, LogicalToDeviceUnits(14), inset, LogicalToDeviceUnits(10));
+        _advancedHeader = NewRowLayout(3);
+        var header = _advancedHeader;
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -590,7 +598,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
         // Body: Non-relevant mix | Overrides
         _advancedBody = NewRowLayout(2);
-        _advancedBody.Padding = new Padding(inset, gap, inset, gap);
+        _advancedBody.Padding = new Padding(inset, gap, inset, Math.Max(0, gap - _cornerInset + 1));
         _advancedBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         _advancedBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         _advancedBody.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 0: Both columns
@@ -697,10 +705,10 @@ public class StepCorpusSettings : UserControl, IWizardStep
         _txtAttachment.PlaceholderText = "Auto";
         _txtPrefix = new TextBox { MaxLength = CorpusSettings.MaxPrefixLength, CharacterCasing = CharacterCasing.Upper };
 
-        _lblHotHint = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, 2, smallGap, 0));
-        _lblPrivilegedHint = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, 2, smallGap, 0));
-        _lblAttachmentRateHint = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, 2, smallGap, 0));
-        _lblPrefixHint = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, 2, smallGap, 0));
+        _lblHotHint = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, LogicalToDeviceUnits(2), smallGap, 0));
+        _lblPrivilegedHint = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, LogicalToDeviceUnits(2), smallGap, 0));
+        _lblAttachmentRateHint = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, LogicalToDeviceUnits(2), smallGap, 0));
+        _lblPrefixHint = WrapLabel(Theme.SmallFont(), Theme.TextMuted, new Padding(0, LogicalToDeviceUnits(2), smallGap, 0));
         _lblHotLine = OverrideLine(xs);
         _lblPrivilegedLine = OverrideLine(xs);
         _lblAttachmentLine = OverrideLine(xs);
@@ -820,16 +828,47 @@ public class StepCorpusSettings : UserControl, IWizardStep
         BackColor = Theme.Surface
     };
 
-    // Wrapping label: AutoSize with a MaximumSize width set in UpdateWidths
-    private static Label WrapLabel(Font font, Color color, Padding margin) => new()
+    // Wrapping label: AutoSize, with its preferred size pinned (Minimum = Maximum) to the UpdateWidths width and the
+    // height its text needs there. Table layouts measure labels through GetPreferredSize and keep stale wrap heights
+    // otherwise (a row once measured at the 150 px default width stayed 8 lines tall)
+    private Label WrapLabel(Font font, Color color, Padding margin)
     {
-        AutoSize = true,
-        UseMnemonic = false,
-        Margin = margin,
-        Font = font,
-        ForeColor = color,
-        BackColor = Color.Transparent
-    };
+        var label = new Label
+        {
+            AutoSize = true,
+            UseMnemonic = false,
+            Margin = margin,
+            Padding = new Padding(0),
+            Font = font,
+            ForeColor = color,
+            BackColor = Color.Transparent,
+            Tag = 1
+        };
+        label.TextChanged += (s, e) => FitWrap(label);
+        FitWrap(label);
+        return label;
+    }
+
+    private static void SetWrapWidth(Label label, int width)
+    {
+        width = Math.Max(1, width);
+        if (label.Tag is int current && current == width)
+            return;
+        label.Tag = width;
+        FitWrap(label);
+    }
+
+    private static void FitWrap(Label label)
+    {
+        var width = label.Tag is int w ? w : 1;
+        var height = string.IsNullOrEmpty(label.Text)
+            ? 0
+            : TextRenderer.MeasureText(label.Text, label.Font, new Size(width, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+        label.MinimumSize = Size.Empty;
+        label.MaximumSize = new Size(width, Math.Max(1, height));
+        label.MinimumSize = new Size(width, height);
+    }
 
     private Label Suffix(int xs) => new()
     {
@@ -849,7 +888,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
         return TextRenderer.MeasureText("%", font).Width + xs;
     }
 
-    private static Label OverrideLine(int xs)
+    private Label OverrideLine(int xs)
     {
         var line = WrapLabel(Theme.SmallFont(), Theme.Warning, new Padding(0, xs, 0, 0));
         line.Visible = false;
@@ -883,18 +922,6 @@ public class StepCorpusSettings : UserControl, IWizardStep
         };
     }
 
-    // Rounds the full-bleed content of a Padding = 1 card so it does not cover the card's rounded corners
-    private void ClipToCard(Control content, int radius)
-    {
-        if (content.Width <= 0 || content.Height <= 0)
-            return;
-        var r = Math.Max(1, LogicalToDeviceUnits(radius) - 1);
-        using var path = Theme.RoundedRect(new Rectangle(0, 0, content.Width, content.Height), r);
-        var old = content.Region;
-        content.Region = new Region(path);
-        old?.Dispose();
-    }
-
     // ----- Widths (wrapping labels follow the step and card widths) -----
 
     private void UpdateWidths()
@@ -902,29 +929,51 @@ public class StepCorpusSettings : UserControl, IWizardStep
         if (_inner == null || _scrollHost == null)
             return;
 
+        // The notice spans the step (the root has no padding)
+        if (ClientSize.Width > 0)
+            SetWrapWidth(_lblNotice, ClientSize.Width);
+        SizeNoticeRow();
+
         var width = _scrollHost.ClientSize.Width;
         if (width <= 0)
             return;
 
         _inner.Width = width;
-        _lblNotice.MaximumSize = new Size(Math.Max(1, _root.ClientSize.Width), 0);
 
         var smallGap = LogicalToDeviceUnits(Theme.SmallGap);
         var pad = LogicalToDeviceUnits(Theme.CardPadding);
         var inset = LogicalToDeviceUnits(15);
         var cardContent = Math.Max(1, width / 2 - smallGap - 2 * pad);
         foreach (var label in new[] { _lblSizeHint, _lblLiveCounts, _lblRelevantWarning, _lblWindowHint, _lblDateLine, _lblMediaNotice, _lblAttachmentHint })
-            label.MaximumSize = new Size(cardContent, 0);
+            SetWrapWidth(label, cardContent);
 
         // Advanced body: 1 px border + 15 inset each side, two columns 8 + 8 apart
         var column = Math.Max(1, (width - 2 - 2 * inset) / 2 - smallGap);
         foreach (var label in new[] { _lblMixHint, _lblMixTotal, _lblDecoyHint, _lblOverridesHint })
-            label.MaximumSize = new Size(column, 0);
+            SetWrapWidth(label, column);
         var overrideText = Math.Max(1, column - LogicalToDeviceUnits(96) - SuffixColumnWidth(LogicalToDeviceUnits(4)) - smallGap);
         foreach (var label in _overrideLabels.Concat(new[] { _lblHotHint, _lblPrivilegedHint, _lblAttachmentRateHint, _lblPrefixHint }))
-            label.MaximumSize = new Size(overrideText, 0);
+            SetWrapWidth(label, overrideText);
         foreach (var label in new[] { _lblHotLine, _lblPrivilegedLine, _lblAttachmentLine, _lblPrefixLine })
-            label.MaximumSize = new Size(column, 0);
+            SetWrapWidth(label, column);
+    }
+
+    private void SizeNoticeRow()
+    {
+        var height = _lblNotice.MinimumSize.Height + _lblNotice.Margin.Vertical;
+        if ((int)_noticeRow.Height == height)
+            return;
+
+        // A style change made while the step itself is being sized does not lay the root out again on its own
+        _noticeRow.Height = height;
+        _root.PerformLayout();
+    }
+
+    // Widths first, so the root lays out with the current notice height and label widths
+    protected override void OnLayout(LayoutEventArgs e)
+    {
+        UpdateWidths();
+        base.OnLayout(e);
     }
 
     // ----- IWizardStep -----
@@ -1070,6 +1119,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
             _lblNotice.Text = CorpusUiText.SettingsNotice(Draft.Corpus!.HasPlan, Draft.Corpus.Approved,
                 Draft.Corpus.ApprovedUtc?.ToLocalTime());
+            SizeNoticeRow();
 
             _txtSize.Text = FormatCount(settings.TotalEmails);
             SelectToggle(MatchingPreset(settings.TotalEmails));
@@ -1190,6 +1240,11 @@ public class StepCorpusSettings : UserControl, IWizardStep
         _btnAdvanced.Text = expanded ? "Hide Advanced" : "Show Advanced";
         _advancedDividerRow.Height = expanded ? 1 : 0;
         _advancedDivider.Visible = expanded;
+        // Header 14 / 10 inside the 1 px border; the card already supplies the corner inset at the top and, when collapsed,
+        // at the bottom
+        var inset = LogicalToDeviceUnits(15);
+        var bottom = expanded ? LogicalToDeviceUnits(10) : Math.Max(0, LogicalToDeviceUnits(10) - _cornerInset + 1);
+        _advancedHeader.Padding = new Padding(inset, Math.Max(0, LogicalToDeviceUnits(14) - _cornerInset + 1), inset, bottom);
         _advancedBody.Visible = expanded;
     }
 
@@ -1529,6 +1584,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
     // ----- Render-test access -----
 
+    internal CaseDraft DraftForTest => Draft;
     internal Panel ScrollHost => _scrollHost;
     internal CardPanel SizeCard => _cardSize;
     internal CardPanel DatesCard => _cardDates;

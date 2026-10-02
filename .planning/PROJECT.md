@@ -23,22 +23,18 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 - ✓ Attachments: Word/Excel/PowerPoint (OpenXml), calendar invites (.ics), inline images, voicemail audio — existing
 - ✓ `.eml` output via MimeKit, optionally organized into per-sender folders — existing
 - ✓ API key persistence, model/pricing configuration, disclaimer gate, opt-in telemetry — existing
+- ✓ User enters a free-text real-life scenario to seed a case — Validated in Phase 2
+- ✓ User selects a complexity preset (Simple / Standard / Complex) that drives # of parties, issues/counts, characters, timeline span and core-document length — Validated in Phase 2
+- ✓ System generates the core legal document appropriate to the scenario (Complaint / Petition / Investigation Memo), realistic and comprehensive — Validated in Phase 2
+- ✓ User can review, edit, and regenerate the core document before continuing — Validated in Phase 2
+- ✓ System derives a Cast of Key Characters (name, title, organization, email address, relevant date range, summary of key involvement) — Validated in Phase 3
+- ✓ System derives a Summary of Key Facts & Events as a dated timeline tied to the allegations/issues — Validated in Phase 3
+- ✓ User can review, edit, and regenerate the cast and key-facts timeline — Validated in Phase 3
+- ✓ Case guide artifacts (core doc, cast, key facts) can be exported (e.g. .docx) — Validated in Phase 3
 
 ### Active
 
 <!-- The case-driven generation flow. Hypotheses until shipped. -->
-
-**Case scenario & core document**
-- [ ] User enters a free-text real-life scenario to seed a case
-- [ ] User selects a complexity preset (Simple / Standard / Complex) that drives # of parties, issues/counts, characters, timeline span and core-document length
-- [ ] System generates the core legal document appropriate to the scenario (Complaint / Petition / Investigation Memo), realistic and comprehensive
-- [ ] User can review, edit, and regenerate the core document before continuing
-
-**Case guide (internal, exportable)**
-- [ ] System derives a Cast of Key Characters (name, title, organization, email address, relevant date range, summary of key involvement)
-- [ ] System derives a Summary of Key Facts & Events as a dated timeline tied to the allegations/issues
-- [ ] User can review, edit, and regenerate the cast and key-facts timeline
-- [ ] Case guide artifacts (core doc, cast, key facts) can be exported (e.g. .docx)
 
 **Ancillary discovery documents (optional)**
 - [ ] User can optionally generate deposition transcripts for key witnesses
@@ -129,4 +125,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-29 after initialization*
+*Last updated: 2026-10-02 after Phase 3 (Case Guide) completion*

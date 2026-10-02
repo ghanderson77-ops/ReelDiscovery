@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Foundation & Provider Gateway** - .NET 10 retarget, tests, concurrency fixes, DPAPI keys, and one OpenAI + Claude gateway with strict structured outputs
 - [x] **Phase 2: Case Scenario & Core Document** - Scenario + preset input produces a realistic, citation-safe Complaint / Petition / Investigation Memo the user can edit (completed 2026-10-01)
-- [ ] **Phase 3: Case Guide** - ID-stable issues, cast, dated facts timeline and canonical-value registry, validated, editable, saved as case.json and exported to .docx
+- [x] **Phase 3: Case Guide** - ID-stable issues, cast, dated facts timeline and canonical-value registry, validated, editable, saved as case.json and exported to .docx (completed 2026-10-02)
 - [ ] **Phase 4: Corpus Plan & Answer Key** - Code-owned manifest of every thread/message with a validator, a plan review screen, the answer key and the review protocol derived from it
 - [ ] **Phase 5: Relevant Evidence Generation & Narrative Ledger** - Knowledge-gated, chronologically waved rendering of relevant threads with a running narrative ledger, saved incrementally as per-custodian EMLs
 - [ ] **Phase 6: Attachments & Non-Relevant Corpus** - Case-driven attachments plus daily business, ancillary, newsletter/spam/personal and near-miss decoy traffic through the same pipeline
@@ -106,7 +106,7 @@ Plans:
 - [x] 03-17-PLAN.md — StepCaseSummary: exports, open/move folder (Wave 5)
 - [x] 03-18-PLAN.md — WizardForm 5-step flow + close semantics; StepCoreDocument autosave/notice/alignment (Wave 8)
 - [x] 03-19-PLAN.md — Describe the Case: Recent cases, Open/New Case (Wave 9)
-- [ ] 03-20-PLAN.md — Phase gate: full suites + human check at 150% (Wave 10)
+- [x] 03-20-PLAN.md — Phase gate: full suites + human check at 150% (Wave 10)
 **UI hint**: yes
 
 ### Phase 4: Corpus Plan & Answer Key
@@ -179,7 +179,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 |-------|----------------|--------|-----------|
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
-| 3. Case Guide | 18/20 | In Progress|  |
+| 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
 | 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |

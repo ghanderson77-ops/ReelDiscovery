@@ -1,7 +1,7 @@
 ---
 phase: 03-case-guide
 verified: 2026-10-01T00:00:00Z
-status: human_needed
+status: passed
 score: 92/95 must-haves verified (4/4 roadmap success criteria verified in code; 3 plan truths need a human / 150% display)
 overrides_applied: 0
 human_verification:
@@ -170,3 +170,7 @@ _Verifier: Claude (gsd-verifier)_
 ## Override: render harness DPI (accepted)
 
 The 03-02 "fail unless 144 DPI" rule was intentionally relaxed to "fail below 120 DPI" (commit 6f6ae81) on the user's explicit choice on 2026-10-01 ("Check at whatever scaling is active") after the user's display switched from 150% to 125%. 144 DPI remains the reference; layouts are DPI-scaled and the clipping detector is unchanged.
+
+## Human verification (2026-10-02)
+
+User approved Phase 3 ("approve phase 3"); see 03-HUMAN-UAT.md and 03-20-SUMMARY.md.

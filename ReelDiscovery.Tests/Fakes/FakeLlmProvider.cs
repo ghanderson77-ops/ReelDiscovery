@@ -8,6 +8,7 @@ namespace ReelDiscovery.Tests.Fakes;
 /// </summary>
 public sealed class FakeLlmProvider : ILlmProvider
 {
+    private readonly object _lock = new();
     private LlmProviderResponse? _last;
 
     public FakeLlmProvider(LlmProviderKind kind = LlmProviderKind.OpenAI)
@@ -33,13 +34,24 @@ public sealed class FakeLlmProvider : ILlmProvider
     /// </summary>
     public Action<int>? OnSend { get; set; }
 
+    /// <summary>
+    /// When set, builds the response from the recorded request and the Responses queue is ignored.
+    /// Lets parallel planner tests answer by prompt content instead of call order.
+    /// </summary>
+    public Func<LlmProviderRequest, LlmProviderResponse>? Respond { get; set; }
+
     public Task<LlmProviderResponse> SendAsync(LlmProviderRequest request, CancellationToken ct = default)
     {
-        OnSend?.Invoke(Requests.Count);
+        int index;
+        lock (_lock)
+            index = Requests.Count;
+
+        // Invoked outside the lock so a test callback can block without serializing parallel callers
+        OnSend?.Invoke(index);
         ct.ThrowIfCancellationRequested();
 
         // Snapshot the request: the gateway mutates MaxTokens between attempts
-        Requests.Add(new LlmProviderRequest
+        var snapshot = new LlmProviderRequest
         {
             ModelId = request.ModelId,
             Effort = request.Effort,
@@ -48,18 +60,31 @@ public sealed class FakeLlmProvider : ILlmProvider
             SystemPrompt = request.SystemPrompt,
             UserPrompt = request.UserPrompt,
             MaxTokens = request.MaxTokens
-        });
+        };
+
+        lock (_lock)
+            Requests.Add(snapshot);
 
         if (ThrowOnSend != null)
             throw ThrowOnSend;
 
-        if (Responses.Count > 0)
-            _last = Responses.Dequeue();
+        var respond = Respond;
+        if (respond != null)
+            return Task.FromResult(respond(snapshot));
 
-        if (_last == null)
-            throw new InvalidOperationException("FakeLlmProvider has no scripted response.");
+        LlmProviderResponse response;
+        lock (_lock)
+        {
+            if (Responses.Count > 0)
+                _last = Responses.Dequeue();
 
-        return Task.FromResult(_last);
+            if (_last == null)
+                throw new InvalidOperationException("FakeLlmProvider has no scripted response.");
+
+            response = _last;
+        }
+
+        return Task.FromResult(response);
     }
 
     public Task<LlmKeyTestResult> TestKeyAsync(string modelId, CancellationToken ct = default)

@@ -125,7 +125,7 @@ Plans:
 Plans:
 - [x] 04-01-PLAN.md — Corpus data contracts: settings, state, plan model, answer-key row, Apportion, case.json format v2 + CaseDraft.Corpus (Wave 1)
 - [x] 04-02-PLAN.md — BusinessCalendar, PlanCallRunner + PlanProgress/FillResult, rich fixture, thread-safe fake, WizardMin (Wave 1)
-- [ ] 04-03-PLAN.md — ThreadShapes, ThreadScheduler, BudgetAllocator, SkeletonContext (Wave 2)
+- [x] 04-03-PLAN.md — ThreadShapes, ThreadScheduler, BudgetAllocator, SkeletonContext (Wave 2)
 - [ ] 04-04-PLAN.md — CorpusPlanValidator (warnings-only rules) + PlanFixtures (Wave 2)
 - [ ] 04-05-PLAN.md — DocIdPrefix, PlanNumbering (chronological DocIDs, custodians, paths), AnswerKeyBuilder (Wave 2)
 - [ ] 04-06-PLAN.md — AnswerKeyCsvWriter (RFC 4180 + OWASP) and AnswerKeyXlsxWriter (3 sheets) (Wave 2)
@@ -205,7 +205,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
-| 4. Corpus Plan & Answer Key | 3/22 | In Progress|  |
+| 4. Corpus Plan & Answer Key | 4/22 | In Progress|  |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |

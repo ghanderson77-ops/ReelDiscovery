@@ -404,10 +404,10 @@ public class CaseGuideGenerator
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // User cancel: completed units are kept for Retry
+            // User cancel: completed units are kept for Retry; the bump makes the caller autosave them (WR-08)
             state.Status = GuidePartStatus.Pending;
             OrderCast(guide);
-            if (changed)
+            if (changed || run.Merged)
                 draft.Revision++;
             throw;
         }
@@ -812,7 +812,11 @@ public class CaseGuideGenerator
                 if (unit.Refused)
                     result.WasRefused = true;
                 if (unit.Value != null)
+                {
                     MapDetails(guide, batches[i], unit.Value, start, end, result);
+                    // Recorded on the run so a cancel (which skips the caller's assignment) still sees the merge (WR-08)
+                    run.Merged = true;
+                }
             }
         }
 
@@ -910,6 +914,8 @@ public class CaseGuideGenerator
                 added |= MapBackground(draft, orgs[i], counts[i], unit.Value, start, end, result);
                 if (!guide.CastState.CompletedUnits.Contains(orgs[i].Id))
                     guide.CastState.CompletedUnits.Add(orgs[i].Id);
+                // A finished unit changes the saved state (CompletedUnits) even when it added nobody (WR-08)
+                run.Merged = true;
             }
         }
 
@@ -1124,6 +1130,12 @@ public class CaseGuideGenerator
         }
 
         public bool IsFatal => FatalError.Length > 0;
+
+        /// <summary>
+        /// True once a finished unit was merged into the guide. Set on the calling thread in the merge <c>finally</c>,
+        /// so it is visible after a user cancel that skipped the caller's own bookkeeping.
+        /// </summary>
+        public bool Merged { get; set; }
 
         public void SetFatal(string message)
         {

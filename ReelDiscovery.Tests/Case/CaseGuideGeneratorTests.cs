@@ -969,6 +969,37 @@ public class CaseGuideGeneratorTests
         Assert.All(guide.Cast, c => Assert.True(c.DetailsPending));
     }
 
+    [Fact]
+    public async Task Cast_ResumeCancel_SavesMergedUnits()
+    {
+        // WR-08: a resumed cast run (no organizations added) cancelled after one background unit finished must bump the
+        // revision so the autosave hook runs for the merged staff
+        var (gateway, fake) = Gateway(FakeLlmProvider.Ok(BackgroundJson), FakeLlmProvider.Ok(BackgroundJson), FakeLlmProvider.Ok(BackgroundJson));
+        using var cts = new CancellationTokenSource();
+        fake.OnSend = i =>
+        {
+            if (i == 1)
+                cts.Cancel();
+        };
+        var draft = CaseTestData.SampleGuidedDraft();
+        var guide = draft.Guide!;
+        guide.CastState.Status = GuidePartStatus.Pending;
+        var staffBefore = guide.Cast.Count(c => c.Tier == CastTier.Background);
+        var revision = draft.Revision;
+        var saved = new List<GuidePart>();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new CaseGuideGenerator(gateway).GenerateAsync(draft, null, part =>
+        {
+            saved.Add(part);
+            return Task.CompletedTask;
+        }, cts.Token));
+
+        Assert.True(guide.Cast.Count(c => c.Tier == CastTier.Background) > staffBefore);
+        Assert.Contains("ORG-01", guide.CastState.CompletedUnits);
+        Assert.True(draft.Revision > revision);
+        Assert.Equal(new[] { GuidePart.Cast }, saved);
+    }
+
     // ---------- Facts fixtures ----------
 
     // SampleGuidedDraft with issues and cast Ready and no facts or values yet

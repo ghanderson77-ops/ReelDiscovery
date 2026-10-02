@@ -222,7 +222,7 @@ public class AnswerKeyBuilderTests
         Assert.Equal(3, family.Count);
         Assert.All(family, r => Assert.Equal("Y", r.Privileged));
         Assert.All(rows.Where(r => r.ThreadId != threadId), r => Assert.Equal("N", r.Privileged));
-        Assert.Single(rows.Where(r => r.Hot == "Y" && r.DocType == "Email"));
+        Assert.Single(rows, r => r.Hot == "Y" && r.DocType == "Email");
     }
 
     [Theory]

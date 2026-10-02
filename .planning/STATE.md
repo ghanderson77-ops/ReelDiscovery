@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-10-02T19:50:51.108Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-10-02T19:59:25.449Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 46
-  percent: 72
+  completed_plans: 47
+  percent: 73
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 5 of 22
+Plan: 6 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -96,6 +96,7 @@ Progress: [██████████] 98%
 | Phase 04 P02 | 14min | 3 tasks | 8 files |
 | Phase 04 P21 | 6min | 1 tasks | 3 files |
 | Phase 04 P03 | 22min | 3 tasks | 7 files |
+| Phase 04 P04 | 15min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -237,6 +238,11 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-03]: SkeletonContext window falls back settings -> DefaultWindow -> last three months (with a Note); ids outside the cast are always active and use UsTimeZones.Default
 - [Phase 04]: [04-03]: ThreadScheduler bump rule: if the sampled reply time is < parent + 1 min or <= previous + 1 min, AddBusinessMinutes(later of parent/previous, 2..20) in the sender zone
 - [Phase 04]: [04-03]: BudgetAllocator adjusts to the exact target by adding to the shortest thread below 12 and trimming the longest above 1 (fact-then-thread order); full threads add a thread to the fact with the most weight per thread; all-singleton overshoot drops Supporting threads first
+- [Phase 04]: [04-04]: Plan mix check compares each non-relevant category with Apportion.Largest(actual non-relevant count, settings mix); warns above 3 points drift
+- [Phase 04]: [04-04]: Privileged side = first counsel on the thread (in-house -> own org; outside -> firm + RepresentsOrgIds, plus any firm representing a client); anyone else, incl. externals, is from the other side
+- [Phase 04]: [04-04]: DocID rule checks set equality with {prefix}-000001..n plus attachment {parent}.{k:0000}, not strict chronological order
+- [Phase 04]: [04-04]: Leakage metrics (depth per thread, attachment share, To+CC, sender hour) are skipped when either group value is 0; relevant vs DailyBusiness+Decoy, both >= 5 messages
+- [Phase 04]: [04-04]: CorpusPlanValidator reads plan.Settings/ToIds/CcIds as stored (no Normalize); null Settings skips settings rules
 
 ### Pending Todos
 
@@ -258,6 +264,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T19:50:25.290Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-10-02T19:59:25.444Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None

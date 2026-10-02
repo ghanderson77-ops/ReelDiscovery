@@ -64,7 +64,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [ ] **PLAN-03**: Relevant threads are scheduled against the key-facts timeline so overlapping issues run concurrently among shared characters without contradiction
 - [ ] **PLAN-04**: Timestamps are realistic (business hours, time zones, weekends/holidays, reply latency)
 - [ ] **PLAN-05**: Plan includes realistic distributions for thread depth, reply vs. reply-all vs. forward, CC patterns and attachment rate
-- [ ] **PLAN-06**: A validator checks the plan (counts, ratio, dates within character active ranges, every key fact covered by evidence)
+- [x] **PLAN-06**: A validator checks the plan (counts, ratio, dates within character active ranges, every key fact covered by evidence)
 - [ ] **PLAN-07**: User sees a plan summary (counts by issue/fact/relevance/custodian, date histogram) and approves it or re-plans before generation starts
 
 ### Evidence Corpus Generation
@@ -212,7 +212,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAN-03 | Phase 4 | Pending |
 | PLAN-04 | Phase 4 | Pending |
 | PLAN-05 | Phase 4 | Pending |
-| PLAN-06 | Phase 4 | Pending |
+| PLAN-06 | Phase 4 | Complete |
 | PLAN-07 | Phase 4 | Pending |
 | CORP-01 | Phase 5 | Pending |
 | CORP-02 | Phase 5 | Pending |

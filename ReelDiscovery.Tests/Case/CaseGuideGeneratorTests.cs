@@ -523,6 +523,61 @@ public class CaseGuideGeneratorTests
         Assert.Equal(guide.Organizations.Count, guide.Organizations.Select(o => o.Domain).Distinct().Count());
     }
 
+    [Fact]
+    public void SyncOrganizations_ReorderedPartiesKeepTheirOrganizations()
+    {
+        // WR-03: party ids are positional; a regenerated document listing Harmon first must not rename ORG-01 into Harmon
+        var draft = CaseTestData.SampleComplaintDraft();
+        CaseGuideGenerator.SyncOrganizations(draft);
+        var guide = draft.Guide!;
+        var parties = draft.CoreDocument!.Parties;
+        (parties[0].Id, parties[1].Id) = ("party-2", "party-1");
+        parties.Reverse();
+
+        var added = CaseGuideGenerator.SyncOrganizations(draft, out var modified);
+
+        Assert.Empty(added);
+        Assert.True(modified);
+        var brightline = guide.FindOrganization("ORG-01")!;
+        Assert.Equal("Brightline Glazing, LLC", brightline.Name);
+        Assert.Equal("party-2", brightline.PartyId);
+        Assert.Equal("brightline.com", brightline.Domain);
+        var harmon = guide.FindOrganization("ORG-02")!;
+        Assert.Equal("Harmon Builders, Inc.", harmon.Name);
+        Assert.Equal("party-1", harmon.PartyId);
+        Assert.Equal("harmon.com", harmon.Domain);
+    }
+
+    [Fact]
+    public async Task Issues_RetitledCountFlagsLinkedFacts()
+    {
+        // WR-03: ISS-01 keeps its id for a retitled count-1, so the facts linked to it ask for review
+        var (gateway, _) = Gateway(FakeLlmProvider.Ok(IssueDetailsJson));
+        var draft = CaseTestData.SampleGuidedDraft();
+        draft.CoreDocument!.Counts[0].Title = "Unjust Enrichment";
+
+        await new CaseGuideGenerator(gateway).GenerateIssuesAsync(draft);
+
+        var guide = draft.Guide!;
+        Assert.Equal("ISS-01", Assert.Single(guide.Issues).Id);
+        Assert.All(guide.Facts.Where(f => f.IssueIds.Contains("ISS-01")), f =>
+        {
+            Assert.True(f.NeedsReview);
+            Assert.Equal("ISS-01 changed from \"Breach of Contract\" to \"Unjust Enrichment\" in the core document.", f.ReviewReason);
+        });
+    }
+
+    [Fact]
+    public async Task Issues_SameTitleDoesNotFlagFacts()
+    {
+        var (gateway, _) = Gateway();
+        var draft = CaseTestData.SampleGuidedDraft();
+
+        await new CaseGuideGenerator(gateway).GenerateIssuesAsync(draft);
+
+        Assert.DoesNotContain(draft.Guide!.Facts, f => f.NeedsReview);
+    }
+
     // ---------- Prompts (cast) ----------
 
     [Fact]

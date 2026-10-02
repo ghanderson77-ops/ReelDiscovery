@@ -215,7 +215,12 @@ public class CaseGuideGenerator
                 : "Extracting the issues from the counts..."
         });
 
+        var previousTitles = guide.Issues
+            .Where(i => i != null && !string.IsNullOrEmpty(i.Id))
+            .GroupBy(i => i.Id, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Title ?? string.Empty, StringComparer.Ordinal);
         guide.Issues = IssueExtractor.Extract(doc, guide);
+        FlagRetitledIssueFacts(guide, previousTitles);
         guide.IssuesState.Status = GuidePartStatus.Ready;
         guide.IssuesState.FailureMessage = string.Empty;
         GuideStaleness.Stamp(draft, GuidePart.Issues);
@@ -224,6 +229,23 @@ public class CaseGuideGenerator
 
         await EnrichIssuesAsync(draft, result, progress, ct);
         return result;
+    }
+
+    // An issue that kept its id for a retitled count may now be a different claim: the facts linked to it ask for review (WR-03)
+    private static void FlagRetitledIssueFacts(CaseGuide guide, IReadOnlyDictionary<string, string> previousTitles)
+    {
+        foreach (var issue in guide.Issues)
+        {
+            if (!previousTitles.TryGetValue(issue.Id, out var oldTitle)
+                || IssueExtractor.NormalizeTitle(oldTitle) == IssueExtractor.NormalizeTitle(issue.Title))
+                continue;
+
+            foreach (var fact in guide.Facts.Where(f => f != null && f.IssueIds != null && f.IssueIds.Contains(issue.Id)))
+            {
+                fact.NeedsReview = true;
+                fact.ReviewReason = $"{issue.Id} changed from \"{oldTitle.Trim()}\" to \"{issue.Title.Trim()}\" in the core document.";
+            }
+        }
     }
 
     /// <summary>
@@ -356,7 +378,7 @@ public class CaseGuideGenerator
         var guide = draft.Guide ??= new CaseGuide();
         var state = guide.CastState;
         var result = new GuidePartResult { Part = GuidePart.Cast };
-        var changed = SyncOrganizations(draft).Count > 0;
+        var changed = SyncOrganizations(draft, out var orgsModified).Count > 0 || orgsModified;
 
         // Resume: the key roster already exists from an unfinished run
         var resume = guide.Cast.Any(c => c.Tier == CastTier.Key) && state.Status != GuidePartStatus.Ready;
@@ -416,21 +438,74 @@ public class CaseGuideGenerator
     }
 
     /// <summary>
-    /// Mirrors the core document's parties as organizations (matched by PartyId). Existing ones are refreshed but keep
-    /// their id and domain so email addresses stay stable. Returns the ids of the organizations added.
+    /// Mirrors the core document's parties as organizations. Existing ones are refreshed but keep their id and domain so
+    /// email addresses stay stable. Returns the ids of the organizations added.
     /// </summary>
-    internal static List<string> SyncOrganizations(CaseDraft draft)
+    internal static List<string> SyncOrganizations(CaseDraft draft) => SyncOrganizations(draft, out _);
+
+    /// <summary>
+    /// Matching (WR-03): same PartyId and name, then same name anywhere (party ids are positional, so a regenerated
+    /// document can list the parties in a different order), then same PartyId with a new name (a renamed party).
+    /// An organization whose party left the document is demoted to a third party so prompts and checks stop asking
+    /// for its counsel. <paramref name="modified"/> is true when an existing organization was re-pointed or demoted.
+    /// </summary>
+    internal static List<string> SyncOrganizations(CaseDraft draft, out bool modified)
     {
         var doc = draft.CoreDocument ?? throw new InvalidOperationException("Write the core document before building the case guide.");
         var guide = draft.Guide ??= new CaseGuide();
         var taken = TakenDomains(guide);
         var added = new List<string>();
+        modified = false;
 
-        foreach (var party in doc.Parties.Where(p => p != null && !string.IsNullOrEmpty(p.Id)))
+        var parties = doc.Parties.Where(p => p != null && !string.IsNullOrEmpty(p.Id)).ToList();
+        var mirrored = guide.Organizations.Where(o => o != null && !string.IsNullOrEmpty(o.PartyId)).ToList();
+        var claimed = new HashSet<CaseOrganization>(ReferenceEqualityComparer.Instance);
+        var matches = new CaseOrganization?[parties.Count];
+
+        CaseOrganization? Claim(int i, Func<CaseOrganization, bool> test)
         {
-            var org = guide.Organizations.FirstOrDefault(o => o.PartyId == party.Id);
+            var match = mirrored.FirstOrDefault(o => !claimed.Contains(o) && test(o));
+            if (match != null)
+            {
+                matches[i] = match;
+                claimed.Add(match);
+            }
+
+            return match;
+        }
+
+        // (1) same party id and name, (2) same name anywhere, (3) same party id, renamed
+        for (var i = 0; i < parties.Count; i++)
+        {
+            var name = IssueExtractor.NormalizeTitle(parties[i].Name);
+            Claim(i, o => o.PartyId == parties[i].Id && IssueExtractor.NormalizeTitle(o.Name) == name);
+        }
+
+        for (var i = 0; i < parties.Count; i++)
+        {
+            var name = IssueExtractor.NormalizeTitle(parties[i].Name);
+            if (matches[i] == null && name.Length > 0)
+                Claim(i, o => IssueExtractor.NormalizeTitle(o.Name) == name);
+        }
+
+        for (var i = 0; i < parties.Count; i++)
+        {
+            if (matches[i] == null)
+                Claim(i, o => o.PartyId == parties[i].Id);
+        }
+
+        for (var i = 0; i < parties.Count; i++)
+        {
+            var party = parties[i];
+            var org = matches[i];
             if (org != null)
             {
+                if (org.PartyId != party.Id)
+                {
+                    org.PartyId = party.Id;
+                    modified = true;
+                }
+
                 org.Name = Clean(party.Name);
                 org.ShortName = Clean(party.ShortName);
                 org.Location = Clean(party.Domicile);
@@ -1685,7 +1760,7 @@ public class CaseGuideGenerator
         var result = new GuidePartResult { Part = GuidePart.Cast };
 
         // Renamed or added parties follow the core document; ids and domains are kept
-        var synced = SyncOrganizations(draft).Count > 0;
+        var synced = SyncOrganizations(draft, out var orgsModified).Count > 0 || orgsModified;
 
         var previous = state.Status;
         state.Status = GuidePartStatus.Generating;

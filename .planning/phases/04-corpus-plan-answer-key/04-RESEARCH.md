@@ -743,17 +743,21 @@ Example: 5,000 emails, 20% relevant, 20% attachments (mostly documents) on Claud
 | A15 | Extra key columns (Doc Type, File Name, separate Parent DocID) are acceptable additions to D-32 | Pattern 9 | Strict D-32 reading: drop extras |
 | A16 | Changing `CaseGuide.ComputeHash()` to a content projection honors D-05 | Pitfall 1 | If D-05 means "byte-for-byte current behavior", spurious stale banners remain |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Who is a custodian?**
    - What we know: D-28 says custodian = sender, and "All custodians" = every mailbox holding a copy. The guide has no `IsCustodian` flag.
    - Unclear: are outside-counsel and adverse-party mailboxes "collected"? Real productions come from one side.
    - Recommendation: all cast members are custodians (a pooled demo collection); externals never. Confirm during plan review; it also fixes Phase 5's mailbox folders.
+   - RESOLVED: all cast members (key and background) are custodians; external senders never are (04-CONTEXT.md "Resolved during planning": Custodians). Implemented in 04-05 (PlanNumbering) and 04-10.
 2. **External sender domains (newsletters, spam, personal).**
    - What we know: PITFALLS security recommends synthetic or reserved domains. Realism wants `gmail.com`-like personal mail.
    - Recommendation: code-generated fictional publication domains from the LLM-seeded `senderName` (`{slug}.com`, checked against case org domains). Personal mail uses a short fixed list of common consumer domains (no mail is ever sent). Flag for the user if they prefer `.example`.
+   - RESOLVED: invented publication/vendor domains plus a few common consumer domains for personal mail (04-CONTEXT.md "Resolved during planning": External sender domains). Implemented in 04-10 and 04-14.
 3. **D-12 literal hosting** (A13) and **protocol timing** (A14): low risk, planner's call.
+   - RESOLVED: planning runs on Review Plan entry (Next on Corpus Settings advances there), and the review protocol prose is generated as the last planning stage, so Approve is a pure file write (04-CONTEXT.md "Resolved during planning": Where planning runs). Implemented in 04-16, 04-18 and 04-22.
 4. **DocID prefix editability** (A6): add an optional "DocID prefix" box under Advanced (2-6 letters) to absorb derivation surprises. Cheap.
+   - RESOLVED: the DocID prefix is derived automatically and editable under Advanced (04-CONTEXT.md "Resolved during planning": Answer-key extras). Implemented in 04-05 (DocIdPrefix) and 04-17.
 
 ## Environment Availability
 

@@ -14,7 +14,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Foundation & Provider Gateway** - .NET 10 retarget, tests, concurrency fixes, DPAPI keys, and one OpenAI + Claude gateway with strict structured outputs
 - [x] **Phase 2: Case Scenario & Core Document** - Scenario + preset input produces a realistic, citation-safe Complaint / Petition / Investigation Memo the user can edit (completed 2026-10-01)
-- [x] **Phase 3: Case Guide** - ID-stable issues, cast, dated facts timeline and canonical-value registry, validated, editable, saved as case.json and exported to .docx (completed 2026-10-02)
+- [x] **Phase 3: Case Guide** - ID-stable issues, cast, dated facts timeline and canonical-value registry, validated, editable, saved as case.json and exported to .docx
+ (completed 2026-10-02)
 - [ ] **Phase 4: Corpus Plan & Answer Key** - Code-owned manifest of every thread/message with a validator, a plan review screen, the answer key and the review protocol derived from it
 - [ ] **Phase 5: Relevant Evidence Generation & Narrative Ledger** - Knowledge-gated, chronologically waved rendering of relevant threads with a running narrative ledger, saved incrementally as per-custodian EMLs
 - [ ] **Phase 6: Attachments & Non-Relevant Corpus** - Case-driven attachments plus daily business, ancillary, newsletter/spam/personal and near-miss decoy traffic through the same pipeline
@@ -119,7 +120,31 @@ Plans:
   3. A plan validator reports counts, ratio, dates outside each character's active range, and any key fact with no planned evidence.
   4. The user sees a plan summary (counts by issue, fact, relevance and custodian, plus a date histogram) and can approve the plan or re-plan.
   5. From the plan alone, the user gets a CSV and Excel answer key with one row per email and attachment. It has all required columns, family relevance propagated to attachments and quoted replies, and a statistics sheet. The user also gets a review protocol / coding manual document.
-**Plans**: TBD
+**Plans**: 22 plans in 8 waves
+
+Plans:
+- [ ] 04-01-PLAN.md — Corpus data contracts: settings, state, plan model, answer-key row, Apportion, case.json format v2 + CaseDraft.Corpus (Wave 1)
+- [ ] 04-02-PLAN.md — BusinessCalendar, PlanCallRunner + PlanProgress/FillResult, rich fixture, thread-safe fake, WizardMin (Wave 1)
+- [ ] 04-03-PLAN.md — ThreadShapes, ThreadScheduler, BudgetAllocator, SkeletonContext (Wave 2)
+- [ ] 04-04-PLAN.md — CorpusPlanValidator (warnings-only rules) + PlanFixtures (Wave 2)
+- [ ] 04-05-PLAN.md — DocIdPrefix, PlanNumbering (chronological DocIDs, custodians, paths), AnswerKeyBuilder (Wave 2)
+- [ ] 04-06-PLAN.md — AnswerKeyCsvWriter (RFC 4180 + OWASP) and AnswerKeyXlsxWriter (3 sheets) (Wave 2)
+- [ ] 04-07-PLAN.md — CorpusPlanPrompts system prompt + ReviewProtocolBuilder (prose call, fallback, docx) (Wave 2)
+- [ ] 04-08-PLAN.md — CorpusPlanStore (corpus-plan.json), PlanSummary, GenerationCostEstimator (Wave 2)
+- [ ] 04-09-PLAN.md — ThreadSkeletonBuilder: relevant threads, multi-issue, hot, privileged, attachments, repair (Wave 3)
+- [ ] 04-10-PLAN.md — NonRelevantSkeletonBuilder: daily, ancillary, newsletter/spam/personal, decoys, externals (Wave 3)
+- [ ] 04-11-PLAN.md — CorpusUiText: all Phase 4 copy + Review Plan entry/gate decisions (Wave 3)
+- [ ] 04-12-PLAN.md — PercentSlider, MonthHistogram, StatTile, ReplanDialog + 144-DPI renders (Wave 4)
+- [ ] 04-13-PLAN.md — RelevantThreadFiller: chunked Story-tier thread plans, mapping, re-ask once, templates (Wave 4)
+- [ ] 04-14-PLAN.md — SubjectSeeder: non-relevant subjects, decoy must-not-mention, external senders (Wave 4)
+- [ ] 04-15-PLAN.md — Case Summary Corpus group (plan, answer key, protocol rows) + renders (Wave 4)
+- [ ] 04-16-PLAN.md — CorpusPlanner.PlanAsync orchestration, guidance weights, schema registration (Wave 5)
+- [ ] 04-17-PLAN.md — StepCorpusSettings + renders (Wave 5)
+- [ ] 04-18-PLAN.md — StepReviewPlan: summary, planning run, staleness, re-plan, Approve via CorpusApproval + renders (Wave 6)
+- [ ] 04-19-PLAN.md — WizardForm 7-step flow, stage mapping, C-P2, reopen without auto-plan (Wave 7)
+- [ ] 04-20-PLAN.md — Phase gate: full suites + human check at 150% (Wave 8)
+- [ ] 04-21-PLAN.md — CaseStage CorpusSettings/ReviewPlan + content-only CaseGuide.ComputeHash (Wave 1)
+- [ ] 04-22-PLAN.md — CorpusApproval service: approve writes, apply new plan (plan file first, stage -> ReviewPlan), staleness rules, FileLockDetector (Wave 3)
 **UI hint**: yes
 
 ### Phase 5: Relevant Evidence Generation & Narrative Ledger
@@ -180,7 +205,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
-| 4. Corpus Plan & Answer Key | 0/TBD | Not started | - |
+| 4. Corpus Plan & Answer Key | 0/22 | Planned | - |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |

@@ -26,6 +26,7 @@ public class CaseGuidePromptInvariantTests
         "entry Character",
         "entry Fact",
         "entry Value",
+        "Regenerate Selected Facts",
         "issue details"
     };
 
@@ -144,6 +145,13 @@ public class CaseGuidePromptInvariantTests
                 draft = CaseTestData.SampleGuidedDraft();
                 Enqueue(fake, ValueEntryJson);
                 await generator.RegenerateEntryAsync(draft, GuidePart.Values, "V-001", "");
+                break;
+
+            case "Regenerate Selected Facts":
+                draft = CaseTestData.SampleGuidedDraft();
+                Enqueue(fake, FactEntryJson);
+                await generator.RegenerateEntriesAsync(draft, GuidePart.Facts, new[] { "F-002", "F-003", "F-005" }, "use the new names", false);
+                Assert.Equal(3, fake.Requests.Count);
                 break;
 
             case "issue details":

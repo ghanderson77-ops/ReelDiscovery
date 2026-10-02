@@ -2710,6 +2710,163 @@ public class CaseGuideGenerator
         draft.Revision++;
     }
 
+    /// <summary>
+    /// Regenerate Selected (Key Facts): rewrites each listed fact in place with the single-entry fact prompt, at most
+    /// MaxParallelCalls in flight. Prompts are built before any call, and every response is merged on the calling thread after
+    /// all calls finish (also on cancel, so finished facts are kept before the cancellation propagates). Hand-edited facts are
+    /// skipped unless <paramref name="replaceEdited"/>; a fact whose call fails keeps its text. A bad key or spend limit stops
+    /// the remaining calls (FatalError). Applied like a hand edit: values citing a rewritten fact are flagged for review.
+    /// </summary>
+    public async Task<GuideEntriesResult> RegenerateEntriesAsync(CaseDraft draft, GuidePart part, IReadOnlyList<string> ids, string guidance,
+        bool replaceEdited, IProgress<GuideProgress>? progress = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(ids);
+        if (part != GuidePart.Facts)
+            throw new ArgumentException("Only key facts can be regenerated as a selection.", nameof(part));
+
+        var guide = draft.Guide ?? throw new InvalidOperationException("Write the case guide before regenerating facts.");
+        guidance ??= string.Empty;
+        var result = new GuideEntriesResult { Part = part };
+
+        var targets = new List<KeyFact>();
+        foreach (var id in ids.Where(i => !string.IsNullOrWhiteSpace(i)).Distinct(StringComparer.Ordinal))
+        {
+            var fact = guide.FindFact(id);
+            if (fact == null)
+            {
+                result.Notes.Add($"{id} no longer exists and was skipped.");
+                continue;
+            }
+
+            // Hand edits are never overwritten unless the user asked for it (T-03-37)
+            if (fact.IsUserEdited && !replaceEdited)
+            {
+                result.SkippedEdited.Add(fact.Id);
+                continue;
+            }
+
+            targets.Add(fact);
+        }
+
+        if (targets.Count == 0)
+            return result;
+
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var semaphore = new SemaphoreSlim(MaxParallelCalls, MaxParallelCalls);
+        // The status line adds its own instruction ("Select them and try again."), so no hint here
+        var run = new UnitRun(runCts, semaphore, ct, string.Empty);
+
+        // Tasks return DTOs only; every prompt is built here from the facts as they are now, before any merge
+        var tasks = targets.Select((fact, i) => RunUnitAsync<FactEntryDto>(new LlmRequest
+        {
+            Tier = LlmTier.Story,
+            OperationName = $"Case Guide - Fact {fact.Id}",
+            SystemPrompt = CaseGuidePrompts.SystemPrompt,
+            UserPrompt = CaseGuidePrompts.BuildFactEntryPrompt(draft, fact, guidance),
+            MaxOutputTokens = EntryMaxOutputTokens
+        }, run, () => progress?.Report(new GuideProgress
+        {
+            Part = GuidePart.Facts,
+            Message = $"Regenerating the selected facts: {fact.Id} ({i + 1} of {targets.Count})...",
+            Done = i,
+            Total = targets.Count
+        }))).ToList();
+
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // User cancel: the facts that came back are merged below, then the cancellation propagates
+            result.WasCancelled = true;
+        }
+        finally
+        {
+            // Merge once on the calling thread: generator tests have no SynchronizationContext, so lambdas run on pool threads
+            if (MergeRegeneratedEntries(draft, targets, tasks, run, result))
+            {
+                // A rewritten fact date: generated characters stay active on every fact date they appear in
+                CaseGuideEditing.WidenActiveRanges(draft);
+                draft.Revision++;
+            }
+        }
+
+        if (result.WasCancelled)
+            ct.ThrowIfCancellationRequested();
+
+        result.FatalError = run.FatalError;
+        return result;
+    }
+
+    // Applies every successful response as one hand edit; failed and unfinished facts keep their text
+    private static bool MergeRegeneratedEntries(CaseDraft draft, List<KeyFact> targets, List<Task<UnitOutcome<FactEntryDto>>> tasks,
+        UnitRun run, GuideEntriesResult result)
+    {
+        var guide = draft.Guide!;
+        var mapped = new List<(KeyFact Target, KeyFact Value)>();
+
+        for (var i = 0; i < targets.Count; i++)
+        {
+            var fact = targets[i];
+            if (!tasks[i].IsCompletedSuccessfully)
+            {
+                // Cancelled before it came back: unchanged, and not reported as a failure
+                continue;
+            }
+
+            var outcome = tasks[i].Result;
+            if (outcome.Value is not { } dto)
+            {
+                var error = outcome.Error.Trim();
+                if (error.Length == 0)
+                    error = run.IsFatal ? "Generation stopped before this fact was written." : "The fact was not rewritten.";
+                result.Failed.Add(new GuideEntryFailure { Id = fact.Id, Message = error });
+                result.WasRefused |= outcome.Refused;
+                continue;
+            }
+
+            // Mapped before anything changes: an empty response leaves the fact as it was
+            var value = MapFact(guide, new FactDto
+            {
+                Date = dto.Date,
+                Title = dto.Title,
+                Description = dto.Description,
+                IssueIds = dto.IssueIds,
+                ActorIds = dto.ActorIds,
+                KnownByIds = dto.KnownByIds,
+                Significance = dto.Significance
+            }, fact.SourceSectionId);
+            if (value == null)
+            {
+                result.Failed.Add(new GuideEntryFailure { Id = fact.Id, Message = "The response had no fact text." });
+                continue;
+            }
+
+            mapped.Add((fact, value));
+        }
+
+        foreach (var failure in result.Failed)
+            result.Notes.Add($"{failure.Id} was not regenerated: {failure.Message}");
+
+        if (mapped.Count == 0)
+            return false;
+
+        GuideStaleness.AbsorbHandEdit(draft, GuidePart.Facts, () =>
+        {
+            foreach (var (target, value) in mapped)
+            {
+                // Clears the edited and needs-review flags
+                CopyFact(target, value);
+                CaseGuideEditing.FlagValues(guide, target.Id, $"{target.Id} was changed after it was written.");
+                result.Regenerated.Add(target.Id);
+            }
+        });
+
+        return true;
+    }
+
     private static ArgumentException UnknownEntry(GuidePart part, string? id) =>
         new($"Unknown {part} '{id}'.", nameof(id));
 
@@ -3149,6 +3306,55 @@ public class GuidePartResult
     /// Mapping notes (ignored ids, dropped people, defaulted dates).
     /// </summary>
     public List<string> Notes { get; set; } = new();
+}
+
+/// <summary>
+/// Outcome of Regenerate Selected (RegenerateEntriesAsync): which entries were rewritten, skipped as hand-edited or failed.
+/// </summary>
+public class GuideEntriesResult
+{
+    public GuidePart Part { get; set; }
+
+    /// <summary>
+    /// Ids rewritten in place, in the order they were asked for.
+    /// </summary>
+    public List<string> Regenerated { get; set; } = new();
+
+    /// <summary>
+    /// Hand-edited ids left alone because replaceEdited was false.
+    /// </summary>
+    public List<string> SkippedEdited { get; set; } = new();
+
+    /// <summary>
+    /// Ids whose call failed (or never ran after a fatal stop); their text is unchanged.
+    /// </summary>
+    public List<GuideEntryFailure> Failed { get; set; } = new();
+
+    /// <summary>
+    /// Non-empty when a bad key or exhausted spend limit stopped the remaining calls.
+    /// </summary>
+    public string FatalError { get; set; } = string.Empty;
+
+    public bool IsFatal => FatalError.Length > 0;
+    public bool WasRefused { get; set; }
+
+    /// <summary>
+    /// True when the user cancelled; the entries that came back first were still applied.
+    /// </summary>
+    public bool WasCancelled { get; set; }
+
+    /// <summary>
+    /// Entries the run tried to rewrite (rewritten + failed).
+    /// </summary>
+    public int Attempted => Regenerated.Count + Failed.Count;
+
+    public List<string> Notes { get; set; } = new();
+}
+
+public class GuideEntryFailure
+{
+    public string Id { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
 }
 
 /// <summary>

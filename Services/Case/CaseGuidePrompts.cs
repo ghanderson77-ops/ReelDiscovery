@@ -20,11 +20,13 @@ public static class CaseGuidePrompts
     /// <summary>
     /// Name rules for every guide prompt: the user's scenario (after real-name substitution), then keep the scenario's and
     /// the document's names, the applied substitutions and the names the user kept (D-01, CASE-03).
-    /// The scenario goes in the user prompt only; the shared system prompt stays byte-stable.
+    /// The scenario goes in the user prompt only; the shared system prompt stays byte-stable. Callers that must keep the
+    /// case story out of a prompt (non-relevant subject seeding, D-14) pass <paramref name="includeScenario"/> = false.
     /// </summary>
-    internal static void AppendNameRules(StringBuilder sb, CaseDraft draft)
+    internal static void AppendNameRules(StringBuilder sb, CaseDraft draft, bool includeScenario = true)
     {
-        AppendScenario(sb, draft);
+        if (includeScenario)
+            AppendScenario(sb, draft);
         sb.AppendLine("Keep every name the document uses exactly as written, including names from films, TV series, books or games.");
 
         var applied = draft.Substitutions

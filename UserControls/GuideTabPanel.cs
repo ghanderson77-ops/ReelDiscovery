@@ -638,6 +638,28 @@ public abstract class GuideTabPanel : UserControl
     }
 
     /// <summary>
+    /// Focuses the detail field a Checks finding is about (after SelectEntity); tabs map the fields they show. Fields
+    /// a tab does not have keep the first-field focus SelectEntity gave.
+    /// </summary>
+    public virtual void FocusField(GuideFindingField field)
+    {
+    }
+
+    /// <summary>
+    /// Scrolls a detail field into view and focuses it (a host such as a LinkPicker focuses its first focusable child).
+    /// </summary>
+    protected void FocusDetailControl(Control? control)
+    {
+        if (control == null || control.IsDisposed)
+            return;
+
+        _fieldsPanel.ScrollControlIntoView(control);
+        var target = control.CanFocus && control is TextBox or ComboBox ? control : FirstFocusable(control) ?? control;
+        if (target.CanFocus)
+            target.Focus();
+    }
+
+    /// <summary>
     /// Commits detail fields that changed but have not been applied yet (selection change, step leave).
     /// </summary>
     public virtual void CommitPendingEdits()

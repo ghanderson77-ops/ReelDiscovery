@@ -398,6 +398,16 @@ public class FactsTabPanel : GuideTabPanel
         _btnNeedsReview.Selected = filter == FactFilter.NeedsReview;
     }
 
+    public override void FocusField(GuideFindingField field) => FocusDetailControl(field switch
+    {
+        GuideFindingField.Date => _txtDate,
+        GuideFindingField.Title => _txtTitle,
+        GuideFindingField.Issues => _pickIssues,
+        GuideFindingField.Actors => _pickActors,
+        GuideFindingField.KnownBy => _pickKnowers,
+        _ => null
+    });
+
     public override bool SelectEntity(string id)
     {
         // Clear a filter that hides the fact first

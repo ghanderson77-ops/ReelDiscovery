@@ -1,5 +1,6 @@
 using System.Globalization;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.UserControls;
 
@@ -51,6 +52,56 @@ public class NextGateResult
     public NextGateKind Kind;
     public string Title = "";
     public string Message = "";
+}
+
+/// <summary>
+/// The Checks card's Fix button for the selected check: Primary "Fix" for an automatic fix, the matching action
+/// ("Regenerate Cast...", "Update Guide") for a model fix, disabled "Fix" otherwise.
+/// </summary>
+public class FixButtonState
+{
+    public bool Enabled;
+    public bool Primary;
+    public string Text = "";
+}
+
+/// <summary>
+/// One error in the M2 gate dialog: what is wrong and how to fix it.
+/// </summary>
+public class GateErrorLine
+{
+    public string Where = "";
+    public string Message = "";
+    public string FixHint = "";
+}
+
+/// <summary>
+/// M2 (errors block Next) dialog: up to five errors with their fixes, the "+ n more" line and the buttons.
+/// FixAutomaticallyText is empty when no error has an automatic fix.
+/// </summary>
+public class ErrorsGateContent
+{
+    public string Title = "";
+    public string Headline = "";
+    public string Body = "";
+    public List<GateErrorLine> Lines = new();
+    public string MoreText = "";
+    public string ShowChecksText = "";
+    public string FixAutomaticallyText = "";
+    public string ContinueAnywayText = "";
+}
+
+/// <summary>
+/// Fix All confirmation: one line per kind of automatic fix with its count.
+/// </summary>
+public class FixAllContent
+{
+    public string Title = "";
+    public string Headline = "";
+    public string Body = "";
+    public List<string> Lines = new();
+    public string Foot = "";
+    public string ConfirmText = "";
 }
 
 /// <summary>
@@ -227,12 +278,12 @@ public static class CaseGuideUiText
         if (unfinished.Count > 0)
         {
             var parts = Ordered(unfinished);
-            var verb = parts.Count > 1 || IsPluralPart(parts[0]) ? "have" : "has";
+            var plural = parts.Count > 1 || IsPluralPart(parts[0]);
             return new NextGateResult
             {
                 Kind = NextGateKind.Unfinished,
                 Title = "Guide Not Finished",
-                Message = $"The guide is not finished: {JoinParts(parts)} {verb} not been written. Click Resume Guide, then click Next again."
+                Message = $"The guide is not finished: {JoinParts(parts)} {(plural ? "have" : "has")} not been written. {ResumeHint(parts)}, then click Next again."
             };
         }
 
@@ -257,6 +308,168 @@ public static class CaseGuideUiText
         }
 
         return new NextGateResult { Kind = NextGateKind.Proceed };
+    }
+
+    /// <summary>
+    /// "Click Resume Guide to write the key facts" (one part) or "... to write them" (several); the M1 gate and the
+    /// unwritten-part checks share it, so both say how to finish the guide the same way.
+    /// </summary>
+    public static string ResumeHint(IReadOnlyList<GuidePart> parts)
+    {
+        var ordered = Ordered(parts);
+        if (ordered.Count == 0)
+            return "Click Resume Guide";
+        return ordered.Count == 1
+            ? $"Click Resume Guide to write the {PartNoun(ordered[0], false)}"
+            : "Click Resume Guide to write them";
+    }
+
+    // --- Checks fixes (Fix, Fix All, the M2 gate dialog) ---
+
+    public const string ChecksHintText = "Double-click a check to go to it.";
+    public const string FixButtonText = "Fix";
+    public const string FixAllTitle = "Fix All";
+    public const string ShowChecksText = "Show Checks";
+    public const string ContinueAnywayText = "Continue Anyway";
+    public const string NothingFixedText = "Nothing changed: the check was already cleared.";
+
+    // The M2 dialog lists at most this many errors, then "+ n more under Checks"
+    public const int GateErrorLimit = 5;
+
+    public static string FixAllButtonText(int n) => $"Fix All ({n.ToString("N0", Invariant)})";
+
+    public static string FixAutomaticallyText(int n) => $"Fix Automatically ({n.ToString("N0", Invariant)})";
+
+    /// <summary>
+    /// Text of the button that runs a finding's fix: "Fix" for an automatic one, otherwise the existing action it starts
+    /// (an ellipsis when that action opens a dialog). Empty for None.
+    /// </summary>
+    public static string QuickFixActionText(GuideQuickFix fix, GuideArea area)
+    {
+        if (CaseGuideQuickFix.IsAutomatic(fix))
+            return FixButtonText;
+
+        return fix switch
+        {
+            GuideQuickFix.RegenerateEntry => area switch
+            {
+                GuideArea.Cast => "Regenerate Character",
+                GuideArea.Values => "Regenerate Value",
+                _ => "Regenerate Fact"
+            },
+            GuideQuickFix.RegenerateCast => "Regenerate Cast...",
+            GuideQuickFix.RegenerateValues => "Regenerate Values...",
+            GuideQuickFix.RetryIssueDetails => "Retry Issue Details",
+            GuideQuickFix.UpdateGuide => "Update Guide",
+            GuideQuickFix.ResumeGuide => "Resume Guide",
+            _ => string.Empty
+        };
+    }
+
+    /// <summary>
+    /// Fix button for the selected check (null when none is selected). Disabled during a run and for checks without a fix.
+    /// </summary>
+    public static FixButtonState FixButtonFor(GuideFinding? selected, bool running, bool otherPrimaryShown = false)
+    {
+        var text = selected == null ? string.Empty : QuickFixActionText(selected.QuickFix, selected.Area);
+        if (text.Length == 0)
+            return new FixButtonState { Text = FixButtonText };
+
+        return new FixButtonState
+        {
+            Text = text,
+            Enabled = !running,
+            // At most two Primary buttons show at once (UI-SPEC): with the banner's Update Guide up, Fix stays Default
+            Primary = !running && selected!.HasAutomaticFix && !otherPrimaryShown
+        };
+    }
+
+    /// <summary>
+    /// How many listed checks Fix All clears (automatic fixes only).
+    /// </summary>
+    public static int AutomaticFixCount(IEnumerable<GuideFinding> findings) =>
+        (findings ?? Enumerable.Empty<GuideFinding>()).Count(f => f != null && f.HasAutomaticFix);
+
+    /// <summary>
+    /// One Fix All confirmation line: "Widen or repair 3 active ranges".
+    /// </summary>
+    public static string FixAllLine(GuideQuickFix fix, int n) => fix switch
+    {
+        GuideQuickFix.AssignNewId => $"Give {Plural(n, "entry", "entries")} a new ID",
+        GuideQuickFix.RemoveBrokenLinks => $"Remove broken links from {Plural(n, "entry", "entries")}",
+        GuideQuickFix.WidenActiveRange => $"Widen or repair {Plural(n, "active range", "active ranges")}",
+        GuideQuickFix.NormalizeDate => $"Rewrite {Plural(n, "date", "dates")} as YYYY-MM-DD",
+        GuideQuickFix.ResetEmail => $"Rebuild {Plural(n, "email address", "email addresses")} from the name and organization",
+        GuideQuickFix.NewEmailDomain => $"Give {Plural(n, "organization", "organizations")} a domain of {(n == 1 ? "its" : "their")} own",
+        GuideQuickFix.AddActorsToKnownBy => $"Add {Plural(n, "person", "people")} under Who knew",
+        GuideQuickFix.ReplaceRealNames => $"Replace {Plural(n, "real name", "real names")} with the fictional ones",
+        GuideQuickFix.LinkParty => $"Link {Plural(n, "party", "parties")} to the matching name in the guide",
+        GuideQuickFix.MarkReviewed => $"Mark {Plural(n, "entry", "entries")} reviewed (the text stays as it is)",
+        _ => string.Empty
+    };
+
+    /// <summary>
+    /// Fix All confirmation (default Cancel). <paramref name="counts"/> comes from CaseGuideQuickFix.CountAutomatic.
+    /// </summary>
+    public static FixAllContent FixAllText(IReadOnlyList<(GuideQuickFix Fix, int Count)> counts)
+    {
+        var total = counts.Sum(c => c.Count);
+        return new FixAllContent
+        {
+            Title = FixAllTitle,
+            Headline = $"Fix {Plural(total, "check", "checks")} automatically?",
+            Body = "These changes are made directly in the guide, with no model calls:",
+            Lines = counts.Where(c => c.Count > 0).Select(c => FixAllLine(c.Fix, c.Count)).Where(l => l.Length > 0).ToList(),
+            Foot = "Checks that need your judgment or a model call stay listed. Every change can be edited afterward.",
+            ConfirmText = FixAllTitle
+        };
+    }
+
+    /// <summary>
+    /// M2 (errors block Next): up to five errors with how to fix each, "+ n more under Checks", and the buttons
+    /// Show Checks (the safe default), Continue Anyway and, when some errors fix automatically, Fix Automatically ({k}).
+    /// </summary>
+    public static ErrorsGateContent ErrorsGateText(IReadOnlyList<GuideFinding> errors)
+    {
+        var list = (errors ?? Array.Empty<GuideFinding>()).Where(f => f != null).ToList();
+        var automatic = AutomaticFixCount(list);
+        var more = list.Count - GateErrorLimit;
+        return new ErrorsGateContent
+        {
+            Title = "Fix the Guide First",
+            Headline = $"The case guide has {Plural(list.Count, "error", "errors")}",
+            Body = $"Later steps rely on these links and dates. Here is how to fix {(list.Count == 1 ? "it" : "them")}:",
+            Lines = list.Take(GateErrorLimit).Select(f => new GateErrorLine { Where = f.Where, Message = f.Message, FixHint = f.FixHint }).ToList(),
+            MoreText = more > 0 ? $"+ {more.ToString("N0", Invariant)} more under Checks" : string.Empty,
+            ShowChecksText = ShowChecksText,
+            FixAutomaticallyText = automatic > 0 ? FixAutomaticallyText(automatic) : string.Empty,
+            ContinueAnywayText = ContinueAnywayText
+        };
+    }
+
+    /// <summary>
+    /// Continue Anyway on the M2 dialog asks once more (default No).
+    /// </summary>
+    public static (string Title, string Text) C15ContinueWithErrors(int errors) =>
+        (ContinueAnywayText,
+            $"The guide still has {Plural(errors, "error", "errors")}. Later steps may produce inconsistent emails. Continue anyway?");
+
+    /// <summary>
+    /// Status line after Fix / Fix All / Fix Automatically.
+    /// </summary>
+    public static string FixedChecksText(int fixedCount, int errorsLeft, int warningsLeft)
+    {
+        if (fixedCount <= 0)
+            return NothingFixedText;
+
+        var text = $"Fixed {Plural(fixedCount, "check", "checks")}.";
+        if (errorsLeft == 0 && warningsLeft == 0)
+            return text + " No problems remain.";
+
+        var left = errorsLeft > 0 && warningsLeft > 0
+            ? $"{Plural(errorsLeft, "error", "errors")} and {Plural(warningsLeft, "warning", "warnings")}"
+            : errorsLeft > 0 ? Plural(errorsLeft, "error", "errors") : Plural(warningsLeft, "warning", "warnings");
+        return $"{text} {left} {(errorsLeft + warningsLeft == 1 ? "remains" : "remain")} under Checks.";
     }
 
     // --- Paths, subtitle, recent cases, Case Summary lines ---

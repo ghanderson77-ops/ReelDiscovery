@@ -94,6 +94,76 @@ public class ThemedDialog : Form
         };
     }
 
+    /// <summary>
+    /// A white card listing items: each a Body line in Text, with an optional Small second line in TextMuted under it,
+    /// and an optional Small footer line. The card is sized to its wrapped text (no scrolling).
+    /// </summary>
+    protected CardPanel AddItemsCard(IReadOnlyList<(string Text, string Detail)> items, string footer = "")
+    {
+        var padX = LDU(ItemsCardPaddingX);
+        var padY = LDU(ItemsCardPaddingY);
+        var card = new CardPanel
+        {
+            BorderColor = Theme.Border,
+            BackColor = Theme.Surface,
+            Dock = DockStyle.Fill,
+            Padding = new Padding(padX, padY, padX, padY),
+            Margin = new Padding(0, 0, 0, LDU(16))
+        };
+
+        var list = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            BackColor = Theme.Surface,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        list.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+        // 1 px border on each side
+        var textWidth = ContentWidth - padX * 2 - 2;
+        void AddLine(string text, Font font, Color color, int top)
+        {
+            var label = new Label
+            {
+                Text = text,
+                AutoSize = true,
+                MaximumSize = new Size(textWidth, 0),
+                Font = font,
+                ForeColor = color,
+                BackColor = Theme.Surface,
+                UseMnemonic = false,
+                Margin = new Padding(0, top, 0, 0),
+                Padding = Padding.Empty
+            };
+            list.RowCount++;
+            list.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // one row per line
+            list.Controls.Add(label, 0, list.RowCount - 1);
+        }
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            AddLine(items[i].Text, Theme.BodyFont(), Theme.Text, i == 0 ? 0 : LDU(ItemGap));
+            if (!string.IsNullOrEmpty(items[i].Detail))
+                AddLine(items[i].Detail, Theme.SmallFont(), Theme.TextMuted, LDU(2));
+        }
+        if (!string.IsNullOrEmpty(footer))
+            AddLine(footer, Theme.SmallFont(), Theme.TextMuted, items.Count == 0 ? 0 : LDU(ItemGap));
+
+        card.Controls.Add(list);
+        card.Height = list.GetPreferredSize(new Size(textWidth, 0)).Height + card.Padding.Vertical + 2;
+        AddContent(card);
+        return card;
+    }
+
+    // Same text inset as the D2 fact list (10)
+    private const int ItemsCardPaddingX = 10;
+    private const int ItemsCardPaddingY = 10;
+    private const int ItemGap = 10;
+
     protected void AddContent(Control control)
     {
         var row = _root.RowCount;

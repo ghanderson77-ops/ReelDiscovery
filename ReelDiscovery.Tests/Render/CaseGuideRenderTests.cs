@@ -228,7 +228,7 @@ public class CaseGuideRenderTests
 
                 var banner = false;
                 var caption = string.Empty;
-                var checksHeight = 0;
+                var wholeRows = 0;
                 var listShown = false;
                 var collapsedHint = false;
                 var result = Render(fixture, "case-guide-stale-with-checks", size, false, null, GuidePart.Facts, step =>
@@ -239,7 +239,8 @@ public class CaseGuideRenderTests
                         && AllControls(step).OfType<Button>().Any(b => b.Visible && b.Text == "Not Now");
                     var checks = AllControls(step).OfType<Label>().First(l => l.Text.StartsWith("Checks (", StringComparison.Ordinal));
                     caption = checks.Text;
-                    checksHeight = checks.Parent!.Parent!.Parent!.Height;
+                    var grid = AllControls(step).OfType<DataGridView>().First(g => g.Columns.Contains("Severity"));
+                    wholeRows = grid.DisplayedRowCount(false) == grid.DisplayedRowCount(true) ? grid.DisplayedRowCount(false) : -1;
                     listShown = AllControls(step).OfType<DataGridView>().Any(g => g.Visible && g.Columns.Contains("Severity"));
                     collapsedHint = VisibleLabel(step, "Make the window taller to see the list.");
                 });
@@ -252,13 +253,100 @@ public class CaseGuideRenderTests
                 {
                     Assert.True(listShown);
                     Assert.False(collapsedHint);
-                    Assert.Equal(fixture.ScaledChecksHeight, checksHeight);
+                    // Whole checks only: no row is cut off at the bottom of the card
+                    Assert.True(wholeRows >= 1, $"whole rows shown: {wholeRows}");
                 }
                 else
                 {
                     // The minimum window cannot fit the banner, the list and a usable detail card: the list folds to its caption line
                     Assert.False(listShown);
                     Assert.True(collapsedHint);
+                }
+            }
+        });
+    }
+
+    [Fact]
+    public void Checks_WithFixHintsAndFixButtons()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.Small })
+            {
+                // Errors with an automatic fix (inactive actor, broken link) and one that needs the user (date after filing)
+                var draft = CaseTestData.SampleGuidedDraft();
+                draft.Guide!.FindCast("CH-002")!.ActiveTo = "2024-03-01";
+                draft.Guide.FindFact("F-002")!.ActorIds.Add("CH-099");
+                draft.Guide.FindFact("F-006")!.Date = "2024-10-02";
+                var automatic = CaseGuideUiText.AutomaticFixCount(CaseGuideValidator.Validate(draft));
+                using var fixture = new GuideFixture(draft);
+
+                var hint = false;
+                var fix = (Visible: false, Enabled: false, Primary: false, Text: "");
+                var fixAll = (Visible: false, Text: "");
+                var rowHeight = 0;
+                var expectedRowHeight = 0;
+                var wholeRows = 0;
+                var buttonsRight = -1;
+                var captionRight = -1;
+                var captionLeft = -1;
+                var cardLeft = -1;
+                var listShown = false;
+                var result = Render(fixture, "case-guide-checks-fixes", size, false, null, GuidePart.Facts, step =>
+                {
+                    step.ShowTab(GuidePart.Facts, "F-003");
+                    var grid = AllControls(step).OfType<DataGridView>().First(g => g.Columns.Contains("Severity"));
+                    listShown = grid.Visible;
+                    var first = grid.Rows.Cast<DataGridViewRow>().First(r => ((GuideFinding)r.Tag!).QuickFix == GuideQuickFix.WidenActiveRange);
+                    step.SelectCheck(first.Index, focus: false);
+
+                    hint = VisibleLabel(step, CaseGuideUiText.ChecksHintText);
+                    var fixAllButton = AllControls(step).OfType<ThemedButton>().First(b => b.Text.StartsWith("Fix All", StringComparison.Ordinal));
+                    fixAll = (fixAllButton.Visible, fixAllButton.Text);
+                    // Fix sits just left of Fix All in the caption line
+                    var fixButton = (ThemedButton)fixAllButton.Parent!.Controls[0];
+                    fix = (fixButton.Visible, fixButton.Enabled, fixButton.Variant == ButtonStyle.Primary, fixButton.Text);
+                    rowHeight = first.Height;
+                    expectedRowHeight = step.LogicalToDeviceUnits(48);
+
+                    var checks = AllControls(step).OfType<Label>().First(l => l.Text.StartsWith("Checks (", StringComparison.Ordinal));
+                    var card = checks.Parent!.Parent!.Parent!;
+                    wholeRows = grid.DisplayedRowCount(false) == grid.DisplayedRowCount(true) ? grid.DisplayedRowCount(false) : -1;
+                    // Fix All ends on the caption line's 15 px right inset; the caption starts on Content x = 16
+                    buttonsRight = step.PointToClient(fixAllButton.Parent!.PointToScreen(new Point(fixAllButton.Right, 0))).X;
+                    captionRight = step.PointToClient(card.PointToScreen(new Point(card.Width, 0))).X - 1 - step.LogicalToDeviceUnits(15);
+                    captionLeft = step.PointToClient(checks.Parent!.PointToScreen(new Point(checks.Left, 0))).X;
+                    cardLeft = step.PointToClient(card.PointToScreen(Point.Empty)).X;
+                });
+
+                AssertRendered(result);
+                Assert.True(automatic >= 3);
+                Assert.Equal(CaseGuideUiText.FixAllButtonText(automatic), fixAll.Text);
+                Assert.True(fixAll.Visible);
+                Assert.Equal(captionRight, buttonsRight);
+                Assert.Equal(cardLeft + 1 + fixture.ScaledInset, captionLeft);
+                if (size == RenderHarness.Large)
+                {
+                    Assert.True(listShown);
+                    Assert.True(hint);
+                    Assert.True(fix.Visible);
+                    Assert.True(fix.Enabled);
+                    Assert.True(fix.Primary);
+                    Assert.Equal("Fix", fix.Text);
+                    Assert.Equal(expectedRowHeight, rowHeight);
+                    // Whole checks only: no row is cut off at the bottom of the card
+                    Assert.Equal(2, wholeRows);
+                }
+                else if (listShown)
+                {
+                    // A short window keeps at least one whole check, and Fix follows it
+                    Assert.True(wholeRows >= 1, $"whole rows shown: {wholeRows}");
+                    Assert.True(fix.Visible);
+                }
+                else
+                {
+                    // The folded list has no row to pick: only Fix All stays
+                    Assert.False(fix.Visible);
                 }
             }
         });
@@ -336,8 +424,7 @@ public class CaseGuideRenderTests
         }, name, size, control =>
         {
             var step = (StepCaseGuide)control;
-            // The 152 row includes the card's 16 top margin
-            fixture.ScaledChecksHeight = step.LogicalToDeviceUnits(152) - step.LogicalToDeviceUnits(Theme.Gap);
+            fixture.ScaledInset = step.LogicalToDeviceUnits(15);
             arrange?.Invoke(step);
         }, options);
     }
@@ -396,7 +483,7 @@ public class CaseGuideRenderTests
 
         public WizardState State { get; }
 
-        public int ScaledChecksHeight { get; set; }
+        public int ScaledInset { get; set; }
 
         public void Dispose()
         {

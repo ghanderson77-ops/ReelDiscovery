@@ -263,6 +263,15 @@ public class CastTabPanel : GuideTabPanel
         _btnBackground.Selected = filter == CastFilter.Background;
     }
 
+    public override void FocusField(GuideFindingField field) => FocusDetailControl(field switch
+    {
+        GuideFindingField.Name => _txtFirst,
+        GuideFindingField.Email => _txtEmail,
+        GuideFindingField.Organization => _cmbOrganization,
+        GuideFindingField.ActiveRange => _txtFrom,
+        _ => null
+    });
+
     public override bool SelectEntity(string id)
     {
         // Clear a filter that hides the character first

@@ -207,7 +207,7 @@ public class CaseGuideUiLogicTests
         var gate = CaseGuideUiText.NextGateDecision(false, new[] { GuidePart.Facts, GuidePart.Values }, 0, 0);
         Assert.Equal(NextGateKind.Unfinished, gate.Kind);
         Assert.Equal("Guide Not Finished", gate.Title);
-        Assert.Equal("The guide is not finished: the key facts and the canonical values have not been written. Click Resume Guide, then click Next again.", gate.Message);
+        Assert.Equal("The guide is not finished: the key facts and the canonical values have not been written. Click Resume Guide to write them, then click Next again.", gate.Message);
     }
 
     [Fact]

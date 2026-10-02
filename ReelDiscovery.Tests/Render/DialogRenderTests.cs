@@ -1,5 +1,9 @@
 using ReelDiscovery.Forms;
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Services.Case;
+using ReelDiscovery.Tests.Case;
+using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Render;
 
@@ -95,6 +99,92 @@ public class DialogRenderTests
             });
 
             AssertRendered(result, height, workingHeight);
+        });
+    }
+
+    [Theory]
+    [InlineData(true, "dialog-guide-errors-many")]
+    [InlineData(false, "dialog-guide-errors-one")]
+    public void GuideErrorsDialog_RendersWithoutClipping(bool many, string name)
+    {
+        RenderHarness.RunSta(() =>
+        {
+            // A real broken guide: the errors and hints come from the validator
+            var draft = CaseTestData.SampleGuidedDraft();
+            var guide = draft.Guide!;
+            guide.FindFact("F-006")!.Date = "2024-10-02";
+            if (many)
+            {
+                guide.FindCast("CH-002")!.ActiveTo = "2024-03-01";
+                guide.FindFact("F-002")!.ActorIds.Add("CH-099");
+                guide.FindFact("F-005")!.Title = "";
+                guide.FindValue("V-001")!.FactIds.Add("F-099");
+                guide.FindCast("CH-007")!.Email = "evan at ellis";
+            }
+            var errors = CaseGuideValidator.Validate(draft).Where(f => f.Severity == IssueSeverity.Error).ToList();
+            var content = CaseGuideUiText.ErrorsGateText(errors);
+
+            var height = 0;
+            var workingHeight = 0;
+            var buttons = new List<(string Text, bool Primary)>();
+            var cancel = string.Empty;
+            var lines = 0;
+            var result = RenderHarness.RenderForm(() => new GuideErrorsDialog(content), name, form =>
+            {
+                height = form.ClientSize.Height;
+                workingHeight = Screen.FromControl(form).WorkingArea.Height;
+                buttons.AddRange(Descendants(form).OfType<ThemedButton>()
+                    .OrderBy(b => b.PointToScreen(Point.Empty).X)
+                    .Select(b => (b.Text, b.Variant == ButtonStyle.Primary)));
+                cancel = (form.CancelButton as Button)?.Text ?? string.Empty;
+                lines = Descendants(form).OfType<Label>().Count(l => content.Lines.Any(e => e.FixHint == l.Text));
+            });
+
+            AssertRendered(result, height, workingHeight);
+            Assert.Equal("Show Checks", cancel);
+            Assert.Equal(content.Lines.Count, lines);
+            if (many)
+            {
+                Assert.True(errors.Count > 5);
+                Assert.Equal(new[] { ("Show Checks", false), ("Continue Anyway", false), (content.FixAutomaticallyText, true) }, buttons);
+            }
+            else
+            {
+                Assert.Single(errors);
+                Assert.Equal(new[] { ("Show Checks", false), ("Continue Anyway", false) }, buttons);
+            }
+        });
+    }
+
+    [Fact]
+    public void FixAllDialog_RendersWithoutClipping()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var content = CaseGuideUiText.FixAllText(new List<(GuideQuickFix, int)>
+            {
+                (GuideQuickFix.RemoveBrokenLinks, 2),
+                (GuideQuickFix.WidenActiveRange, 3),
+                (GuideQuickFix.ResetEmail, 1),
+                (GuideQuickFix.MarkReviewed, 4)
+            });
+            var height = 0;
+            var workingHeight = 0;
+            var cancel = string.Empty;
+            var primary = string.Empty;
+            var result = RenderHarness.RenderForm(() => new FixAllDialog(content), "dialog-fix-all", form =>
+            {
+                height = form.ClientSize.Height;
+                workingHeight = Screen.FromControl(form).WorkingArea.Height;
+                cancel = (form.CancelButton as Button)?.Text ?? string.Empty;
+                primary = Descendants(form).OfType<ThemedButton>().Single(b => b.Variant == ButtonStyle.Primary).Text;
+                Assert.Contains(Descendants(form).OfType<Label>(), l => l.Text == "Fix 10 checks automatically?");
+                Assert.Contains(Descendants(form).OfType<Label>(), l => l.Text == "Widen or repair 3 active ranges");
+            });
+
+            AssertRendered(result, height, workingHeight);
+            Assert.Equal("Cancel", cancel);
+            Assert.Equal("Fix All", primary);
         });
     }
 

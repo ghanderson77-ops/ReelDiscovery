@@ -13,9 +13,16 @@ namespace ReelDiscovery.UserControls;
 /// </summary>
 public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
 {
-    // Least body height (logical) worth keeping the 152 Checks list for
+    // Least body height (logical) worth keeping the Checks list for
     private const int MinBodyHeight = 300;
     private const string ChecksCollapsedText = "Make the window taller to see the list.";
+
+    // The Checks list shows up to two whole two-line checks, one when the window is short, and folds to its caption line
+    // when even one would crowd the body
+    private const int ChecksMaxRows = 2;
+    private const int ChecksRowHeight = 48;
+    // Space between a check and its fix hint inside one row
+    private const int CheckLineGap = 2;
 
     private WizardState _state = null!;
     private readonly Dictionary<GuidePart, GuideTabPanel> _panels = new();
@@ -49,7 +56,11 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     private Label _lblNoChecks = null!;
     private Panel _checksGridHost = null!;
     private TableLayoutPanel _checksCaptionLine = null!;
+    private FlowLayoutPanel _checksButtons = null!;
+    private ThemedButton _btnFix = null!;
+    private ThemedButton _btnFixAll = null!;
     private DataGridView _gridChecks = null!;
+    private readonly Font _checkHintFont = Theme.SmallFont();
     private Label _lblStatus = null!;
     private SlimProgressBar _progress = null!;
     private Button _btnCancel = null!;
@@ -62,8 +73,15 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     private GuideTabPanel? _actionsOwner;
     private List<GuideFinding> _findings = new();
     private bool _showBanner;
+    // The stale banner shows its Primary Update Guide
+    private bool _bannerPrimaryShown;
     private bool _checksHasFindings;
     private bool _checksShowsNoProblems;
+    // The user picked a check (click, keys or Show Checks): its selection stays drawn and drives the Fix button
+    private bool _checksUserSelected;
+    // The findings list is shown (it folds to the caption line on a short window)
+    private bool _checksListShown;
+    private List<GuideFinding> _visibleFindings = new();
 
     public string StepTitle => "Case Guide";
     public string NextButtonText => "Next >";
@@ -108,7 +126,8 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _root.RowStyles.Add(_bannerRow);                                                      // 1: Banner
         _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));                                 // 2: Tabs row
         _root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));                             // 3: Body
-        _checksRow = new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(152));
+        // Sized in UpdateChecksLayout to whole checks (ChecksCardHeightFor)
+        _checksRow = new RowStyle(SizeType.AutoSize);
         _root.RowStyles.Add(_checksRow);                                                      // 4: Checks card
         _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));                                 // 5: Status strip
 
@@ -369,7 +388,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         var captionLine = _checksCaptionLine = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -379,7 +398,8 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         };
         captionLine.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         captionLine.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        captionLine.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 0: Caption | no-findings line
+        captionLine.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        captionLine.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 0: Caption | hint or no-findings line | Fix, Fix All
         _lblChecks = new Label
         {
             Text = "Checks",
@@ -402,13 +422,36 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
             Visible = false
         };
         _lblNoChecks.Height = _lblNoChecks.PreferredHeight;
+        // Fix runs the selected check's fix; Fix All every automatic one (both only while the list has findings)
+        _checksButtons = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(gap, 0, 0, 0),
+            Padding = new Padding(0),
+            BackColor = Theme.Surface,
+            Visible = false
+        };
+        _btnFix = (ThemedButton)ButtonHelper.CreateButton(CaseGuideUiText.FixButtonText, 0, buttonHeight, ButtonStyle.Default);
+        _btnFix.Margin = new Padding(0);
+        _btnFix.Enabled = false;
+        _btnFixAll = (ThemedButton)ButtonHelper.CreateButton(CaseGuideUiText.FixAllButtonText(0), 0, buttonHeight, ButtonStyle.Default);
+        _btnFixAll.Margin = new Padding(smallGap, 0, 0, 0);
+        _checksButtons.Controls.Add(_btnFix);
+        _checksButtons.Controls.Add(_btnFixAll);
         captionLine.Controls.Add(_lblChecks, 0, 0);
         captionLine.Controls.Add(_lblNoChecks, 1, 0);
+        captionLine.Controls.Add(_checksButtons, 2, 0);
         checksLayout.Controls.Add(captionLine, 0, 0);
 
         _checksGridHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6)), BackColor = Theme.Surface };
         _gridChecks = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true };
         GridStyle.Apply(_gridChecks, this);
+        // Two lines per check: what is wrong, then how to fix it (painted in CellPainting)
+        _gridChecks.RowTemplate.Height = LogicalToDeviceUnits(ChecksRowHeight);
         SetChecksSelectionVisible(false);
         _gridChecks.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -491,11 +534,19 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnCancel.Click += BtnCancel_Click;
         _gridChecks.CellDoubleClick += (s, e) => NavigateToFinding(e.RowIndex);
         _gridChecks.KeyDown += GridChecks_KeyDown;
-        _gridChecks.CellFormatting += GridChecks_CellFormatting;
+        _gridChecks.CellPainting += GridChecks_CellPainting;
         // The grid makes its first row current when it is first shown; the selection is drawn only while the
-        // grid has focus, so an unfocused Checks list never looks like something was picked
+        // grid has focus or the user picked a check, so an untouched Checks list never looks like something was picked
         _gridChecks.Enter += (s, e) => SetChecksSelectionVisible(true);
-        _gridChecks.Leave += (s, e) => SetChecksSelectionVisible(false);
+        _gridChecks.Leave += (s, e) => SetChecksSelectionVisible(_checksUserSelected);
+        _gridChecks.SelectionChanged += (s, e) =>
+        {
+            if (_gridChecks.Focused && _gridChecks.SelectedRows.Count > 0)
+                _checksUserSelected = true;
+            UpdateFixButtons();
+        };
+        _btnFix.Click += async (s, e) => await FixSelectedCheckAsync();
+        _btnFixAll.Click += (s, e) => FixAllChecks();
         _root.SizeChanged += (s, e) =>
         {
             SizeBanner();
@@ -750,6 +801,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         }
 
         _showBanner = show;
+        _bannerPrimaryShown = show && content.Variant is BannerVariant.StaleCore or BannerVariant.StaleDownstream;
         if (_banner.Visible != show)
             _banner.Visible = show;
         SizeBanner();
@@ -791,6 +843,9 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _lblChecks.Text = CaseGuideUiText.ChecksCaption(
             CaseGuideValidator.CountErrors(visible), CaseGuideValidator.CountWarnings(visible), _isGenerating);
 
+        // A picked check keeps its place after a fix: the next check moves up into the selection
+        var keepIndex = _checksUserSelected && _gridChecks.SelectedRows.Count > 0 ? _gridChecks.SelectedRows[0].Index : -1;
+        _visibleFindings = visible;
         _gridChecks.Rows.Clear();
         foreach (var finding in visible)
         {
@@ -798,17 +853,26 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
                 finding.Severity == IssueSeverity.Error ? "Error" : "Warning",
                 finding.Where,
                 finding.Message);
-            _gridChecks.Rows[index].Tag = finding;
+            var row = _gridChecks.Rows[index];
+            row.Tag = finding;
+            // The painted lines end in an ellipsis when the window is narrow; the tooltip has both in full
+            row.Cells[2].ToolTipText = finding.FixHint.Length > 0 ? $"{finding.Message}\n{finding.FixHint}" : finding.Message;
         }
         _gridChecks.ClearSelection(); // Keep severity colors visible on the first row
+        if (keepIndex >= 0 && _gridChecks.Rows.Count > 0)
+            _gridChecks.Rows[Math.Min(keepIndex, _gridChecks.Rows.Count - 1)].Selected = true;
+        else
+            _checksUserSelected = false;
+        SetChecksSelectionVisible(_gridChecks.Focused || _checksUserSelected);
 
         _checksHasFindings = visible.Count > 0;
         _checksShowsNoProblems = !_checksHasFindings && !_isGenerating && draft.Guide != null;
         UpdateChecksLayout();
+        UpdateFixButtons();
     }
 
     /// <summary>
-    /// 152 with findings, one content-sized line without. When the window is too short for the list and a usable
+    /// Up to two whole checks with findings, one content-sized line without. When the window is too short for even one check and a usable
     /// body (MinBodyHeight), the card keeps only its caption line and says how to see the list, so the tab's
     /// detail card never collapses into overlapping fields.
     /// </summary>
@@ -817,26 +881,118 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         if (_state == null)
             return;
 
-        var collapse = _checksCard.Visible && _checksHasFindings && ChecksWouldCrowdBody();
-        _checksGridHost.Visible = _checksHasFindings && !collapse;
-        // 12 above and 8 below the caption over the list; a one-line card is balanced 12 / 12
-        var captionBottom = LogicalToDeviceUnits(_checksGridHost.Visible ? Theme.SmallGap : 12);
-        if (_checksCaptionLine.Margin.Bottom != captionBottom)
-            _checksCaptionLine.Margin = new Padding(_checksCaptionLine.Margin.Left, _checksCaptionLine.Margin.Top, _checksCaptionLine.Margin.Right, captionBottom);
+        // The caption line holds the 34 px Fix buttons whenever there are findings: 10 above and 8 below, so the header is
+        // as tall as the tab cards' headers (52); a one-line card without findings is balanced 12 / 12
+        var buttons = _checksHasFindings && !_isGenerating;
+        var captionTop = LogicalToDeviceUnits(buttons ? 10 : 12);
+        var captionBottom = LogicalToDeviceUnits(buttons ? Theme.SmallGap : 12);
+        if (_checksCaptionLine.Margin.Top != captionTop || _checksCaptionLine.Margin.Bottom != captionBottom)
+            _checksCaptionLine.Margin = new Padding(_checksCaptionLine.Margin.Left, captionTop, _checksCaptionLine.Margin.Right, captionBottom);
+        if (_checksButtons.Visible != buttons)
+            _checksButtons.Visible = buttons;
 
-        // One line beside the caption: "No problems found..." (Success) or the collapsed-list hint (TextMuted)
-        var lineText = collapse ? ChecksCollapsedText : _checksShowsNoProblems ? CaseGuideUiText.NoChecksText : string.Empty;
+        // Two whole checks when the body keeps MinBodyHeight, else one, else none (the list folds to its caption line)
+        var rows = _checksCard.Visible && _checksHasFindings ? Math.Min(ChecksMaxRows, _visibleFindings.Count) : 0;
+        while (rows > 0 && ChecksWouldCrowdBody(ChecksCardHeightFor(rows)))
+            rows--;
+        var collapse = _checksCard.Visible && _checksHasFindings && rows == 0;
+        _checksListShown = _checksHasFindings && !collapse;
+        _checksGridHost.Visible = _checksListShown;
+
+        // One line beside the caption: "No problems found..." (Success), the double-click hint or the collapsed-list hint (TextMuted)
+        var lineText = collapse ? ChecksCollapsedText
+            : _checksShowsNoProblems ? CaseGuideUiText.NoChecksText
+            : _checksHasFindings && !_isGenerating ? CaseGuideUiText.ChecksHintText
+            : string.Empty;
         _lblNoChecks.Text = lineText;
-        _lblNoChecks.ForeColor = collapse ? Theme.TextMuted : Theme.Success;
+        _lblNoChecks.ForeColor = _checksShowsNoProblems && !collapse ? Theme.Success : Theme.TextMuted;
         _lblNoChecks.Visible = lineText.Length > 0;
 
-        var sizeType = _checksCard.Visible && _checksHasFindings && !collapse ? SizeType.Absolute : SizeType.AutoSize;
-        if (_checksRow.SizeType != sizeType)
-            _checksRow.SizeType = sizeType;
+        if (rows > 0)
+        {
+            var height = ChecksCardHeightFor(rows);
+            if (_checksRow.SizeType != SizeType.Absolute)
+                _checksRow.SizeType = SizeType.Absolute;
+            if ((int)_checksRow.Height != height)
+                _checksRow.Height = height;
+        }
+        else if (_checksRow.SizeType != SizeType.AutoSize)
+        {
+            _checksRow.SizeType = SizeType.AutoSize;
+        }
+        UpdateFixButtons();
     }
 
-    // True when showing the 152 list would leave the body shorter than MinBodyHeight
-    private bool ChecksWouldCrowdBody()
+    /// <summary>
+    /// Root row height (device px) that shows exactly <paramref name="rows"/> whole checks: the card's top margin and 1 px
+    /// padding, the caption line with its margins, the grid header, the rows and the 6 px bottom inset.
+    /// </summary>
+    private int ChecksCardHeightFor(int rows)
+    {
+        var caption = Math.Max(_lblChecks.PreferredHeight, _checksButtons.Visible ? LogicalToDeviceUnits(34) : 0)
+            + _checksCaptionLine.Margin.Vertical;
+        var header = _gridChecks.ColumnHeadersVisible ? _gridChecks.ColumnHeadersHeight : 0;
+        return _checksCard.Margin.Vertical + _checksCard.Padding.Vertical + caption + header
+            + rows * _gridChecks.RowTemplate.Height + _checksGridHost.Margin.Vertical;
+    }
+
+    /// <summary>
+    /// Fix follows the selected check (Primary for an automatic fix, the matching action for a model fix, disabled when the
+    /// check has none); Fix All ({n}) shows while any listed check fixes automatically.
+    /// </summary>
+    private void UpdateFixButtons()
+    {
+        if (_state == null)
+            return;
+
+        var state = CaseGuideUiText.FixButtonFor(_checksListShown ? SelectedCheck() : null, _isGenerating, _bannerPrimaryShown);
+        if (_btnFix.Text != state.Text)
+            _btnFix.Text = state.Text;
+        var variant = state.Primary ? ButtonStyle.Primary : ButtonStyle.Default;
+        if (_btnFix.Variant != variant)
+            _btnFix.Variant = variant;
+        _btnFix.Enabled = state.Enabled;
+        // The list is folded on a short window, so there is no row to pick
+        _btnFix.Visible = _checksListShown;
+
+        var automatic = CaseGuideUiText.AutomaticFixCount(_visibleFindings);
+        var fixAllText = CaseGuideUiText.FixAllButtonText(automatic);
+        if (_btnFixAll.Text != fixAllText)
+            _btnFixAll.Text = fixAllText;
+        _btnFixAll.Visible = automatic > 0;
+        _btnFixAll.Enabled = !_isGenerating;
+        _btnFixAll.Margin = new Padding(_btnFix.Visible ? LogicalToDeviceUnits(Theme.SmallGap) : 0, 0, 0, 0);
+    }
+
+    // The check the user picked; null until they pick one (the grid's own first-row selection does not count)
+    private GuideFinding? SelectedCheck() =>
+        (_checksUserSelected || _gridChecks.Focused) && _gridChecks.SelectedRows.Count > 0
+            ? _gridChecks.SelectedRows[0].Tag as GuideFinding
+            : null;
+
+    /// <summary>
+    /// Picks a check as if the user clicked it: selected, drawn, scrolled into view, and the Fix button follows it.
+    /// </summary>
+    internal void SelectCheck(int rowIndex, bool focus)
+    {
+        if (rowIndex < 0 || rowIndex >= _gridChecks.Rows.Count)
+            return;
+
+        _checksUserSelected = true;
+        if (focus && _gridChecks.CanFocus)
+            _gridChecks.Focus();
+        _gridChecks.ClearSelection();
+        _gridChecks.Rows[rowIndex].Selected = true;
+        if (_gridChecks.Columns.Count > 0)
+            _gridChecks.CurrentCell = _gridChecks.Rows[rowIndex].Cells[0];
+        SetChecksSelectionVisible(true);
+        if (_gridChecks.DisplayedRowCount(false) > 0 && !_gridChecks.Rows[rowIndex].Displayed)
+            _gridChecks.FirstDisplayedScrollingRowIndex = rowIndex;
+        UpdateFixButtons();
+    }
+
+    // True when a Checks card of this height would leave the body shorter than MinBodyHeight
+    private bool ChecksWouldCrowdBody(int checksHeight)
     {
         var rows = _root.GetRowHeights();
         if (rows.Length < 6 || _root.ClientSize.Height <= 0)
@@ -844,8 +1000,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
 
         // The banner row is set by SizeBanner (current even before the next layout); the others do not depend on Checks
         var bodyAndChecks = _root.ClientSize.Height - rows[0] - (int)_bannerRow.Height - rows[2] - rows[5];
-        // The row keeps its 152 height while it is AutoSize
-        return bodyAndChecks - (int)_checksRow.Height < LogicalToDeviceUnits(MinBodyHeight);
+        return bodyAndChecks - checksHeight < LogicalToDeviceUnits(MinBodyHeight);
     }
 
     private void ShowSelectedTab()
@@ -959,11 +1114,56 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     {
         if (rowIndex < 0 || rowIndex >= _gridChecks.Rows.Count)
             return;
-        if (_gridChecks.Rows[rowIndex].Tag is not GuideFinding finding || PartFor(finding.Area) is not { } part)
+        if (_gridChecks.Rows[rowIndex].Tag is GuideFinding finding)
+            NavigateToFinding(finding);
+    }
+
+    /// <summary>
+    /// Opens the finding's tab (a guide-level finding opens the tab it names in GoTo), selects its entry (for an
+    /// organization, its first character) and focuses the field the check is about.
+    /// </summary>
+    private void NavigateToFinding(GuideFinding finding)
+    {
+        if (_state == null || IsDisposed || PartFor(finding.GoTo ?? finding.Area) is not { } part)
             return;
 
+        var entityId = NavigationTarget(Draft, finding);
         // SelectEntity clears a filter that hides the entity, selects its row and focuses the first detail field
-        ShowTab(part, string.IsNullOrEmpty(finding.EntityId) ? null : finding.EntityId);
+        ShowTab(part, entityId.Length == 0 ? null : entityId);
+        var panel = _panels[part];
+        if (entityId.Length > 0 && panel.Visible)
+            panel.FocusField(finding.Field);
+    }
+
+    /// <summary>
+    /// Entry to select for a finding: its own entity, or for an organization finding shown on the Cast tab, the
+    /// organization's first character (the party's linked character for a party finding). Empty selects nothing.
+    /// </summary>
+    public static string NavigationTarget(CaseDraft draft, GuideFinding finding)
+    {
+        if (finding == null)
+            return string.Empty;
+        if (finding.Area != GuideArea.Guide || finding.GoTo != GuideArea.Cast)
+            return finding.EntityId ?? string.Empty;
+
+        var guide = draft?.Guide;
+        if (guide == null)
+            return string.Empty;
+
+        var orgId = finding.EntityId ?? string.Empty;
+        if (orgId.Length == 0 && finding.FixTargetId.Length > 0)
+        {
+            // A party finding: the organization (or character) with the party's name
+            var party = draft!.CoreDocument?.Parties?.FirstOrDefault(p => p != null && p.Id == finding.FixTargetId);
+            if (party != null && CaseGuideQuickFix.ExactNameMember(draft, party) is { } member)
+                return member.Id;
+            if (party != null && CaseGuideQuickFix.ExactNameOrganization(draft, party) is { } org)
+                orgId = org.Id;
+        }
+
+        return orgId.Length == 0
+            ? string.Empty
+            : guide.Cast.FirstOrDefault(c => c != null && c.OrganizationId == orgId)?.Id ?? string.Empty;
     }
 
     private void GridChecks_KeyDown(object? sender, KeyEventArgs e)
@@ -982,16 +1182,46 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _gridChecks.Invalidate();
     }
 
-    private void GridChecks_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    /// <summary>
+    /// Paints every Checks cell: Severity (Danger / Warning) and Where on the first line, and the Check cell as two lines,
+    /// the problem in Text and how to fix it in Small TextMuted. The first lines share one baseline across the row and the
+    /// pair is centered vertically; text starts at the grid's 15 px cell inset (Content x).
+    /// </summary>
+    private void GridChecks_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
     {
-        if (e.ColumnIndex != 0 || e.RowIndex < 0 || e.CellStyle == null)
+        if (e.RowIndex < 0 || e.ColumnIndex < 0 || e.Graphics == null || e.CellStyle == null)
             return;
         if (_gridChecks.Rows[e.RowIndex].Tag is not GuideFinding finding)
             return;
 
-        var color = finding.Severity == IssueSeverity.Error ? Theme.Danger : Theme.Warning;
-        e.CellStyle.ForeColor = color;
-        e.CellStyle.SelectionForeColor = color;
+        e.Paint(e.ClipBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border | DataGridViewPaintParts.SelectionBackground);
+
+        // No NoPadding: stock text cells keep GDI's left padding, so painted text lands on the header text x
+        const TextFormatFlags flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis
+            | TextFormatFlags.Left | TextFormatFlags.Top;
+        var font = e.CellStyle.Font ?? _gridChecks.Font;
+        var lineHeight = TextRenderer.MeasureText(e.Graphics, "Ag", font, Size.Empty, flags).Height;
+        var hintHeight = TextRenderer.MeasureText(e.Graphics, "Ag", _checkHintFont, Size.Empty, flags).Height;
+        var gap = LogicalToDeviceUnits(CheckLineGap);
+        // Rows without a hint center their single line; every cell of the row uses the same first-line top
+        var pairHeight = finding.FixHint.Length > 0 ? lineHeight + gap + hintHeight : lineHeight;
+        var bounds = e.CellBounds;
+        var top = bounds.Top + Math.Max(0, (bounds.Height - pairHeight) / 2);
+        var left = bounds.Left + e.CellStyle.Padding.Left;
+        var width = Math.Max(0, bounds.Right - left - LogicalToDeviceUnits(8));
+
+        var (text, color) = e.ColumnIndex switch
+        {
+            0 => (finding.Severity == IssueSeverity.Error ? "Error" : "Warning", finding.Severity == IssueSeverity.Error ? Theme.Danger : Theme.Warning),
+            1 => (finding.Where, Theme.Text),
+            _ => (finding.Message, Theme.Text)
+        };
+        TextRenderer.DrawText(e.Graphics, text, font, new Rectangle(left, top, width, lineHeight), color, flags);
+        if (e.ColumnIndex == 2 && finding.FixHint.Length > 0)
+            TextRenderer.DrawText(e.Graphics, finding.FixHint, _checkHintFont,
+                new Rectangle(left, top + lineHeight + gap, width, hintHeight), Theme.TextMuted, flags);
+
+        e.Handled = true;
     }
 
     private void ReviewFacts()

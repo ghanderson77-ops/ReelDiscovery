@@ -304,6 +304,14 @@ public class ValuesTabPanel : GuideTabPanel
 
     // ----- Detail -----
 
+    public override void FocusField(GuideFindingField field) => FocusDetailControl(field switch
+    {
+        GuideFindingField.Label => _txtLabel,
+        GuideFindingField.Value => _txtValue,
+        GuideFindingField.LinkedFacts => _pickFacts,
+        _ => null
+    });
+
     protected override void ShowDetail(string? id)
     {
         var value = Value(id);

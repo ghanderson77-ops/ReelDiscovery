@@ -561,7 +561,9 @@ public partial class StepCaseGuide
     }
 
     /// <summary>
-    /// Next gate: unfinished parts block (M1), errors block (M2), warnings ask with No as the default (M3) (T-03-54).
+    /// Next gate: unfinished parts block and say how to finish (M1); errors open the errors dialog (M2) with each error's
+    /// fix, Fix Automatically, Show Checks (the default) and Continue Anyway (confirmed, default No); warnings ask with No
+    /// as the default (M3) (T-03-54).
     /// </summary>
     public Task<bool> ValidateStepAsync()
     {
@@ -570,24 +572,188 @@ public partial class StepCaseGuide
 
         CommitAllEdits();
         RefreshAll();
+        return Task.FromResult(EvaluateNextGate());
+    }
 
+    private bool EvaluateNextGate()
+    {
         var gate = CaseGuideUiText.NextGateDecision(_isGenerating, UnfinishedParts(Draft),
             CaseGuideValidator.CountErrors(_findings), CaseGuideValidator.CountWarnings(_findings));
         switch (gate.Kind)
         {
             case NextGateKind.Disabled:
-                return Task.FromResult(false);
+                return false;
             case NextGateKind.Unfinished:
-            case NextGateKind.Errors:
                 MessageBox.Show(FindForm(), gate.Message, gate.Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return Task.FromResult(false);
+                return false;
+            case NextGateKind.Errors:
+                return ErrorsGate();
             case NextGateKind.Warnings:
                 var answer = MessageBox.Show(FindForm(), gate.Message, gate.Title, MessageBoxButtons.YesNo, MessageBoxIcon.Question,
                     MessageBoxDefaultButton.Button2);
-                return Task.FromResult(answer == DialogResult.Yes);
+                return answer == DialogResult.Yes;
             default:
-                return Task.FromResult(true);
+                return true;
         }
+    }
+
+    // M2: the errors dialog; Fix Automatically applies the automatic fixes and evaluates the gate again
+    private bool ErrorsGate()
+    {
+        var errors = _findings.Where(f => f.Severity == IssueSeverity.Error).ToList();
+        GuideErrorsChoice choice;
+        using (var dialog = new GuideErrorsDialog(CaseGuideUiText.ErrorsGateText(errors)))
+        {
+            // Esc and the close box mean Show Checks (the dialog's Cancel button)
+            choice = dialog.ShowDialog(FindForm()) == DialogResult.OK ? dialog.Choice : GuideErrorsChoice.ShowChecks;
+        }
+        if (IsDisposed)
+            return false;
+
+        switch (choice)
+        {
+            case GuideErrorsChoice.FixAutomatically:
+                var applied = CaseGuideQuickFix.ApplyAll(Draft, errors);
+                AfterFix(applied);
+                // Nothing changed means the gate would only ask the same thing again
+                if (applied == 0)
+                {
+                    ShowFirstError();
+                    return false;
+                }
+                return EvaluateNextGate();
+
+            case GuideErrorsChoice.ContinueAnyway:
+                var (title, text) = CaseGuideUiText.C15ContinueWithErrors(errors.Count);
+                var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+                if (answer == DialogResult.Yes)
+                    return true;
+                ShowFirstError();
+                return false;
+
+            default:
+                ShowFirstError();
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Show Checks: selects the first error in the Checks list and focuses it; when the list is folded (short window) it
+    /// opens the error's entry instead.
+    /// </summary>
+    private void ShowFirstError()
+    {
+        if (_state == null || IsDisposed)
+            return;
+
+        var index = _visibleFindings.FindIndex(f => f.Severity == IssueSeverity.Error);
+        if (index < 0)
+            return;
+
+        if (_checksListShown)
+            SelectCheck(index, focus: true);
+        else
+            NavigateToFinding(_visibleFindings[index]);
+    }
+
+    // ----- Checks fixes -----
+
+    /// <summary>
+    /// Fix (Checks card): applies the selected check's automatic fix, or starts the run its model fix needs through the
+    /// same path (and confirmation) as the matching button.
+    /// </summary>
+    private async Task FixSelectedCheckAsync()
+    {
+        if (_isGenerating || _state == null || Draft.Guide == null || SelectedCheck() is not { } finding)
+            return;
+
+        CommitAllEdits();
+        if (finding.HasAutomaticFix)
+        {
+            AfterFix(CaseGuideQuickFix.Apply(Draft, finding) ? 1 : 0);
+            return;
+        }
+
+        switch (finding.QuickFix)
+        {
+            case GuideQuickFix.RegenerateEntry when PartFor(finding.Area) is { } part && part != GuidePart.Issues:
+                if (ConfirmRegenerateEdited(part, finding.EntityId))
+                    await RegenerateEntryAsync(part, finding.EntityId, string.Empty);
+                break;
+            case GuideQuickFix.RegenerateCast:
+                await RegenerateTabAsync(GuidePart.Cast);
+                break;
+            case GuideQuickFix.RegenerateValues:
+                await RegenerateTabAsync(GuidePart.Values);
+                break;
+            case GuideQuickFix.RetryIssueDetails:
+                await RetryIssueDetailsAsync();
+                break;
+            case GuideQuickFix.UpdateGuide:
+                await UpdateGuideAsync();
+                break;
+            case GuideQuickFix.ResumeGuide:
+                await GenerateOrResumeAsync();
+                break;
+        }
+    }
+
+    // C3 for a hand-edited entry, like the detail card's Regenerate button
+    private bool ConfirmRegenerateEdited(GuidePart part, string entityId)
+    {
+        var guide = Draft.Guide;
+        var edited = part switch
+        {
+            GuidePart.Cast => guide?.FindCast(entityId)?.IsUserEdited,
+            GuidePart.Facts => guide?.FindFact(entityId)?.IsUserEdited,
+            GuidePart.Values => guide?.FindValue(entityId)?.IsUserEdited,
+            _ => null
+        };
+        if (edited == null)
+            return false;
+        if (edited == false)
+            return true;
+
+        var noun = part switch { GuidePart.Cast => "Character", GuidePart.Values => "Value", _ => "Fact" };
+        var (title, text) = CaseGuideUiText.C3RegenerateEdited(noun, EntityName(part, entityId));
+        var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+        return answer == DialogResult.Yes && !IsDisposed;
+    }
+
+    /// <summary>
+    /// Fix All ({n}): lists the automatic fixes by kind (default Cancel) and applies them all.
+    /// </summary>
+    private void FixAllChecks()
+    {
+        if (_isGenerating || _state == null || Draft.Guide == null)
+            return;
+
+        CommitAllEdits();
+        RefreshAll();
+        var findings = _visibleFindings.Where(f => f.HasAutomaticFix).ToList();
+        if (findings.Count == 0)
+            return;
+
+        using (var dialog = new FixAllDialog(CaseGuideUiText.FixAllText(CaseGuideQuickFix.CountAutomatic(findings))))
+        {
+            if (dialog.ShowDialog(FindForm()) != DialogResult.OK || IsDisposed)
+                return;
+        }
+
+        AfterFix(CaseGuideQuickFix.ApplyAll(Draft, findings));
+    }
+
+    // After any fix: revalidate, refresh, autosave and say what is left
+    private void AfterFix(int fixedCount)
+    {
+        if (IsDisposed)
+            return;
+
+        RefreshAll();
+        if (fixedCount > 0)
+            QueueSave();
+        SetStatus(CaseGuideUiText.FixedChecksText(fixedCount, CaseGuideValidator.CountErrors(_findings), CaseGuideValidator.CountWarnings(_findings)),
+            fixedCount > 0 ? Theme.Success : Theme.Warning);
     }
 
     protected override void Dispose(bool disposing)
@@ -603,6 +769,8 @@ public partial class StepCaseGuide
             {
                 // The run already finished and released its token source; nothing to cancel
             }
+
+            _checkHintFont.Dispose();
 
             // Tab actions of unselected tabs sit outside any control tree, so nothing else disposes them
             foreach (var panel in _panels.Values)

@@ -14,6 +14,7 @@ public class StatTile : UserControl
     private Label _lblCaption = null!;
     private Label _lblValue = null!;
     private Label _lblSubLine = null!;
+    private int _contentHeight;
 
     public StatTile()
     {
@@ -54,13 +55,18 @@ public class StatTile : UserControl
             Padding = Padding.Empty
         };
         _layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        _layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 0: Caption
-        _layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 1: Value
-        _layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 2: Sub-line
-
         _lblCaption = TileLabel(Theme.SmallFont(), Theme.TextMuted, 0);
         _lblValue = TileLabel(Theme.TitleFont(), Theme.Text, LogicalToDeviceUnits(4));
         _lblSubLine = TileLabel(Theme.SmallFont(), Theme.TextMuted, LogicalToDeviceUnits(2));
+
+        // Fixed single-line rows: an AutoSize row would measure an ellipsized label as wrapped text
+        // and shift the lines of a narrow tile out of line with its neighbours
+        // Measured before the labels are docked: once in the layout their heights follow the cells
+        var rowHeights = new[] { RowHeight(_lblCaption), RowHeight(_lblValue), RowHeight(_lblSubLine) };
+        _contentHeight = rowHeights.Sum();
+        _layout.RowStyles.Add(new RowStyle(SizeType.Absolute, rowHeights[0])); // 0: Caption
+        _layout.RowStyles.Add(new RowStyle(SizeType.Absolute, rowHeights[1])); // 1: Value
+        _layout.RowStyles.Add(new RowStyle(SizeType.Absolute, rowHeights[2])); // 2: Sub-line
         _layout.Controls.Add(_lblCaption, 0, 0);
         _layout.Controls.Add(_lblValue, 0, 1);
         _layout.Controls.Add(_lblSubLine, 0, 2);
@@ -78,24 +84,26 @@ public class StatTile : UserControl
             AutoEllipsis = true,
             UseMnemonic = false,
             Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
+            // TopLeft: the rows are exactly one line tall, and MiddleLeft centres an ellipsized label's
+            // text as if it wrapped, lifting it half a line above its neighbours
+            TextAlign = ContentAlignment.TopLeft,
             Margin = new Padding(0, top, 0, 0),
             Font = font,
             ForeColor = color,
             BackColor = Theme.Surface
         };
-        label.Height = label.PreferredHeight;
+        // One line exactly (PreferredHeight adds slack that would pile up under the sub-line)
+        label.Height = font.Height;
         return label;
     }
+
+    private static int RowHeight(Label label) => label.Height + label.Margin.Vertical;
 
     /// <summary>
     /// Card padding plus the three label rows and their top margins.
     /// </summary>
     private int TileHeight() =>
-        _card.Padding.Vertical
-        + _lblCaption.Height + _lblCaption.Margin.Vertical
-        + _lblValue.Height + _lblValue.Margin.Vertical
-        + _lblSubLine.Height + _lblSubLine.Margin.Vertical;
+        _card.Padding.Vertical + _contentHeight;
 
     public override Size GetPreferredSize(Size proposedSize) => new(Width, TileHeight());
 

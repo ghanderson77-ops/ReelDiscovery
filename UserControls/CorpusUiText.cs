@@ -1,6 +1,8 @@
 using System.Globalization;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Services.Corpus;
 
 namespace ReelDiscovery.UserControls;
 
@@ -22,6 +24,100 @@ public enum CorpusFileStatus
     Written,
     EarlierPlan,
     Failed
+}
+
+public enum PlanBannerVariant
+{
+    None,
+    StaleGuide,
+    SettingsChanged
+}
+
+public class PlanBannerContent
+{
+    public PlanBannerVariant Variant;
+    public string Heading = "";
+    public string Body = "";
+    public string PrimaryText = "";
+    public string SecondaryText = "";
+}
+
+public enum TileKind
+{
+    Emails,
+    Threads,
+    Relevant,
+    Hot,
+    Privileged,
+    Attachments,
+    Cost
+}
+
+public class TileContent
+{
+    public string Caption = "";
+    public string Value = "";
+    public string SubLine = "";
+    public string Tooltip = "";
+}
+
+/// <summary>
+/// What entering Review Plan does (UI-SPEC S2 entry rules; reopen and unreadable-plan cards added).
+/// </summary>
+public enum ReviewPlanEntry
+{
+    KeepRun,
+    AutoPlan,
+    AutoReplan,
+    SettingsBanner,
+    StaleBanner,
+    ShowPlan,
+    NoPlanCard,
+    UnreadableCard
+}
+
+public class ReviewPlanEntryInput
+{
+    public bool Running;
+    public bool HasPlan;
+
+    // Non-empty when the saved plan could not be loaded
+    public string UnreadableReason = "";
+    public bool Approved;
+
+    // plan.SettingsHash != settings.ComputeHash(); dismissed = that hash was kept with Keep This Plan
+    public bool SettingsChanged;
+    public bool SettingsDismissed;
+
+    // plan.GuideHash != guide.ComputeHash(); dismissed = that hash was kept with Keep This Plan
+    public bool GuideStale;
+    public bool GuideDismissed;
+
+    // Reopened case: show the No corpus plan yet card instead of planning (Phase 3 U13 cost control)
+    public bool SuppressAutoPlan;
+}
+
+public enum PlanStateCard
+{
+    Planning,
+    NoPlan,
+    Failed,
+    Unreadable
+}
+
+public enum PlanNextGateKind
+{
+    Disabled,
+    NoPlan,
+    AskApprove,
+    Proceed
+}
+
+public class PlanNextGateResult
+{
+    public PlanNextGateKind Kind;
+    public string Title = "";
+    public string Message = "";
 }
 
 /// <summary>
@@ -255,7 +351,316 @@ public static class CorpusUiText
     public static string MissingFileText(string fileName) =>
         $"{fileName} is no longer in the case folder. Approve the plan again on Review Plan to rewrite it.";
 
+    // --- Review Plan: entry rules (D-12, D-25, D-26) ---
+
+    /// <summary>
+    /// First match wins: active run, unreadable plan, no plan (auto-plan, or the card on reopen), unapproved plan with
+    /// changed settings (auto re-plan), stale guide (banner; wins over changed settings), approved plan with changed
+    /// settings (banner), otherwise show the plan. Nothing re-plans an approved plan silently (T-04-34).
+    /// </summary>
+    public static ReviewPlanEntry ReviewPlanEntryDecision(ReviewPlanEntryInput input)
+    {
+        if (input.Running)
+            return ReviewPlanEntry.KeepRun;
+        if (!string.IsNullOrWhiteSpace(input.UnreadableReason))
+            return ReviewPlanEntry.UnreadableCard;
+        if (!input.HasPlan)
+            return input.SuppressAutoPlan ? ReviewPlanEntry.NoPlanCard : ReviewPlanEntry.AutoPlan;
+        if (!input.Approved && input.SettingsChanged)
+            return ReviewPlanEntry.AutoReplan;
+        if (input.GuideStale && !input.GuideDismissed)
+            return ReviewPlanEntry.StaleBanner;
+        if (input.Approved && input.SettingsChanged && !input.SettingsDismissed)
+            return ReviewPlanEntry.SettingsBanner;
+        return ReviewPlanEntry.ShowPlan;
+    }
+
+    /// <summary>
+    /// True when entering the step must set Approved = false and save: an approved plan behind a stale-guide banner (D-25).
+    /// </summary>
+    public static bool WithdrawsApproval(ReviewPlanEntryInput input) =>
+        input.Approved && ReviewPlanEntryDecision(input) == ReviewPlanEntry.StaleBanner;
+
+    // --- Review Plan: banner ---
+
+    /// <summary>
+    /// emails and percent are the plan's (earlier) settings; null for None.
+    /// </summary>
+    public static PlanBannerContent? PlanBannerText(PlanBannerVariant variant, int emails, int percent)
+    {
+        return variant switch
+        {
+            PlanBannerVariant.StaleGuide => new PlanBannerContent
+            {
+                Variant = variant,
+                Heading = "The plan is out of date with the case guide.",
+                Body = "The case guide changed after this plan was built. Re-plan builds a new plan from the current guide. Approval is withdrawn until you re-plan or keep this plan.",
+                PrimaryText = "Re-plan...",
+                SecondaryText = "Keep This Plan"
+            },
+            PlanBannerVariant.SettingsChanged => new PlanBannerContent
+            {
+                Variant = variant,
+                Heading = "The corpus settings changed after this plan was approved.",
+                Body = $"This plan still uses the earlier settings ({CaseGuideUiText.Plural(emails, "email", "emails")}, {N(percent)}% relevant). Re-plan builds a new plan with the current settings. Keep This Plan leaves the approved plan and its answer key as they are.",
+                PrimaryText = "Re-plan...",
+                SecondaryText = "Keep This Plan"
+            },
+            _ => null
+        };
+    }
+
+    // --- Review Plan: tiles ---
+
+    public static TileContent Tile(TileKind kind, PlanSummary summary, CostEstimate cost)
+    {
+        switch (kind)
+        {
+            case TileKind.Emails:
+                return new TileContent
+                {
+                    Caption = "Emails",
+                    Value = N(summary.Emails),
+                    SubLine = CaseGuideUiText.Plural(summary.Custodians, "custodian", "custodians"),
+                    Tooltip = $"{N(summary.Emails)} planned emails across {N(summary.Custodians)} custodian mailboxes"
+                };
+            case TileKind.Threads:
+                var average = summary.Threads == 0 ? 0.0 : (double)summary.Emails / summary.Threads;
+                return new TileContent
+                {
+                    Caption = "Threads",
+                    Value = N(summary.Threads),
+                    SubLine = $"avg {average.ToString("0.0", Invariant)} emails"
+                };
+            case TileKind.Relevant:
+                return new TileContent
+                {
+                    Caption = "Relevant",
+                    Value = PercentText(summary.RelevantPercent),
+                    SubLine = CaseGuideUiText.Plural(summary.Relevant, "email", "emails"),
+                    Tooltip = $"{N(summary.Relevant)} relevant and {N(summary.NonRelevant)} non-relevant emails"
+                };
+            case TileKind.Hot:
+                return new TileContent
+                {
+                    Caption = "Hot",
+                    Value = N(summary.HotEmails),
+                    SubLine = CaseGuideUiText.Plural(summary.HotFacts, "hot fact", "hot facts"),
+                    Tooltip = "Hot documents follow the facts marked Hot in the case guide."
+                };
+            case TileKind.Privileged:
+                return new TileContent
+                {
+                    Caption = "Privileged",
+                    Value = N(summary.PrivilegedThreads),
+                    SubLine = CaseGuideUiText.Plural(summary.PrivilegedEmails, "email", "emails"),
+                    Tooltip = "Privileged threads include in-house or outside counsel."
+                };
+            case TileKind.Attachments:
+                return new TileContent
+                {
+                    Caption = "Attachments",
+                    Value = N(summary.Attachments),
+                    SubLine = $"on {PercentText(summary.AttachmentPercent)} of emails",
+                    Tooltip = AttachmentTooltip(summary.AttachmentsByType)
+                };
+            default:
+                var model = string.IsNullOrWhiteSpace(cost.ModelName) ? "the Story model" : cost.ModelName.Trim();
+                return new TileContent
+                {
+                    Caption = "Est. cost",
+                    Value = "≈" + Money(cost.Total),
+                    SubLine = "to generate, ±50%",
+                    Tooltip = $"Rough estimate for writing this corpus on {model}: relevant email {Money(cost.RelevantCost)}, other email {Money(cost.OtherCost)}, attachments {Money(cost.AttachmentCost)}. Images and voicemail are billed separately by OpenAI. Planning cost so far is in the cost ticker."
+                };
+        }
+    }
+
+    // --- Review Plan: stage checklist and progress ---
+
+    public static string StageName(PlanStage stage) => stage switch
+    {
+        PlanStage.Allocating => "Allocating threads to the key facts",
+        PlanStage.PlanningRelevant => "Planning relevant threads",
+        PlanStage.PlanningOther => "Planning other email",
+        PlanStage.WritingProtocol => "Writing the review protocol",
+        _ => "Checking the plan"
+    };
+
+    public static string StageProgress(int done, int total) => $"{N(done)} of {N(total)}";
+
+    /// <summary>
+    /// Status strip message; relevant chunks and other-email batches show "(chunk/batch i of n)" when n > 0.
+    /// </summary>
+    public static string ProgressText(PlanStage stage, int index, int total)
+    {
+        var name = StageName(stage);
+        if (total > 0 && stage == PlanStage.PlanningRelevant)
+            return $"{name} (chunk {N(index)} of {N(total)})...";
+        if (total > 0 && stage == PlanStage.PlanningOther)
+            return $"{name} (batch {N(index)} of {N(total)})...";
+        return name + "...";
+    }
+
+    // --- Review Plan: state cards ---
+
+    public static StateCardContent StateCard(PlanStateCard card, string reason = "")
+    {
+        return card switch
+        {
+            PlanStateCard.Planning => new StateCardContent
+            {
+                Heading = "Planning the corpus...",
+                Body = "Code fixes every email's date, people and labels first. Then the model writes a subject and purpose for each thread. This takes 1-2 minutes for 1,000 emails and up to 10 minutes for 5,000."
+            },
+            PlanStateCard.Failed => new StateCardContent
+            {
+                Heading = "The plan was not built",
+                Body = Sentence(reason) + "Your corpus settings were kept. Click Retry Planning to try again.",
+                ButtonText = "Retry Planning"
+            },
+            PlanStateCard.Unreadable => new StateCardContent
+            {
+                Heading = "The saved plan could not be opened",
+                Body = Sentence(reason) + "Click Plan Corpus to build a new plan from the case guide.",
+                ButtonText = "Plan Corpus"
+            },
+            _ => new StateCardContent
+            {
+                Heading = "No corpus plan yet",
+                Body = "Click Plan Corpus to plan every thread and message from the case guide and your corpus settings.",
+                ButtonText = "Plan Corpus"
+            }
+        };
+    }
+
+    // --- Review Plan: Checks card ---
+
+    public const string NoChecksText = "No problems found. Every key fact has planned evidence, and every date and participant checks out.";
+    public const string ChecksHint = "Warnings never block Approve Plan.";
+
+    public static string ChecksCaption(int warnings) =>
+        warnings <= 0 ? "Checks" : $"Checks ({CaseGuideUiText.Plural(warnings, "warning", "warnings")})";
+
+    // --- Review Plan: outcome status lines ---
+
+    public const string KeptStaleText = "Kept this plan. Click Approve Plan to write the answer key again.";
+    public const string ApprovingText = "Writing the answer key and review protocol...";
+
+    public static string ReadyText(int emails, int threads, int relevant)
+    {
+        var emailText = CaseGuideUiText.Plural(emails, "email", "emails");
+        var threadText = CaseGuideUiText.Plural(threads, "thread", "threads");
+        return $"Plan ready: {emailText} in {threadText}, {N(relevant)} relevant. Review it, then click Approve Plan.";
+    }
+
+    public static string ReadyWithWarningsText(int warnings) =>
+        $"Plan ready with {CaseGuideUiText.Plural(warnings, "warning", "warnings")}. Review the Checks list, then click Approve Plan.";
+
+    public static string CancelledText(bool previousPlan) =>
+        previousPlan
+            ? "Planning cancelled. The previous plan is still in place."
+            : "Planning cancelled. Your corpus settings were kept.";
+
+    public static string FatalText(string message) =>
+        $"Planning stopped{Colon(message)}. Fix the problem on the API Configuration step, then click Retry Planning.";
+
+    public static string RefusedText(int refused, int total, string message)
+    {
+        var why = TrimMessage(message);
+        var detail = why.Length == 0 ? "" : $" ({why})";
+        return $"Planning stopped: the model declined {N(refused)} of {N(total)} thread batches{detail}. Click Retry Planning, or Re-plan with guidance that softens the wording.";
+    }
+
+    public static string ApprovedText(string folderName) =>
+        $"Plan approved. Wrote answer-key.csv, answer-key.xlsx and {ProtocolFileName(folderName)} to the case folder.";
+
+    public static string ApproveFileOpenText(string fileName) => $"Close {fileName}, then click Approve Plan again.";
+
+    public static string ApproveFailedText(string reason) =>
+        $"Could not write the answer key{Colon(reason)}. Check that the case folder is writable, then click Approve Plan again.";
+
+    // --- Review Plan: Next gate, confirmations, badge ---
+
+    public static PlanNextGateResult PlanNextGate(bool running, bool hasPlan, bool approved)
+    {
+        if (running)
+            return new PlanNextGateResult { Kind = PlanNextGateKind.Disabled };
+        if (!hasPlan)
+        {
+            return new PlanNextGateResult
+            {
+                Kind = PlanNextGateKind.NoPlan,
+                Title = "No Plan Yet",
+                Message = "There is no corpus plan yet. Click Plan Corpus, then approve the plan."
+            };
+        }
+
+        if (!approved)
+        {
+            return new PlanNextGateResult
+            {
+                Kind = PlanNextGateKind.AskApprove,
+                Title = "Approve the Plan",
+                Message = "Approve this plan and continue? Approve Plan writes the answer key (CSV and Excel) and the review protocol to the case folder."
+            };
+        }
+
+        return new PlanNextGateResult { Kind = PlanNextGateKind.Proceed };
+    }
+
+    public static (string Title, string Text) CP1CancelPlanning(bool previousPlan)
+    {
+        const string text = "Stop planning? The partial plan is discarded. Your corpus settings are kept.";
+        return ("Cancel Planning", previousPlan ? text + " The previous plan stays in place." : text);
+    }
+
+    public static (string Title, string Text) CP2ClosePlanning() =>
+        ("Stop Planning?", "Planning is still running. Close and stop it? The partial plan is discarded; your settings are saved.");
+
+    public static string ApprovalBadgeText(DateTime approvedLocal) =>
+        "Approved " + approvedLocal.ToString("MMM d, h:mm tt", Invariant);
+
     // --- Shared formatting ---
+
+    /// <summary>
+    /// "{n} documents, {n} calendar invites, {n} images, {n} voicemails", listing only types with a count;
+    /// Word, Excel and PowerPoint together are documents.
+    /// </summary>
+    private static string AttachmentTooltip(IReadOnlyDictionary<AttachmentType, int> byType)
+    {
+        int Count(AttachmentType type) => byType.TryGetValue(type, out var n) ? Math.Max(0, n) : 0;
+
+        var docs = Count(AttachmentType.Word) + Count(AttachmentType.Excel) + Count(AttachmentType.PowerPoint);
+        var parts = new List<string>();
+        if (docs > 0)
+            parts.Add(CaseGuideUiText.Plural(docs, "document", "documents"));
+        if (Count(AttachmentType.CalendarInvite) > 0)
+            parts.Add(CaseGuideUiText.Plural(Count(AttachmentType.CalendarInvite), "calendar invite", "calendar invites"));
+        if (Count(AttachmentType.Image) > 0)
+            parts.Add(CaseGuideUiText.Plural(Count(AttachmentType.Image), "image", "images"));
+        if (Count(AttachmentType.Voicemail) > 0)
+            parts.Add(CaseGuideUiText.Plural(Count(AttachmentType.Voicemail), "voicemail", "voicemails"));
+
+        return parts.Count == 0 ? "No attachments planned" : string.Join(", ", parts);
+    }
+
+    /// <summary>
+    /// "$130" from $10 up, "$4.75" below (D-21).
+    /// </summary>
+    private static string Money(decimal amount) =>
+        amount >= 10m
+            ? "$" + Math.Round(amount, 0, MidpointRounding.AwayFromZero).ToString("N0", Invariant)
+            : "$" + amount.ToString("0.00", Invariant);
+
+    /// <summary>
+    /// ": {message}" or "" when there is no message.
+    /// </summary>
+    private static string Colon(string? message)
+    {
+        var trimmed = TrimMessage(message);
+        return trimmed.Length == 0 ? "" : ": " + trimmed;
+    }
 
     /// <summary>
     /// Whole percentages without decimals ("20%"), otherwise one decimal ("19.6%"), rounded away from zero.
@@ -290,8 +695,6 @@ public static class CorpusUiText
     }
 
     private static string N(int value) => value.ToString("N0", Invariant);
-
-    private static string N(decimal value) => value.ToString("N0", Invariant);
 
     private static string Date(DateTime value) => value.ToString("MMM d, yyyy", Invariant);
 

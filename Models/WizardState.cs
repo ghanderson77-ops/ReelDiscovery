@@ -117,6 +117,9 @@ public class WizardState
     /// </summary>
     public string PendingNotice { get; set; } = string.Empty;
 
+    /// <summary>Set when a case is opened from disk (04-19) so Review Plan shows No corpus plan yet instead of auto-planning; cleared by Next on Corpus Settings or by Plan Corpus on Review Plan.</summary>
+    public bool SuppressAutoPlanOnce { get; set; }
+
     // Step 2 - Topic Input
     public string Topic { get; set; } = string.Empty;
     public string AdditionalInstructions { get; set; } = string.Empty;

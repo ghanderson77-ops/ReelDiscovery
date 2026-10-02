@@ -502,7 +502,7 @@ public static class CaseGuideDocxExporter
     /// <summary>
     /// Paragraph formatting options; unset values inherit from the paragraph style.
     /// </summary>
-    private sealed class ParaFormat
+    internal sealed class ParaFormat
     {
         public string? Style { get; set; }
         public bool Bold { get; set; }
@@ -524,7 +524,7 @@ public static class CaseGuideDocxExporter
     /// <summary>
     /// Minimal schema-ordered WordprocessingML builder (Pitfall 10): styles, paragraphs, tables and page sections.
     /// </summary>
-    private sealed class WordBuilder
+    internal sealed class WordBuilder
     {
         private readonly List<OpenXmlElement> _body = new();
 
@@ -838,7 +838,7 @@ public static class CaseGuideDocxExporter
     /// <summary>
     /// Table cell text with an optional bold lead-in ("Title: " before the description).
     /// </summary>
-    private sealed class Cell
+    internal sealed class Cell
     {
         public Cell(string? text, string? boldLead = null)
         {

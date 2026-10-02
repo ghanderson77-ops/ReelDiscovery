@@ -902,7 +902,10 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     {
         var previous = _panels[_selectedTab];
         if (part != _selectedTab && previous.Visible && !_isGenerating)
+        {
+            previous.CommitGridEdits();
             previous.CommitPendingEdits();
+        }
 
         _selectedTab = part;
         foreach (var (p, toggle) in _tabButtons)

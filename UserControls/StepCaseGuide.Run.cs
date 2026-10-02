@@ -41,6 +41,20 @@ public partial class StepCaseGuide
             SetStatus(CaseGuideUiText.SaveFailedText(_state.CaseStore.LastSaveError), Theme.Danger);
     }
 
+    /// <summary>
+    /// Applies every pending edit synchronously: cells still in edit mode and queued grid commits on every tab, then the
+    /// selected tab's detail fields. Runs before a run sets the tabs busy, on Next, on leave and on close (WR-02).
+    /// </summary>
+    private void CommitAllEdits()
+    {
+        if (_isGenerating)
+            return;
+
+        foreach (var panel in _panels.Values)
+            panel.CommitGridEdits();
+        _panels[_selectedTab].CommitPendingEdits();
+    }
+
     // ----- Runs -----
 
     // Every run goes through the gateway, which tracks usage and never exposes keys in its messages
@@ -84,7 +98,7 @@ public partial class StepCaseGuide
         if (_isGenerating || _state == null || part == GuidePart.Issues || Draft.Guide == null)
             return;
 
-        _panels[part].CommitPendingEdits();
+        CommitAllEdits();
         string guidance;
         bool replaceEdited;
         using (var dialog = new RegenerateTabDialog(part, EditedCount(Draft.Guide, part)))
@@ -111,6 +125,8 @@ public partial class StepCaseGuide
         if (_isGenerating || _state == null || string.IsNullOrEmpty(entityId))
             return;
 
+        // A typed cell or detail field is applied before the run makes the tabs read-only (WR-02)
+        CommitAllEdits();
         var name = EntityName(part, entityId);
         _cts = new CancellationTokenSource();
         _writingEntityId = entityId;
@@ -176,7 +192,7 @@ public partial class StepCaseGuide
         if (_isGenerating || _state == null)
             return;
 
-        _panels[_selectedTab].CommitPendingEdits();
+        CommitAllEdits();
         _cts = new CancellationTokenSource();
         _userPickedTab = false;
         _writingPart = null;
@@ -429,7 +445,7 @@ public partial class StepCaseGuide
         if (_state == null)
             return;
 
-        _panels[_selectedTab].CommitPendingEdits();
+        CommitAllEdits();
         await SaveAsync();
     }
 
@@ -441,7 +457,7 @@ public partial class StepCaseGuide
         if (_isGenerating || _state == null)
             return Task.FromResult(false);
 
-        _panels[_selectedTab].CommitPendingEdits();
+        CommitAllEdits();
         RefreshAll();
 
         var gate = CaseGuideUiText.NextGateDecision(_isGenerating, UnfinishedParts(Draft),

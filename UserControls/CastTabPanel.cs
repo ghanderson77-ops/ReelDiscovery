@@ -288,7 +288,7 @@ public class CastTabPanel : GuideTabPanel
         var text = Convert.ToString(row.Cells[e.ColumnIndex].Value, CultureInfo.InvariantCulture) ?? string.Empty;
         var field = column.Name == "Name" ? CastField.FullName : CastField.Title;
         // Applying inside CellEndEdit would rebuild the grid reentrantly (T-03-46)
-        Defer(() => CommitGridEdit(id, field, column.HeaderText, text));
+        QueueGridEdit(() => CommitGridEdit(id, field, column.HeaderText, text));
     }
 
     private void CommitGridEdit(string id, CastField field, string columnHeader, string text)

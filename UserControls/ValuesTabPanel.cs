@@ -272,7 +272,7 @@ public class ValuesTabPanel : GuideTabPanel
         var text = Convert.ToString(row.Cells[e.ColumnIndex].Value, CultureInfo.InvariantCulture) ?? string.Empty;
         var field = column.Name == "Label" ? ValueField.Label : ValueField.Value;
         // Applying inside CellEndEdit would rebuild the grid reentrantly
-        Defer(() => CommitGridEdit(id, field, text));
+        QueueGridEdit(() => CommitGridEdit(id, field, text));
     }
 
     private void CommitGridEdit(string id, ValueField field, string text)

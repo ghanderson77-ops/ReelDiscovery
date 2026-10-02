@@ -343,7 +343,7 @@ public class FactsTabPanel : GuideTabPanel
         var text = Convert.ToString(row.Cells[e.ColumnIndex].Value, CultureInfo.InvariantCulture) ?? string.Empty;
         var field = column.Name == "Date" ? FactField.Date : FactField.Title;
         // Applying inside CellEndEdit would rebuild the grid reentrantly (T-03-46)
-        Defer(() => CommitGridEdit(id, field, text));
+        QueueGridEdit(() => CommitGridEdit(id, field, text));
     }
 
     private void CommitGridEdit(string id, FactField field, string text)

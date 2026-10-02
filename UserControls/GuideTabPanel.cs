@@ -29,6 +29,8 @@ public abstract class GuideTabPanel : UserControl
     private bool _rebuilding;
     private bool _refreshQueued;
     private bool _busy;
+    // Grid-cell commits waiting for the message loop (WR-02)
+    private readonly List<Action> _queuedGridEdits = new();
     private bool _detailNarrow;
     private string? _shownId;
 
@@ -558,6 +560,45 @@ public abstract class GuideTabPanel : UserControl
     /// </summary>
     public virtual void CommitPendingEdits()
     {
+    }
+
+    /// <summary>
+    /// Queues a grid-cell commit from CellEndEdit (applying it there would rebuild the grid reentrantly, T-03-46)
+    /// and posts a flush. <see cref="CommitGridEdits"/> applies the queue at once when a run starts, on Next, on leave and on close.
+    /// </summary>
+    protected void QueueGridEdit(Action commit)
+    {
+        _queuedGridEdits.Add(commit);
+        if (IsHandleCreated && !IsDisposed)
+            BeginInvoke(new Action(FlushQueuedGridEdits));
+        else
+            FlushQueuedGridEdits();
+    }
+
+    /// <summary>
+    /// Ends a cell still in edit mode and applies every queued grid edit now, so typed text is never dropped by a run that
+    /// starts before the posted commit, a Next validation, or a window close (WR-02). Call outside grid events only.
+    /// </summary>
+    public void CommitGridEdits()
+    {
+        if (IsDisposed)
+            return;
+
+        // Fires CellEndEdit, which queues the commit
+        if (Grid.IsCurrentCellInEditMode)
+            Grid.EndEdit();
+        FlushQueuedGridEdits();
+    }
+
+    private void FlushQueuedGridEdits()
+    {
+        if (IsDisposed || _queuedGridEdits.Count == 0)
+            return;
+
+        var edits = _queuedGridEdits.ToList();
+        _queuedGridEdits.Clear();
+        foreach (var edit in edits)
+            edit();
     }
 
     public virtual void SetBusy(bool busy)

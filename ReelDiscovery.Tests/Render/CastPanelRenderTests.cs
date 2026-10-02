@@ -136,6 +136,35 @@ public class CastPanelRenderTests
         });
     }
 
+    [Fact]
+    public void Cast_CellEditAppliedBeforeRunStarts()
+    {
+        // WR-02: a cell still in edit mode (or a commit still queued) is applied synchronously by CommitGridEdits,
+        // so a run that sets the host busy right after never drops the typed text
+        RenderHarness.RunSta(() =>
+        {
+            var draft = CaseTestData.SampleGuidedDraft();
+            var inEdit = false;
+            RenderCast("cast-cell-edit", RenderHarness.Large, draft, (panel, host) =>
+            {
+                panel.SelectEntity("CH-002");
+                var grid = FindGrid(panel);
+                var row = grid.Rows.Cast<DataGridViewRow>().First(r => (string)r.Tag! == "CH-002");
+                grid.Focus();
+                grid.CurrentCell = row.Cells[grid.Columns["Title"]!.Index];
+                inEdit = grid.BeginEdit(selectAll: true);
+                grid.EditingControl!.Text = "Senior Project Manager";
+
+                panel.CommitGridEdits();
+                host.IsBusy = true;
+                panel.SetBusy(true);
+            });
+
+            Assert.True(inEdit);
+            Assert.Equal("Senior Project Manager", draft.Guide!.FindCast("CH-002")!.Title);
+        });
+    }
+
     private static RenderResult RenderCast(string name, Size size, CaseDraft? draft, Action<CastTabPanel, RenderGuideHost>? arrange = null)
     {
         return RenderHarness.RenderControl(() => new CastTabPanel(), name, size, control =>

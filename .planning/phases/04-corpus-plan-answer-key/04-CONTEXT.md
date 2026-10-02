@@ -76,6 +76,14 @@ Out of scope: writing email prose or EMLs (Phase 5), attachment content and non-
 - DocID prefix derivation (e.g. initials of the first party or case title), file-path naming scheme, and the generation-cost estimate heuristic.
 - The US federal holiday table (computed rules, including observed dates).
 
+### Resolved during planning (auto chain — research recommendations accepted; user may revisit)
+- **Custodians:** every cast member (key and background) is a custodian; external senders (newsletters, spam, personal contacts) never are (RESEARCH A7).
+- **External sender domains:** invented publication/vendor domains plus a few common consumer domains for personal mail.
+- **Where planning runs:** Next on Corpus Settings advances to Review Plan, which starts the planning run automatically on entry when no current plan exists (still satisfies D-12; RESEARCH A13). Review protocol prose is generated as the last planning stage, so Approve is a pure file write (A14).
+- **Answer-key extras:** Doc Type, File Name and a separate Parent DocID column are allowed in addition to D-32 (A15). DocID prefix is derived automatically and editable under Advanced (A6).
+- **Guide hash:** `CaseGuide.ComputeHash()` becomes a content-only projection (excludes UI/state fields such as `DismissedStaleKey`, generation timestamps, review flags) so UI actions don't stale the plan (A16).
+- **Plan storage:** plan lives in a sibling `corpus-plan.json` in the case folder; `case.json` keeps settings, plan id/hash and approval state; `CaseDraft.CurrentFormatVersion` → 2.
+
 </decisions>
 
 <canonical_refs>

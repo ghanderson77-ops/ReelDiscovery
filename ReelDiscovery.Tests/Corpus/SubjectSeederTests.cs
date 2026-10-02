@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
@@ -9,8 +10,12 @@ using ReelDiscovery.Tests.Fakes;
 
 namespace ReelDiscovery.Tests.Corpus;
 
-public class SubjectSeederTests
+public partial class SubjectSeederTests
 {
+    // "S-0001 | Daily business | ..."
+    [GeneratedRegex(@"^(S-\d{4}) \| ([^|]+?) \|", RegexOptions.Multiline)]
+    private static partial Regex SlotLinePattern();
+
     // ----- Fixtures -----
 
     private static Dictionary<NonRelevantCategory, int> Mix(int daily = 0, int ancillary = 0, int newsletter = 0, int decoy = 0) => new()
@@ -247,6 +252,416 @@ public class SubjectSeederTests
             CaseTestData.AssertNoJsonInstructions(new LlmProviderRequest { SystemPrompt = CorpusPlanPrompts.SystemPrompt, UserPrompt = prompt });
             Assert.DoesNotContain("JSON", prompt);
             Assert.DoesNotContain("invented names fictional", prompt, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    // ----- Task 2: SeedAsync -----
+
+    private static List<(string SlotId, string Category)> Slots(string prompt) =>
+        SlotLinePattern().Matches(prompt).Select(m => (m.Groups[1].Value, m.Groups[2].Value.Trim())).ToList();
+
+    private static object Seed(string slotId, string category, string? subject = null, string? angle = null, string? senderName = null) => new
+    {
+        slotId,
+        subject = subject ?? $"Subject {slotId}",
+        angle = angle ?? (category == "Near-miss" ? $"Angle {slotId}." : string.Empty),
+        senderName = senderName ?? (category is "Newsletter" or "Spam" or "Vendor" ? $"Sender {slotId}" : category == "Personal" ? $"Pat Sender{slotId[2..]}" : string.Empty)
+    };
+
+    /// <summary>
+    /// Answers every slot listed in the prompt except <paramref name="omit"/>.
+    /// </summary>
+    private static LlmProviderResponse Echo(LlmProviderRequest request, params string[] omit)
+    {
+        var seeds = Slots(request.UserPrompt).Where(s => !omit.Contains(s.SlotId)).Select(s => Seed(s.SlotId, s.Category)).ToArray();
+        return FakeLlmProvider.Ok(JsonSerializer.Serialize(new { seeds }));
+    }
+
+    private static LlmProviderResponse Respond(params object[] seeds) => FakeLlmProvider.Ok(JsonSerializer.Serialize(new { seeds }));
+
+    private static (RecordingGateway Gateway, FakeLlmProvider Fake) Gateway()
+    {
+        var (gateway, fake) = CorpusTestData.CreateGateway();
+        return (new RecordingGateway(gateway), fake);
+    }
+
+    private static HashSet<string> CaseDomains(CaseGuide guide) =>
+        guide.Organizations.Select(o => o.Domain).Where(d => !string.IsNullOrWhiteSpace(d)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static string LowerFirst(string text) => text.Length == 0 ? text : char.ToLowerInvariant(text[0]) + text[1..];
+
+    [Fact]
+    public async Task SeedAsync_HappyPath_SeedsEveryThread_AndSendsStoryRequests()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var guide = draft.Guide!;
+        var skeleton = Skeleton(draft, Mix(daily: 300, ancillary: 100, newsletter: 120, decoy: 60));
+        var n = SubjectSeeder.BuildBatches(skeleton.Threads).Count;
+        var (gateway, fake) = Gateway();
+        fake.Respond = r => Echo(r);
+
+        var result = await new SubjectSeeder(gateway).SeedAsync(draft, skeleton.Threads, skeleton.Externals);
+
+        Assert.False(result.IsFatal);
+        Assert.Equal(n, result.TotalChunks);
+        Assert.Equal(0, result.RefusedChunks);
+        Assert.Equal(0, result.FailedChunks);
+        Assert.Empty(result.Notes);
+
+        var mustNot = SubjectSeeder.MustNotMention(guide);
+        Assert.All(skeleton.Threads, t =>
+        {
+            Assert.Matches(@"^Subject S-\d{4}$", t.Subject);
+            Assert.False(t.UsesFallbackContent);
+            if (t.Category == NonRelevantCategory.Decoy)
+            {
+                Assert.Matches(@"^Angle S-\d{4}\.$", t.DecoyAngle);
+                Assert.Equal(mustNot, t.MustNotMention);
+            }
+            else
+            {
+                Assert.Empty(t.DecoyAngle);
+                Assert.Empty(t.MustNotMention);
+            }
+        });
+
+        // Every external used as a sender was renamed from a seed; domains never collide with case organizations
+        var senders = skeleton.Threads.Select(t => t.Messages[0].FromId).Where(id => id.StartsWith("EXT-")).ToHashSet();
+        var caseDomains = CaseDomains(guide);
+        foreach (var external in skeleton.Externals)
+        {
+            Assert.DoesNotContain(external.Domain, caseDomains);
+            Assert.EndsWith("@" + external.Domain, external.Email);
+            if (senders.Contains(external.Id))
+                Assert.Contains("Sender", external.Name);
+        }
+
+        Assert.Equal(n, gateway.Requests.Count);
+        var expected = Enumerable.Range(1, n).Select(i => $"Corpus Plan - Other email (batch {i} of {n})").OrderBy(s => s, StringComparer.Ordinal);
+        Assert.Equal(expected, gateway.Requests.Select(r => r.OperationName).OrderBy(s => s, StringComparer.Ordinal));
+        Assert.All(gateway.Requests, r =>
+        {
+            Assert.Equal(LlmTier.Story, r.Tier);
+            Assert.Equal(8_000, r.MaxOutputTokens);
+            Assert.Equal(CorpusPlanPrompts.SystemPrompt, r.SystemPrompt);
+        });
+        Assert.All(fake.Requests, CaseTestData.AssertNoJsonInstructions);
+    }
+
+    [Fact]
+    public async Task SeedAsync_RenamesExternals_SafeDomains()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var externals = Externals();
+        externals.Add(new ExternalParty { Id = "EXT-004", Name = "Keystone Benefits", Email = "offers@keystonebenefits.com", Domain = "keystonebenefits.com", Kind = ExternalKind.Vendor });
+        var threads = new List<PlannedThread>
+        {
+            NewsletterThread("N-0001", "EXT-001"),
+            NewsletterThread("N-0002", "EXT-003"),
+            NewsletterThread("N-0003", "EXT-004"),
+            NewsletterThread("N-0004", "EXT-001")
+        };
+        var (gateway, fake) = Gateway();
+        fake.Respond = _ => Respond(
+            Seed("S-0001", "Newsletter", "Spring market outlook", senderName: "Lakeside Facilities Report"),
+            Seed("S-0002", "Personal", "Dinner Saturday?", senderName: "Dana Whitfield"),
+            Seed("S-0003", "Vendor", "Your benefits renewal", senderName: "Ellis Park"),
+            Seed("S-0004", "Newsletter", "Summer issue", senderName: "Another Name Entirely"));
+
+        await new SubjectSeeder(gateway).SeedAsync(draft, threads, externals);
+
+        Assert.Equal("Lakeside Facilities Report", externals[0].Name);
+        Assert.Equal("news@lakesidefacilitiesreport.com", externals[0].Email);
+        Assert.Equal("lakesidefacilitiesreport.com", externals[0].Domain);
+
+        Assert.Equal("Dana Whitfield", externals[2].Name);
+        Assert.Equal("dana.whitfield@gmail.com", externals[2].Email);
+        Assert.Equal("gmail.com", externals[2].Domain);
+
+        // "Ellis Park" folds to ellispark.com, the law firm's domain
+        Assert.Equal("Ellis Park", externals[3].Name);
+        Assert.Equal("ellisparkmail.com", externals[3].Domain);
+        Assert.Equal("offers@ellisparkmail.com", externals[3].Email);
+
+        // Untouched external keeps its defaults
+        Assert.Equal("Daily Deal Alerts", externals[1].Name);
+        Assert.Equal("Spring market outlook", threads[0].Subject);
+    }
+
+    [Fact]
+    public async Task SeedAsync_ExternalName_CappedFoldedOrKept()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var externals = Externals();
+        var threads = new List<PlannedThread> { NewsletterThread("N-0001", "EXT-001"), NewsletterThread("N-0002", "EXT-002") };
+        var longName = string.Concat(Enumerable.Repeat("Facility Weekly ", 6));
+        var (gateway, fake) = Gateway();
+        fake.Respond = _ => Respond(
+            Seed("S-0001", "Newsletter", "Issue 12", senderName: longName),
+            Seed("S-0002", "Spam", "Big savings", senderName: "@@@ !!!"));
+
+        await new SubjectSeeder(gateway).SeedAsync(draft, threads, externals);
+
+        Assert.True(externals[0].Name.Length <= 60);
+        Assert.Matches(@"^news@[a-z0-9]{1,30}\.com$", externals[0].Email);
+        Assert.Equal("Daily Deal Alerts", externals[1].Name);
+        Assert.Equal("offers@dailydealalerts.com", externals[1].Email);
+    }
+
+    [Fact]
+    public async Task SeedAsync_DecoyForbidden_ReaskedOnceThenTemplated()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var guide = draft.Guide!;
+        var threads = new List<PlannedThread> { DecoyThread("N-0001"), DecoyThread("N-0002") };
+        var (gateway, fake) = Gateway();
+        fake.Respond = r => Respond(Slots(r.UserPrompt).Select(s => s.SlotId == "S-0001"
+            ? Seed(s.SlotId, s.Category, "Lakeview Tower CO-007 payment")
+            : Seed(s.SlotId, s.Category)).ToArray());
+
+        var result = await new SubjectSeeder(gateway).SeedAsync(draft, threads, new List<ExternalParty>());
+
+        Assert.Equal(2, fake.Requests.Count);
+        Assert.Equal(new[] { "S-0001" }, CorpusTestData.SlotIdsIn(fake.Requests[1].UserPrompt));
+        Assert.Equal("Corpus Plan - Other email (batch 1 of 1) retry", gateway.Requests[1].OperationName);
+
+        var templated = threads[0];
+        Assert.True(templated.UsesFallbackContent);
+        Assert.StartsWith("Lakeview Tower ", templated.Subject);
+        var topic = templated.Subject["Lakeview Tower ".Length..];
+        Assert.Contains(topic, SubjectSeeder.RoutineTopics.Select(LowerFirst));
+        Assert.DoesNotContain("CO-007", templated.Subject);
+        Assert.False(string.IsNullOrWhiteSpace(templated.DecoyAngle));
+        Assert.Equal(SubjectSeeder.MustNotMention(guide), templated.MustNotMention);
+
+        Assert.Equal("Subject S-0002", threads[1].Subject);
+        Assert.False(threads[1].UsesFallbackContent);
+        Assert.Contains("1 other email uses a placeholder subject because the model did not plan it.", result.Notes);
+    }
+
+    [Fact]
+    public async Task SeedAsync_DecoyForbiddenAngle_ReaskFixes()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var threads = new List<PlannedThread> { DecoyThread("N-0001") };
+        var (gateway, fake) = Gateway();
+        var calls = 0;
+        fake.Respond = r => Interlocked.Increment(ref calls) == 1
+            ? Respond(Seed("S-0001", "Near-miss", "Lakeview Tower site badges", "Badges, plus the inv-2024-118 balance."))
+            : Respond(Seed("S-0001", "Near-miss", "Lakeview Tower site badges", "New badge readers at the site entrance."));
+
+        var result = await new SubjectSeeder(gateway).SeedAsync(draft, threads, new List<ExternalParty>());
+
+        Assert.Equal(2, fake.Requests.Count);
+        Assert.Equal("Lakeview Tower site badges", threads[0].Subject);
+        Assert.Equal("New badge readers at the site entrance.", threads[0].DecoyAngle);
+        Assert.False(threads[0].UsesFallbackContent);
+        Assert.Empty(result.Notes);
+    }
+
+    [Fact]
+    public async Task SeedAsync_UnknownIgnored_MissingReaskedThenTemplatedByCategory()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var externals = Externals();
+        var threads = new List<PlannedThread>
+        {
+            DailyThread("N-0001"),
+            NewsletterThread("N-0002", "EXT-001"),
+            NewsletterThread("N-0003", "EXT-002"),
+            NewsletterThread("N-0004", "EXT-003"),
+            DailyThread("N-0005")
+        };
+        var (gateway, fake) = Gateway();
+        fake.Respond = _ => Respond(Seed("S-0005", "Daily business"), Seed("S-9999", "Daily business", "Invented"));
+
+        var result = await new SubjectSeeder(gateway).SeedAsync(draft, threads, externals);
+
+        Assert.Equal(2, fake.Requests.Count);
+        Assert.Equal(new[] { "S-0001", "S-0002", "S-0003", "S-0004" }, CorpusTestData.SlotIdsIn(fake.Requests[1].UserPrompt));
+        Assert.Contains(threads[0].Subject, SubjectSeeder.RoutineTopics);
+        Assert.Equal("Commercial Builder Weekly weekly update", threads[1].Subject);
+        Assert.Equal("Limited-time offer from Daily Deal Alerts", threads[2].Subject);
+        Assert.Equal("Weekend plans", threads[3].Subject);
+        Assert.Equal("Subject S-0005", threads[4].Subject);
+        Assert.All(threads.Take(4), t => Assert.True(t.UsesFallbackContent));
+        Assert.False(threads[4].UsesFallbackContent);
+        Assert.DoesNotContain(threads, t => t.Subject == "Invented");
+        Assert.Contains("4 other emails use placeholder subjects because the model did not plan them.", result.Notes);
+    }
+
+    [Fact]
+    public void TemplateSubject_ByCategory()
+    {
+        var guide = CorpusTestData.RichDraft().Guide!;
+        var externals = Externals().ToDictionary(e => e.Id);
+        var random = new Random(7);
+
+        Assert.Contains(SubjectSeeder.TemplateSubject(DailyThread(), guide, externals, random), SubjectSeeder.RoutineTopics);
+        var ancillary = DailyThread();
+        ancillary.Category = NonRelevantCategory.Ancillary;
+        Assert.Contains(SubjectSeeder.TemplateSubject(ancillary, guide, externals, random), SubjectSeeder.RoutineTopics);
+        Assert.Equal("Commercial Builder Weekly weekly update", SubjectSeeder.TemplateSubject(NewsletterThread("N-1", "EXT-001"), guide, externals, random));
+        Assert.Equal("Limited-time offer from Daily Deal Alerts", SubjectSeeder.TemplateSubject(NewsletterThread("N-1", "EXT-002"), guide, externals, random));
+        Assert.Equal("Weekend plans", SubjectSeeder.TemplateSubject(NewsletterThread("N-1", "EXT-003"), guide, externals, random));
+
+        var decoy = SubjectSeeder.TemplateSubject(DecoyThread(), guide, externals, random);
+        Assert.StartsWith("Lakeview Tower ", decoy);
+        Assert.Contains(decoy["Lakeview Tower ".Length..], SubjectSeeder.RoutineTopics.Select(LowerFirst));
+        Assert.Contains("Parking passes for May", SubjectSeeder.RoutineTopics);
+        Assert.Contains("Team lunch Thursday", SubjectSeeder.RoutineTopics);
+    }
+
+    [Fact]
+    public async Task SeedAsync_StripsIdTokens_AndCapsSubject()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var threads = new List<PlannedThread> { DailyThread("N-0001"), DailyThread("N-0002") };
+        var (gateway, fake) = Gateway();
+        var longSubject = string.Concat(Enumerable.Repeat("Quarterly budget review ", 10));
+        fake.Respond = _ => Respond(
+            Seed("S-0001", "Daily business", "RE: Ask CH-002 about F-003 and ISS-01 parking"),
+            Seed("S-0002", "Daily business", longSubject));
+
+        await new SubjectSeeder(gateway).SeedAsync(draft, threads, new List<ExternalParty>());
+
+        Assert.Equal("Ask about and parking", threads[0].Subject);
+        Assert.True(threads[1].Subject.Length <= 120);
+        Assert.StartsWith("Quarterly budget review", threads[1].Subject);
+    }
+
+    [Fact]
+    public async Task SeedAsync_RefusedBatch_CountedAndTemplated()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var threads = new List<PlannedThread> { DailyThread("N-0001"), DecoyThread("N-0002") };
+        var (gateway, fake) = Gateway();
+        fake.Respond = r => r.UserPrompt.Contains("near-miss") ? FakeLlmProvider.Refused("No.") : Echo(r);
+
+        var result = await new SubjectSeeder(gateway).SeedAsync(draft, threads, new List<ExternalParty>());
+
+        Assert.Equal(2, result.TotalChunks);
+        Assert.Equal(1, result.RefusedChunks);
+        Assert.Equal("No.", result.RefusalMessage);
+        Assert.Equal(2, fake.Requests.Count);
+        Assert.Equal("Subject S-0001", threads[0].Subject);
+        Assert.True(threads[1].UsesFallbackContent);
+        Assert.StartsWith("Lakeview Tower ", threads[1].Subject);
+    }
+
+    [Fact]
+    public async Task SeedAsync_FailedBatch_ReaskedThenTemplated()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var threads = new List<PlannedThread> { DailyThread("N-0001") };
+        var (gateway, fake) = Gateway();
+        fake.Respond = _ => FakeLlmProvider.Failed(LlmFailureKind.Network, "connection reset");
+
+        var result = await new SubjectSeeder(gateway).SeedAsync(draft, threads, new List<ExternalParty>());
+
+        Assert.Equal(1, result.FailedChunks);
+        Assert.False(result.IsFatal);
+        Assert.True(threads[0].UsesFallbackContent);
+        Assert.Contains(threads[0].Subject, SubjectSeeder.RoutineTopics);
+    }
+
+    [Fact]
+    public async Task SeedAsync_FatalError_StopsRemainingBatches()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var skeleton = Skeleton(draft, Mix(daily: 300, ancillary: 100, newsletter: 120, decoy: 60));
+        Assert.True(SubjectSeeder.BuildBatches(skeleton.Threads).Count >= 3);
+        var (gateway, fake) = Gateway();
+        fake.Respond = _ => FakeLlmProvider.Failed(LlmFailureKind.Auth, "Invalid API key");
+
+        var result = await new SubjectSeeder(gateway, maxParallel: 1).SeedAsync(draft, skeleton.Threads, skeleton.Externals);
+
+        Assert.True(result.IsFatal);
+        Assert.Contains("Invalid API key", result.FatalError);
+        Assert.Single(fake.Requests);
+    }
+
+    [Fact]
+    public async Task SeedAsync_UserCancel_Throws()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var skeleton = Skeleton(draft, Mix(daily: 300, decoy: 60));
+        var (gateway, fake) = Gateway();
+        using var cts = new CancellationTokenSource();
+        fake.OnSend = _ => cts.Cancel();
+        fake.Respond = r => Echo(r);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new SubjectSeeder(gateway).SeedAsync(draft, skeleton.Threads, skeleton.Externals, null, cts.Token));
+    }
+
+    [Fact]
+    public async Task SeedAsync_ReportsPlanningOtherProgress()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var skeleton = Skeleton(draft, Mix(daily: 300, ancillary: 100, newsletter: 120, decoy: 60));
+        var n = SubjectSeeder.BuildBatches(skeleton.Threads).Count;
+        var (gateway, fake) = Gateway();
+        fake.Respond = r => Echo(r);
+        var progress = new LockedProgress();
+
+        await new SubjectSeeder(gateway).SeedAsync(draft, skeleton.Threads, skeleton.Externals, progress);
+
+        var reports = progress.Snapshot();
+        Assert.All(reports, r => Assert.Equal(PlanStage.PlanningOther, r.Stage));
+        Assert.All(reports, r => Assert.Equal(n, r.StageTotal));
+        Assert.Equal(Enumerable.Range(0, n), reports.Select(r => r.StageDone).OrderBy(d => d));
+    }
+
+    [Fact]
+    public async Task SeedAsync_NoThreads_NoRequests()
+    {
+        var (gateway, fake) = Gateway();
+
+        var result = await new SubjectSeeder(gateway).SeedAsync(CorpusTestData.RichDraft(), new List<PlannedThread>(), new List<ExternalParty>());
+
+        Assert.Equal(0, result.TotalChunks);
+        Assert.Empty(fake.Requests);
+    }
+
+    // Synchronous and thread-safe: onStart fires from parallel batch tasks
+    private sealed class LockedProgress : IProgress<PlanProgress>
+    {
+        private readonly List<PlanProgress> _reports = new();
+
+        public void Report(PlanProgress value)
+        {
+            lock (_reports)
+                _reports.Add(value);
+        }
+
+        public List<PlanProgress> Snapshot()
+        {
+            lock (_reports)
+                return _reports.ToList();
+        }
+    }
+
+    private sealed class RecordingGateway : ILlmGateway
+    {
+        private readonly ILlmGateway _inner;
+
+        public RecordingGateway(ILlmGateway inner)
+        {
+            _inner = inner;
+        }
+
+        public List<LlmRequest> Requests { get; } = new();
+
+        public LlmProviderKind Provider => _inner.Provider;
+
+        public ReelDiscovery.Models.AIModelConfig ResolveModel(LlmTier tier) => _inner.ResolveModel(tier);
+
+        public Task<LlmResult<T>> GenerateAsync<T>(LlmRequest request, CancellationToken ct = default) where T : class
+        {
+            lock (Requests)
+                Requests.Add(new LlmRequest { Tier = request.Tier, OperationName = request.OperationName, SystemPrompt = request.SystemPrompt, UserPrompt = request.UserPrompt, MaxOutputTokens = request.MaxOutputTokens });
+            return _inner.GenerateAsync<T>(request, ct);
         }
     }
 }

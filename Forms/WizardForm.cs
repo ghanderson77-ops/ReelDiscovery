@@ -539,11 +539,32 @@ public partial class WizardForm : Form
         return _steps[_currentStepIndex] is StepCoreDocument { IsGenerating: true } or StepCaseGuide { IsGenerating: true };
     }
 
-    // Disposing the running step cancels its token, so no further calls are billed (WR-07, T-03-61)
+    // Disposing the running step cancels its token, so no further calls are billed (WR-07, T-03-61).
+    // A guide run is cancelled and awaited first, so units that already came back are merged and saved (WR-01).
     private void StopActiveRun()
     {
-        if (_currentStepIndex >= 0 && _currentStepIndex < _steps.Count)
-            _steps[_currentStepIndex].Dispose();
+        if (_currentStepIndex < 0 || _currentStepIndex >= _steps.Count)
+            return;
+
+        var step = _steps[_currentStepIndex];
+        if (step is StepCaseGuide guide)
+        {
+            // Disabled while messages are pumped, so no click or second close re-enters the wizard
+            var wasEnabled = Enabled;
+            UseWaitCursor = true;
+            Enabled = false;
+            try
+            {
+                guide.CancelAndWaitForRun(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                Enabled = wasEnabled;
+                UseWaitCursor = false;
+            }
+        }
+
+        step.Dispose();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)

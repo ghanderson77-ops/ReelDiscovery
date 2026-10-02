@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
@@ -13,6 +14,8 @@ namespace ReelDiscovery.UserControls;
 public partial class StepCaseGuide
 {
     private CancellationTokenSource? _cts;
+    // The run in flight (whole guide, tab or entry), so closing can wait for it to merge its finished units (WR-01)
+    private Task? _activeRun;
     private Guid _boundCaseId = Guid.Empty;
 
     // ----- Autosave (D-10) -----
@@ -120,7 +123,10 @@ public partial class StepCaseGuide
     /// <summary>
     /// Regenerate {Noun} for one entry (the panel already asked C3 for a hand-edited entry). On failure the old text is kept.
     /// </summary>
-    public async Task RegenerateEntryAsync(GuidePart part, string entityId, string guidance)
+    public Task RegenerateEntryAsync(GuidePart part, string entityId, string guidance) =>
+        TrackRun(RegenerateEntryCoreAsync(part, entityId, guidance));
+
+    private async Task RegenerateEntryCoreAsync(GuidePart part, string entityId, string guidance)
     {
         if (_isGenerating || _state == null || string.IsNullOrEmpty(entityId))
             return;
@@ -185,7 +191,50 @@ public partial class StepCaseGuide
     /// Runs one generator call with progress, per-part autosave, cancel and the outcome status line (one run at a time, T-03-52).
     /// <paramref name="failedText"/> words a failed part (default: "The {part} failed: ... Click Retry {Part}.").
     /// </summary>
-    private async Task RunAsync(
+    private Task RunAsync(
+        Func<CaseGuideGenerator, IProgress<GuideProgress>, Func<GuidePart, Task>, CancellationToken, Task<CaseGuideGenerationResult>> work,
+        Func<GuidePart, string, string>? failedText = null) =>
+        TrackRun(RunCoreAsync(work, failedText));
+
+    private Task TrackRun(Task run)
+    {
+        if (!run.IsCompleted)
+            _activeRun = run;
+        return run;
+    }
+
+    /// <summary>
+    /// Closing during a run (C12, D-10): cancels the run and pumps messages until it has unwound, so the units that
+    /// already came back are merged into the draft before the close-time save (WR-01). Returns false on timeout.
+    /// </summary>
+    public bool CancelAndWaitForRun(TimeSpan timeout)
+    {
+        var run = _activeRun;
+        if (run == null || run.IsCompleted)
+            return true;
+
+        try
+        {
+            _cts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run released its token source while finishing; it is unwinding already
+        }
+
+        // The run's continuations (merge in the generator's finally, final autosave) resume on this UI thread
+        var clock = Stopwatch.StartNew();
+        while (!run.IsCompleted && clock.Elapsed < timeout)
+        {
+            Application.DoEvents();
+            if (!run.IsCompleted)
+                Thread.Sleep(15);
+        }
+
+        return run.IsCompleted;
+    }
+
+    private async Task RunCoreAsync(
         Func<CaseGuideGenerator, IProgress<GuideProgress>, Func<GuidePart, Task>, CancellationToken, Task<CaseGuideGenerationResult>> work,
         Func<GuidePart, string, string>? failedText = null)
     {

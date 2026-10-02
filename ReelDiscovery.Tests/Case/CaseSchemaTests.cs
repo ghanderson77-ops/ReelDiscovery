@@ -1,5 +1,6 @@
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Tests.Fakes;
 
 namespace ReelDiscovery.Tests.Case;
@@ -15,6 +16,8 @@ public class CaseSchemaTests
             data.Add(nameof(CoreDocumentGenerator), type);
         foreach (var type in CaseGuideGenerator.SchemaTypes)
             data.Add(nameof(CaseGuideGenerator), type);
+        foreach (var type in CorpusPlanner.SchemaTypes)
+            data.Add(nameof(CorpusPlanner), type);
         return data;
     }
 

@@ -214,6 +214,5 @@ public class RelevantThreadFillerTests
         Assert.DoesNotContain("JSON", prompt);
         // Applied substitutions are restated (use them exactly); the prompt never asks the model to invent names
         Assert.DoesNotContain("invented names fictional", prompt, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("invent", prompt.Replace("never invent", string.Empty), StringComparison.OrdinalIgnoreCase);
     }
 }

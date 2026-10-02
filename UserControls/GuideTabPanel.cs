@@ -41,6 +41,10 @@ public abstract class GuideTabPanel : UserControl
     protected Label DetailHeading = null!;
     protected Label DetailMeta = null!;
     protected Panel NoticeSlot = null!;
+    /// <summary>
+    /// Hidden AutoSize row between the grid card header and the grid (Key Facts selection bar). Spans the card's inner width.
+    /// </summary>
+    protected Panel GridBarSlot = null!;
     protected TableLayoutPanel Fields = null!;
     protected TextBox GuidanceBox = null!;
     protected ThemedButton DeleteButton = null!;
@@ -71,10 +75,23 @@ public abstract class GuideTabPanel : UserControl
     public abstract IReadOnlyList<Control> TabActions { get; }
 
     /// <summary>
-    /// Id of the selected row, or null when nothing is selected.
+    /// Id of the selected row the detail card shows: the current (focused) row while it is selected, otherwise the first
+    /// selected row; null when nothing is selected.
     /// </summary>
     protected string? SelectedId =>
-        Grid.SelectedRows.Count > 0 ? Grid.SelectedRows[0].Tag as string : null;
+        Grid.CurrentRow is { Selected: true } current ? current.Tag as string
+        : Grid.SelectedRows.Count > 0 ? Grid.SelectedRows[0].Tag as string : null;
+
+    /// <summary>
+    /// Ids of every selected row, in display order (multi-select grids).
+    /// </summary>
+    protected IReadOnlyList<string> SelectedIds =>
+        Grid.Rows.Cast<DataGridViewRow>().Where(r => r.Selected).Select(r => r.Tag as string).OfType<string>().ToList();
+
+    /// <summary>
+    /// True while RefreshFromDraft rebuilds the rows (selection events then are not user changes).
+    /// </summary>
+    protected bool Rebuilding => _rebuilding;
 
     /// <summary>
     /// False keeps the grid read-only even when no run is active (Issues, D-08).
@@ -136,14 +153,15 @@ public abstract class GuideTabPanel : UserControl
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Margin = new Padding(0),
             BackColor = Theme.Surface
         };
         gridLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         gridLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                            // 0: Card header
         gridLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(1)));  // 1: Divider
-        gridLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));                        // 2: Grid or empty text
+        gridLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));                            // 2: Selection bar (hidden unless used)
+        gridLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));                        // 3: Grid or empty text
 
         var top = LogicalToDeviceUnits(14);
         var bottom = LogicalToDeviceUnits(10);
@@ -200,6 +218,22 @@ public abstract class GuideTabPanel : UserControl
         gridLayout.Controls.Add(header, 0, 0);
         gridLayout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Theme.Border, Margin = new Padding(0) }, 0, 1);
 
+        // A 1-column TLP (like the notice slot) so a subclass can stack an AutoSize bar in it
+        var gridBarSlot = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Theme.Surface,
+            Visible = false
+        };
+        gridBarSlot.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        GridBarSlot = gridBarSlot;
+        gridLayout.Controls.Add(GridBarSlot, 0, 2);
+
         var gridHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6)), BackColor = Theme.Surface };
         Grid = new DataGridView { Dock = DockStyle.Fill, EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2 };
         GridStyle.Apply(Grid, this);
@@ -216,7 +250,7 @@ public abstract class GuideTabPanel : UserControl
         };
         gridHost.Controls.Add(Grid);
         gridHost.Controls.Add(_emptyGridLabel);
-        gridLayout.Controls.Add(gridHost, 0, 2);
+        gridLayout.Controls.Add(gridHost, 0, 3);
         gridCard.Controls.Add(gridLayout);
         _body.Controls.Add(gridCard, 0, 0);
 
@@ -462,6 +496,8 @@ public abstract class GuideTabPanel : UserControl
         var sortColumn = Grid.SortedColumn;
         var sortOrder = Grid.SortOrder;
         var selectedId = SelectedId ?? _shownId;
+        // Multi-select grids keep every selected row across the rebuild (the current one stays current)
+        var alsoSelected = Grid.MultiSelect ? SelectedIds.Where(id => id != selectedId).ToHashSet(StringComparer.Ordinal) : null;
         var firstDisplayed = Grid.FirstDisplayedScrollingRowIndex;
         var dot = Grid.Columns[GridStyle.DotColumnName];
 
@@ -495,6 +531,14 @@ public abstract class GuideTabPanel : UserControl
                     Grid.FirstDisplayedScrollingRowIndex = Math.Min(firstDisplayed, Grid.Rows.Count - 1);
                 var row = FindRow(selectedId) ?? Grid.Rows[0];
                 SelectRow(row);
+                if (alsoSelected is { Count: > 0 })
+                {
+                    foreach (DataGridViewRow other in Grid.Rows)
+                    {
+                        if (other.Tag is string id && alsoSelected.Contains(id))
+                            other.Selected = true;
+                    }
+                }
             }
         }
         finally
@@ -504,6 +548,43 @@ public abstract class GuideTabPanel : UserControl
 
         ApplyEditableState();
         ShowDetailCore(SelectedId);
+        OnSelectionChanged();
+    }
+
+    /// <summary>
+    /// Called after the user changes the grid selection and after every rebuild (selection bars).
+    /// </summary>
+    protected virtual void OnSelectionChanged()
+    {
+    }
+
+    /// <summary>
+    /// Selects exactly these rows (the first one in display order becomes current and fills the detail card).
+    /// Returns how many were found.
+    /// </summary>
+    protected int SelectRows(IEnumerable<string> ids)
+    {
+        var wanted = ids.ToHashSet(StringComparer.Ordinal);
+        var rows = Grid.Rows.Cast<DataGridViewRow>().Where(r => r.Tag is string id && wanted.Contains(id)).ToList();
+        if (rows.Count == 0)
+            return 0;
+
+        SelectRow(rows[0]);
+        _rebuilding = true;
+        try
+        {
+            foreach (var row in rows.Skip(1))
+                row.Selected = true;
+        }
+        finally
+        {
+            _rebuilding = false;
+        }
+
+        if (_shownId != SelectedId)
+            ShowDetailCore(SelectedId);
+        OnSelectionChanged();
+        return rows.Count;
     }
 
     /// <summary>
@@ -547,6 +628,7 @@ public abstract class GuideTabPanel : UserControl
         SelectRow(row);
         if (_shownId != id)
             ShowDetailCore(id);
+        OnSelectionChanged();
         FocusFirstField();
         return true;
     }
@@ -646,6 +728,22 @@ public abstract class GuideTabPanel : UserControl
         if (column == null)
             return;
 
+        // Selecting one entity (rebuild, Checks navigation, Add) drops any other selected rows first; the clear itself is not
+        // a user change, so it never empties the detail card between the two states
+        if (Grid.MultiSelect && Grid.SelectedRows.Count > (row.Selected ? 1 : 0))
+        {
+            var rebuilding = _rebuilding;
+            _rebuilding = true;
+            try
+            {
+                Grid.ClearSelection();
+            }
+            finally
+            {
+                _rebuilding = rebuilding;
+            }
+        }
+
         // Setting CurrentCell selects the full row and scrolls it into view
         Grid.CurrentCell = row.Cells[column.Index];
         row.Selected = true;
@@ -657,12 +755,13 @@ public abstract class GuideTabPanel : UserControl
             return;
 
         var id = SelectedId;
-        if (id == _shownId)
-            return;
-
-        // Edits to the previous entity are applied, never lost, when the selection moves
-        CommitPendingEdits();
-        ShowDetailCore(id);
+        if (id != _shownId)
+        {
+            // Edits to the previous entity are applied, never lost, when the selection moves
+            CommitPendingEdits();
+            ShowDetailCore(id);
+        }
+        OnSelectionChanged();
     }
 
     private void Grid_KeyDown(object? sender, KeyEventArgs e)
@@ -671,6 +770,14 @@ public abstract class GuideTabPanel : UserControl
             return;
 
         e.Handled = true;
+        OnDeleteKey();
+    }
+
+    /// <summary>
+    /// The Delete key in the grid: deletes the shown entry (Key Facts deletes a multi-row selection instead).
+    /// </summary>
+    protected virtual void OnDeleteKey()
+    {
         if (DeleteButton.Enabled)
             DeleteButton.PerformClick();
     }

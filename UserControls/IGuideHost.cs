@@ -35,6 +35,12 @@ public interface IGuideHost
     /// </summary>
     Task RegenerateTabAsync(GuidePart part);
 
+    /// <summary>
+    /// Regenerate Selected: shows the Regenerate Selected dialog for the entries and runs them as one generation run
+    /// (progress, Cancel Generation, autosave). Returns null when the dialog was cancelled or no run started.
+    /// </summary>
+    Task<GuideEntriesResult?> RegenerateEntriesAsync(GuidePart part, IReadOnlyList<string> entityIds);
+
     Task RetryIssueDetailsAsync();
 
     void ShowTab(GuidePart part, string? entityId = null);

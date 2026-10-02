@@ -116,6 +116,121 @@ public class FactsPanelRenderTests
         });
     }
 
+    [Theory]
+    [InlineData("large")]
+    [InlineData("small")]
+    public void Facts_MultiSelect_ShowsSelectionBar(string sizeName)
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var size = sizeName == "large" ? RenderHarness.Large : RenderHarness.Small;
+            string? shown = null;
+            string? heading = null;
+            var buttons = new List<(string Text, bool Enabled)>();
+            var barText = string.Empty;
+            var captionX = -1;
+            var barTextX = -1;
+            var barButtonsRight = -1;
+            var countRight = -1;
+            var result = RenderFacts("facts-multi-select-" + sizeName, size, ReviewDraft(), (panel, host) =>
+            {
+                panel.SelectEntity("F-002");
+                var grid = FindGrid(panel);
+                foreach (DataGridViewRow row in grid.Rows)
+                {
+                    if (row.Tag is "F-003" or "F-004" or "F-005")
+                        row.Selected = true;
+                }
+                // The detail card keeps the current row; the grid is focused like after Ctrl+click
+                grid.Focus();
+                shown = SelectedId(panel);
+                heading = AllControls(panel).OfType<Label>().FirstOrDefault(l => l.Visible && l.Text == "Harmon confirms the change order procedure")?.Text;
+                var bar = AllControls(panel).OfType<Label>().First(l => l.Visible && l.Text.EndsWith(" facts selected"));
+                barText = bar.Text;
+                var caption = AllControls(panel).OfType<Label>().First(l => l.Text == "Key facts");
+                var count = AllControls(panel).OfType<Label>().First(l => l.Visible && l.Text.StartsWith("6 facts"));
+                captionX = panel.PointToClient(caption.Parent!.PointToScreen(caption.Location)).X;
+                barTextX = panel.PointToClient(bar.Parent!.PointToScreen(bar.Location)).X;
+                countRight = panel.PointToClient(count.Parent!.PointToScreen(new Point(count.Right, 0))).X;
+                var delete = AllControls(panel).OfType<Button>().First(b => b.Visible && b.Text == "Delete Selected");
+                barButtonsRight = panel.PointToClient(delete.Parent!.PointToScreen(new Point(delete.Right, 0))).X;
+                buttons.AddRange(AllControls(panel).OfType<Button>()
+                    .Where(b => b.Visible && b.Text is "Regenerate Selected..." or "Mark Reviewed" or "Delete Selected" && b.Parent is FlowLayoutPanel)
+                    .Select(b => (b.Text, b.Enabled)));
+            }, new ClippingOptions { AllowGridHorizontalScroll = sizeName == "small" });
+
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
+            Assert.Equal("F-002", shown);
+            Assert.Equal("Harmon confirms the change order procedure", heading);
+            Assert.Equal("4 facts selected", barText);
+            // F-004 needs review, so every action is available
+            Assert.Equal(new[] { ("Regenerate Selected...", true), ("Mark Reviewed", true), ("Delete Selected", true) }, buttons);
+            // Content x: the bar's count starts where the card caption does
+            Assert.Equal(captionX, barTextX);
+            if (sizeName == "large")
+            {
+                // One line: the buttons end on the same right edge as the header's count line
+                Assert.Equal(countRight, barButtonsRight);
+            }
+            Assert.Empty(result.Clipping);
+        });
+    }
+
+    [Fact]
+    public void Facts_NeedsReviewFilter_SelectAll()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var draft = ReviewDraft();
+            foreach (var id in new[] { "F-002", "F-005" })
+            {
+                var fact = draft.Guide!.FindFact(id)!;
+                fact.NeedsReview = true;
+                fact.ReviewReason = ReviewReason;
+            }
+            var selected = new List<string>();
+            var barText = string.Empty;
+            var markEnabled = false;
+            var result = RenderFacts("facts-needs-review-select-all", RenderHarness.Large, draft, (panel, host) =>
+            {
+                panel.ShowNeedsReview();
+                var grid = FindGrid(panel);
+                // Ctrl+A in the grid
+                grid.SelectAll();
+                selected.AddRange(grid.SelectedRows.Cast<DataGridViewRow>().Select(r => (string)r.Tag!).OrderBy(i => i));
+                barText = AllControls(panel).OfType<Label>().First(l => l.Visible && l.Text.EndsWith(" facts selected")).Text;
+                markEnabled = AllControls(panel).OfType<Button>().First(b => b.Text == "Mark Reviewed" && b.Parent is FlowLayoutPanel).Enabled;
+            });
+
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
+            // Only the rows the filter shows
+            Assert.Equal(new[] { "F-002", "F-004", "F-005" }, selected);
+            Assert.Equal("3 facts selected", barText);
+            Assert.True(markEnabled);
+            Assert.Empty(result.Clipping);
+        });
+    }
+
+    [Fact]
+    public void Facts_SingleSelection_HidesSelectionBar()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var barShown = true;
+            RenderFacts("facts-single-select", RenderHarness.Large, ReviewDraft(), (panel, host) =>
+            {
+                var grid = FindGrid(panel);
+                grid.SelectAll();
+                // Selecting one entity (Checks navigation) drops the rest of the selection
+                panel.SelectEntity("F-003");
+                barShown = AllControls(panel).OfType<Label>().Any(l => l.Visible && l.Text.EndsWith(" facts selected"));
+                Assert.Equal(new[] { "F-003" }, grid.SelectedRows.Cast<DataGridViewRow>().Select(r => (string)r.Tag!));
+            });
+
+            Assert.False(barShown);
+        });
+    }
+
     [Fact]
     public void Facts_Empty()
     {
@@ -165,8 +280,10 @@ public class FactsPanelRenderTests
 
     private static string? SelectedId(Control panel)
     {
+        // The row the detail card shows: the current row while it is selected (multi-select keeps it while others are added)
         var grid = FindGrid(panel);
-        return grid.SelectedRows.Count > 0 ? grid.SelectedRows[0].Tag as string : null;
+        return grid.CurrentRow is { Selected: true } current ? current.Tag as string
+            : grid.SelectedRows.Count > 0 ? grid.SelectedRows[0].Tag as string : null;
     }
 
     private static IEnumerable<Control> AllControls(Control root)

@@ -608,6 +608,82 @@ public static class CaseGuideUiText
     public static string DeleteLinkedFootText(string firstName) =>
         $"Remove from Facts and Delete takes {firstName} out of these facts. Delete Only keeps the links; each one is listed under Checks until you fix it.";
 
+    // --- Bulk fact actions (Key Facts selection bar, needs-review banner, Regenerate Selected dialog) ---
+
+    public const string RegenerateSelectedButtonText = "Regenerate Selected...";
+    public const string MarkAllReviewedButtonText = "Mark All Reviewed";
+    public const string RegenerateSelectedTitle = "Regenerate Selected Facts";
+
+    /// <summary>
+    /// Selection bar line, e.g. "12 facts selected".
+    /// </summary>
+    public static string SelectedFactsText(int n) => $"{Plural(n, "fact", "facts")} selected";
+
+    public static string RegenerateSelectedHeadline(int n) => $"Regenerate {Plural(n, "selected fact", "selected facts")}";
+
+    public static string RegenerateSelectedBody(int editedCount)
+    {
+        var body = "Rewrites each fact in place with the current cast. Each fact keeps its ID, so canonical values that cite it stay linked and are marked for review. A rewritten fact no longer needs review.";
+        if (editedCount > 0)
+            body += " Facts you edited are kept unless you check the box below.";
+        return body + " This makes one Story-model call per fact.";
+    }
+
+    public const string RegenerateSelectedPlaceholder = "e.g. keep the dates and use the new names from the cast";
+
+    /// <summary>
+    /// Status line after Regenerate Selected: "Regenerated 12 of 12 facts.", "Regenerated 10 of 12 facts; 2 failed: {reason}.
+    /// Click Regenerate Selected to try again." (the failed facts are selected again), plus "Kept 2 facts you edited." when any were skipped.
+    /// </summary>
+    public static string RegeneratedFactsText(int regenerated, int attempted, int failed, string firstError, int skippedEdited)
+    {
+        var kept = skippedEdited > 0 ? $"Kept {Plural(skippedEdited, "fact", "facts")} you edited" : string.Empty;
+        if (attempted == 0)
+            return kept.Length > 0 ? kept + "; nothing was regenerated." : "Nothing was regenerated.";
+
+        var text = $"Regenerated {regenerated.ToString("N0", Invariant)} of {Plural(attempted, "fact", "facts")}";
+        if (failed > 0)
+        {
+            // One failed fact stays selected alone, so the detail card's button is the one to click
+            var button = failed == 1 ? "Regenerate Fact" : "Regenerate Selected";
+            text += $"; {failed.ToString("N0", Invariant)} failed{Colon(firstError)}. Click {button} to try again.";
+        }
+        else
+        {
+            text += ".";
+        }
+        return kept.Length > 0 ? $"{text} {kept}." : text;
+    }
+
+    public static string RegenerateFactsStoppedText(string message, int regenerated, int attempted) =>
+        $"Generation stopped{Colon(message)}. Regenerated {regenerated.ToString("N0", Invariant)} of {Plural(attempted, "fact", "facts")}; the rest kept their text. Fix the problem on the API Configuration step, then try again.";
+
+    public static string MarkedReviewedText(int n) => $"Marked {Plural(n, "fact", "facts")} as reviewed.";
+
+    public static string DeletedFactsText(int n) => $"Deleted {Plural(n, "fact", "facts")}.";
+
+    /// <summary>
+    /// Mark All Reviewed (needs-review banner). Default No.
+    /// </summary>
+    public static (string Title, string Text) C13MarkAllReviewed(int n) =>
+        ("Mark All Reviewed", n == 1
+            ? "Mark 1 fact as reviewed? Its text will stay as it is."
+            : $"Mark all {Plural(n, "fact", "facts")} as reviewed? Their text will stay as it is.");
+
+    /// <summary>
+    /// Delete Selected (Key Facts selection bar), worded like C5. Default No.
+    /// </summary>
+    public static (string Title, string Text) C14DeleteFacts(int n, int valuesUsing)
+    {
+        var text = $"Delete {Plural(n, "fact", "facts")}?";
+        if (valuesUsing > 0)
+        {
+            text += $" They are used by {Plural(valuesUsing, "canonical value", "canonical values")}; " +
+                    (valuesUsing == 1 ? "that link will be removed." : "those links will be removed.");
+        }
+        return ("Delete Facts", text + " This cannot be undone.");
+    }
+
     // --- Private helpers ---
 
     private static List<GuidePart> Ordered(IReadOnlyList<GuidePart> parts) =>

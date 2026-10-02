@@ -12,6 +12,18 @@ public enum FactFilter
 }
 
 /// <summary>
+/// What the Key Facts selection bar shows for the selected facts (pure, unit-tested).
+/// </summary>
+public class FactSelectionState
+{
+    public bool Visible { get; set; }
+    public string Text { get; set; } = string.Empty;
+    public bool CanRegenerate { get; set; }
+    public bool CanMarkReviewed { get; set; }
+    public bool CanDelete { get; set; }
+}
+
+/// <summary>
 /// Key Facts tab (D-07, D-18..D-21): the timeline as a sortable grid and a detail card with three link pickers.
 /// Date and Fact edit in the grid; every other field edits in the detail card. Every change goes through
 /// CaseGuideEditing, which validates it, marks the fact user-edited and keeps the people who did it in Who knew.
@@ -30,6 +42,12 @@ public class FactsTabPanel : GuideTabPanel
     private readonly ThemedButton _btnMarkReviewed;
     private readonly ThemedButton _btnAddFact;
     private readonly ThemedButton _btnRegenerateFacts;
+    private readonly Panel _selectionBar;
+    private readonly Label _lblSelection;
+    private readonly FlowLayoutPanel _selectionButtons;
+    private readonly ThemedButton _btnRegenerateSelected;
+    private readonly ThemedButton _btnMarkSelectedReviewed;
+    private readonly ThemedButton _btnDeleteSelected;
     private readonly Font _noteFont;
     private readonly Control[] _tabActions;
     private readonly Dictionary<TextBox, FactField> _textFields = new();
@@ -111,6 +129,55 @@ public class FactsTabPanel : GuideTabPanel
         _btnRegenerateFacts.Margin = new Padding(0);
         _tabActions = new Control[] { _btnAddFact, _btnRegenerateFacts };
 
+        // Selection bar (2+ facts selected): "{n} facts selected" | Regenerate Selected... · Mark Reviewed · Delete Selected,
+        // between the card header and the grid, on Content x (15 inside the Padding = 1 card), then a 1 px divider
+        Grid.MultiSelect = true;
+        var inset = LogicalToDeviceUnits(15);
+        var smallGap = LogicalToDeviceUnits(Theme.SmallGap);
+        // Placed by hand in LayoutSelectionBar (like the notice): nested AutoSize tables kept a stale height after the
+        // one-line / two-line switch, and the spare height showed as a grey band above the grid
+        _selectionBar = new Panel
+        {
+            // Anchored, not Fill: the AutoSize slot then takes the height LayoutSelectionBar sets
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Theme.Surface
+        };
+        _lblSelection = new Label
+        {
+            AutoSize = true,
+            Margin = new Padding(0),
+            UseMnemonic = false,
+            Font = Theme.LabelFont(),
+            ForeColor = Theme.Text,
+            BackColor = Theme.Surface
+        };
+        _selectionButtons = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Theme.Surface
+        };
+        _btnRegenerateSelected = (ThemedButton)ButtonHelper.CreateButton(CaseGuideUiText.RegenerateSelectedButtonText, 0, buttonHeight, ButtonStyle.Primary);
+        _btnRegenerateSelected.Margin = new Padding(0, 0, smallGap, 0);
+        _btnMarkSelectedReviewed = (ThemedButton)ButtonHelper.CreateButton("Mark Reviewed", 0, buttonHeight, ButtonStyle.Default);
+        _btnMarkSelectedReviewed.Margin = new Padding(0, 0, smallGap, 0);
+        _btnDeleteSelected = (ThemedButton)ButtonHelper.CreateButton("Delete Selected", 0, buttonHeight, ButtonStyle.Default);
+        _btnDeleteSelected.Margin = new Padding(0);
+        _selectionButtons.Controls.Add(_btnRegenerateSelected);
+        _selectionButtons.Controls.Add(_btnMarkSelectedReviewed);
+        _selectionButtons.Controls.Add(_btnDeleteSelected);
+        _selectionBar.Controls.Add(_lblSelection);
+        _selectionBar.Controls.Add(_selectionButtons);
+        // 1 px divider under the bar, full card width like the header's divider
+        _selectionBar.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = LogicalToDeviceUnits(1), BackColor = Theme.Border, Margin = new Padding(0) });
+        GridBarSlot.Controls.Add(_selectionBar);
+
         // Wire handlers only after every control exists
         _btnAll.Click += (s, e) => SetFilter(FactFilter.All);
         _btnNeedsReview.Click += (s, e) => SetFilter(FactFilter.NeedsReview);
@@ -121,6 +188,11 @@ public class FactsTabPanel : GuideTabPanel
         _btnRegenerateFacts.Click += BtnRegenerateFacts_Click;
         DeleteButton.Click += DeleteButton_Click;
         RegenerateButton.Click += RegenerateButton_Click;
+        _btnRegenerateSelected.Click += BtnRegenerateSelected_Click;
+        _btnMarkSelectedReviewed.Click += BtnMarkSelectedReviewed_Click;
+        _btnDeleteSelected.Click += BtnDeleteSelected_Click;
+        // The bar's width decides whether it fits on one line
+        _selectionBar.SizeChanged += (s, e) => QueueLayoutSelectionBar();
     }
 
     public override IReadOnlyList<Control> TabActions => _tabActions;
@@ -162,6 +234,26 @@ public class FactsTabPanel : GuideTabPanel
 
     public static bool PassesFilter(KeyFact f, FactFilter filter) =>
         filter != FactFilter.NeedsReview || f.NeedsReview;
+
+    /// <summary>
+    /// The selection bar shows for 2+ selected facts: "{n} facts selected", Regenerate Selected and Delete Selected
+    /// (idle only), and Mark Reviewed only when at least one selected fact needs review.
+    /// </summary>
+    public static FactSelectionState SelectionState(IReadOnlyCollection<KeyFact> selected, bool busy)
+    {
+        var count = selected?.Count ?? 0;
+        if (count < 2)
+            return new FactSelectionState();
+
+        return new FactSelectionState
+        {
+            Visible = true,
+            Text = CaseGuideUiText.SelectedFactsText(count),
+            CanRegenerate = !busy,
+            CanMarkReviewed = !busy && selected!.Any(f => f.NeedsReview),
+            CanDelete = !busy
+        };
+    }
 
     private static string SignificanceText(FactSignificance s) => s.ToString();
 
@@ -328,6 +420,210 @@ public class FactsTabPanel : GuideTabPanel
         RefreshFromDraft();
         if (Grid.Rows.Count > 0 && Grid.Rows[0].Tag is string id)
             base.SelectEntity(id);
+    }
+
+    // ----- Selection bar -----
+
+    private List<KeyFact> SelectedFacts() =>
+        SelectedIds.Select(id => Fact(id)).OfType<KeyFact>().ToList();
+
+    protected override void OnSelectionChanged()
+    {
+        if (Rebuilding)
+            return;
+        UpdateSelectionBar();
+    }
+
+    public override void SetBusy(bool busy)
+    {
+        base.SetBusy(busy);
+        UpdateSelectionBar();
+    }
+
+    private void UpdateSelectionBar()
+    {
+        if (IsDisposed)
+            return;
+
+        var state = SelectionState(IsAttached ? SelectedFacts() : new List<KeyFact>(), Busy || (IsAttached && Host.IsBusy));
+        // A longer count ("9" to "10 facts selected") can push the buttons to a second line
+        var relayout = _lblSelection.Text != state.Text || GridBarSlot.Visible != state.Visible;
+        if (_lblSelection.Text != state.Text)
+            _lblSelection.Text = state.Text;
+        _btnRegenerateSelected.Enabled = state.CanRegenerate;
+        _btnMarkSelectedReviewed.Enabled = state.CanMarkReviewed;
+        _btnDeleteSelected.Enabled = state.CanDelete;
+        if (GridBarSlot.Visible != state.Visible)
+            GridBarSlot.Visible = state.Visible;
+        if (relayout)
+            LayoutSelectionBar();
+    }
+
+    private bool _layoutSelectionBarQueued;
+
+    // Width changes arrive inside a layout pass: decide one line or two afterwards
+    private void QueueLayoutSelectionBar()
+    {
+        if (!IsHandleCreated || IsDisposed)
+        {
+            LayoutSelectionBar();
+            return;
+        }
+        if (_layoutSelectionBarQueued)
+            return;
+
+        _layoutSelectionBarQueued = true;
+        BeginInvoke(new Action(() =>
+        {
+            _layoutSelectionBarQueued = false;
+            if (!IsDisposed)
+                LayoutSelectionBar();
+        }));
+    }
+
+    /// <summary>
+    /// One line (count left, buttons right, 8 above and below the 34 px buttons) when it fits the grid card; otherwise the
+    /// buttons go on a second line under the count, both at Content x (they fit the grid card at the minimum window size).
+    /// </summary>
+    private void LayoutSelectionBar()
+    {
+        if (!GridBarSlot.Visible)
+            return;
+
+        var inset = LogicalToDeviceUnits(15);
+        var pad = LogicalToDeviceUnits(Theme.SmallGap);
+        var divider = LogicalToDeviceUnits(1);
+        // Before the first layout the bar has no width yet: measure against the grid host, which the bar spans
+        var width = _selectionBar.Width > 1 ? _selectionBar.Width : (Grid.Parent ?? Grid).Width;
+        var label = _lblSelection.PreferredSize;
+        var buttons = _selectionButtons.GetPreferredSize(Size.Empty);
+        var wrap = inset + label.Width + LogicalToDeviceUnits(Theme.Gap) + buttons.Width + inset > width;
+
+        int height;
+        if (wrap)
+        {
+            _lblSelection.Location = new Point(inset, pad);
+            _selectionButtons.Location = new Point(inset, pad + label.Height + pad);
+            height = pad + label.Height + pad + buttons.Height + pad + divider;
+        }
+        else
+        {
+            _lblSelection.Location = new Point(inset, pad + (buttons.Height - label.Height) / 2);
+            _selectionButtons.Location = new Point(Math.Max(inset, width - inset - buttons.Width), pad);
+            height = pad + buttons.Height + pad + divider;
+        }
+
+        if (_selectionBar.Height != height)
+        {
+            _selectionBar.Height = height;
+            // The slot is AutoSize: the grid card must lay out again to give it the new height
+            (GridBarSlot.Parent ?? GridBarSlot).PerformLayout();
+        }
+    }
+
+    protected override void OnDeleteKey()
+    {
+        // Two or more selected rows: Delete removes the selection (asks first), like Delete Selected
+        if (SelectedIds.Count >= 2)
+        {
+            if (_btnDeleteSelected.Enabled)
+                _btnDeleteSelected.PerformClick();
+            return;
+        }
+
+        base.OnDeleteKey();
+    }
+
+    /// <summary>
+    /// Applies typed cells and detail fields before a bulk action reads the selection.
+    /// </summary>
+    private List<string> CommitAndGetSelection()
+    {
+        CommitGridEdits();
+        CommitPendingEdits();
+        return SelectedIds.Where(id => Fact(id) != null).ToList();
+    }
+
+    private async void BtnRegenerateSelected_Click(object? sender, EventArgs e)
+    {
+        if (!IsAttached || Host.IsBusy)
+            return;
+
+        var ids = CommitAndGetSelection();
+        if (ids.Count < 2)
+            return;
+
+        GuideEntriesResult? result = null;
+        try
+        {
+            result = await Host.RegenerateEntriesAsync(GuidePart.Facts, ids);
+        }
+        catch (Exception ex)
+        {
+            // The host reports its own failures; this only catches a fault before it could
+            if (!IsDisposed)
+                Host.SetStatus(ex.InnerException != null ? $"Error: {ex.Message} ({ex.InnerException.Message})" : $"Error: {ex.Message}", Theme.Danger);
+        }
+
+        if (IsDisposed)
+            return;
+
+        // Rewritten facts may change any field or their notes, so build the card again
+        _builtId = null;
+        RefreshFromDraft();
+        // The facts that failed are selected again, ready for another try
+        if (result is { Failed.Count: > 0 })
+            SelectRows(result.Failed.Select(f => f.Id));
+    }
+
+    private void BtnMarkSelectedReviewed_Click(object? sender, EventArgs e)
+    {
+        if (!IsAttached || Host.IsBusy)
+            return;
+
+        var ids = CommitAndGetSelection();
+        if (ids.Count == 0)
+            return;
+
+        // Under the Needs review filter the reviewed facts leave the list: move on to the next one
+        var nextId = _filter == FactFilter.NeedsReview ? NeighborId(ids) : null;
+        var marked = CaseGuideEditing.MarkFactsReviewed(Host.Draft, ids);
+        if (marked == 0)
+            return;
+
+        Host.NotifyEdited(GuidePart.Facts);
+        RefreshFromDraft();
+        if (nextId != null)
+            SelectEntity(nextId);
+        Host.SetStatus(CaseGuideUiText.MarkedReviewedText(marked), Theme.Success);
+    }
+
+    private void BtnDeleteSelected_Click(object? sender, EventArgs e)
+    {
+        if (!IsAttached || Host.IsBusy)
+            return;
+
+        var ids = CommitAndGetSelection();
+        if (ids.Count < 2)
+            return;
+
+        // Worded like C5 and defaults to No (T-03-49)
+        var (title, text) = CaseGuideUiText.C14DeleteFacts(ids.Count, CaseGuideEditing.ValuesReferencingAny(Host.Draft, ids));
+        var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.Yes || IsDisposed)
+            return;
+
+        var nextId = NeighborId(ids);
+        // Same side effects as Delete Fact for each one: values citing it are flagged and lose the link
+        var deleted = ids.Count(id => CaseGuideEditing.DeleteFact(Host.Draft, id));
+        if (deleted == 0)
+            return;
+
+        Host.NotifyEdited(GuidePart.Facts);
+        RefreshFromDraft();
+        if (nextId != null && SelectEntity(nextId))
+            Grid.Focus();
+        Host.SetStatus(CaseGuideUiText.DeletedFactsText(deleted), Theme.Success);
     }
 
     private void Grid_CellEndEdit(object? sender, DataGridViewCellEventArgs e)
@@ -796,7 +1092,7 @@ public class FactsTabPanel : GuideTabPanel
         if (answer != DialogResult.Yes || IsDisposed)
             return;
 
-        var nextId = NeighborId(id);
+        var nextId = NeighborId(new[] { id });
         if (!CaseGuideEditing.DeleteFact(Host.Draft, id))
             return;
 
@@ -885,7 +1181,7 @@ public class FactsTabPanel : GuideTabPanel
 
         CommitPendingEdits();
         // Under the Needs review filter the reviewed fact leaves the list: move on to the next one
-        var nextId = _filter == FactFilter.NeedsReview ? NeighborId(id) : null;
+        var nextId = _filter == FactFilter.NeedsReview ? NeighborId(new[] { id }) : null;
         if (!CaseGuideEditing.MarkReviewed(Host.Draft, id))
             return;
 
@@ -896,17 +1192,28 @@ public class FactsTabPanel : GuideTabPanel
     }
 
     /// <summary>
-    /// The row after the given one (or before it when it is last), so the selection stays in place after it leaves.
+    /// The first row after the last of the given ones that is not among them (or the nearest one before it), so the selection
+    /// stays in place after those rows leave.
     /// </summary>
-    private string? NeighborId(string id)
+    private string? NeighborId(IReadOnlyCollection<string> ids)
     {
-        var rows = Grid.Rows.Cast<DataGridViewRow>().ToList();
-        var index = rows.FindIndex(r => r.Tag as string == id);
-        if (index < 0)
+        var rows = Grid.Rows.Cast<DataGridViewRow>().Select(r => r.Tag as string).ToList();
+        var leaving = ids.ToHashSet(StringComparer.Ordinal);
+        var last = rows.FindLastIndex(id => id != null && leaving.Contains(id));
+        if (last < 0)
             return null;
-        if (index + 1 < rows.Count)
-            return rows[index + 1].Tag as string;
-        return index > 0 ? rows[index - 1].Tag as string : null;
+
+        for (var i = last + 1; i < rows.Count; i++)
+        {
+            if (rows[i] is { } after && !leaving.Contains(after))
+                return after;
+        }
+        for (var i = last - 1; i >= 0; i--)
+        {
+            if (rows[i] is { } before && !leaving.Contains(before))
+                return before;
+        }
+        return null;
     }
 
     private void Defer(Action action)

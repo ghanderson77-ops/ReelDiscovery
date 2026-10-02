@@ -557,6 +557,44 @@ public static partial class CaseGuideEditing
         return true;
     }
 
+    /// <summary>
+    /// Mark Reviewed for a selection: clears NeedsReview on each listed fact that has it (text unchanged). Returns how many changed.
+    /// </summary>
+    public static int MarkFactsReviewed(CaseDraft draft, IEnumerable<string> factIds)
+    {
+        var guide = draft?.Guide;
+        if (draft == null || guide == null || factIds == null)
+            return 0;
+
+        var count = 0;
+        foreach (var id in factIds.Distinct(StringComparer.Ordinal))
+        {
+            var fact = guide.FindFact(id ?? string.Empty);
+            if (fact == null || !fact.NeedsReview)
+                continue;
+
+            fact.NeedsReview = false;
+            fact.ReviewReason = string.Empty;
+            count++;
+        }
+
+        if (count > 0)
+            draft.Revision++;
+        return count;
+    }
+
+    /// <summary>
+    /// Mark All Reviewed (needs-review banner): clears NeedsReview on every fact. Returns how many changed.
+    /// </summary>
+    public static int MarkAllFactsReviewed(CaseDraft draft) =>
+        MarkFactsReviewed(draft, draft?.Guide?.Facts.Where(f => f != null && f.NeedsReview).Select(f => f.Id).ToList() ?? new List<string>());
+
+    /// <summary>
+    /// Canonical values that cite at least one of the facts (each value counted once).
+    /// </summary>
+    public static int ValuesReferencingAny(CaseDraft draft, IReadOnlyCollection<string> factIds) =>
+        draft?.Guide?.Values.Count(v => v != null && v.FactIds.Any(factIds.Contains)) ?? 0;
+
     public static int ValuesReferencing(CaseDraft draft, string factId) =>
         draft?.Guide?.Values.Count(v => v.FactIds.Contains(factId)) ?? 0;
 

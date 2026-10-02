@@ -121,6 +121,58 @@ public partial class StepCaseGuide
     }
 
     /// <summary>
+    /// Regenerate Selected (Key Facts): asks for guidance and whether edited facts are replaced, then rewrites the selected facts
+    /// as one run, so progress, Cancel Generation, autosave and the busy state work like every other run.
+    /// </summary>
+    public async Task<GuideEntriesResult?> RegenerateEntriesAsync(GuidePart part, IReadOnlyList<string> entityIds)
+    {
+        if (_isGenerating || _state == null || part != GuidePart.Facts || Draft.Guide == null || entityIds == null)
+            return null;
+
+        CommitAllEdits();
+        var guide = Draft.Guide;
+        var ids = entityIds.Where(id => guide.FindFact(id) != null).Distinct(StringComparer.Ordinal).ToList();
+        if (ids.Count == 0)
+            return null;
+
+        string guidance;
+        bool replaceEdited;
+        var edited = ids.Count(id => guide.FindFact(id)!.IsUserEdited);
+        using (var dialog = new RegenerateSelectedDialog(ids.Count, edited))
+        {
+            if (dialog.ShowDialog(FindForm()) != DialogResult.OK || IsDisposed)
+                return null;
+            guidance = dialog.Guidance;
+            replaceEdited = dialog.ReplaceEdited;
+        }
+
+        GuideEntriesResult? entries = null;
+        await RunAsync(async (g, p, done, ct) =>
+        {
+            entries = await g.RegenerateEntriesAsync(Draft, part, ids, guidance, replaceEdited, p, ct);
+            await done(part);
+            return new CaseGuideGenerationResult { FatalError = entries.FatalError, Notes = entries.Notes };
+        }, report: _ => ReportEntriesOutcome(entries));
+        return entries;
+    }
+
+    private void ReportEntriesOutcome(GuideEntriesResult? entries)
+    {
+        if (entries == null)
+            return;
+
+        if (entries.IsFatal)
+        {
+            SetStatus(CaseGuideUiText.RegenerateFactsStoppedText(entries.FatalError, entries.Regenerated.Count, entries.Attempted), Theme.Danger);
+            return;
+        }
+
+        var text = CaseGuideUiText.RegeneratedFactsText(entries.Regenerated.Count, entries.Attempted, entries.Failed.Count,
+            entries.Failed.FirstOrDefault()?.Message ?? string.Empty, entries.SkippedEdited.Count);
+        SetStatus(text, entries.Failed.Count > 0 ? Theme.Danger : entries.Regenerated.Count > 0 ? Theme.Success : Theme.Warning);
+    }
+
+    /// <summary>
     /// Regenerate {Noun} for one entry (the panel already asked C3 for a hand-edited entry). On failure the old text is kept.
     /// </summary>
     public Task RegenerateEntryAsync(GuidePart part, string entityId, string guidance) =>
@@ -189,12 +241,13 @@ public partial class StepCaseGuide
 
     /// <summary>
     /// Runs one generator call with progress, per-part autosave, cancel and the outcome status line (one run at a time, T-03-52).
-    /// <paramref name="failedText"/> words a failed part (default: "The {part} failed: ... Click Retry {Part}.").
+    /// <paramref name="failedText"/> words a failed part (default: "The {part} failed: ... Click Retry {Part}.");
+    /// <paramref name="report"/> replaces the whole outcome status line when given.
     /// </summary>
     private Task RunAsync(
         Func<CaseGuideGenerator, IProgress<GuideProgress>, Func<GuidePart, Task>, CancellationToken, Task<CaseGuideGenerationResult>> work,
-        Func<GuidePart, string, string>? failedText = null) =>
-        TrackRun(RunCoreAsync(work, failedText));
+        Func<GuidePart, string, string>? failedText = null, Action<CaseGuideGenerationResult>? report = null) =>
+        TrackRun(RunCoreAsync(work, failedText, report));
 
     private Task TrackRun(Task run)
     {
@@ -236,7 +289,7 @@ public partial class StepCaseGuide
 
     private async Task RunCoreAsync(
         Func<CaseGuideGenerator, IProgress<GuideProgress>, Func<GuidePart, Task>, CancellationToken, Task<CaseGuideGenerationResult>> work,
-        Func<GuidePart, string, string>? failedText = null)
+        Func<GuidePart, string, string>? failedText = null, Action<CaseGuideGenerationResult>? report = null)
     {
         if (_isGenerating || _state == null)
             return;
@@ -293,7 +346,10 @@ public partial class StepCaseGuide
             if (IsDisposed)
                 return;
 
-            ReportOutcome(result, failedText ?? CaseGuideUiText.PartFailedText);
+            if (report != null)
+                report(result);
+            else
+                ReportOutcome(result, failedText ?? CaseGuideUiText.PartFailedText);
         }
         catch (OperationCanceledException)
         {

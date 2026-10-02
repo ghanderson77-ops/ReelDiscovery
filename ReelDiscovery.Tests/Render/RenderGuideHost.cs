@@ -42,6 +42,12 @@ internal sealed class RenderGuideHost : IGuideHost
         return Task.CompletedTask;
     }
 
+    public Task<GuideEntriesResult?> RegenerateEntriesAsync(GuidePart part, IReadOnlyList<string> entityIds)
+    {
+        Calls.Add($"RegenerateEntries:{part}:{string.Join(",", entityIds)}");
+        return Task.FromResult<GuideEntriesResult?>(null);
+    }
+
     public Task RetryIssueDetailsAsync()
     {
         Calls.Add("RetryIssueDetails");

@@ -45,6 +45,40 @@ public class DialogRenderTests
     }
 
     [Theory]
+    [InlineData(12, 3, "dialog-regenerate-selected-edited")]
+    [InlineData(35, 0, "dialog-regenerate-selected")]
+    public void RegenerateSelectedDialog_RendersWithoutClipping(int selected, int edited, string name)
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var height = 0;
+            var workingHeight = 0;
+            var checkbox = string.Empty;
+            var result = RenderHarness.RenderForm(() => new RegenerateSelectedDialog(selected, edited), name, form =>
+            {
+                height = form.ClientSize.Height;
+                workingHeight = Screen.FromControl(form).WorkingArea.Height;
+                checkbox = Descendants(form).OfType<CheckBox>().SingleOrDefault()?.Text ?? string.Empty;
+                Assert.Contains(Descendants(form).OfType<Label>(), l => l.Text == $"Regenerate {selected} selected facts");
+                Assert.Contains(Descendants(form).OfType<Button>(), b => b.Text == "Regenerate Selected");
+            });
+
+            AssertRendered(result, height, workingHeight);
+            Assert.Equal(edited > 0 ? $"Also replace my {edited} edited facts" : string.Empty, checkbox);
+        });
+    }
+
+    private static IEnumerable<Control> Descendants(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            yield return child;
+            foreach (var nested in Descendants(child))
+                yield return nested;
+        }
+    }
+
+    [Theory]
     [InlineData(9, "dialog-delete-references-9")]
     [InlineData(1, "dialog-delete-references-1")]
     public void DeleteReferencesDialog_RendersWithoutClipping(int lineCount, string name)

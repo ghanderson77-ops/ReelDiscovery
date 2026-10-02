@@ -65,7 +65,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [ ] **PLAN-04**: Timestamps are realistic (business hours, time zones, weekends/holidays, reply latency)
 - [ ] **PLAN-05**: Plan includes realistic distributions for thread depth, reply vs. reply-all vs. forward, CC patterns and attachment rate
 - [x] **PLAN-06**: A validator checks the plan (counts, ratio, dates within character active ranges, every key fact covered by evidence)
-- [ ] **PLAN-07**: User sees a plan summary (counts by issue/fact/relevance/custodian, date histogram) and approves it or re-plans before generation starts
+- [x] **PLAN-07**: User sees a plan summary (counts by issue/fact/relevance/custodian, date histogram) and approves it or re-plans before generation starts
 
 ### Evidence Corpus Generation
 
@@ -98,11 +98,11 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Answer Key
 
-- [ ] **KEY-01**: System produces an answer key in CSV and Excel with one row per document (emails and attachments)
+- [x] **KEY-01**: System produces an answer key in CSV and Excel with one row per document (emails and attachments)
 - [x] **KEY-02**: Each row includes DocID, file path, custodian, date, from/to, subject, thread ID, family/parent ID, relevance category, issue codes, linked fact IDs, hot flag, privilege flag and a one-sentence rationale
 - [x] **KEY-03**: Labels come from the plan at generation time, with family-level relevance propagated to attachments and quoted replies
 - [x] **KEY-04**: Excel key includes a corpus statistics sheet (counts by custodian, issue, relevance category, date)
-- [ ] **KEY-05**: System generates a review protocol / coding manual document describing issues and relevance criteria for reviewers
+- [x] **KEY-05**: System generates a review protocol / coding manual document describing issues and relevance criteria for reviewers
 
 ### Corpus QA
 
@@ -213,7 +213,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAN-04 | Phase 4 | Pending |
 | PLAN-05 | Phase 4 | Pending |
 | PLAN-06 | Phase 4 | Complete |
-| PLAN-07 | Phase 4 | Pending |
+| PLAN-07 | Phase 4 | Complete |
 | CORP-01 | Phase 5 | Pending |
 | CORP-02 | Phase 5 | Pending |
 | CORP-03 | Phase 5 | Pending |
@@ -234,11 +234,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ATT-02 | Phase 6 | Pending |
 | ATT-03 | Phase 6 | Pending |
 | ATT-04 | Phase 6 | Pending |
-| KEY-01 | Phase 4 | Pending |
+| KEY-01 | Phase 4 | Complete |
 | KEY-02 | Phase 4 | Complete |
 | KEY-03 | Phase 4 | Complete |
 | KEY-04 | Phase 4 | Complete |
-| KEY-05 | Phase 4 | Pending |
+| KEY-05 | Phase 4 | Complete |
 | QA-01 | Phase 7 | Pending |
 | QA-02 | Phase 7 | Pending |
 | QA-03 | Phase 7 | Pending |

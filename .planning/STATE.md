@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-18-PLAN.md
-last_updated: "2026-10-02T22:41:27.038Z"
+stopped_at: Completed 04-19-PLAN.md
+last_updated: "2026-10-02T22:48:06.126Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 62
-  percent: 97
+  completed_plans: 63
+  percent: 98
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 21 of 22
+Plan: 22 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -112,6 +112,7 @@ Progress: [██████████] 98%
 | Phase 04 P16 | 9min | 2 tasks | 3 files |
 | Phase 04 P17 | 25min | 2 tasks | 4 files |
 | Phase 04 P18 | 13min | 3 tasks | 5 files |
+| Phase 04 P19 | 15min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -302,6 +303,9 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-17]: Code-built wrapping labels pin MinimumSize = MaximumSize to (width, measured height) and code-sized rows call the root PerformLayout; Padding=1 cards inset top/bottom by the corner radius — AutoSize TLP rows kept stale wrap heights (150 px gap at 144 DPI) and full-bleed content covered rounded corners
 - [Phase 04]: 04-18: Approving a plan kept against a changed guide dismisses the current guide hash, so Keep This Plan then Approve Plan stays approved
 - [Phase 04]: 04-18: Failed or cancelled planning over an existing plan re-shows that plan with its banner; count-grid sort glyphs hidden to keep numeric headers on the 16 px line
+- [Phase 04]: 04-19: The close-time flush includes Corpus Settings and Review Plan so pending corpus edits are committed before the synchronous save
+- [Phase 04]: 04-19: Closing during planning shows C-P2 only on Review Plan; core document and guide runs keep C12
+- [Phase 04]: 04-19: Histogram axis max is the smallest 1/2/2.5/5 x 10^n at or above the largest month
 
 ### Pending Todos
 
@@ -323,6 +327,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T22:41:27.033Z
-Stopped at: Completed 04-18-PLAN.md
+Last session: 2026-10-02T22:48:06.121Z
+Stopped at: Completed 04-19-PLAN.md
 Resume file: None

@@ -136,7 +136,7 @@ Plans:
 - [x] 04-11-PLAN.md — CorpusUiText: all Phase 4 copy + Review Plan entry/gate decisions (Wave 3)
 - [x] 04-12-PLAN.md — PercentSlider, MonthHistogram, StatTile, ReplanDialog + 144-DPI renders (Wave 4)
 - [x] 04-13-PLAN.md — RelevantThreadFiller: chunked Story-tier thread plans, mapping, re-ask once, templates (Wave 4)
-- [ ] 04-14-PLAN.md — SubjectSeeder: non-relevant subjects, decoy must-not-mention, external senders (Wave 4)
+- [x] 04-14-PLAN.md — SubjectSeeder: non-relevant subjects, decoy must-not-mention, external senders (Wave 4)
 - [ ] 04-15-PLAN.md — Case Summary Corpus group (plan, answer key, protocol rows) + renders (Wave 4)
 - [ ] 04-16-PLAN.md — CorpusPlanner.PlanAsync orchestration, guidance weights, schema registration (Wave 5)
 - [ ] 04-17-PLAN.md — StepCorpusSettings + renders (Wave 5)
@@ -205,7 +205,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
-| 4. Corpus Plan & Answer Key | 15/22 | In Progress|  |
+| 4. Corpus Plan & Answer Key | 16/22 | In Progress|  |
 | 5. Relevant Evidence Generation & Narrative Ledger | 0/TBD | Not started | - |
 | 6. Attachments & Non-Relevant Corpus | 0/TBD | Not started | - |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-10-02T20:38:30.057Z"
+stopped_at: Completed 04-10-PLAN.md
+last_updated: "2026-10-02T20:49:42.627Z"
 last_activity: 2026-10-02
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 64
-  completed_plans: 52
-  percent: 81
+  completed_plans: 53
+  percent: 83
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 4 (Corpus Plan & Answer Key) — EXECUTING
-Plan: 11 of 22
+Plan: 12 of 22
 Status: Ready to execute
 Last activity: 2026-10-02
 
@@ -102,6 +102,7 @@ Progress: [██████████] 98%
 | Phase 04 P07 | 14min | 2 tasks | 5 files |
 | Phase 04 P08 | 12min | 2 tasks | 5 files |
 | Phase 04 P09 | 35min | 2 tasks | 2 files |
+| Phase 04 P10 | 25min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -267,6 +268,10 @@ Recent decisions affecting current work:
 - [Phase 04]: [04-09]: Privileged side mirrors validator rule 12 (in-house own org; outside firm + RepresentsOrgIds; plus firms representing those clients); candidates need counsel + 1 other active client-side knower; target round(threads x pct), min 1
 - [Phase 04]: [04-09]: Attachments are an exact share (round(messages x AttachmentPercent)) picked among messages that can carry an enabled type; invites only Seq 1, voicemail only single-message threads
 - [Phase 04]: [04-09]: Repair swaps an inactive person from that message onward (counsel for counsel on privileged threads), reschedules on sender swaps (3 passes), else truncates with a note and moves removed messages to a replacement thread of people active anchor..+30 days
+- [Phase 04]: [04-10]: Daily-business root senders weighted 1 + relevant messages sent; ~20% of daily threads add one Party/ThirdParty person; round(threads x 2%) (min 1 at 50+) privileged daily threads stay inside the in-house counsel's organization
+- [Phase 04]: [04-10]: Decoys use knowers of a fact (2+ knowers preferred), start within +/-30 days of it clamped to the window, carry its IssueIds and never FactIds
+- [Phase 04]: [04-10]: Externals = clamp(bulk messages / 15, 3, 40) split 40/30/30 (spam first in the spam/vendor group), never reuse a case org or cast email domain; external-root threads are owned by the cast recipient; spam images are exactly 5% of spam messages when Image is enabled
+- [Phase 04]: [04-10]: Non-relevant threads use stable pools (active anchor..+30 days) and reschedule-to-fit (active ranges and window end) instead of swap/truncate repair; totals never change
 
 ### Pending Todos
 
@@ -288,6 +293,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-02T20:38:30.052Z
-Stopped at: Completed 04-09-PLAN.md
+Last session: 2026-10-02T20:49:42.623Z
+Stopped at: Completed 04-10-PLAN.md
 Resume file: None

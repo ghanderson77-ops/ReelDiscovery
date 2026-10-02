@@ -33,6 +33,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     private Button _btnUpdateGuide = null!;
     private Button _btnNotNow = null!;
     private Button _btnReviewFacts = null!;
+    private Button _btnMarkAllReviewed = null!;
     private FlowLayoutPanel _tabStrip = null!;
     private FlowLayoutPanel _tabActions = null!;
     private Panel _bodyHost = null!;
@@ -228,10 +229,13 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnNotNow = ButtonHelper.CreateButton("Not Now", 0, buttonHeight, ButtonStyle.Default);
         _btnNotNow.Margin = new Padding(0);
         _btnReviewFacts = ButtonHelper.CreateButton("Review Facts", 0, buttonHeight, ButtonStyle.Default);
-        _btnReviewFacts.Margin = new Padding(0);
+        _btnReviewFacts.Margin = new Padding(0, 0, smallGap, 0);
+        _btnMarkAllReviewed = ButtonHelper.CreateButton(CaseGuideUiText.MarkAllReviewedButtonText, 0, buttonHeight, ButtonStyle.Default);
+        _btnMarkAllReviewed.Margin = new Padding(0);
         _bannerButtons.Controls.Add(_btnUpdateGuide);
         _bannerButtons.Controls.Add(_btnNotNow);
         _bannerButtons.Controls.Add(_btnReviewFacts);
+        _bannerButtons.Controls.Add(_btnMarkAllReviewed);
         bannerLayout.Controls.Add(_lblBannerHeading, 0, 0);
         bannerLayout.Controls.Add(_lblBannerBody, 0, 1);
         bannerLayout.Controls.Add(_bannerButtons, 1, 0);
@@ -483,6 +487,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnUpdateGuide.Click += async (s, e) => await UpdateGuideAsync();
         _btnNotNow.Click += (s, e) => DismissStaleBanner();
         _btnReviewFacts.Click += (s, e) => ReviewFacts();
+        _btnMarkAllReviewed.Click += (s, e) => MarkAllReviewed();
         _btnCancel.Click += BtnCancel_Click;
         _gridChecks.CellDoubleClick += (s, e) => NavigateToFinding(e.RowIndex);
         _gridChecks.KeyDown += GridChecks_KeyDown;
@@ -737,9 +742,11 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
             _btnUpdateGuide.Visible = stale;
             _btnNotNow.Visible = stale;
             _btnReviewFacts.Visible = !stale;
+            _btnMarkAllReviewed.Visible = !stale;
             _btnUpdateGuide.Enabled = !_isGenerating;
             _btnNotNow.Enabled = !_isGenerating;
             _btnReviewFacts.Enabled = !_isGenerating;
+            _btnMarkAllReviewed.Enabled = !_isGenerating;
         }
 
         _showBanner = show;
@@ -942,6 +949,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnUpdateGuide.Enabled = !busy;
         _btnNotNow.Enabled = !busy;
         _btnReviewFacts.Enabled = !busy;
+        _btnMarkAllReviewed.Enabled = !busy;
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -994,6 +1002,33 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         ShowTab(GuidePart.Facts);
         if (_panels[GuidePart.Facts].Visible)
             _panels[GuidePart.Facts].ShowNeedsReview();
+    }
+
+    /// <summary>
+    /// Mark All Reviewed (needs-review banner, C13): clears every fact's needs-review flag; their text is unchanged.
+    /// </summary>
+    private void MarkAllReviewed()
+    {
+        if (_state == null || _isGenerating || Draft.Guide == null)
+            return;
+
+        CommitAllEdits();
+        var count = GuideStaleness.NeedsReviewCount(Draft);
+        if (count == 0)
+            return;
+
+        var (title, text) = CaseGuideUiText.C13MarkAllReviewed(count);
+        var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+        if (answer != DialogResult.Yes || IsDisposed)
+            return;
+
+        var marked = CaseGuideEditing.MarkAllFactsReviewed(Draft);
+        if (marked == 0)
+            return;
+
+        RefreshAll();
+        QueueSave();
+        SetStatus(CaseGuideUiText.MarkedReviewedText(marked), Theme.Success);
     }
 
     // ----- IWizardStep -----

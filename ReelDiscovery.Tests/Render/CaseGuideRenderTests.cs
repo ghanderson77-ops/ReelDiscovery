@@ -102,7 +102,8 @@ public class CaseGuideRenderTests
                 {
                     step.ShowTab(GuidePart.Facts, "F-004");
                     banner = VisibleLabel(step, "1 fact references characters you changed.")
-                        && AllControls(step).OfType<Button>().Any(b => b.Visible && b.Text == "Review Facts");
+                        && AllControls(step).OfType<Button>().Any(b => b.Visible && b.Text == "Review Facts")
+                        && AllControls(step).OfType<Button>().Any(b => b.Visible && b.Enabled && b.Text == "Mark All Reviewed");
                     notice = VisibleLabel(step, "Review this fact: Tom Becker was changed after it was written.");
                 });
 
@@ -110,6 +111,53 @@ public class CaseGuideRenderTests
                 AssertRendered(result);
                 Assert.True(banner);
                 Assert.True(notice);
+            }
+        });
+    }
+
+    [Fact]
+    public void FactsTab_NeedsReview_MultiSelect()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.Small })
+            {
+                // After a cast edit most facts need review (UAT): the banner offers Mark All Reviewed, the grid a selection bar
+                var draft = CaseTestData.SampleGuidedDraft();
+                foreach (var fact in draft.Guide!.Facts.Skip(1))
+                {
+                    fact.NeedsReview = true;
+                    fact.ReviewReason = "Tom Becker was changed after it was written.";
+                }
+                using var fixture = new GuideFixture(draft);
+                var banner = false;
+                var bar = false;
+                var bannerButtonsRight = -1;
+                var bannerRight = -1;
+                var result = Render(fixture, "case-guide-facts-multi-select", size, false, null, GuidePart.Facts, step =>
+                {
+                    step.ShowTab(GuidePart.Facts, "F-002");
+                    var grid = AllControls(step).OfType<FactsTabPanel>().Single().Controls.Cast<Control>()
+                        .SelectMany(AllControls).OfType<DataGridView>().First();
+                    foreach (DataGridViewRow row in grid.Rows)
+                    {
+                        if (row.Tag is "F-003" or "F-004" or "F-005" or "F-006")
+                            row.Selected = true;
+                    }
+                    banner = VisibleLabel(step, "5 facts reference characters you changed.")
+                        && AllControls(step).OfType<Button>().Any(b => b.Visible && b.Text == "Mark All Reviewed");
+                    bar = VisibleLabel(step, "5 facts selected");
+                    var markAll = AllControls(step).OfType<Button>().First(b => b.Text == "Mark All Reviewed");
+                    bannerButtonsRight = step.PointToClient(markAll.Parent!.PointToScreen(new Point(markAll.Right, 0))).X;
+                    var card = AllControls(step).OfType<CardPanel>().First(c => c.Visible && c.BorderColor == Theme.Warning);
+                    bannerRight = step.PointToClient(card.Parent!.PointToScreen(new Point(card.Right, 0))).X - card.Padding.Right;
+                });
+
+                AssertRendered(result);
+                Assert.True(banner);
+                Assert.True(bar);
+                // The banner's buttons end on its 16 px right padding
+                Assert.Equal(bannerRight, bannerButtonsRight);
             }
         });
     }

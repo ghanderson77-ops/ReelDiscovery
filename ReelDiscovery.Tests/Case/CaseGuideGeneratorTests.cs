@@ -259,6 +259,72 @@ public class CaseGuideGeneratorTests
         Assert.All(draft.Guide.Issues, i => Assert.True(i.HasDetails));
     }
 
+    // CR-02: issue details interrupted by a cancel, fatal error or closed run (Pending / left Generating)
+    private static CaseDraft InterruptedDetailsDraft(GuidePartStatus detailsStatus)
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        foreach (var issue in draft.Guide!.Issues)
+        {
+            issue.Description = string.Empty;
+            issue.Elements.Clear();
+            issue.RelevanceCriteria = string.Empty;
+        }
+
+        draft.Guide.IssueDetailsState.Status = detailsStatus;
+        return draft;
+    }
+
+    [Theory]
+    [InlineData(GuidePartStatus.Pending)]
+    [InlineData(GuidePartStatus.Generating)]
+    public async Task GenerateAsync_ResumesInterruptedIssueDetails(GuidePartStatus detailsStatus)
+    {
+        var (gateway, fake) = Gateway(FakeLlmProvider.Ok(IssueDetailsJson));
+        var draft = InterruptedDetailsDraft(detailsStatus);
+        var saved = new List<GuidePart>();
+
+        var result = await new CaseGuideGenerator(gateway).GenerateAsync(draft, null, part =>
+        {
+            saved.Add(part);
+            return Task.CompletedTask;
+        });
+
+        var request = Assert.Single(fake.Requests);
+        Assert.Contains("ISS-01", request.UserPrompt);
+        Assert.Equal(GuidePartStatus.Ready, draft.Guide!.IssueDetailsState.Status);
+        Assert.All(draft.Guide.Issues, i => Assert.True(i.HasDetails));
+        Assert.Contains(GuidePart.Issues, saved);
+        Assert.False(result.IsFatal);
+        Assert.False(CaseGuideGenerator.IssueDetailsMissing(draft.Guide));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_FailedIssueDetailsWaitForRetryButton()
+    {
+        var (gateway, fake) = Gateway();
+        var draft = InterruptedDetailsDraft(GuidePartStatus.Failed);
+
+        await new CaseGuideGenerator(gateway).GenerateAsync(draft);
+
+        Assert.Empty(fake.Requests);
+        Assert.True(CaseGuideGenerator.IssueDetailsMissing(draft.Guide));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_InterruptedIssueDetailsFatalStops()
+    {
+        var (gateway, _) = Gateway(FakeLlmProvider.Failed(LlmFailureKind.Auth, "Invalid API key"));
+        var draft = InterruptedDetailsDraft(GuidePartStatus.Pending);
+        draft.Guide!.CastState.Status = GuidePartStatus.Pending;
+
+        var result = await new CaseGuideGenerator(gateway).GenerateAsync(draft);
+
+        Assert.True(result.IsFatal);
+        Assert.Contains("Invalid API key", result.FatalError);
+        Assert.Empty(result.PartsWritten);
+        Assert.Equal(GuidePartStatus.Pending, draft.Guide.CastState.Status);
+    }
+
     // ---------- Cast fixtures ----------
 
     // Default roster for SampleComplaintDraft: covers every counsel gap (in-house counsel for ORG-01/ORG-02 and a firm with a

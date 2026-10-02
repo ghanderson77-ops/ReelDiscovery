@@ -584,7 +584,10 @@ public static partial class CaseGuideValidator
                 findings.Add(Error(GuideArea.Guide, string.Empty, $"The {name} {(plural ? "were" : "was")} not written."));
         }
 
-        if (ctx.Guide.IssueDetailsState?.Status == GuidePartStatus.Failed)
+        // Failed, or interrupted (Pending / left Generating) with issues still missing their details (CR-02)
+        var issuesReady = ctx.Guide.IssuesState?.Status == GuidePartStatus.Ready;
+        if (ctx.Guide.IssueDetailsState?.Status == GuidePartStatus.Failed
+            || (issuesReady && ctx.Issues.Any(i => S(i.Description).Length == 0)))
             findings.Add(Warning(GuideArea.Guide, string.Empty, "The issue details were not written. Click Retry Issue Details."));
 
         foreach (var (part, name, plural) in PartNames)

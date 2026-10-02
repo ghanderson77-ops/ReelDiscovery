@@ -579,6 +579,22 @@ public class CaseGuideValidatorTests
         Assert.Empty(Errors(findings));
     }
 
+    [Theory]
+    [InlineData(GuidePartStatus.Pending)]
+    [InlineData(GuidePartStatus.Generating)]
+    public void IssueDetailsInterrupted_IsWarning(GuidePartStatus status)
+    {
+        // CR-02: a cancel or fatal error leaves the details Pending (a closed run leaves them Generating) with issues missing details
+        var draft = Sample();
+        G(draft).IssueDetailsState.Status = status;
+        G(draft).Issues[0].Description = string.Empty;
+        G(draft).Issues[0].RelevanceCriteria = string.Empty;
+
+        var findings = CaseGuideValidator.Validate(draft);
+
+        AssertFinding(findings, IssueSeverity.Warning, GuideArea.Guide, "", "The issue details were not written. Click Retry Issue Details.");
+    }
+
     // ---- Rule 22: staleness and review ----
 
     private static void StampAll(CaseDraft draft)

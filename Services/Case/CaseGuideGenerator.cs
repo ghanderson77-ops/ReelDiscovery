@@ -58,6 +58,22 @@ public class CaseGuideGenerator
 
         try
         {
+            // Issue details interrupted by a cancel, a fatal error or a closed run (Pending or left Generating) are written
+            // again on Resume; a Failed state stays with the Retry Issue Details button (CR-02)
+            if (IssueDetailsInterrupted(guide))
+            {
+                var detailsResult = await RunTrackedAsync(draft, GuidePart.Issues, () => RetryIssueDetailsAsync(draft, progress, ct), partCompleted);
+                result.Notes.AddRange(detailsResult.Notes);
+                if (detailsResult.IsFatal)
+                {
+                    result.FatalError = detailsResult.FatalError;
+                    return result;
+                }
+
+                if (guide.IssueDetailsState.Status == GuidePartStatus.Failed)
+                    result.Notes.Add(guide.IssueDetailsState.FailureMessage);
+            }
+
             foreach (var part in GuideStaleness.Order)
             {
                 // Finished parts are skipped; Issues counts as finished even when its details failed
@@ -209,6 +225,21 @@ public class CaseGuideGenerator
         await EnrichIssuesAsync(draft, result, progress, ct);
         return result;
     }
+
+    /// <summary>
+    /// True when the issues are extracted but some have no details (description, elements, relevance criteria), whatever
+    /// the details state says: a cancel or fatal error leaves it Pending, a closed run leaves it Generating (CR-02).
+    /// </summary>
+    public static bool IssueDetailsMissing(CaseGuide? guide) =>
+        guide != null
+        && guide.IssuesState.Status == GuidePartStatus.Ready
+        && guide.Issues.Any(i => i != null && !i.HasDetails);
+
+    /// <summary>
+    /// Details missing and not marked Failed: the enrichment was interrupted, so Resume Guide writes them again.
+    /// </summary>
+    internal static bool IssueDetailsInterrupted(CaseGuide guide) =>
+        IssueDetailsMissing(guide) && guide.IssueDetailsState.Status != GuidePartStatus.Failed;
 
     /// <summary>
     /// Writes details only for issues that have none (Retry Issue Details).

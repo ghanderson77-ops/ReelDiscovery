@@ -59,7 +59,12 @@ public class IssuesTabPanel : GuideTabPanel
     protected override void RefreshHeader()
     {
         CountLabel.Text = CaseGuideUiText.IssuesSourceText(Document?.DocumentType == CoreDocumentType.InvestigationMemo);
-        _btnRetryDetails.Visible = Guide?.IssueDetailsState.Status == GuidePartStatus.Failed;
+        // Any issue without details can be retried: Failed, or Pending/left Generating after a cancel, fatal error or close (CR-02).
+        // Hidden while this run is writing them.
+        var guide = Guide;
+        _btnRetryDetails.Visible = guide != null
+            && (guide.IssueDetailsState.Status == GuidePartStatus.Failed || CaseGuideGenerator.IssueDetailsMissing(guide))
+            && !(Busy && guide.IssueDetailsState.Status == GuidePartStatus.Generating);
         _btnRetryDetails.Enabled = !Busy;
     }
 

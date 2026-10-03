@@ -164,7 +164,7 @@ public class MailboxWriterTests : IDisposable
         Assert.Equal(2, alternative.Count);
         Assert.Equal("text/plain", alternative[0].ContentType.MimeType);
         Assert.Equal("text/html", alternative[1].ContentType.MimeType);
-        Assert.Equal(email.PlainText, loaded.TextBody.Replace("\r\n", "\n").TrimEnd());
+        Assert.Equal(email.PlainText, loaded.TextBody!.Replace("\r\n", "\n").TrimEnd());
         Assert.Contains("updated schedule", loaded.HtmlBody);
 
         Assert.Equal("PL-000042", loaded.Headers[MailboxWriter.DocIdHeader]);

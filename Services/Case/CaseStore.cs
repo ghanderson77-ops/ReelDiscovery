@@ -221,7 +221,8 @@ public class CaseStore
             return new CaseLoadResult { Draft = draft, Error = CaseLoadError.None };
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or IOException
-                                       or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+                                       or UnauthorizedAccessException or ArgumentException or NotSupportedException
+                                       or OverflowException)
         {
             var reason = ex.Message.Trim().TrimEnd('.');
             return Fail(CaseLoadError.Corrupt,

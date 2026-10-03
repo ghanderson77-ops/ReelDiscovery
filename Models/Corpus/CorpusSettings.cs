@@ -202,8 +202,9 @@ public class CorpusSettings
         TotalEmails = Math.Clamp(TotalEmails, MinEmails, MaxEmails);
         RelevantPercent = Math.Clamp(RelevantPercent, MinRelevantPercent, MaxRelevantPercent);
 
+        // Clamp each share before summing: Enumerable.Sum is checked and overflows on crafted values (CR-01)
         var mix = new[] { DailyBusinessPercent, AncillaryPercent, NewsletterPercent, DecoyPercent }
-            .Select(x => Math.Max(0, x)).ToArray();
+            .Select(x => Math.Clamp(x, 0, 100)).ToArray();
         if (mix.Sum() == 0)
             mix = DefaultMix.ToArray();
         else if (mix.Sum() != 100)

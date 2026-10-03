@@ -79,7 +79,8 @@ public static class CorpusPlanStore
             return new PlanLoadResult { Plan = plan };
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or IOException
-                                       or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+                                       or UnauthorizedAccessException or NotSupportedException or ArgumentException
+                                       or OverflowException)
         {
             var reason = ex.Message.Trim().TrimEnd('.');
             return Fail($"The plan file could not be read: {reason}.");

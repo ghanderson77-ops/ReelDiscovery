@@ -219,6 +219,21 @@ public class CorpusSettingsTests
     }
 
     [Fact]
+    public void Normalize_HugeShares_DoNotOverflow()
+    {
+        // CR-01: crafted case.json values near int.MaxValue
+        var settings = new CorpusSettings
+        {
+            DailyBusinessPercent = int.MaxValue, AncillaryPercent = 1, NewsletterPercent = int.MaxValue, DecoyPercent = 0
+        };
+
+        settings.Normalize();
+
+        Assert.Equal(100, settings.MixTotal);
+        Assert.Equal(0, settings.DecoyPercent);
+    }
+
+    [Fact]
     public void Normalize_NegativeShareBecomesZero()
     {
         var settings = new CorpusSettings { DailyBusinessPercent = -10, AncillaryPercent = 50, NewsletterPercent = 30, DecoyPercent = 20 };

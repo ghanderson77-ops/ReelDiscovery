@@ -298,6 +298,23 @@ public class CaseStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_OverflowingCorpusMix_OpensWithoutThrowing()
+    {
+        // CR-01: shares near int.MaxValue used to overflow the checked Sum in CorpusSettings.Normalize
+        var store = CreateStore();
+        Directory.CreateDirectory(_temp);
+        var path = Path.Combine(_temp, "case.json");
+        File.WriteAllText(path,
+            "{\"FormatVersion\":2,\"CoreDocument\":{},\"Corpus\":{\"Settings\":{\"DailyBusinessPercent\":2147483647,"
+            + "\"AncillaryPercent\":1,\"NewsletterPercent\":2147483647,\"DecoyPercent\":2147483647}}}");
+
+        var result = store.Load(path);
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Equal(100, result.Draft!.Corpus!.Settings.MixTotal);
+    }
+
+    [Fact]
     public void Load_NullsNormalized()
     {
         var store = CreateStore();

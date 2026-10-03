@@ -1,7 +1,15 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Tests.Corpus;
+using ReelDiscovery.Tests.Fakes;
 
 namespace ReelDiscovery.Tests.Evidence;
 
@@ -10,9 +18,83 @@ namespace ReelDiscovery.Tests.Evidence;
 /// F-003 is a hot 4-message thread (New, Reply, ReplyAll, Forward); F-004 starts with an external vendor (EXT-002);
 /// F-001 is privileged with in-house and outside counsel and three custodians on its root.
 /// </summary>
-internal static class EvidenceTestData
+internal static partial class EvidenceTestData
 {
     public const string VendorId = "EXT-002";
+
+    // Neutral filler: no person names, no amounts, no ids
+    private static readonly string[] FillerWords =
+    {
+        "please", "review", "the", "updated", "schedule", "and", "let", "me", "know", "if", "anything", "needs",
+        "to", "change", "before", "we", "move", "ahead", "with", "next", "steps", "on", "this", "item"
+    };
+
+    private static readonly JsonSerializerOptions ResponderJsonOptions = new() { Converters = { new JsonStringEnumConverter() } };
+
+    [GeneratedRegex(@"Thread id: (T-\d{4})")]
+    private static partial Regex ThreadIdLine();
+
+    /// <summary>
+    /// Fake render responder: answers a render request by its "Thread id: T-xxxx" line with a valid ThreadRenderDto (one
+    /// message per planned seq, neutral bodies inside each message's length band, signOff "Thanks,", one Commitment detail
+    /// "site walk {n}" on seq 1). <paramref name="overrideJson"/> gets (threadId, attempt) and may return replacement JSON
+    /// (null = default). Attempts are counted per thread. Unknown threads fail with a transient error.
+    /// </summary>
+    public static Func<LlmProviderRequest, LlmProviderResponse> RenderResponder(CorpusPlan plan, CaseGuide guide,
+        Func<string, int, string?>? overrideJson = null)
+    {
+        var assignments = RenderAssignments.Compute(plan);
+        var threads = plan.Threads
+            .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id))
+            .GroupBy(t => t.Id, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var attempts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
+
+        return request =>
+        {
+            var match = ThreadIdLine().Match(request.UserPrompt ?? string.Empty);
+            if (!match.Success || !threads.TryGetValue(match.Groups[1].Value, out var thread))
+                return FakeLlmProvider.Failed(LlmFailureKind.Transient, "unknown thread");
+
+            var attempt = attempts.AddOrUpdate(thread.Id, 1, (_, n) => n + 1);
+            var custom = overrideJson?.Invoke(thread.Id, attempt);
+            if (custom != null)
+                return FakeLlmProvider.Ok(custom, 1000, 400);
+
+            assignments.TryGetValue(thread.Id, out var assignment);
+            var number = int.Parse(thread.Id[2..]).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var dto = new ThreadRenderer.ThreadRenderDto();
+            foreach (var message in thread.Messages.Where(m => m != null).OrderBy(m => m.Seq))
+            {
+                var spec = RenderAssignments.Spec(assignment?.For(message.Seq)?.Length ?? LengthBand.Medium);
+                dto.Messages.Add(new ThreadRenderer.RenderedMessageDto
+                {
+                    Seq = message.Seq,
+                    Body = Filler((spec.MinWords + spec.MaxWords) / 2),
+                    SignOff = "Thanks,",
+                    PeopleNamed = new List<string>()
+                });
+            }
+
+            dto.NewDetails.Add(new ThreadRenderer.LedgerDeltaDto
+            {
+                Seq = 1,
+                Kind = LedgerKind.Commitment,
+                About = $"site walk {number}",
+                Statement = $"The team agreed to a site walk {number}.",
+                Value = string.Empty,
+                FactIds = new List<string>()
+            });
+
+            return FakeLlmProvider.Ok(JsonSerializer.Serialize(dto, ResponderJsonOptions), 1000, 400);
+        };
+    }
+
+    private static string Filler(int words)
+    {
+        var text = string.Join(" ", Enumerable.Range(0, Math.Max(1, words)).Select(i => FillerWords[i % FillerWords.Length]));
+        return char.ToUpperInvariant(text[0]) + text[1..] + ".";
+    }
 
     public static (CaseDraft Draft, CorpusPlan Plan) ApprovedCase()
     {

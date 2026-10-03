@@ -275,7 +275,7 @@ public class EvidencePromptsTests
         var response = responder(new LlmProviderRequest { SystemPrompt = request.SystemPrompt, UserPrompt = request.UserPrompt });
 
         Assert.Equal(LlmOutcome.Succeeded, response.Outcome);
-        var dto = JsonSerializer.Deserialize<ThreadRenderer.ThreadRenderDto>(response.Text,
+        var dto = JsonSerializer.Deserialize<ThreadRenderer.ThreadRenderDto>(response.Text!,
             new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } })!;
         Assert.Equal(thread.Messages.OrderBy(m => m.Seq).Select(m => m.Seq), dto.Messages.Select(m => m.Seq));
 

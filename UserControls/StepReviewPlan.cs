@@ -1091,7 +1091,8 @@ public partial class StepReviewPlan : UserControl, IWizardStep
     {
         var plan = Draft?.Corpus?.Plan;
         var content = plan == null ? null
-            : CorpusUiText.PlanBannerText(variant, plan.Settings.TotalEmails, plan.Settings.RelevantPercent);
+            : CorpusUiText.PlanBannerText(variant, plan.Settings.TotalEmails, plan.Settings.RelevantPercent,
+                Draft!.Corpus!.Approved);
         _bannerVariant = content == null ? PlanBannerVariant.None : variant;
         if (content != null)
         {

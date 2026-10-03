@@ -170,7 +170,8 @@ public partial class StepReviewPlan
     }
 
     /// <summary>
-    /// The saved plan with its banner: stale guide wins over changed settings (approved plans only); nothing re-plans here.
+    /// The saved plan with its banner: stale guide wins over changed settings; nothing re-plans here. An unapproved plan
+    /// with changed settings reaches here only on a reopened case or after a cancelled/failed re-plan (CR-02).
     /// </summary>
     private void ShowCurrentPlan()
     {
@@ -183,7 +184,7 @@ public partial class StepReviewPlan
 
         ShowPlan(plan, CorpusPlanValidator.Validate(Draft, plan, _state.IsMediaAvailable));
         var variant = CorpusApproval.IsGuideStale(Draft) ? PlanBannerVariant.StaleGuide
-            : Draft.Corpus!.Approved && CorpusApproval.IsSettingsChanged(Draft) ? PlanBannerVariant.SettingsChanged
+            : CorpusApproval.IsSettingsChanged(Draft) ? PlanBannerVariant.SettingsChanged
             : PlanBannerVariant.None;
         ShowBanner(variant);
     }

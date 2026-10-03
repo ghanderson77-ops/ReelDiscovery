@@ -91,6 +91,29 @@ public class ReviewPlanLogicTests
     }
 
     [Fact]
+    public void Entry_ReopenedUnapprovedSettingsChanged_ShowsBannerNotReplan()
+    {
+        // CR-02: a case opened from disk never starts a (billed) re-plan by itself (T-04-62, D-25)
+        var input = Input(settingsChanged: true, suppress: true);
+        Assert.Equal(ReviewPlanEntry.SettingsBanner, CorpusUiText.ReviewPlanEntryDecision(input));
+        Assert.False(CorpusUiText.WithdrawsApproval(input));
+    }
+
+    [Fact]
+    public void Entry_ReopenedUnapprovedSettingsChangedDismissed_ShowsPlan()
+    {
+        Assert.Equal(ReviewPlanEntry.ShowPlan,
+            CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true, settingsDismissed: true, suppress: true)));
+    }
+
+    [Fact]
+    public void Entry_ReopenedUnapprovedStaleAndSettingsChanged_StaleWins()
+    {
+        Assert.Equal(ReviewPlanEntry.StaleBanner,
+            CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true, guideStale: true, suppress: true)));
+    }
+
+    [Fact]
     public void Entry_ApprovedSettingsChangedShowsBanner()
     {
         Assert.Equal(ReviewPlanEntry.SettingsBanner, CorpusUiText.ReviewPlanEntryDecision(Input(approved: true, settingsChanged: true)));
@@ -170,6 +193,18 @@ public class ReviewPlanLogicTests
         Assert.Equal($"This plan still uses the earlier settings ({settings}). Re-plan builds a new plan with the current settings. Keep This Plan leaves the approved plan and its answer key as they are.", banner.Body);
         Assert.Equal("Re-plan...", banner.PrimaryText);
         Assert.Equal("Keep This Plan", banner.SecondaryText);
+    }
+
+    [Fact]
+    public void Banner_SettingsChanged_UnapprovedWording()
+    {
+        var banner = CorpusUiText.PlanBannerText(PlanBannerVariant.SettingsChanged, 1000, 20, approved: false);
+
+        Assert.NotNull(banner);
+        Assert.Equal(PlanBannerVariant.SettingsChanged, banner!.Variant);
+        Assert.Equal("The corpus settings changed after this plan was built.", banner.Heading);
+        Assert.DoesNotContain("approved", banner.Body);
+        Assert.Contains("1,000 emails, 20% relevant", banner.Body);
     }
 
     [Fact]

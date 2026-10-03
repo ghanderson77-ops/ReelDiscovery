@@ -358,8 +358,9 @@ public static class CorpusUiText
 
     /// <summary>
     /// First match wins: active run, unreadable plan, no plan (auto-plan, or the card on reopen), unapproved plan with
-    /// changed settings (auto re-plan), stale guide (banner; wins over changed settings), approved plan with changed
-    /// settings (banner), otherwise show the plan. Nothing re-plans an approved plan silently (T-04-34).
+    /// changed settings (auto re-plan, except on a reopened case), stale guide (banner; wins over changed settings),
+    /// changed settings (banner), otherwise show the plan. Nothing re-plans an approved plan silently (T-04-34), and a
+    /// case opened from disk never starts a run by itself (T-04-62, D-25).
     /// </summary>
     public static ReviewPlanEntry ReviewPlanEntryDecision(ReviewPlanEntryInput input)
     {
@@ -369,11 +370,12 @@ public static class CorpusUiText
             return ReviewPlanEntry.UnreadableCard;
         if (!input.HasPlan)
             return input.SuppressAutoPlan ? ReviewPlanEntry.NoPlanCard : ReviewPlanEntry.AutoPlan;
-        if (!input.Approved && input.SettingsChanged)
+        // A reopened case shows the saved plan with the settings banner instead of re-planning (CR-02)
+        if (!input.Approved && input.SettingsChanged && !input.SuppressAutoPlan)
             return ReviewPlanEntry.AutoReplan;
         if (input.GuideStale && !input.GuideDismissed)
             return ReviewPlanEntry.StaleBanner;
-        if (input.Approved && input.SettingsChanged && !input.SettingsDismissed)
+        if (input.SettingsChanged && !input.SettingsDismissed)
             return ReviewPlanEntry.SettingsBanner;
         return ReviewPlanEntry.ShowPlan;
     }
@@ -387,9 +389,9 @@ public static class CorpusUiText
     // --- Review Plan: banner ---
 
     /// <summary>
-    /// emails and percent are the plan's (earlier) settings; null for None.
+    /// emails and percent are the plan's (earlier) settings; approved picks the SettingsChanged wording; null for None.
     /// </summary>
-    public static PlanBannerContent? PlanBannerText(PlanBannerVariant variant, int emails, int percent)
+    public static PlanBannerContent? PlanBannerText(PlanBannerVariant variant, int emails, int percent, bool approved = true)
     {
         return variant switch
         {
@@ -398,6 +400,14 @@ public static class CorpusUiText
                 Variant = variant,
                 Heading = "The plan is out of date with the case guide.",
                 Body = "The case guide changed after this plan was built. Re-plan builds a new plan from the current guide. Approval is withdrawn until you re-plan or keep this plan.",
+                PrimaryText = "Re-plan...",
+                SecondaryText = "Keep This Plan"
+            },
+            PlanBannerVariant.SettingsChanged when !approved => new PlanBannerContent
+            {
+                Variant = variant,
+                Heading = "The corpus settings changed after this plan was built.",
+                Body = $"This plan still uses the earlier settings ({CaseGuideUiText.Plural(emails, "email", "emails")}, {N(percent)}% relevant). Re-plan builds a new plan with the current settings. Keep This Plan keeps this plan as it is.",
                 PrimaryText = "Re-plan...",
                 SecondaryText = "Keep This Plan"
             },

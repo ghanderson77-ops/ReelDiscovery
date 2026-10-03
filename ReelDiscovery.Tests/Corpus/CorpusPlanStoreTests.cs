@@ -100,6 +100,40 @@ public class CorpusPlanStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Load_ReplacedBeforeCaseJsonSaved_RecoversPreviousPlan()
+    {
+        // WR-01: a re-plan overwrote corpus-plan.json but case.json still names the previous plan
+        var previous = SamplePlan();
+        await CorpusPlanStore.SaveAsync(_folder, previous);
+        var replacement = SamplePlan();
+        await CorpusPlanStore.SaveAsync(_folder, replacement);
+
+        Assert.True(File.Exists(CorpusPlanStore.PreviousPlanPath(_folder)));
+        var result = CorpusPlanStore.Load(_folder, previous.PlanId);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal(previous.PlanId, result.Plan!.PlanId);
+        // The recovered plan is back in place, so a later re-plan backs up the plan case.json names
+        Assert.True(CorpusPlanStore.Load(_folder, previous.PlanId).Succeeded);
+        Assert.Equal(previous.PlanId,
+            System.Text.Json.JsonDocument.Parse(File.ReadAllText(PlanFile)).RootElement.GetProperty("PlanId").GetGuid());
+    }
+
+    [Fact]
+    public async Task Load_NewPlanId_StillLoadsCurrentFile()
+    {
+        var previous = SamplePlan();
+        await CorpusPlanStore.SaveAsync(_folder, previous);
+        var replacement = SamplePlan();
+        await CorpusPlanStore.SaveAsync(_folder, replacement);
+
+        var result = CorpusPlanStore.Load(_folder, replacement.PlanId);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal(replacement.PlanId, result.Plan!.PlanId);
+    }
+
+    [Fact]
     public void Load_MissingFile_NoPlan()
     {
         var result = CorpusPlanStore.Load(_folder, Guid.NewGuid());

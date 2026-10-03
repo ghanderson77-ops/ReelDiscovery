@@ -81,7 +81,7 @@ public static class GenerationHistory
         var ended = replay.LastRunEnded;
         if (ended != null)
         {
-            var total = threads.Values.Count(t => t.Relevance == ThreadRelevance.Relevant);
+            var total = threads.Values.Count(WavePlanner.IsGeneratable);
             GenerationEventKind? kind = ended.Outcome switch
             {
                 GenerationOutcome.Finished => GenerationEventKind.RunFinished,

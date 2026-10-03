@@ -869,7 +869,7 @@ public partial class StepGenerateCorpus : IWizardStep
 
     private static List<PlannedThread> RelevantThreads(CorpusPlan plan) =>
         (plan.Threads ?? new List<PlannedThread>())
-        .Where(t => t != null && t.Relevance == ThreadRelevance.Relevant && !string.IsNullOrEmpty(t.Id))
+        .Where(WavePlanner.IsGeneratable)
         .ToList();
 
     protected override void Dispose(bool disposing)

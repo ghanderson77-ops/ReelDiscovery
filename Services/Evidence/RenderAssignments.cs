@@ -46,7 +46,7 @@ public static class RenderAssignments
     public static Dictionary<string, ThreadAssignment> Compute(CorpusPlan plan)
     {
         var threads = (plan?.Threads ?? new List<PlannedThread>())
-            .Where(t => t != null && t.Relevance == ThreadRelevance.Relevant)
+            .Where(WavePlanner.IsGeneratable)
             .OrderBy(t => t.Id, StringComparer.Ordinal)
             .ToList();
 

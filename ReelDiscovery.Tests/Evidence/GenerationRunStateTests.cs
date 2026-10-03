@@ -76,6 +76,23 @@ public class GenerationRunStateTests
     }
 
     [Fact]
+    public void RelevantThreadWithoutMessages_IsNeitherScheduledNorPending()
+    {
+        var (_, plan) = EvidenceTestData.ApprovedCase();
+        var written = Relevant(plan);
+        plan.Threads.Add(new PlannedThread { Id = "T-0999", Relevance = ThreadRelevance.Relevant, Messages = new List<PlannedMessage>() });
+
+        var state = GenerationRunState.From(plan,
+            Replay(written.Select(t => Done(plan, t, ThreadWriteStatus.Written, 0.01m)).ToArray()));
+
+        Assert.DoesNotContain(WavePlanner.Plan(plan), w => w.ThreadIds.Contains("T-0999"));
+        Assert.False(RenderAssignments.Compute(plan).ContainsKey("T-0999"));
+        Assert.Equal(written.Count, state.TotalThreads);
+        Assert.Equal(0, state.Pending);
+        Assert.False(state.StatusByThread.ContainsKey("T-0999"));
+    }
+
+    [Fact]
     public void From_ProjectsStatusesAndCounts()
     {
         var (_, plan, state, threads) = Mixed();

@@ -14,6 +14,16 @@ public static class WavePlanner
     public const int MaxThreadsPerWave = 12;
 
     /// <summary>
+    /// A relevant thread the run can write: it has an id and at least one message. Waves, run totals, assignments and the
+    /// step all count with this one predicate, so a thread the run never schedules never counts as pending.
+    /// </summary>
+    public static bool IsGeneratable(PlannedThread? thread) =>
+        thread != null
+        && thread.Relevance == ThreadRelevance.Relevant
+        && !string.IsNullOrEmpty(thread.Id)
+        && thread.Messages?.Any(m => m != null) == true;
+
+    /// <summary>
     /// Waves of relevant threads in first-message order: a wave spans <see cref="WindowDays"/> from its first thread,
     /// stretches to <see cref="ExtendedWindowDays"/> while it holds fewer than <see cref="MinThreadsPerWave"/> threads,
     /// and is split at its largest time gap while it holds more than <see cref="MaxThreadsPerWave"/>.
@@ -22,7 +32,7 @@ public static class WavePlanner
     {
         // Always computed from the whole plan, never the remaining threads, so Continue sees identical waves and ledger visibility (Pitfall 3)
         var ordered = (plan?.Threads ?? new List<PlannedThread>())
-            .Where(t => t != null && t.Relevance == ThreadRelevance.Relevant && t.Messages != null && t.Messages.Count > 0)
+            .Where(IsGeneratable)
             .Select(t => (Thread: t, First: MessageTime.FirstUtc(t)))
             .OrderBy(x => x.First)
             .ThenBy(x => x.Thread.Id, StringComparer.Ordinal)

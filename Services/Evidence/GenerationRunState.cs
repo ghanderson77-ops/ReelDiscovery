@@ -181,7 +181,7 @@ public class GenerationRunState
 
     private static IEnumerable<PlannedThread> RelevantThreads(CorpusPlan plan) =>
         (plan?.Threads ?? new List<PlannedThread>())
-        .Where(t => t != null && t.Relevance == ThreadRelevance.Relevant && !string.IsNullOrEmpty(t.Id));
+        .Where(WavePlanner.IsGeneratable);
 }
 
 /// <summary>

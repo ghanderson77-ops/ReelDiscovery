@@ -76,10 +76,10 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [ ] **CORP-05**: Privileged attorney-client communications are generated with counsel characters
 - [ ] **CORP-06**: Threads have correct threading (replies quote the right prior message, Message-ID/In-Reply-To/References)
 - [ ] **CORP-07**: Writing style varies by character (voice, length, signature) so emails don't all sound alike
-- [ ] **CORP-08**: System maintains a running internal narrative as emails are generated: after each thread, new facts and details it introduced (commitments, decisions, meeting outcomes, dates, figures, people mentioned) are extracted into a narrative ledger tagged with date, participants and related issues/facts
+- [x] **CORP-08**: System maintains a running internal narrative as emails are generated: after each thread, new facts and details it introduced (commitments, decisions, meeting outcomes, dates, figures, people mentioned) are extracted into a narrative ledger tagged with date, participants and related issues/facts
 - [ ] **CORP-09**: Each later email's context includes the relevant narrative-ledger entries (dated before it, known to its participants, related to its issues/facts) so the story builds on what was already written
 - [ ] **CORP-10**: Relevant threads are generated in chronological waves so earlier narrative is available to later threads; new content that contradicts the ledger or canonical values is flagged and retried
-- [ ] **CORP-11**: The narrative ledger is saved with the case file and exportable as a readable "story so far" summary
+- [x] **CORP-11**: The narrative ledger is saved with the case file and exportable as a readable "story so far" summary
 
 ### Non-Relevant Material
 
@@ -112,7 +112,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Run Reliability & Cost
 
-- [ ] **RUN-01**: Each completed thread (EML files plus its answer-key rows) is saved immediately; an interruption never loses finished work
+- [x] **RUN-01**: Each completed thread (EML files plus its answer-key rows) is saved immediately; an interruption never loses finished work
 - [ ] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
 - [ ] **RUN-03**: Bulk generation can use the provider's Batch API (OpenAI and Anthropic) for lower cost
 - [ ] **RUN-04**: Submitted batch jobs are tracked on disk so results can be collected if the app is restarted
@@ -221,10 +221,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORP-05 | Phase 5 | Pending |
 | CORP-06 | Phase 5 | Pending |
 | CORP-07 | Phase 5 | Pending |
-| CORP-08 | Phase 5 | Pending |
+| CORP-08 | Phase 5 | Complete |
 | CORP-09 | Phase 5 | Pending |
 | CORP-10 | Phase 5 | Pending |
-| CORP-11 | Phase 5 | Pending |
+| CORP-11 | Phase 5 | Complete |
 | NOISE-01 | Phase 6 | Pending |
 | NOISE-02 | Phase 6 | Pending |
 | NOISE-03 | Phase 6 | Pending |
@@ -242,7 +242,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QA-01 | Phase 7 | Pending |
 | QA-02 | Phase 7 | Pending |
 | QA-03 | Phase 7 | Pending |
-| RUN-01 | Phase 5 | Pending |
+| RUN-01 | Phase 5 | Complete |
 | RUN-02 | Phase 5 | Pending |
 | RUN-03 | Phase 7 | Pending |
 | RUN-04 | Phase 7 | Pending |

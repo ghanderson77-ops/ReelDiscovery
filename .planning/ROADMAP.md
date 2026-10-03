@@ -161,7 +161,7 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 05-01-PLAN.md — Evidence models (ledger, journal, assignments, progress), CaseStage.Generation, format v3, approved-plan fixture (Wave 1)
+- [x] 05-01-PLAN.md — Evidence models (ledger, journal, assignments, progress), CaseStage.Generation, format v3, approved-plan fixture (Wave 1)
 - [ ] 05-02-PLAN.md — Gateway token totals, custodian folder map, amount parser, answer-key status/subject overlay (Wave 1)
 - [ ] 05-03-PLAN.md — WavePlanner (chronological waves) + RenderAssignments (subtlety/length/privilege mixes) (Wave 2)
 - [ ] 05-04-PLAN.md — KnowledgeGate (point-in-time context) + LedgerSelector + LedgerMerger (Wave 2)

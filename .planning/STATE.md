@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-10-03T19:37:28.332Z"
-last_activity: 2026-10-03 -- Phase 5 planning complete
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-10-03T19:43:12.281Z"
+last_activity: 2026-10-03
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 81
-  completed_plans: 64
-  percent: 79
+  completed_plans: 65
+  percent: 80
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-29)
 
 **Core value:** Every relevant email in a multi-thousand-document corpus must stay faithful to one consistent case story (core pleading + key-facts timeline).
-**Current focus:** Phase 4 — Corpus Plan & Answer Key
+**Current focus:** Phase 5 — Relevant Evidence Generation & Narrative Ledger
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
+Phase: 5 (Relevant Evidence Generation & Narrative Ledger) — EXECUTING
+Plan: 2 of 17
 Status: Ready to execute
-Last activity: 2026-10-03 -- Phase 5 planning complete
+Last activity: 2026-10-03
 
 Progress: [██████████] 100%
 
@@ -115,6 +115,7 @@ Progress: [██████████] 100%
 | Phase 04 P18 | 13min | 3 tasks | 5 files |
 | Phase 04 P19 | 15min | 2 tasks | 9 files |
 | Phase 04 P20 | 25min | 2 tasks | 1 files |
+| Phase 05 P01 | 15min | 2 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -309,6 +310,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-19: Closing during planning shows C-P2 only on Review Plan; core document and guide runs keep C12
 - [Phase 04]: 04-19: Histogram axis max is the smallest 1/2/2.5/5 x 10^n at or above the largest month
 - [Phase 04]: [04-20]: Phase 4 gate approved 2026-10-03 - full suites green and human check of the corpus flow at 150% scaling passed with no issues
+- [Phase 05]: 05-01: JournalRecord.Normalize leaves undefined record Type unchanged so replay skips it; only CorpusPlan.IsSafeEmlPath paths survive
+- [Phase 05]: 05-01: case.json FormatVersion 3 and CaseStage.Generation (stored by name) carry Corpus.Generation ledger state
 
 ### Pending Todos
 
@@ -330,6 +333,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-03T18:26:57.464Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-relevant-evidence-generation-narrative-ledger/05-CONTEXT.md
+Last session: 2026-10-03T19:43:12.276Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None

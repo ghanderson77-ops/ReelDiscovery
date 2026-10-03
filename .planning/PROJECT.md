@@ -31,6 +31,9 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 - ✓ System derives a Summary of Key Facts & Events as a dated timeline tied to the allegations/issues — Validated in Phase 3
 - ✓ User can review, edit, and regenerate the cast and key-facts timeline — Validated in Phase 3
 - ✓ Case guide artifacts (core doc, cast, key facts) can be exported (e.g. .docx) — Validated in Phase 3
+- ✓ User controls corpus size (up to 5,000) and the relevant vs. non-relevant proportion, plus the non-relevant mix, date window and attachment types — Validated in Phase 4
+- ✓ Code plans every thread and message (dates in business hours/time zones/holidays, participants, reply structure, facts/issues, labels, attachments) before any prose; a validator checks the plan and the user reviews, re-plans or approves it — Validated in Phase 4
+- ✓ System produces a CSV/Excel answer key (one row per email and attachment, family relevance propagated, statistics + legend sheets) and a review protocol .docx, both derived from the approved plan — Validated in Phase 4 (rows carry Status = Planned until Phase 5 renders the emails)
 
 ### Active
 
@@ -48,12 +51,8 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 - [ ] Continuity is maintained across batches (dates, roles, amounts, prior messages) so threads don't lose the thread
 - [ ] Multiple overlapping issues/storylines can run concurrently among the same people without contradiction
 - [ ] Existing attachment types (Office docs, calendar invites, images, voicemail) are generated as evidence driven by the case guide
-- [ ] User controls the relevant vs. non-relevant proportion of the corpus
 - [ ] Non-relevant material includes: same custodians' daily business, other ancillary characters, newsletters/spam/personal, and near-miss decoys (same project/keywords, not about the alleged conduct)
 - [ ] Corpus scales to ~5,000 emails (majority may be non-relevant)
-
-**Answer key**
-- [ ] System produces a CSV/Excel answer key: one row per document with file, custodian, date, relevance, related issue(s)/allegation(s), and linked key fact(s)
 
 **Reliability & cost at scale**
 - [ ] Completed threads are saved incrementally — an interruption or single failure never loses finished work
@@ -67,7 +66,7 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 
 - Keeping the old topic → storylines → characters wizard flow — the case-driven flow replaces it
 - Pause/resume of an interrupted run from a saved project file — not requested for v1; incremental saving covers data-loss
-- Up-front cost estimate before generation — not requested for v1 (live cost ticker remains)
+- Precise up-front cost quote before generation — not requested for v1 (Phase 4 shows a rough ±50% generation estimate on Review Plan; the live cost ticker remains)
 - DAT/Concordance load files and JSON answer key — CSV/Excel key only for v1
 - Non-email native file collections (loose file shares, chat/Slack, SMS) — email corpus with attachments is the evidence format
 - Cross-platform (macOS/Linux) — Windows WinForms app
@@ -103,7 +102,10 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 | Incremental saving + Batch API; no pause/resume in v1 | Protects long 5K runs and cuts cost without project-file complexity | — Pending |
 | Keep all existing attachment types | Reuse working builders; richer evidence | — Pending |
 | Running narrative ledger built during generation; relevant threads rendered in chronological waves | Later emails build on details earlier emails invented; trade-off: relevant threads are less parallel/batchable than noise | — Pending |
-| Code-owned plan (manifest) before prose; answer key derived from plan | Research: LLM must not own dates/counts/labels; exact key by construction | — Pending |
+| Code-owned plan (manifest) before prose; answer key derived from plan | Research: LLM must not own dates/counts/labels; exact key by construction | ✓ Validated in Phase 4 — code owns structure, LLM fills text only; key + protocol written on Approve |
+| Plan stored in sibling `corpus-plan.json`; case.json format v2 holds settings/approval | ~3-6 MB plan at 5K would make every autosave slow | ✓ Phase 4 |
+| Validator findings are warnings only; nothing blocks Approve; nothing re-plans silently | User choice (D-24/D-25); paid runs only on explicit action | ✓ Phase 4 |
+| Binary relevance + Hot/Privileged/Near-miss flags; DocIDs numbered chronologically with opaque paths | Classifier-friendly key without label leakage via IDs or paths | ✓ Phase 4 |
 | Per-custodian mailbox folders; privilege tagging, hot docs, review protocol, blind-review QA in v1 | User scoping after research | — Pending |
 | Retarget .NET 10; gpt-image replaces dall-e-3; DPAPI keys; add tests | .NET 8 EOL 2026-11-10; dall-e-3 retired; security; no tests today | — Pending |
 
@@ -125,4 +127,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-02 after Phase 3 (Case Guide) completion*
+*Last updated: 2026-10-03 after Phase 4 (Corpus Plan & Answer Key) completion*

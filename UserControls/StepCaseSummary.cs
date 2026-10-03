@@ -110,7 +110,8 @@ public class StepCaseSummary : UserControl, IWizardStep
 
     /// <summary>
     /// State of one corpus file: no entry or no file on disk = not written; an entry stamped with another plan = written
-    /// for an earlier plan. WrittenFiles.FileName is never used; the caller checks the known file in the case folder.
+    /// for an earlier plan. The caller checks the known file in the case folder (for the protocol, a validated recorded name
+    /// when the folder was renamed, WR-08).
     /// </summary>
     public static CorpusFileStatus FileStatusFor(CorpusState? corpus, CorpusFileKind kind, bool fileExists)
     {
@@ -711,15 +712,17 @@ public class StepCaseSummary : UserControl, IWizardStep
 
     private static string FolderName(string folder) => Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
 
-    // Known file names only; WrittenFiles.FileName from case.json never builds a path (T-04-45)
-    private static string CorpusFileName(CorpusFileKind kind, string folder) => kind switch
+    // Known file names only. The protocol may use the recorded name from case.json, but only after it passes
+    // ReviewProtocolBuilder.IsProtocolFileName (a bare "... - Review Protocol.docx" name) and exists (T-04-45, WR-08)
+    private string CorpusFileName(CorpusFileKind kind, string folder) => kind switch
     {
         CorpusFileKind.AnswerKeyCsv => AnswerKeyCsvWriter.FileName,
         CorpusFileKind.AnswerKeyXlsx => AnswerKeyXlsxWriter.FileName,
-        _ => ReviewProtocolBuilder.FileNameFor(FolderName(folder))
+        _ => ReviewProtocolBuilder.ResolveFileName(folder,
+            WrittenEntry(Draft.Corpus, CorpusFileKind.ReviewProtocol)?.FileName)
     };
 
-    private static bool CorpusFileExists(CorpusFileKind kind, string folder) =>
+    private bool CorpusFileExists(CorpusFileKind kind, string folder) =>
         folder.Length > 0 && File.Exists(Path.Combine(folder, CorpusFileName(kind, folder)));
 
     /// <summary>
@@ -793,7 +796,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         var protocolExists = CorpusFileExists(CorpusFileKind.ReviewProtocol, folder);
         var protocolStatus = FileStatusFor(corpus, CorpusFileKind.ReviewProtocol, protocolExists);
         var protocolName = folder.Length > 0
-            ? ReviewProtocolBuilder.FileNameFor(FolderName(folder))
+            ? CorpusFileName(CorpusFileKind.ReviewProtocol, folder)
             : ReviewProtocolBuilder.FileNameFor(CaseFolderNaming.DefaultFolderName(draft));
         _rowProtocol.Line2.Text = CorpusUiText.ProtocolLine(guide.Issues.Count, protocolName);
         _rowProtocol.Line3!.Text = CorpusUiText.FileStatusLine(protocolStatus, WrittenLocal(corpus, CorpusFileKind.ReviewProtocol), string.Empty);

@@ -111,7 +111,39 @@ public partial class ReviewProtocolBuilder
         };
     }
 
-    public static string FileNameFor(string folderName) => $"{folderName} - Review Protocol.docx";
+    public const string FileNameSuffix = " - Review Protocol.docx";
+
+    public static string FileNameFor(string folderName) => $"{folderName}{FileNameSuffix}";
+
+    /// <summary>
+    /// True for a bare protocol file name ("... - Review Protocol.docx"): no folder part, no "..", no invalid characters.
+    /// Guards a name read from case.json before it is combined with the case folder (T-04-45).
+    /// </summary>
+    public static bool IsProtocolFileName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length <= FileNameSuffix.Length)
+            return false;
+        if (!name.EndsWith(FileNameSuffix, StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (name.Contains("..", StringComparison.Ordinal) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            return false;
+        return Path.GetFileName(name) == name && !Path.IsPathRooted(name);
+    }
+
+    /// <summary>
+    /// The protocol file in <paramref name="caseFolder"/>: the name for the current folder when that file exists, otherwise
+    /// the recorded name from the last write when it is a valid protocol name and that file exists (the folder was renamed
+    /// or moved to a suffixed name after approval, WR-08), otherwise the current-folder name.
+    /// </summary>
+    public static string ResolveFileName(string caseFolder, string? recordedName)
+    {
+        var current = FileNameFor(Path.GetFileName(Path.TrimEndingDirectorySeparator(caseFolder)));
+        if (string.IsNullOrEmpty(caseFolder) || File.Exists(Path.Combine(caseFolder, current)))
+            return current;
+
+        var recorded = (recordedName ?? string.Empty).Trim();
+        return IsProtocolFileName(recorded) && File.Exists(Path.Combine(caseFolder, recorded)) ? recorded : current;
+    }
 
     /// <summary>
     /// Deterministic, validator-clean .docx bytes for the protocol. Structure comes from the guide; prose fills the sections.

@@ -198,6 +198,46 @@ public class ReviewProtocolTests
         Assert.Equal("Brightline v. Harmon - Review Protocol.docx", ReviewProtocolBuilder.FileNameFor("Brightline v. Harmon"));
     }
 
+    [Theory]
+    [InlineData("Brightline v. Harmon - Review Protocol.docx", true)]
+    [InlineData(" - Review Protocol.docx", false)]
+    [InlineData("..\\Other - Review Protocol.docx", false)]
+    [InlineData("sub\\Case - Review Protocol.docx", false)]
+    [InlineData("C:\\x\\Case - Review Protocol.docx", false)]
+    [InlineData("Case..x - Review Protocol.docx", false)]
+    [InlineData("answer-key.csv", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsProtocolFileName_OnlyBareProtocolNames(string? name, bool expected)
+    {
+        Assert.Equal(expected, ReviewProtocolBuilder.IsProtocolFileName(name));
+    }
+
+    [Fact]
+    public void ResolveFileName_RenamedFolder_UsesRecordedNameWhenItExists()
+    {
+        // WR-08: the folder became "Case (2)" after approval; the protocol keeps its original name
+        var root = Path.Combine(Path.GetTempPath(), "rd-protocol-" + Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(root, "Case (2)");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            Assert.Equal("Case (2) - Review Protocol.docx", ReviewProtocolBuilder.ResolveFileName(folder, "Case - Review Protocol.docx"));
+
+            File.WriteAllText(Path.Combine(folder, "Case - Review Protocol.docx"), "x");
+            Assert.Equal("Case - Review Protocol.docx", ReviewProtocolBuilder.ResolveFileName(folder, "Case - Review Protocol.docx"));
+            Assert.Equal("Case (2) - Review Protocol.docx", ReviewProtocolBuilder.ResolveFileName(folder, "..\\Case - Review Protocol.docx"));
+
+            // A protocol for the current folder name wins over the recorded one
+            File.WriteAllText(Path.Combine(folder, "Case (2) - Review Protocol.docx"), "x");
+            Assert.Equal("Case (2) - Review Protocol.docx", ReviewProtocolBuilder.ResolveFileName(folder, "Case - Review Protocol.docx"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private sealed class RecordingGateway : ILlmGateway
     {
         private readonly ILlmGateway _inner;

@@ -32,6 +32,10 @@ public class StatTile : UserControl
 
     internal string SubLineText => _lblSubLine.Text;
 
+    internal Color ValueColor => _lblValue.ForeColor;
+
+    internal int ValueWidth => _lblValue.Width;
+
     private void InitializeUI()
     {
         this.BackColor = Theme.Background;

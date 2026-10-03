@@ -725,7 +725,9 @@ public partial class StepGenerateCorpus : UserControl
 
             SetCell(row, "Wave", wave.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
             SetCell(row, "Dates", GenerationUiText.WaveDates(wave.Start, wave.End));
-            row.Cells["Dates"].ToolTipText = GenerationUiText.WaveTooltip(wave.Threads, wave.Emails);
+            // Full dates first: the Dates column may trim them at the minimum window size
+            row.Cells["Dates"].ToolTipText = GenerationUiText.WaveDates(wave.Start, wave.End) + Environment.NewLine
+                + GenerationUiText.WaveTooltip(wave.Threads, wave.Emails);
             SetCell(row, "Threads", $"{wave.Done:N0} / {wave.Threads:N0}");
             SetCell(row, "Warnings", wave.Warnings > 0 ? wave.Warnings.ToString("N0") : string.Empty);
             SetCell(row, "Failed", wave.Failed > 0 ? wave.Failed.ToString("N0") : string.Empty);
@@ -766,7 +768,8 @@ public partial class StepGenerateCorpus : UserControl
         {
             var e = recent[i];
             var line = GenerationUiText.ActivityText(e);
-            var row = new DataGridViewRow();
+            // From the template so inserted rows keep the 32 px grid row height
+            var row = (DataGridViewRow)_gridActivity.RowTemplate.Clone();
             row.CreateCells(_gridActivity, string.Empty, e.LocalTime.ToString("h:mm:ss tt", System.Globalization.CultureInfo.GetCultureInfo("en-US")),
                 e.ThreadId, line.Text);
             row.Cells[_gridActivity.Columns["Event"]!.Index].ToolTipText = line.Tooltip;
@@ -979,6 +982,67 @@ public partial class StepGenerateCorpus : UserControl
     }
 
     // ----- Render-test access -----
+
+    /// <summary>
+    /// Binds and shows one state synchronously for render tests; never reads the journal, starts a run or saves.
+    /// </summary>
+    internal void LoadForRender(WizardState state, GenerateCorpusRenderState render, GenerationView? view = null, string reason = "",
+        int earlierThreads = 0)
+    {
+        BindState(state);
+        RefreshHeader();
+        var plan = state.Case.Corpus?.Plan;
+        SetNotice(plan == null || render == GenerateCorpusRenderState.NotApproved ? string.Empty : NoticeFor(plan));
+        var counts = view?.Counts ?? new GenerationCounts();
+
+        switch (render)
+        {
+            case GenerateCorpusRenderState.Ready:
+                ShowStateCard(ReadyCard(plan!));
+                break;
+            case GenerateCorpusRenderState.Running:
+                _isGenerating = true;
+                ShowDashboard(false, 0, 0, 0, false);
+                ApplyView(view!);
+                RaiseStateChanged();
+                break;
+            case GenerateCorpusRenderState.Partial:
+                ApplyView(view!);
+                ShowDashboard(true, counts.DoneThreads, counts.TotalThreads, counts.FailedThreads, false);
+                ShowOutcome(GenerationOutcome.Cancelled, counts, string.Empty);
+                break;
+            case GenerateCorpusRenderState.FinishedClean:
+            case GenerateCorpusRenderState.FinishedIssues:
+                ApplyView(view!);
+                ShowDashboard(false, counts.DoneThreads, counts.TotalThreads, counts.FailedThreads, counts.FailedThreads > 0);
+                ShowOutcome(GenerationOutcome.Finished, counts, string.Empty);
+                break;
+            case GenerateCorpusRenderState.NotApproved:
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty));
+                break;
+            case GenerateCorpusRenderState.PlanChanged:
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.PlanChanged, 0, 0, 0, 0m, string.Empty, earlierThreads, string.Empty));
+                break;
+            default:
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.Unreadable, 0, 0, 0, 0m, string.Empty, 0, reason));
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Outcome status line in its tone (UI-SPEC outcome table).
+    /// </summary>
+    internal void ShowOutcome(GenerationOutcome outcome, GenerationCounts counts, string message)
+    {
+        var line = GenerationUiText.OutcomeText(outcome, counts, message);
+        SetStatus(line.Text, ToneColor(line.Tone));
+    }
+
+    internal bool StateCardShown => _stateCardShown;
+    internal bool BannerShown => _bannerShown && !_stateCardShown;
+    internal string StateHeading => _lblStateHeading.Text;
+    internal string StateBody => _lblStateBody.Text;
+    internal string NoticeText => _noticeText;
 
     internal DataGridView WavesGrid => _gridWaves;
     internal DataGridView ActivityGrid => _gridActivity;

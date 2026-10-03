@@ -118,12 +118,12 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [ ] **RUN-04**: Submitted batch jobs are tracked on disk so results can be collected if the app is restarted
 - [ ] **RUN-05**: Shared case-guide context uses prompt caching where the provider supports it
 - [ ] **RUN-06**: User can cancel a run and keep everything generated so far
-- [ ] **RUN-07**: Live progress and cost display stays responsive during long runs
+- [x] **RUN-07**: Live progress and cost display stays responsive during long runs
 
 ### Output
 
 - [ ] **OUT-01**: EML files are organized per custodian mailbox; an email appears in each participating custodian's folder (sent and received), as in a real collection
-- [ ] **OUT-02**: Each EML carries its DocID in a custom header (X-ReelDiscovery-DocID) traceable to the answer key
+- [x] **OUT-02**: Each EML carries its DocID in a custom header (X-ReelDiscovery-DocID) traceable to the answer key
 - [ ] **OUT-03**: The case-driven flow replaces the old topic/storyline wizard flow
 
 ## v2 Requirements
@@ -248,9 +248,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RUN-04 | Phase 7 | Pending |
 | RUN-05 | Phase 7 | Pending |
 | RUN-06 | Phase 5 | Pending |
-| RUN-07 | Phase 5 | Pending |
+| RUN-07 | Phase 5 | Complete |
 | OUT-01 | Phase 5 | Pending |
-| OUT-02 | Phase 5 | Pending |
+| OUT-02 | Phase 5 | Complete |
 | OUT-03 | Phase 7 | Pending |
 
 **Coverage:**

@@ -299,8 +299,11 @@ public class EmailComposerTests
     [Fact]
     public void Compose_is_deterministic()
     {
-        var first = ComposeFact("F-003", PrivilegeMarking.None);
-        var second = ComposeFact("F-003", PrivilegeMarking.None);
+        // Same plan composed twice (each fixture call gets a fresh PlanId)
+        var (_, plan, people) = Fixture();
+        var thread = PlanFixtures.Thread(plan, "F-003");
+        var first = EmailComposer.Compose(plan.PlanId, thread, Assignment(thread, PrivilegeMarking.None), Rendered(thread), people);
+        var second = EmailComposer.Compose(plan.PlanId, thread, Assignment(thread, PrivilegeMarking.None), Rendered(thread), people);
         Assert.Equal(first.Emails.Select(e => e.MessageId), second.Emails.Select(e => e.MessageId));
         Assert.Equal(first.Emails.Select(e => e.PlainText), second.Emails.Select(e => e.PlainText));
         Assert.Equal(first.Emails.Select(e => e.Html), second.Emails.Select(e => e.Html));

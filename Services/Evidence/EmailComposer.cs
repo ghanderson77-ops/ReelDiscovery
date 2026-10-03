@@ -161,6 +161,137 @@ public static partial class EmailComposer
         return lines;
     }
 
+    /// <summary>
+    /// Composes every planned message of a thread from the repaired model text. Rendered messages are matched by Seq;
+    /// a planned message without one throws <see cref="ArgumentException"/> (callers validate first).
+    /// </summary>
+    public static ComposedThread Compose(Guid planId, PlannedThread thread, ThreadAssignment assignment, RenderedThread rendered, PeopleDirectory people)
+    {
+        ArgumentNullException.ThrowIfNull(thread);
+        ArgumentNullException.ThrowIfNull(rendered);
+        ArgumentNullException.ThrowIfNull(people);
+
+        var marking = assignment?.Marking ?? PrivilegeMarking.None;
+        var banner = marking is PrivilegeMarking.Banner or PrivilegeMarking.BannerAndSubject;
+        var result = new ComposedThread { ThreadId = thread.Id };
+        var bySeq = new Dictionary<int, ComposedEmail>();
+        var tableUsed = false;
+
+        foreach (var planned in (thread.Messages ?? new List<PlannedMessage>()).Where(m => m != null).OrderBy(m => m.Seq))
+        {
+            var text = rendered.Messages.FirstOrDefault(m => m != null && m.Seq == planned.Seq)
+                ?? throw new ArgumentException($"Thread {thread.Id} has no rendered text for message {planned.Seq}.", nameof(rendered));
+
+            // D-02: addresses, dates and threading come only from the plan
+            var sender = people.Find(planned.FromId);
+            var domain = sender?.Domain ?? string.Empty;
+            var parent = planned.Kind != MessageKind.New && bySeq.TryGetValue(planned.ReplyToSeq, out var p) ? p : null;
+            var body = Normalize(text.Body).Trim();
+            var signOff = Normalize(text.SignOff).Trim();
+            var signature = SignatureFor(sender, assignment?.For(planned.Seq)?.Length ?? LengthBand.Medium, planned.Kind);
+
+            var email = new ComposedEmail
+            {
+                Planned = planned,
+                ThreadId = thread.Id,
+                MessageId = MessageIdFor(planId, planned.DocId, domain),
+                InReplyTo = parent?.MessageId ?? string.Empty,
+                References = KnowledgeGate.Ancestors(thread, planned.Seq)
+                    .Where(bySeq.ContainsKey)
+                    .Select(seq => bySeq[seq].MessageId)
+                    .ToList(),
+                Subject = SubjectFor(thread, planned, marking),
+                From = Address(people, planned.FromId),
+                To = (planned.ToIds ?? new List<string>()).Select(id => Address(people, id)).ToList(),
+                Cc = (planned.CcIds ?? new List<string>()).Select(id => Address(people, id)).ToList(),
+                Date = planned.SentAt,
+                BodyPlain = body,
+                SignOff = signOff,
+                Signature = signature
+            };
+
+            email.PlainText = PlainTextOf(email, parent, banner);
+
+            // Quoted history is composer-built HTML only; model text is encoded inside ComposeFragment (T-05-19)
+            QuotedPart? quoted = null;
+            if (parent != null)
+            {
+                var forward = planned.Kind == MessageKind.Forward;
+                quoted = new QuotedPart
+                {
+                    IsForward = forward,
+                    HeaderLines = forward
+                        ? ForwardHeaderLines(parent)
+                        : new List<string> { QuoteHeader(MessageTime.Local(parent.Planned), parent.From.Name, parent.From.Email) },
+                    ParentFragment = parent.HtmlFragment
+                };
+            }
+
+            var theme = OrganizationThemes.ForDomain(domain);
+            var allowTable = !tableUsed;
+            email.HtmlFragment = HtmlEmailFormatter.ComposeFragment(body, signOff, signature, quoted, theme, banner, allowTable);
+            email.Html = HtmlEmailFormatter.ComposeHtml(body, signOff, signature, quoted, theme, banner, allowTable);
+
+            // One table per thread: only a table that actually rendered (not a rejected oversize one) uses the allowance
+            if (allowTable && PipeTableRegex().IsMatch(body)
+                && CountOf(email.HtmlFragment, "<table") > CountOf(parent?.HtmlFragment ?? string.Empty, "<table"))
+                tableUsed = true;
+
+            bySeq[planned.Seq] = email;
+            result.Emails.Add(email);
+        }
+
+        return result;
+    }
+
+    private static string PlainTextOf(ComposedEmail email, ComposedEmail? parent, bool banner)
+    {
+        var text = new StringBuilder();
+        if (banner)
+            text.Append(HtmlEmailFormatter.PrivilegedBannerText).Append("\n\n");
+
+        text.Append(email.BodyPlain).Append("\n\n");
+        if (email.SignOff.Length > 0)
+            text.Append(email.SignOff).Append('\n');
+        text.Append(email.Signature);
+
+        // The model never re-quotes; code builds the whole quoted history
+        if (parent != null && email.Planned.Kind is MessageKind.Reply or MessageKind.ReplyAll)
+        {
+            text.Append("\n\n")
+                .Append(QuoteHeader(MessageTime.Local(parent.Planned), parent.From.Name, parent.From.Email))
+                .Append('\n')
+                .Append(ThreadingHelper.QuoteText(parent.PlainText));
+        }
+        else if (parent != null && email.Planned.Kind == MessageKind.Forward)
+        {
+            text.Append("\n\n---------- Forwarded message ----------\n")
+                .Append(string.Join("\n", ForwardHeaderLines(parent)))
+                .Append("\n\n")
+                .Append(parent.PlainText);
+        }
+
+        return text.ToString();
+    }
+
+    private static EmailAddressPart Address(PeopleDirectory people, string id) =>
+        new() { Name = people.NameOf(id), Email = people.EmailOf(id) };
+
+    private static string Normalize(string? text) =>
+        (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+
+    private static int CountOf(string text, string value)
+    {
+        var count = 0;
+        for (var i = text.IndexOf(value, StringComparison.Ordinal); i >= 0; i = text.IndexOf(value, i + value.Length, StringComparison.Ordinal))
+            count++;
+        return count;
+    }
+
+    // A "| a | b |" line followed by a "|---" separator line
+    [GeneratedRegex(@"^[ \t]*\|[^\n]*\n[ \t]*\|[ \t]*:?-{3,}", RegexOptions.Multiline)]
+    private static partial Regex PipeTableRegex();
+
     private static string Display(EmailAddressPart part) =>
         part.Email.Length > 0 ? $"{part.Name} <{part.Email}>" : part.Name;
 

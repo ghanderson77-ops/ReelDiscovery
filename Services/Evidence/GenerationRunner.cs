@@ -280,6 +280,8 @@ public class GenerationRunner
         var outcome = await uow.RunAsync(render, run).ConfigureAwait(false);
         if (outcome.Kind != ThreadOutcomeKind.NotRun)
             await MaybeProjectAsync(ctx).ConfigureAwait(false);
+        else
+            ctx.AddUnjournaledSpend(outcome.InputTokens, outcome.OutputTokens, outcome.CostUsd);
         return outcome;
     }
 
@@ -337,6 +339,10 @@ public class GenerationRunner
         var plan = input.Plan;
         ctx.WriteLastProjection(DateTime.UtcNow);
 
+        // Before the replay, so the final projection includes the spend RunEnded carries
+        if (final)
+            await AppendRunEndedAsync(ctx, outcome, message).ConfigureAwait(false);
+
         // The journal is the source of truth: anything journaled is in the key, whatever happened in memory
         GenerationRunState? state = null;
         NarrativeLedger? ledger = null;
@@ -364,7 +370,7 @@ public class GenerationRunner
         }
 
         if (state == null || ledger == null)
-            return await UnprojectedCheckpointAsync(ctx, final, outcome, message, unusableReason).ConfigureAwait(false);
+            return UnprojectedCheckpoint(ctx, final, outcome, message, unusableReason);
 
         ctx.LastGoodState = state;
         ctx.LastGoodLedger = ledger;
@@ -411,9 +417,6 @@ public class GenerationRunner
             checkpoint.Files.AddRange(checkpoint.StoryResult.Files);
         }
 
-        if (final)
-            await AppendRunEndedAsync(ctx, outcome, message).ConfigureAwait(false);
-
         if (ctx.Persist != null)
         {
             try
@@ -434,14 +437,11 @@ public class GenerationRunner
     /// <summary>
     /// The journal could not be projected (unreadable, foreign plan or a projection bug). Keeps the last good projection:
     /// the key, story and case.json are left as they are rather than overwritten with an empty run, and the next readable
-    /// projection catches up. Never throws.
+    /// projection catches up. RunEnded is already appended by the caller. Never throws.
     /// </summary>
-    private static async Task<GenerationCheckpoint> UnprojectedCheckpointAsync(RunContext ctx, bool final,
-        GenerationOutcome outcome, string message, string reason)
+    private static GenerationCheckpoint UnprojectedCheckpoint(RunContext ctx, bool final, GenerationOutcome outcome,
+        string message, string reason)
     {
-        if (final)
-            await AppendRunEndedAsync(ctx, outcome, message).ConfigureAwait(false);
-
         return new GenerationCheckpoint
         {
             State = ctx.LastGoodState,
@@ -455,6 +455,8 @@ public class GenerationRunner
 
     private static async Task AppendRunEndedAsync(RunContext ctx, GenerationOutcome outcome, string? message)
     {
+        // Calls a fatal stop left without a thread record are still spend (WR-02)
+        var (inputTokens, outputTokens, cost) = ctx.ReadUnjournaledSpend();
         try
         {
             await ctx.Journal.AppendAsync(new JournalRecord
@@ -463,7 +465,10 @@ public class GenerationRunner
                 Utc = DateTime.UtcNow,
                 PlanId = ctx.Input.Plan.PlanId,
                 Outcome = outcome,
-                Message = message ?? string.Empty
+                Message = message ?? string.Empty,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                CostUsd = cost
             }, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception)
@@ -509,6 +514,9 @@ public class GenerationRunner
     {
         private readonly object _lock = new();
         private DateTime _lastProjectionUtc;
+        private int _unjournaledInput;
+        private int _unjournaledOutput;
+        private decimal _unjournaledCost;
 
         public GenerationRunInput Input { get; init; } = new();
         public CaseGuide Guide { get; init; } = new();
@@ -541,6 +549,22 @@ public class GenerationRunner
         {
             lock (_lock)
                 _lastProjectionUtc = utc;
+        }
+
+        public void AddUnjournaledSpend(int inputTokens, int outputTokens, decimal cost)
+        {
+            lock (_lock)
+            {
+                _unjournaledInput += inputTokens;
+                _unjournaledOutput += outputTokens;
+                _unjournaledCost += cost;
+            }
+        }
+
+        public (int InputTokens, int OutputTokens, decimal CostUsd) ReadUnjournaledSpend()
+        {
+            lock (_lock)
+                return (_unjournaledInput, _unjournaledOutput, _unjournaledCost);
         }
     }
 }

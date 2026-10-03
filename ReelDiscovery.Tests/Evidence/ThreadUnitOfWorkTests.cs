@@ -265,6 +265,31 @@ public class ThreadUnitOfWorkTests : IDisposable
     }
 
     [Fact]
+    public async Task FatalAfterAnAttempt_NotRunCarriesTheSpend()
+    {
+        _fake.Respond = Mutating((n, dto) =>
+        {
+            if (n == 1)
+            {
+                NameStrangers(dto, "Odell Prewitt");
+                return null;
+            }
+            return FakeLlmProvider.Failed(LlmFailureKind.Auth, "invalid key");
+        });
+        var ctx = Context("F-003");
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit().RunAsync(ctx, run);
+
+        Assert.Equal(ThreadOutcomeKind.NotRun, outcome.Kind);
+        Assert.Empty(JournalLines());
+        Assert.True(outcome.InputTokens >= 1000 && outcome.OutputTokens >= 400);
+        Assert.Equal(_story.CalculateTotalCost(outcome.InputTokens, outcome.OutputTokens), outcome.CostUsd);
+        Assert.Equal(outcome.CostUsd, _snapshot.Drain().Counts.CostUsd);
+    }
+
+    [Fact]
     public async Task ViolationThenTransportFailure_KeepsFirstAttemptAsWarnings()
     {
         _fake.Respond = Mutating((n, dto) =>

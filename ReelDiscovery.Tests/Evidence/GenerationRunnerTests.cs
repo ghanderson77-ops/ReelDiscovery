@@ -409,6 +409,8 @@ public partial class GenerationRunnerTests : IDisposable
         var ended = JournalRecords().Last();
         Assert.Equal(JournalRecordType.RunEnded, ended.Type);
         Assert.Equal(GenerationOutcome.Fatal, ended.Outcome);
+        Assert.Equal(ended.CostUsd + replay.LastByThread[requested[0]].CostUsd, Replay().SpentCostUsd);
+        Assert.Equal(Replay().SpentCostUsd, result.State.CostUsd);
         Assert.Contains(snapshot.Peek().Events, e => e.Kind == GenerationEventKind.RunStopped && e.Reason.Contains("invalid key"));
         Assert.False(snapshot.Peek().Counts.Finished);
     }

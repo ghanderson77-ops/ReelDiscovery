@@ -19,6 +19,11 @@ public class ThreadOutcome
     public string Reason { get; set; } = string.Empty;
     public int Emails { get; set; }
     public int Files { get; set; }
+
+    // Spend of a NotRun thread, which has no journal line of its own; the runner adds it to RunEnded
+    public int InputTokens { get; set; }
+    public int OutputTokens { get; set; }
+    public decimal CostUsd { get; set; }
 }
 
 /// <summary>
@@ -74,7 +79,18 @@ public class ThreadUnitOfWork
 
                 // Left pending: Continue writes it later (D-06)
                 if (run.IsFatal)
-                    return new ThreadOutcome { Kind = ThreadOutcomeKind.NotRun, Reason = run.FatalError };
+                {
+                    var spent = Cost(inputTokens, outputTokens);
+                    _snapshot.RecordThread(ctx.WaveIndex, ThreadRunStatus.Pending, 0, 0, spent);
+                    return new ThreadOutcome
+                    {
+                        Kind = ThreadOutcomeKind.NotRun,
+                        Reason = run.FatalError,
+                        InputTokens = inputTokens,
+                        OutputTokens = outputTokens,
+                        CostUsd = spent
+                    };
+                }
 
                 if (outcome.Value == null)
                 {
@@ -233,7 +249,7 @@ public class ThreadUnitOfWork
     private async Task<ThreadOutcome> FailAsync(ThreadRenderContext ctx, ThreadFailureKind kind, string reason, int attempts,
         int inputTokens, int outputTokens)
     {
-        // GenerationRunState sums cost over ThreadDone and ThreadFailed records, so failures carry their spend too
+        // JournalReplay sums cost over every ThreadDone and ThreadFailed record, so failures carry their spend too
         var cost = Cost(inputTokens, outputTokens);
         var record = new JournalRecord
         {

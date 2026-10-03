@@ -29,6 +29,12 @@ public class JournalReplay
 
     public JournalRecord? LastRunEnded { get; set; }
 
+    /// <summary>
+    /// Spend across every ThreadDone, ThreadFailed and RunEnded record of the current plan, including attempts a later
+    /// retry replaced and calls a fatal stop left unjournaled per thread.
+    /// </summary>
+    public decimal SpentCostUsd { get; set; }
+
     // Blank, torn or corrupt lines
     public int SkippedLines { get; set; }
 
@@ -147,12 +153,16 @@ public class GenerationJournal
                         break;
                     case JournalRecordType.RunEnded:
                         replay.LastRunEnded = record;
+                        replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
                         break;
                     case JournalRecordType.ThreadDone:
                     case JournalRecordType.ThreadFailed:
-                        // Later lines win: a retried thread's newest outcome replaces the earlier one
+                        // Later lines win: a retried thread's newest outcome replaces the earlier one, but its spend stays counted
                         if (threadIds.Contains(record.ThreadId))
+                        {
                             replay.LastByThread[record.ThreadId] = record;
+                            replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+                        }
                         break;
                 }
             }
@@ -165,6 +175,7 @@ public class GenerationJournal
         {
             replay.Exists = true;
             replay.LastByThread.Clear();
+            replay.SpentCostUsd = 0m;
             replay.Reason = $"The saved run could not be read: {ex.Message.Trim().TrimEnd('.')}.";
             return replay;
         }

@@ -98,6 +98,33 @@ public class GenerationJournalTests : IDisposable
     }
 
     [Fact]
+    public async Task Replay_SpentCost_CountsReplacedFailuresAndRunEnded()
+    {
+        var journal = new GenerationJournal(_folder);
+        var failed = Failed("T-0003");
+        failed.CostUsd = 0.10m;
+        var done = Done("T-0003");
+        done.CostUsd = 0.25m;
+        var other = Done("T-0005");
+        other.CostUsd = 0.05m;
+        await journal.AppendAsync(Started());
+        await journal.AppendAsync(failed);
+        await journal.AppendAsync(done);
+        await journal.AppendAsync(other);
+        await journal.AppendAsync(new JournalRecord
+        {
+            Type = JournalRecordType.RunEnded, PlanId = _plan.PlanId, Outcome = GenerationOutcome.Fatal, CostUsd = 0.02m
+        });
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+        var state = GenerationRunState.From(_plan, replay);
+
+        Assert.Equal(0.42m, replay.SpentCostUsd);
+        Assert.Equal(0.42m, state.CostUsd);
+        Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread["T-0003"].Type);
+    }
+
+    [Fact]
     public async Task Replay_RunEnded_KeepsLast()
     {
         var journal = new GenerationJournal(_folder);

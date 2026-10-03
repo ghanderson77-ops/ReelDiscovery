@@ -66,7 +66,8 @@ public class GenerationSnapshot
     }
 
     /// <summary>
-    /// Counts one finished thread. Written and Warnings count as done; Failed counts separately. <paramref name="previous"/>
+    /// Counts one finished thread. Written and Warnings count as done; Failed counts separately; Pending adds only the
+    /// spend (a fatal stop left the thread unjournaled). <paramref name="previous"/>
     /// is the thread's status before this run: a retried thread that had failed leaves the Failed count first, so Retry
     /// Failed Threads never counts it twice.
     /// </summary>

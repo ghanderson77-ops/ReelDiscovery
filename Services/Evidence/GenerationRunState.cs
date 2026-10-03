@@ -106,6 +106,9 @@ public class GenerationRunState
 
         state.FilesWritten = files.Count;
         state.Mailboxes = mailboxes.Count;
+
+        // Replaced failures and fatal-stop calls were paid for too; the last record per thread alone under-counts
+        state.CostUsd = Math.Max(state.CostUsd, replay.SpentCostUsd);
         return state;
     }
 

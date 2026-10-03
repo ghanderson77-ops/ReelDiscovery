@@ -10,6 +10,9 @@ public class CorpusPlan
 {
     public const int CurrentFormatVersion = 1;
 
+    // Root of every planned .eml path; equals PlanNumbering.MailboxesFolder
+    public const string MailboxesRoot = "Mailboxes";
+
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     public Guid PlanId { get; set; }
     public DateTime CreatedUtc { get; set; }
@@ -53,7 +56,7 @@ public class CorpusPlan
 
     /// <summary>
     /// Repairs a plan loaded from untrusted corpus-plan.json: null lists, strings and sub-objects become empty values at
-    /// every level (T-04-02); never throws.
+    /// every level (T-04-02), and an unsafe email path or attachment file name becomes empty (WR-10); never throws.
     /// </summary>
     public void Normalize()
     {
@@ -92,6 +95,31 @@ public class CorpusPlan
         }
     }
 
+    /// <summary>
+    /// True for the relative path shape PlanNumbering writes: four '/'-separated segments starting with Mailboxes and ending
+    /// in .eml, each a safe file name. Rooted paths, backslashes and ".." are refused.
+    /// </summary>
+    public static bool IsSafeEmlPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || path.Contains('\\') || Path.IsPathRooted(path))
+            return false;
+
+        var segments = path.Split('/');
+        return segments.Length == 4
+            && segments[0] == MailboxesRoot
+            && segments.All(IsSafeFileName)
+            && segments[3].EndsWith(".eml", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A bare file or folder name: not blank, no "..", no invalid file-name characters (which include both separators).
+    /// </summary>
+    public static bool IsSafeFileName(string? name) =>
+        !string.IsNullOrWhiteSpace(name)
+        && !name.Contains("..", StringComparison.Ordinal)
+        && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
+        && name.Trim() == name;
+
     private static void NormalizeThread(PlannedThread thread)
     {
         thread.Id ??= string.Empty;
@@ -117,13 +145,14 @@ public class CorpusPlan
             message.FactIds = CaseGuide.CleanStrings(message.FactIds);
             message.Intent ??= string.Empty;
             message.MustConvey = CaseGuide.CleanStrings(message.MustConvey);
-            message.FilePath ??= string.Empty;
+            // Only "Mailboxes/{folder}/{box}/{name}.eml" survives, so no loaded path can leave the output folder (WR-10)
+            message.FilePath = IsSafeEmlPath(message.FilePath) ? message.FilePath : string.Empty;
             message.CustodianIds = CaseGuide.CleanStrings(message.CustodianIds);
             message.Attachments = CaseGuide.CleanList(message.Attachments);
             foreach (var attachment in message.Attachments)
             {
                 attachment.DocId ??= string.Empty;
-                attachment.FileName ??= string.Empty;
+                attachment.FileName = IsSafeFileName(attachment.FileName) ? attachment.FileName : string.Empty;
                 attachment.Title ??= string.Empty;
                 attachment.Description ??= string.Empty;
             }

@@ -155,6 +155,45 @@ public class CorpusPlanStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Load_TamperedPaths_AreBlanked()
+    {
+        // WR-10: a loaded plan must not carry paths that leave the output folder
+        var plan = SamplePlan();
+        var message = plan.Threads[0].Messages[0];
+        message.FilePath = "..\\..\\Users\\x\\AppData\\evil.eml";
+        message.Attachments[0].FileName = "..\\evil.docx";
+        await CorpusPlanStore.SaveAsync(_folder, plan);
+
+        var loaded = CorpusPlanStore.Load(_folder, plan.PlanId).Plan!;
+
+        Assert.Equal(string.Empty, loaded.Threads[0].Messages[0].FilePath);
+        Assert.Equal(string.Empty, loaded.Threads[0].Messages[0].Attachments[0].FileName);
+    }
+
+    [Theory]
+    [InlineData("Mailboxes/tom.becker/Sent Items/BH-000001.eml", true)]
+    [InlineData("Mailboxes/Unassigned/Inbox/BH-000002.eml", true)]
+    [InlineData("Mailboxes/../Inbox/BH-000001.eml", false)]
+    [InlineData("Mailboxes/tom/Inbox/..", false)]
+    [InlineData("Mailboxes\\tom\\Inbox\\BH-000001.eml", false)]
+    [InlineData("C:/Mailboxes/tom/Inbox/BH-000001.eml", false)]
+    [InlineData("/Mailboxes/tom/Inbox/BH-000001.eml", false)]
+    [InlineData("Other/tom/Inbox/BH-000001.eml", false)]
+    [InlineData("Mailboxes/tom/Inbox/BH-000001.exe", false)]
+    [InlineData("Mailboxes/tom/BH-000001.eml", false)]
+    [InlineData("", false)]
+    public void IsSafeEmlPath_OnlyPlannedShape(string path, bool expected)
+    {
+        Assert.Equal(expected, CorpusPlan.IsSafeEmlPath(path));
+    }
+
+    [Fact]
+    public void MailboxesRoot_MatchesPlanNumbering()
+    {
+        Assert.Equal(PlanNumbering.MailboxesFolder, CorpusPlan.MailboxesRoot);
+    }
+
+    [Fact]
     public void Load_Garbage_NoPlan()
     {
         File.WriteAllText(PlanFile, "{ this is not json");

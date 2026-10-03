@@ -5,8 +5,10 @@ using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Services.Evidence;
 
 namespace ReelDiscovery.UserControls;
 
@@ -43,6 +45,12 @@ public class StepCaseSummary : UserControl, IWizardStep
     private Button _btnOpenCsv = null!;
     private Button _btnOpenXlsx = null!;
     private Button _btnOpenProtocol = null!;
+    private ContentRow _rowMailboxes = null!;
+    private ContentRow _rowStory = null!;
+    private Button _btnOpenMailboxes = null!;
+    private Button _btnGenerateEmails = null!;
+    private Button _btnOpenStory = null!;
+    private Button _btnExportStory = null!;
     private readonly Dictionary<CaseExportKind, ContentRow> _exportRows = new();
     private readonly HashSet<CaseExportKind> _failedExports = new();
 
@@ -402,6 +410,12 @@ public class StepCaseSummary : UserControl, IWizardStep
         _rowPlan = CreateRow("Corpus plan", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Review Plan", "Plan Corpus" });
         _rowAnswerKey = CreateRow("Answer key", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open CSV", "Open in Excel" });
         _rowProtocol = CreateRow("Review protocol", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open in Word" });
+        _rowMailboxes = CreateRow("Mailboxes", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open Mailboxes Folder", "Generate Emails" });
+        _rowStory = CreateRow("Story so far", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open in Word", "Export Story So Far" });
+        _btnOpenMailboxes = _rowMailboxes.Buttons[0];
+        _btnGenerateEmails = _rowMailboxes.Buttons[1];
+        _btnOpenStory = _rowStory.Buttons[0];
+        _btnExportStory = _rowStory.Buttons[1];
         _btnReviewPlan = _rowPlan.Buttons[0];
         _btnPlanCorpus = _rowPlan.Buttons[1];
         _btnOpenCsv = _rowAnswerKey.Buttons[0];
@@ -417,6 +431,8 @@ public class StepCaseSummary : UserControl, IWizardStep
             (_rowPlan, ""),
             (_rowAnswerKey, ""),
             (_rowProtocol, ""),
+            (_rowMailboxes, ""),
+            (_rowStory, ""),
             (null, "Case guide"),
             (_exportRows[CaseExportKind.CoreDocument], ""),
             (_exportRows[CaseExportKind.Cast], ""),
@@ -486,6 +502,10 @@ public class StepCaseSummary : UserControl, IWizardStep
         _btnOpenCsv.Click += (s, e) => OpenCorpusFile(CorpusFileKind.AnswerKeyCsv);
         _btnOpenXlsx.Click += (s, e) => OpenCorpusFile(CorpusFileKind.AnswerKeyXlsx);
         _btnOpenProtocol.Click += (s, e) => OpenCorpusFile(CorpusFileKind.ReviewProtocol);
+        _btnOpenMailboxes.Click += (s, e) => OpenMailboxesFolder();
+        _btnGenerateEmails.Click += (s, e) => (FindForm() as WizardForm)?.NavigateToStage(CaseStage.Generation);
+        _btnOpenStory.Click += (s, e) => OpenStory();
+        _btnExportStory.Click += async (s, e) => await ExportStoryAsync();
         foreach (var kind in ExportKinds)
         {
             var row = _exportRows[kind];
@@ -789,6 +809,16 @@ public class StepCaseSummary : UserControl, IWizardStep
             WrittenLocal(corpus, CorpusFileKind.AnswerKeyCsv, CorpusFileKind.AnswerKeyXlsx), string.Empty);
         _rowAnswerKey.Line3.ForeColor = FileLineColor(keyStatus);
         SetDot(_rowAnswerKey, DotColor(CorpusDotState(keyStatus)));
+
+        // A run for the current plan adds "· {g} generated, {p} planned" (key rows still Planned)
+        var generation = corpus?.Generation;
+        var runCurrent = plan != null && generation != null && generation.RunPlanId == plan.PlanId && corpus!.PlanId == plan.PlanId;
+        var keyWritten = WrittenLocal(corpus, CorpusFileKind.AnswerKeyCsv, CorpusFileKind.AnswerKeyXlsx);
+        if (runCurrent && HasGenerated(generation!) && keyStatus == CorpusFileStatus.Written && keyWritten.HasValue)
+        {
+            var planned = Math.Max(0, plan!.EmailCount + plan.AttachmentCount - generation!.EmailsWritten - generation.EmailsFailed);
+            _rowAnswerKey.Line3.Text = GenerationUiText.AnswerKeyRunClause(keyWritten.Value, generation.EmailsWritten, planned);
+        }
         _btnOpenCsv.Visible = csvExists;
         _btnOpenXlsx.Visible = xlsxExists;
 
@@ -803,7 +833,87 @@ public class StepCaseSummary : UserControl, IWizardStep
         _rowProtocol.Line3.ForeColor = FileLineColor(protocolStatus);
         SetDot(_rowProtocol, DotColor(CorpusDotState(protocolStatus)));
         _btnOpenProtocol.Visible = protocolExists;
+
+        RefreshGenerationRows(folder, corpus, generation, runCurrent);
     }
+
+    private static bool HasGenerated(GenerationState generation) =>
+        generation.ThreadsWritten + generation.ThreadsWithWarnings + generation.ThreadsFailed > 0 || generation.FilesWritten > 0;
+
+    /// <summary>
+    /// Mailboxes and Story so far rows (05-UI-SPEC S3) from the cached run counts and the ledger in case.json.
+    /// </summary>
+    private void RefreshGenerationRows(string folder, CorpusState? corpus, GenerationState? generation, bool runCurrent)
+    {
+        var mailboxesPath = MailboxesPath(folder);
+        var mailboxes = GenerationUiText.MailboxesRow(new MailboxesRowInput
+        {
+            Generated = generation != null && HasGenerated(generation),
+            EarlierPlan = generation != null && generation.RunPlanId != corpus!.PlanId,
+            Total = generation?.ThreadsTotal ?? 0,
+            Written = generation == null ? 0 : generation.ThreadsWritten + generation.ThreadsWithWarnings,
+            Warnings = generation?.ThreadsWithWarnings ?? 0,
+            Failed = generation?.ThreadsFailed ?? 0,
+            Files = generation?.FilesWritten ?? 0,
+            Mailboxes = generation?.Mailboxes ?? 0,
+            FolderExists = mailboxesPath != null && Directory.Exists(mailboxesPath)
+        });
+        ApplySummaryRow(_rowMailboxes, mailboxes);
+        _btnOpenMailboxes.Visible = mailboxes.ShowPrimary;
+        _btnGenerateEmails.Visible = mailboxes.ShowSecondary;
+
+        var entries = generation?.Ledger?.Entries ?? new List<LedgerEntry>();
+        var storyName = StoryFileName(folder);
+        var storyExists = folder.Length > 0 && File.Exists(Path.Combine(folder, storyName));
+        var story = GenerationUiText.StoryRow(new StoryRowInput
+        {
+            Entries = entries.Count,
+            Threads = entries.Select(e => e.SourceThreadId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).Count(),
+            FileName = storyName,
+            FileExists = storyExists,
+            WrittenLocal = storyExists ? WrittenLocal(corpus, CorpusFileKind.StorySoFar) : null,
+            Error = generation?.StoryError ?? string.Empty
+        });
+        ApplySummaryRow(_rowStory, story);
+        _btnOpenStory.Visible = story.ShowPrimary;
+        // A ledger from an earlier plan is not exported against the current plan; Start Over on Generate Corpus clears it
+        _btnExportStory.Visible = story.ShowSecondary && runCurrent;
+    }
+
+    // Name = verified case folder name + constant suffix, never a name read from case.json (T-05-52)
+    private string StoryFileName(string folder) =>
+        StorySoFarDocxBuilder.FileNameFor(folder.Length > 0 ? FolderName(folder) : CaseFolderNaming.DefaultFolderName(Draft));
+
+    /// <summary>
+    /// Full path of the case's Mailboxes folder, or null when the case folder is empty or the path does not resolve
+    /// directly under it (T-05-52).
+    /// </summary>
+    internal static string? MailboxesPath(string caseFolder)
+    {
+        if (string.IsNullOrWhiteSpace(caseFolder))
+            return null;
+
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(caseFolder));
+        var path = Path.GetFullPath(Path.Combine(root, PlanNumbering.MailboxesFolder));
+        var expected = root + Path.DirectorySeparatorChar + PlanNumbering.MailboxesFolder;
+        return string.Equals(path, expected, StringComparison.OrdinalIgnoreCase) ? path : null;
+    }
+
+    private static void ApplySummaryRow(ContentRow row, SummaryRowContent content)
+    {
+        row.Line2.Text = content.Line2;
+        row.Line3!.Text = content.Line3;
+        row.Line3.ForeColor = ToneColor(content.Line3Tone, Theme.TextMuted);
+        SetDot(row, ToneColor(content.DotTone, Theme.BorderStrong));
+    }
+
+    private static Color ToneColor(SummaryTone tone, Color muted) => tone switch
+    {
+        SummaryTone.Success => Theme.Success,
+        SummaryTone.Warning => Theme.Warning,
+        SummaryTone.Danger => Theme.Danger,
+        _ => muted
+    };
 
     // First and last month of the histogram; an empty plan falls back to the plan's window
     private static (DateTime First, DateTime Last) PlanMonths(PlanSummary summary, CorpusPlan plan)
@@ -834,7 +944,8 @@ public class StepCaseSummary : UserControl, IWizardStep
             row.Export!.Enabled = !_busy && draft.CoreDocument != null && (kind == CaseExportKind.CoreDocument || draft.Guide != null);
             row.Open!.Enabled = !_busy;
         }
-        foreach (var button in _rowPlan.Buttons.Concat(_rowAnswerKey.Buttons).Concat(_rowProtocol.Buttons))
+        foreach (var button in _rowPlan.Buttons.Concat(_rowAnswerKey.Buttons).Concat(_rowProtocol.Buttons)
+                     .Concat(_rowMailboxes.Buttons).Concat(_rowStory.Buttons))
             button.Enabled = !_busy;
     }
 
@@ -1125,6 +1236,163 @@ public class StepCaseSummary : UserControl, IWizardStep
             SetStatus($"Could not open the case folder: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
         }
     }
+
+    // ----- Generated corpus (05-UI-SPEC S3) -----
+
+    /// <summary>
+    /// Opens a file through the shell. Test seam.
+    /// </summary>
+    internal Action<string> OpenFile = path =>
+    {
+        using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    };
+
+    /// <summary>
+    /// Opens a folder in Explorer. Test seam.
+    /// </summary>
+    internal Action<string> OpenFolder = path =>
+    {
+        using var process = Process.Start("explorer.exe", "\"" + path + "\"");
+    };
+
+    /// <summary>
+    /// Opens "{case folder}\Mailboxes" in Explorer, only when it resolves directly under the verified case folder (T-05-52).
+    /// </summary>
+    internal void OpenMailboxesFolder()
+    {
+        var path = MailboxesPath(CaseFolder);
+        if (path == null || !Directory.Exists(path))
+        {
+            RefreshAll();
+            return;
+        }
+
+        try
+        {
+            OpenFolder(path);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            SetStatus($"Could not open the Mailboxes folder: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
+        }
+    }
+
+    /// <summary>
+    /// Opens the story-so-far .docx: verified case folder + the derived file name, never a name from case.json.
+    /// A missing file refreshes the row and says how to write it again.
+    /// </summary>
+    internal void OpenStory()
+    {
+        var folder = CaseFolder;
+        if (folder.Length == 0)
+        {
+            RefreshAll();
+            return;
+        }
+
+        var fileName = StoryFileName(folder);
+        var path = Path.GetFullPath(Path.Combine(folder, fileName));
+        if (!File.Exists(path))
+        {
+            RefreshAll();
+            SetStatus(GenerationUiText.StoryMissingText(fileName), Theme.Danger);
+            return;
+        }
+
+        try
+        {
+            OpenFile(path);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            SetStatus($"Could not open {fileName}: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
+        }
+    }
+
+    /// <summary>
+    /// Rewrites the story-so-far .docx from the ledger saved in case.json (CORP-11), stamps it, and saves. The journal is
+    /// replayed only for the warnings section and the thread counts; an unreadable journal still exports the ledger.
+    /// </summary>
+    internal async Task ExportStoryAsync()
+    {
+        if (_busy)
+            return;
+
+        var draft = Draft;
+        var folder = CaseFolder;
+        var plan = CorpusPlanStore.EnsureLoaded(draft).Plan;
+        var generation = draft.Corpus?.Generation;
+        if (folder.Length == 0 || plan == null || generation == null || generation.RunPlanId != plan.PlanId
+            || draft.Corpus!.PlanId != plan.PlanId || generation.Ledger.Entries.Count == 0)
+        {
+            RefreshAll();
+            return;
+        }
+
+        var guide = draft.Guide ?? new CaseGuide();
+        var ledger = generation.Ledger;
+        var fileName = StoryFileName(folder);
+        SetBusy(true);
+        SetStatus(GenerationUiText.StoryExportingText, Theme.TextMuted);
+        try
+        {
+            GenerationFileResult result;
+            try
+            {
+                // Every action (and Back/Finish) is disabled meanwhile, so the draft is a stable snapshot off the UI thread
+                result = await Task.Run(async () =>
+                {
+                    var replay = GenerationJournal.Replay(folder, plan);
+                    var state = GenerationRunState.From(plan, replay);
+                    return await GenerationOutputs.WriteStorySoFarAsync(folder, draft, plan, ledger, state, PeopleDirectory.Create(guide, plan));
+                });
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                result = new GenerationFileResult { FailedFileName = fileName, Error = ex.Message };
+            }
+            if (IsDisposed)
+                return;
+
+            generation.StoryError = result.Succeeded ? string.Empty : $"{result.FailedFileName}: {result.Error}";
+            CorpusApproval.RecordPartialWrites(draft, result.Files);
+            if (result.Succeeded)
+                SetStatus(GenerationUiText.StoryExportedText(fileName), Theme.Success);
+            else if (result.FileOpenElsewhere)
+                SetStatus(GenerationUiText.StoryLockedText(fileName), Theme.Warning);
+            else
+                SetStatus(GenerationUiText.StoryExportFailedText(fileName, result.Error), Theme.Danger);
+
+            if (CaseStore.CanSave(draft))
+            {
+                var saved = await _state.CaseStore.SaveAsync(draft);
+                if (IsDisposed)
+                    return;
+                if (!saved)
+                    SetStatus(CaseGuideUiText.SaveFailedText(_state.CaseStore.LastSaveError), Theme.Danger);
+            }
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+                RefreshAll();
+            }
+        }
+    }
+
+    // Test accessors (the step is never shown in step-logic tests)
+    internal Label StatusLabel => _lblStatus;
+    internal Label MailboxesLine3 => _rowMailboxes.Line3!;
+    internal Label StoryLine3 => _rowStory.Line3!;
+    internal Label AnswerKeyLine3 => _rowAnswerKey.Line3!;
+    internal Color MailboxesDotColor => _rowMailboxes.DotColor;
+    internal Color StoryDotColor => _rowStory.DotColor;
+    internal Button OpenMailboxesButton => _btnOpenMailboxes;
+    internal Button GenerateEmailsButton => _btnGenerateEmails;
+    internal Button OpenStoryButton => _btnOpenStory;
+    internal Button ExportStoryButton => _btnExportStory;
 
     private async Task MoveCaseFolderAsync()
     {

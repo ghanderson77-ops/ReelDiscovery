@@ -548,6 +548,15 @@ public static class GenerationUiText
     public static string StoryMissingText(string fileName) =>
         $"{fileName} is no longer in the case folder. Click Export Story So Far to write it again.";
 
+    public const string StoryExportingText = "Exporting the story so far...";
+
+    public static string StoryExportedText(string fileName) => $"Exported {fileName} to the case folder.";
+
+    public static string StoryLockedText(string fileName) => $"Close {fileName} in Word, then click Export Story So Far.";
+
+    public static string StoryExportFailedText(string fileName, string reason) =>
+        $"Could not export {fileName}{Colon(reason)}. Check that the case folder is writable, then click Export Story So Far.";
+
     // --- Shared formatting ---
 
     private static string Plural(int n, string singular, string plural) => CaseGuideUiText.Plural(n, singular, plural);

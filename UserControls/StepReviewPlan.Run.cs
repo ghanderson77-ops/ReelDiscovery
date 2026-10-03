@@ -498,13 +498,20 @@ public partial class StepReviewPlan
                 SetStatus(CorpusUiText.ApprovedText(Path.GetFileName(Path.TrimEndingDirectorySeparator(folder))), Theme.Success);
                 await SaveAsync();
             }
-            else if (result.FileOpenElsewhere)
-            {
-                SetStatus(CorpusUiText.ApproveFileOpenText(result.FailedFileName), Theme.Danger);
-            }
             else
             {
-                SetStatus(CorpusUiText.ApproveFailedText(result.Error), Theme.Danger);
+                SetStatus(result.FileOpenElsewhere
+                    ? CorpusUiText.ApproveFileOpenText(result.FailedFileName)
+                    : CorpusUiText.ApproveFailedText(result.Error), Theme.Danger);
+
+                // Files written before the failure now hold this plan; keep their stamps in case.json (WR-02)
+                if (result.Files.Count > 0)
+                {
+                    Draft!.Revision++;
+                    await SaveAsync();
+                    if (IsDisposed)
+                        return false;
+                }
             }
         }
         catch (OperationCanceledException)

@@ -99,11 +99,10 @@ public class CorpusApprovalTests : IDisposable
     }
 
     [Fact]
-    public async Task Approve_SecondFileFails_RecordsNothing()
+    public async Task Approve_SecondFileFails_ApprovesNothing_StampsOnlyTheWrittenFile()
     {
         var (draft, plan) = Setup();
         Attach(draft, plan);
-        var before = draft.Corpus!.WrittenFiles.Count;
 
         var result = await CorpusApproval.ApproveAsync(_folder, draft, plan, FailingWriter(2, new IOException("Disk full")));
 
@@ -111,9 +110,36 @@ public class CorpusApprovalTests : IDisposable
         Assert.Equal("answer-key.xlsx", result.FailedFileName);
         Assert.Equal("Disk full", result.Error);
         Assert.False(result.FileOpenElsewhere);
-        Assert.False(draft.Corpus.Approved);
+        Assert.False(draft.Corpus!.Approved);
         Assert.Null(draft.Corpus.ApprovedUtc);
-        Assert.Equal(before, draft.Corpus.WrittenFiles.Count);
+        // WR-02: answer-key.csv was overwritten, so its stamp follows the plan it now holds
+        var entry = Assert.Single(draft.Corpus.WrittenFiles);
+        Assert.Equal(CorpusFileKind.AnswerKeyCsv, entry.Kind);
+        Assert.Equal(plan.PlanId, entry.PlanId);
+    }
+
+    [Fact]
+    public async Task Approve_PartialWriteAfterReplan_RestampsOnlyReplacedFiles()
+    {
+        // WR-02: Word holds the protocol open while re-approving a new plan
+        var (draft, plan) = Setup();
+        Attach(draft, plan);
+        Assert.True((await CorpusApproval.ApproveAsync(_folder, draft, plan)).Succeeded);
+
+        var next = PlanFixtures.Clone(plan);
+        next.PlanId = Guid.NewGuid();
+        Attach(draft, next);
+        draft.Corpus!.Approved = false;
+        var error = new IOException("The file is in use.", unchecked((int)0x80070020));
+        var result = await CorpusApproval.ApproveAsync(_folder, draft, next, FailingWriter(3, error));
+
+        Assert.False(result.Succeeded);
+        Assert.False(draft.Corpus.Approved);
+        Assert.Equal(3, draft.Corpus.WrittenFiles.Count);
+        var byKind = draft.Corpus.WrittenFiles.ToDictionary(f => f.Kind);
+        Assert.Equal(next.PlanId, byKind[CorpusFileKind.AnswerKeyCsv].PlanId);
+        Assert.Equal(next.PlanId, byKind[CorpusFileKind.AnswerKeyXlsx].PlanId);
+        Assert.Equal(plan.PlanId, byKind[CorpusFileKind.ReviewProtocol].PlanId);
     }
 
     [Fact]

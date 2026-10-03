@@ -109,14 +109,31 @@ public static class CorpusApproval
     }
 
     /// <summary>
+    /// Re-stamps the files a failed approval did overwrite with the plan they now hold, so the case summary never shows
+    /// a file of the current plan as written for the earlier one (WR-02). Approval itself is not recorded (D-26).
+    /// </summary>
+    public static void RecordPartialWrites(CaseDraft draft, IReadOnlyList<WrittenCorpusFile> files)
+    {
+        if (files.Count == 0)
+            return;
+
+        draft.Corpus ??= new CorpusState();
+        var corpus = draft.Corpus;
+        corpus.WrittenFiles = corpus.WrittenFiles.Where(w => files.All(f => f.Kind != w.Kind)).Concat(files).ToList();
+    }
+
+    /// <summary>
     /// Writes the answer key and review protocol, then records approval only if every write succeeded (D-26, T-04-70).
-    /// The caller saves case.json afterwards.
+    /// A partial write re-stamps only the files it replaced (WR-02). The caller saves case.json afterwards, also after a
+    /// failure that wrote some files (result.Files is not empty).
     /// </summary>
     public static async Task<ApprovalResult> ApproveAsync(string caseFolder, CaseDraft draft, CorpusPlan plan, FileWriter? writer = null, CancellationToken ct = default)
     {
         var result = await WriteFilesAsync(caseFolder, draft, plan, writer, ct);
         if (result.Succeeded)
             RecordApproval(draft, plan, result.Files, DateTime.UtcNow);
+        else
+            RecordPartialWrites(draft, result.Files);
         return result;
     }
 

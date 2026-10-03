@@ -147,6 +147,21 @@ public class GenerationJournalTests : IDisposable
     }
 
     [Fact]
+    public async Task Append_AfterTornLastLine_StartsFreshLine()
+    {
+        var journal = new GenerationJournal(_folder);
+        await journal.AppendAsync(Done("T-0003"));
+        await File.AppendAllTextAsync(JournalPath, "{\"Type\":\"ThreadDone\",\"PlanId\":\"" + _plan.PlanId + "\",\"Thread");
+        await journal.AppendAsync(Done("T-0005"));
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(1, replay.SkippedLines);
+        Assert.Equal(2, replay.LastByThread.Count);
+        Assert.True(replay.LastByThread.ContainsKey("T-0005"));
+    }
+
+    [Fact]
     public async Task Replay_UnknownTypeUnknownThreadForeignPlan_Dropped()
     {
         var journal = new GenerationJournal(_folder);

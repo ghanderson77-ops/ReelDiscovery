@@ -80,7 +80,17 @@ public class GenerationJournal
         try
         {
             // One write per line + flush: a kill leaves at most a torn last line, which replay skips (RUN-01)
-            await using var stream = new FileStream(FilePath, FileMode.Append, FileAccess.Write, FileShare.Read);
+            await using var stream = new FileStream(FilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+
+            // A kill can leave a torn last line with no newline; start a fresh line so this record is not fused onto it
+            if (stream.Length > 0)
+            {
+                stream.Seek(-1, SeekOrigin.End);
+                if (stream.ReadByte() != '\n')
+                    stream.WriteByte((byte)'\n');
+            }
+
+            stream.Seek(0, SeekOrigin.End);
             await stream.WriteAsync(bytes, ct).ConfigureAwait(false);
             stream.Flush(flushToDisk: true);
         }

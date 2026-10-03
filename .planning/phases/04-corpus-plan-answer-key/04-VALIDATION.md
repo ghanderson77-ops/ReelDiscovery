@@ -90,4 +90,4 @@ Task IDs are filled in by the planner/executor; the requirement → test map is 
 - [x] Feedback latency < 30s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** automated gate green 2026-10-02 (04-20 Task 1); manual-only checks pending human verification (04-20 Task 2)
+**Approval:** approved 2026-10-03 (automated gate + human check at 150%)

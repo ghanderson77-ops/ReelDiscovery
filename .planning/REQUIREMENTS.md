@@ -11,7 +11,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 - [x] **PLAT-01**: App targets .NET 10 (net10.0-windows) with the SDK pinned via global.json and still publishes as a single-file self-contained exe
 - [x] **PLAT-02**: API keys are stored encrypted with Windows DPAPI (existing Base64 key file migrated)
-- [ ] **PLAT-03**: A test project exists and runs unit tests for planner, validators, answer-key writer and EML output
+- [x] **PLAT-03**: A test project exists and runs unit tests for planner, validators, answer-key writer and EML output
 - [x] **PLAT-04**: Known concurrency bugs are fixed (shared `System.Random`, non-thread-safe mutation in parallel sections)
 - [ ] **PLAT-05**: Dead code in the old generation path is removed as it is replaced
 
@@ -62,8 +62,8 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [x] **PLAN-01**: User sets the corpus size (up to ~5,000 emails) and the relevant vs. non-relevant proportion
 - [x] **PLAN-02**: System plans every thread and message in code before any prose is written: date/time, sender, recipients (To/CC), reply/forward structure, linked facts and issues, relevance label, attachments
 - [x] **PLAN-03**: Relevant threads are scheduled against the key-facts timeline so overlapping issues run concurrently among shared characters without contradiction
-- [ ] **PLAN-04**: Timestamps are realistic (business hours, time zones, weekends/holidays, reply latency)
-- [ ] **PLAN-05**: Plan includes realistic distributions for thread depth, reply vs. reply-all vs. forward, CC patterns and attachment rate
+- [x] **PLAN-04**: Timestamps are realistic (business hours, time zones, weekends/holidays, reply latency)
+- [x] **PLAN-05**: Plan includes realistic distributions for thread depth, reply vs. reply-all vs. forward, CC patterns and attachment rate
 - [x] **PLAN-06**: A validator checks the plan (counts, ratio, dates within character active ranges, every key fact covered by evidence)
 - [x] **PLAN-07**: User sees a plan summary (counts by issue/fact/relevance/custodian, date histogram) and approves it or re-plans before generation starts
 
@@ -174,7 +174,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | PLAT-01 | Phase 1 | Complete |
 | PLAT-02 | Phase 1 | Complete |
-| PLAT-03 | Phase 1, Phase 4 | Partial (Phase 1: harness + EML tests; planner/validator/answer-key tests in Phase 4) |
+| PLAT-03 | Phase 1, Phase 4 | Complete |
 | PLAT-04 | Phase 1 | Complete |
 | PLAT-05 | Phase 7 | Pending |
 | PROV-01 | Phase 1 | Complete |
@@ -210,8 +210,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAN-01 | Phase 4 | Complete |
 | PLAN-02 | Phase 4 | Complete |
 | PLAN-03 | Phase 4 | Complete |
-| PLAN-04 | Phase 4 | Pending |
-| PLAN-05 | Phase 4 | Pending |
+| PLAN-04 | Phase 4 | Complete |
+| PLAN-05 | Phase 4 | Complete |
 | PLAN-06 | Phase 4 | Complete |
 | PLAN-07 | Phase 4 | Complete |
 | CORP-01 | Phase 5 | Pending |

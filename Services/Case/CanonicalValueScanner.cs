@@ -113,7 +113,8 @@ public static partial class CanonicalValueScanner
         }
     }
 
-    private static bool TryParseAmount(string? text, out decimal amount)
+    /// <summary>Parses "$7.5 million"-style amounts; used by the Phase 5 render checks for the +/-15% variant window.</summary>
+    internal static bool TryParseAmount(string? text, out decimal amount)
     {
         amount = 0;
         var s = (text ?? string.Empty).Trim().ToLowerInvariant();

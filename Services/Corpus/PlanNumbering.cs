@@ -160,6 +160,9 @@ public static class PlanNumbering
             .FirstOrDefault(id => id != null && castById.ContainsKey(id));
     }
 
+    /// <summary>Folder name per cast id, exactly as planned sender paths use it (Inbox copies must match, OUT-01).</summary>
+    internal static IReadOnlyDictionary<string, string> CustodianFolders(CaseGuide guide) => BuildFolders(guide);
+
     // Cast order decides who keeps a shared local part (first wins)
     private static Dictionary<string, string> BuildFolders(CaseGuide guide)
     {

@@ -11,6 +11,10 @@ namespace ReelDiscovery.Services.Corpus;
 public static class AnswerKeyBuilder
 {
     public const string StatusPlanned = "Planned";
+    public const string StatusGenerated = "Generated";
+    public const string StatusGeneratedWithWarnings = "Generated - with warnings";
+    public const string StatusFailed = "Failed";
+    public const string StatusSkipped = "Skipped";
     public const string DocTypeEmail = "Email";
     public const string DocTypeAttachment = "Attachment";
     public const string RelevantLabel = "Relevant";
@@ -23,8 +27,9 @@ public static class AnswerKeyBuilder
 
     /// <summary>
     /// One row per planned email and per attachment, sorted by DocID (ordinal); never mutates the plan or the guide.
+    /// The optional overlay sets Status and Subject on email rows; attachment rows copy the parent subject but stay Planned.
     /// </summary>
-    public static List<AnswerKeyRow> Build(CorpusPlan plan, CaseGuide guide)
+    public static List<AnswerKeyRow> Build(CorpusPlan plan, CaseGuide guide, AnswerKeyOverlay? overlay = null)
     {
         var lookups = new Lookups(plan, guide);
         var rows = new List<AnswerKeyRow>();
@@ -72,6 +77,14 @@ public static class AnswerKeyBuilder
                     row.NonRelevantCategory = CategoryLabel(thread.Category);
                     row.NearMiss = thread.Category == NonRelevantCategory.Decoy ? Yes : No;
                     row.Rationale = NonRelevantRationale(thread);
+                }
+
+                // Run state (D-05): applied before attachment rows so they copy the rendered subject
+                if (overlay != null && overlay.ByDocId.TryGetValue(row.DocId, out var o) && o != null)
+                {
+                    row.Status = string.IsNullOrWhiteSpace(o.Status) ? StatusPlanned : o.Status;
+                    if (!string.IsNullOrWhiteSpace(o.Subject))
+                        row.Subject = o.Subject;
                 }
 
                 rows.Add(row);
@@ -270,4 +283,18 @@ public static class AnswerKeyBuilder
             return email.Length == 0 ? name : $"{name} <{email}>";
         }
     }
+}
+
+public class AnswerKeyOverlayEntry
+{
+    public string Status { get; set; } = AnswerKeyBuilder.StatusPlanned;
+    public string Subject { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Run-state projection onto the planned key (D-05): status and rendered subject per email DocID.
+/// </summary>
+public class AnswerKeyOverlay
+{
+    public Dictionary<string, AnswerKeyOverlayEntry> ByDocId { get; set; } = new(StringComparer.Ordinal);
 }

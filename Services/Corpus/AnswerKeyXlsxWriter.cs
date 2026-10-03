@@ -61,7 +61,7 @@ public static class AnswerKeyXlsxWriter
         "Near-Miss Decoy: Y when the document looks related to the matter but is not relevant.",
         "Non-Relevant Category: Kind of non-relevant material.",
         "Rationale: Why the document was coded this way.",
-        "Status: Planned until the document is generated."
+        "Status: Planned, Generated, Generated - with warnings, Failed or Skipped. Planned rows are not generated yet; with warnings means the email was kept after failing a consistency check 3 times."
     };
 
     /// <summary>

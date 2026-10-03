@@ -328,4 +328,38 @@ public class PlanNumberingTests
         plan.Threads.SelectMany(t => new[] { t.Id, t.OwnerCustodianId, string.Join(",", t.LinkedThreadIds) }
             .Concat(t.Messages.SelectMany(m => new[] { m.Id, m.DocId, m.FilePath, string.Join(",", m.CustodianIds) }
                 .Concat(m.Attachments.Select(a => a.DocId))))).ToList();
+
+    [Fact]
+    public void CustodianFolders_MatchPlannedSenderPaths()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var guide = draft.Guide!;
+        var plan = PlanFixtures.ValidPlan(draft);
+        PlanNumbering.Assign(plan, guide);
+
+        var folders = PlanNumbering.CustodianFolders(guide);
+        var castIds = guide.Cast.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        var checkedCount = 0;
+
+        foreach (var message in plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant).SelectMany(t => t.Messages))
+        {
+            var segments = message.FilePath.Split('/');
+            Assert.Equal("Mailboxes", segments[0]);
+
+            // Sender-owned copies sit in the sender's folder under Sent Items
+            if (castIds.Contains(message.FromId))
+            {
+                Assert.Equal(folders[message.FromId], segments[1]);
+                Assert.Equal("Sent Items", segments[2]);
+                checkedCount++;
+            }
+            else
+            {
+                Assert.Contains(segments[1], folders.Values);
+            }
+        }
+
+        Assert.True(checkedCount > 0);
+        Assert.All(guide.Cast, c => Assert.True(folders.ContainsKey(c.Id)));
+    }
 }

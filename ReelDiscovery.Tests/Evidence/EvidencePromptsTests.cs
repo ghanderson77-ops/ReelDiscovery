@@ -232,6 +232,7 @@ public class EvidencePromptsTests
     {
         var (draft, plan, thread) = HotCase();
         var root = thread.Messages.OrderBy(m => m.Seq).First();
+        root.Attachments.Clear();
         root.Attachments.Add(new PlannedAttachment { Kind = AttachmentType.Excel, Title = "Change Order 7 pricing", FileName = "Change Order 7 pricing.xlsx" });
 
         var lines = MessageLines(EvidencePrompts.BuildThreadPrompt(Context(draft, plan, thread)));

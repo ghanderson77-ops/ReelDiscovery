@@ -174,7 +174,7 @@ Plans:
 - [x] 05-11-PLAN.md — GenerationRunState, answer-key re-projection, story-so-far .docx, draft applier (Wave 5)
 - [x] 05-12-PLAN.md — GenerationSnapshot + ThreadUnitOfWork (check-retry, keep best, write, journal) (Wave 5)
 - [x] 05-13-PLAN.md — GenerationRunner (waves, cancel, fatal, continue) + Start Over + end-to-end tests (Wave 6)
-- [ ] 05-14-PLAN.md — StepGenerateCorpus layout, entry display, 144-DPI render tests (Wave 7)
+- [x] 05-14-PLAN.md — StepGenerateCorpus layout, entry display, 144-DPI render tests (Wave 7)
 - [ ] 05-15-PLAN.md — Run lifecycle (off-UI run, persistence, cancel, Start Over, reopen) + 8-step wizard shell (Wave 8)
 - [ ] 05-16-PLAN.md — Case Summary Mailboxes/Story so far rows + re-plan warning (Wave 9)
 - [ ] 05-17-PLAN.md — Phase gate: full/render suites + human verification at 144 DPI and live run (Wave 10)

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-13-PLAN.md
-last_updated: "2026-10-03T21:11:36.878Z"
+stopped_at: Completed 05-14-PLAN.md
+last_updated: "2026-10-03T21:32:37.936Z"
 last_activity: 2026-10-03
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 81
-  completed_plans: 77
-  percent: 95
+  completed_plans: 78
+  percent: 96
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 5 (Relevant Evidence Generation & Narrative Ledger) — EXECUTING
-Plan: 14 of 17
+Plan: 15 of 17
 Status: Ready to execute
 Last activity: 2026-10-03
 
@@ -128,6 +128,7 @@ Progress: [██████████] 100%
 | Phase 05 P11 | 15min | 3 tasks | 5 files |
 | Phase 05 P12 | 20min | 2 tasks | 4 files |
 | Phase 05 P13 | 25min | 2 tasks | 4 files |
+| Phase 05 P14 | 35min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -354,6 +355,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-13: Runner end is guaranteed by finally: final checkpoint (journal replay, key, story, RunEnded, persist) runs after finish, cancel, fatal stop or an escaped exception (InternalError)
 - [Phase 05]: 05-13: Answer key re-projected per finished thread at most every 2 s behind a single-projection gate; wave end and run end always project
 - [Phase 05]: 05-13: Start Over deletes only ResolveUnderCase-validated journal-listed and planned relevant EMLs plus the journal and story file; FilesDeleted counts EMLs only
+- [Phase 05]: 05-14: Generate Corpus grids use the 28 px GridStyle dot column (not UI-SPEC 24); WizardMin still keeps Dates >= 120 and Event >= 160
+- [Phase 05]: 05-14: Generate Corpus entry replays the journal off the UI thread and never builds a provider; Ready-card cost uses WizardState.StoryModelConfig
 
 ### Pending Todos
 
@@ -375,6 +378,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-03T21:11:29.253Z
-Stopped at: Completed 05-13-PLAN.md
+Last session: 2026-10-03T21:32:32.712Z
+Stopped at: Completed 05-14-PLAN.md
 Resume file: None

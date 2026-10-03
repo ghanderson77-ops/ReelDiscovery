@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
@@ -55,6 +56,9 @@ public partial class StepGenerateCorpus : IWizardStep
         public JournalReplay Replay = new();
         public GenerationRunState State = new();
         public GenerationView? View;
+        // Set when the journal was re-projected on entry (crash recovery)
+        public NarrativeLedger? Ledger;
+        public GenerationFileResult? KeyResult;
     }
 
     // ----- IWizardStep lifecycle -----
@@ -112,10 +116,29 @@ public partial class StepGenerateCorpus : IWizardStep
             {
                 var guide = Draft.Guide ?? new CaseGuide();
                 var model = _state.StoryModelConfig;
-                // Replay and projections run off the UI thread (200 MB cap in the journal, T-05-45)
-                data = await Task.Run(() => ReadEntry(folder, plan, guide, model));
+                var cached = corpus!.Generation;
+                var cachedPlanId = cached?.RunPlanId;
+                var cachedProjected = cached?.ProjectedUtc;
+                // Replay and projections run off the UI thread (200 MB cap in the journal, T-05-45); never a provider call (T-05-51)
+                data = await Task.Run(() => ReadEntryAsync(folder, plan, guide, model, cachedPlanId, cachedProjected));
                 if (IsDisposed || _isGenerating)
                     return;
+
+                if (data.Ledger != null)
+                {
+                    // Crash recovery: the journal is the source of truth (D-05, Pitfall 4)
+                    GenerationStateApplier.Apply(Draft, plan, data.State, data.Ledger, data.KeyResult?.Files ?? new List<WrittenCorpusFile>(),
+                        GenerationOutcome.None, string.Empty, DateTime.UtcNow, final: false);
+                    if (data.KeyResult != null)
+                    {
+                        Draft.Corpus!.Generation!.KeyError = FileErrorOf(data.KeyResult);
+                        ShowFileError(data.KeyResult);
+                    }
+
+                    await SaveAsync();
+                    if (IsDisposed || _isGenerating)
+                        return;
+                }
 
                 input.HasSavedRun = data.Replay.Exists && (data.State.HasRun || data.Replay.PlanChanged);
                 input.PlanChanged = data.Replay.PlanChanged;
@@ -156,8 +179,6 @@ public partial class StepGenerateCorpus : IWizardStep
                 return;
         }
     }
-
-    public Task OnLeaveStepAsync() => Task.CompletedTask;
 
     /// <summary>
     /// Next gate (UI-SPEC U7): disabled during a run; otherwise a partial corpus is a valid result and Next advances.
@@ -202,6 +223,18 @@ public partial class StepGenerateCorpus : IWizardStep
         _btnContinue.Click += async (s, e) => await StartRunAsync();
         _btnRetryFailed.Click += async (s, e) => await StartRunAsync();
         _btnCancel.Click += (s, e) => RequestCancel();
+        _btnStartOver.Click += async (s, e) => await StartOverAsync();
+        _gridActivity.CellDoubleClick += (s, e) => OpenEml(ActivityEventAt(e.RowIndex));
+        _gridActivity.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode != Keys.Enter || _gridActivity.CurrentRow == null)
+                return;
+
+            // Enter opens the row instead of moving to the next one
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            OpenEml(ActivityEventAt(_gridActivity.CurrentRow.Index));
+        };
     }
 
     /// <summary>
@@ -218,7 +251,7 @@ public partial class StepGenerateCorpus : IWizardStep
                 (FindForm() as WizardForm)?.NavigateToStage(CaseStage.ReviewPlan);
                 return Task.CompletedTask;
             default:
-                return Task.CompletedTask;
+                return StartOverAsync();
         }
     }
 
@@ -547,17 +580,242 @@ public partial class StepGenerateCorpus : IWizardStep
     private static string ErrorText(Exception ex) =>
         ex.InnerException != null ? $"{ex.Message} ({ex.InnerException.Message})" : ex.Message;
 
+    // ----- Start Over (C-G2, UI-SPEC U6) -----
+
+    internal Task ClickStartOverAsync() => StartOverAsync();
+
+    /// <summary>
+    /// Deletes the generated EMLs, the journal, the ledger and the story file after C-G2 (Warning, default No), then
+    /// re-projects the answer key to Planned. The plan, the guide and case.json stay.
+    /// </summary>
+    private async Task StartOverAsync()
+    {
+        if (_state == null || _isGenerating || _isResetting)
+            return;
+
+        var plan = Draft.Corpus?.Plan;
+        string folder;
+        try
+        {
+            folder = _state.CaseStore.EnsureFolder(Draft);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetStatus(ErrorText(ex), Theme.Danger);
+            return;
+        }
+
+        // The journal can be large; counting its files stays off the UI thread
+        var files = await Task.Run(() => GenerationJournal.ListAllFiles(folder).Count);
+        if (IsDisposed || _isGenerating || _isResetting)
+            return;
+
+        var (title, text) = GenerationUiText.CG2StartOver(files);
+        if (!Confirm(title, text, MessageBoxIcon.Warning))
+            return;
+
+        _isResetting = true;
+        _btnStartOver.Enabled = false;
+        _btnStateAction.Enabled = false;
+        RaiseStateChanged();
+        try
+        {
+            // Deletes only journal-listed and planned relevant EML paths under Mailboxes plus two constant-name files (T-05-49)
+            var reset = await GenerationReset.StartOverAsync(folder, plan, Draft.Guide);
+            if (IsDisposed)
+                return;
+
+            GenerationStateApplier.Clear(Draft);
+            GenerationFileResult? key = null;
+            if (plan != null && Draft.Corpus?.Approved == true)
+            {
+                key = await GenerationOutputs.WriteAnswerKeyAsync(folder, Draft.Guide ?? new CaseGuide(), plan, new AnswerKeyOverlay());
+                if (IsDisposed)
+                    return;
+
+                CorpusApproval.RecordPartialWrites(Draft, key.Files);
+            }
+
+            await SaveAsync();
+            if (IsDisposed)
+                return;
+
+            _isResetting = false;
+            await OnEnterStepAsync();
+            if (IsDisposed)
+                return;
+
+            if (reset.Errors.Count > 0)
+                SetStatus($"Some files could not be deleted: {reset.Errors[0]}", Theme.Danger);
+            else if (key is { Succeeded: false })
+                ShowFileError(key);
+            else
+                SetStatus(GenerationUiText.StartedOverText(reset.FilesDeleted), Theme.Success);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // UI boundary: files that were deleted stay deleted; the journal (if still there) is reread on the next entry
+            if (!IsDisposed)
+                SetStatus(ErrorText(ex), Theme.Danger);
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                _isResetting = false;
+                _btnStartOver.Enabled = true;
+                _btnStateAction.Enabled = true;
+                RaiseStateChanged();
+            }
+        }
+    }
+
+    // ----- Leaving the step (Pitfall 8) -----
+
+    /// <summary>
+    /// Retries an answer-key or story-so-far write that failed during the run (a file open in Excel or Word), once, and
+    /// saves. Never throws to the shell: a file still locked keeps its error for the next leave.
+    /// </summary>
+    public async Task OnLeaveStepAsync()
+    {
+        if (_state == null || _isGenerating || _isResetting)
+            return;
+
+        var corpus = Draft.Corpus;
+        var plan = corpus?.Plan;
+        var generation = corpus?.Generation;
+        if (plan == null || generation == null || corpus!.Approved != true || generation.RunPlanId != plan.PlanId)
+            return;
+
+        var retryKey = generation.KeyError.Length > 0;
+        var retryStory = generation.StoryError.Length > 0 && generation.Ledger.Entries.Count > 0;
+        if (!retryKey && !retryStory)
+            return;
+
+        var folder = Draft.FolderPath;
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            return;
+
+        var guide = Draft.Guide ?? new CaseGuide();
+        var ledger = generation.Ledger;
+        var draft = Draft;
+        GenerationFileResult? key = null;
+        GenerationFileResult? story = null;
+        try
+        {
+            (key, story) = await Task.Run(async () =>
+            {
+                var replay = GenerationJournal.Replay(folder, plan);
+                // An unreadable or foreign journal would reset the key to Planned; the entry card handles those
+                if (!replay.Readable || replay.PlanChanged)
+                    return ((GenerationFileResult?)null, (GenerationFileResult?)null);
+
+                var state = GenerationRunState.From(plan, replay);
+                var k = retryKey
+                    ? await GenerationOutputs.WriteAnswerKeyAsync(folder, guide, plan, state.BuildOverlay(plan, RenderAssignments.Compute(plan)))
+                    : null;
+                var s = retryStory
+                    ? await GenerationOutputs.WriteStorySoFarAsync(folder, draft, plan, ledger, state, PeopleDirectory.Create(guide, plan))
+                    : null;
+                return (k, s);
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // The writers report locked files in their results; anything else keeps the error for the next leave
+            return;
+        }
+
+        var written = new List<WrittenCorpusFile>();
+        if (key != null)
+        {
+            generation.KeyError = FileErrorOf(key);
+            written.AddRange(key.Files);
+        }
+        if (story != null)
+        {
+            generation.StoryError = FileErrorOf(story);
+            written.AddRange(story.Files);
+        }
+        if (written.Count == 0 && key == null && story == null)
+            return;
+
+        CorpusApproval.RecordPartialWrites(Draft, written);
+        await SaveAsync();
+    }
+
+    // ----- Opening an EML from the activity grid (U15) -----
+
+    /// <summary>
+    /// Opens a file through the shell. Test seam.
+    /// </summary>
+    internal Action<string> OpenFile = path =>
+    {
+        using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    };
+
+    private GenerationEvent? ActivityEventAt(int rowIndex) =>
+        rowIndex >= 0 && rowIndex < _gridActivity.Rows.Count ? (_gridActivity.Rows[rowIndex].Tag as DotTag)?.Event : null;
+
+    /// <summary>
+    /// Written and Kept-with-warnings rows open the thread's last EML. The path must pass IsSafeEmlPath and resolve under
+    /// the case folder (T-05-47); nothing else is ever opened.
+    /// </summary>
+    internal void OpenEml(GenerationEvent? e)
+    {
+        if (e == null || e.Kind is not (GenerationEventKind.ThreadWritten or GenerationEventKind.KeptWithWarnings))
+            return;
+
+        var folder = Draft.FolderPath;
+        if (string.IsNullOrWhiteSpace(folder))
+            return;
+
+        var full = MailboxWriter.ResolveUnderCase(folder, e.FilePath);
+        if (full == null || !full.EndsWith(".eml", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!File.Exists(full))
+        {
+            SetStatus(GenerationUiText.MissingEmlText(Path.GetFileNameWithoutExtension(full)), Theme.Danger);
+            return;
+        }
+
+        try
+        {
+            OpenFile(full);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            SetStatus($"Could not open {Path.GetFileName(full)}: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
+        }
+    }
+
     // ----- Entry helpers -----
 
-    private static EntryData ReadEntry(string folder, CorpusPlan plan, CaseGuide guide, AIModelConfig? model)
+    private static async Task<EntryData> ReadEntryAsync(string folder, CorpusPlan plan, CaseGuide guide, AIModelConfig? model,
+        Guid? cachedPlanId, DateTime? cachedProjectedUtc)
     {
         var replay = GenerationJournal.Replay(folder, plan);
         var state = GenerationRunState.From(plan, replay);
         var data = new EntryData { Replay = replay, State = state };
-        if (state.HasRun && replay.Readable && !replay.PlanChanged)
-            data.View = HistoryView(plan, guide, replay, state, model);
+        if (!state.HasRun || !replay.Readable || replay.PlanChanged)
+            return data;
+
+        data.View = HistoryView(plan, guide, replay, state, model);
+
+        // case.json is behind the journal (killed mid-run, or never projected): rebuild the ledger and the key from it
+        if (NeedsProjection(plan, replay, cachedPlanId, cachedProjectedUtc))
+        {
+            data.Ledger = LedgerMerger.Build(plan, guide, WavePlanner.WaveIndexByThread(WavePlanner.Plan(plan)), state.DeltasByThread);
+            data.KeyResult = await GenerationOutputs.WriteAnswerKeyAsync(folder, guide, plan,
+                state.BuildOverlay(plan, RenderAssignments.Compute(plan)));
+        }
+
         return data;
     }
+
+    internal static bool NeedsProjection(CorpusPlan plan, JournalReplay replay, Guid? cachedPlanId, DateTime? cachedProjectedUtc) =>
+        cachedPlanId == null || cachedPlanId != plan.PlanId || cachedProjectedUtc == null || cachedProjectedUtc < replay.LastWriteUtc;
 
     /// <summary>
     /// Dashboard of a saved run rebuilt from the journal: counts, ledger size, waves and activity (reopen, RUN-06).

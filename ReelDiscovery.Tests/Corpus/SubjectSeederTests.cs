@@ -241,6 +241,53 @@ public partial class SubjectSeederTests
     }
 
     [Fact]
+    public void BuildDecoyPrompt_OmitsCaseScenario()
+    {
+        // WR-06: the alleged conduct (the user's scenario) must not reach the decoy prompt (D-14)
+        var draft = CorpusTestData.RichDraft();
+        draft.EffectiveScenario = "Brightline accuses Harmon of hiding a kickback scheme on the Lakeview Tower glazing package.";
+        draft.Scenario = draft.EffectiveScenario;
+
+        var prompt = SubjectSeeder.BuildDecoyPrompt(draft, new List<(string, PlannedThread)> { ("S-0003", DecoyThread()) },
+            SubjectSeeder.MustNotMention(draft.Guide!));
+
+        Assert.DoesNotContain("kickback scheme", prompt);
+    }
+
+    private static CaseGuide ParaphraseGuide()
+    {
+        var guide = new CaseGuide();
+        guide.Organizations.Add(new CaseOrganization { Id = "ORG-01", Name = "Brightline Glazing" });
+        guide.Cast.Add(new CastMember { Id = "CH-001", FirstName = "Tom", LastName = "Becker", OrganizationId = "ORG-01" });
+        guide.Facts.Add(new KeyFact { Id = "F-001", Date = "2024-03-18", Title = "Brightline submits inflated change order for curtain wall anchors" });
+        return guide;
+    }
+
+    [Theory]
+    [InlineData("Inflated change order on the curtain wall anchors", true)]
+    [InlineData("Submit the inflated curtain wall anchor order", true)]
+    [InlineData("Brightline holiday party RSVP", false)]
+    [InlineData("Curtain wall mockup schedule", false)]
+    [InlineData("Change order template for the lobby refresh", false)]
+    public void ParaphrasesFact_FlagsCloseParaphrasesOnly(string text, bool expected)
+    {
+        // WR-06: shared keywords are fine (D-14); carrying most of a fact title's distinctive words is not
+        var tokens = SubjectSeeder.FactTitleTokens(ParaphraseGuide());
+
+        Assert.Equal(expected, SubjectSeeder.ParaphrasesFact(text, tokens));
+    }
+
+    [Fact]
+    public void FactTitleTokens_ExcludeOrganizationAndCastNames()
+    {
+        var tokens = Assert.Single(SubjectSeeder.FactTitleTokens(ParaphraseGuide()));
+
+        Assert.DoesNotContain("brightline", tokens);
+        Assert.Contains("anchor", tokens);
+        Assert.Contains("inflated", tokens);
+    }
+
+    [Fact]
     public void Prompts_NoJsonOrFictionalInstructions()
     {
         var draft = CorpusTestData.RichDraft();

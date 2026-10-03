@@ -262,11 +262,14 @@ public partial class SubjectSeeder
                 if (!string.IsNullOrWhiteSpace(member.FullName))
                     CaseNames.Add(member.FullName);
             }
+
+            FactTokens = FactTitleTokens(guide);
         }
 
         public List<ExternalParty> Externals { get; }
         public Dictionary<string, ExternalParty> ExternalById { get; }
         public List<string> MustNotMention { get; }
+        public List<HashSet<string>> FactTokens { get; }
         public HashSet<string> Seeded { get; } = new(StringComparer.Ordinal);
         public HashSet<string> Renamed { get; } = new(StringComparer.Ordinal);
         public HashSet<string> CaseDomains { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -318,7 +321,8 @@ public partial class SubjectSeeder
             if (thread.Category == NonRelevantCategory.Decoy)
             {
                 var angle = Clean(dto.Angle);
-                if (angle.Length == 0 || MentionsForbidden(subject, state.MustNotMention) || MentionsForbidden(angle, state.MustNotMention))
+                if (angle.Length == 0 || MentionsForbidden(subject, state.MustNotMention) || MentionsForbidden(angle, state.MustNotMention)
+                    || ParaphrasesFact(subject, state.FactTokens) || ParaphrasesFact(angle, state.FactTokens))
                     continue;
                 thread.DecoyAngle = angle;
             }
@@ -337,6 +341,73 @@ public partial class SubjectSeeder
 
     internal static bool MentionsForbidden(string text, IReadOnlyList<string> mustNotMention) =>
         mustNotMention.Any(term => term.Length > 0 && text.Contains(term, StringComparison.OrdinalIgnoreCase));
+
+    // A decoy may share keywords with the case (D-14); it paraphrases a fact when it carries at least this many of that
+    // fact title's distinctive words and at least this share of them (WR-06)
+    private const int ParaphraseMinWords = 3;
+    private const double ParaphraseMinShare = 0.6;
+
+    private static readonly HashSet<string> TitleStopWords = new(StringComparer.Ordinal)
+    {
+        "about", "after", "again", "against", "also", "before", "between", "from", "have", "into", "over", "that", "their",
+        "them", "then", "they", "this", "under", "upon", "were", "what", "when", "which", "while", "with", "without", "would"
+    };
+
+    /// <summary>
+    /// Distinctive words per dated fact title: four or more letters/digits, folded to lower case with a plural "s"
+    /// dropped, minus stop words and words of organization, project and cast names (decoys may use those, D-14).
+    /// </summary>
+    internal static List<HashSet<string>> FactTitleTokens(CaseGuide? guide)
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var org in guide?.Organizations ?? new List<CaseOrganization>())
+        {
+            allowed.UnionWith(Words(org?.Name));
+            allowed.UnionWith(Words(org?.ShortName));
+        }
+        foreach (var member in guide?.Cast ?? new List<CastMember>())
+            allowed.UnionWith(Words(member?.FullName));
+        foreach (var project in ProjectNames(guide ?? new CaseGuide()))
+            allowed.UnionWith(Words(project));
+
+        return (guide?.Facts ?? new List<KeyFact>())
+            .Where(f => f != null && !string.IsNullOrWhiteSpace(f.Title))
+            .Select(f => Words(f.Title).Where(w => !allowed.Contains(w)).ToHashSet(StringComparer.Ordinal))
+            .Where(set => set.Count >= ParaphraseMinWords)
+            .ToList();
+    }
+
+    /// <summary>
+    /// True when <paramref name="text"/> carries most of one fact title's distinctive words, i.e. it is about the alleged
+    /// conduct even though it does not quote the title (WR-06).
+    /// </summary>
+    internal static bool ParaphrasesFact(string text, IReadOnlyList<HashSet<string>> factTokens)
+    {
+        if (string.IsNullOrWhiteSpace(text) || factTokens.Count == 0)
+            return false;
+
+        var words = Words(text).ToHashSet(StringComparer.Ordinal);
+        foreach (var fact in factTokens)
+        {
+            var shared = fact.Count(words.Contains);
+            if (shared >= ParaphraseMinWords && shared >= fact.Count * ParaphraseMinShare)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> Words(string? text)
+    {
+        foreach (Match match in WordPattern().Matches(text ?? string.Empty))
+        {
+            var word = match.Value.ToLowerInvariant();
+            if (word.Length > 4 && word.EndsWith('s') && !word.EndsWith("ss", StringComparison.Ordinal))
+                word = word[..^1];
+            if (word.Length >= 4 && !TitleStopWords.Contains(word))
+                yield return word;
+        }
+    }
 
     /// <summary>
     /// Renames an outside sender from the model's sender name. Business senders get "{mailbox}@{slug}.com" (slug folded to
@@ -428,6 +499,9 @@ public partial class SubjectSeeder
     [GeneratedRegex(@"\s+")]
     private static partial Regex WhitespacePattern();
 
+    [GeneratedRegex(@"[\p{L}\p{N}]+")]
+    private static partial Regex WordPattern();
+
     [GeneratedRegex(@"^(?:(?:RE|FW|FWD)\s*:\s*)+", RegexOptions.IgnoreCase)]
     private static partial Regex ReplyPrefixPattern();
 
@@ -493,15 +567,16 @@ public partial class SubjectSeeder
     }
 
     /// <summary>
-    /// Near-miss decoy request: name rules, the project names (ProjectName values) and organization names, the slot lines,
-    /// the task and the must-not-mention list.
+    /// Near-miss decoy request: name rules (without the case scenario, so the alleged conduct never reaches the prompt,
+    /// D-14), the project names (ProjectName values) and organization names, the slot lines, the task and the
+    /// must-not-mention list.
     /// </summary>
     internal static string BuildDecoyPrompt(CaseDraft draft, IReadOnlyList<(string SlotId, PlannedThread Thread)> slots, IReadOnlyList<string> mustNotMention)
     {
         var guide = draft.Guide ?? new CaseGuide();
 
         var sb = new StringBuilder();
-        CaseGuidePrompts.AppendNameRules(sb, draft);
+        CaseGuidePrompts.AppendNameRules(sb, draft, includeScenario: false);
 
         var projects = ProjectNames(guide);
         var organizations = guide.Organizations

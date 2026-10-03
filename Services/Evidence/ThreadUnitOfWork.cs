@@ -95,8 +95,14 @@ public class ThreadUnitOfWork
                 var rendered = RenderRepair.Apply(outcome.Value, ctx);
                 var violations = RenderValidator.Check(rendered, ctx);
 
-                // Fewest violations wins; a tie goes to the later attempt (D-14)
-                if (best == null || violations.Count <= bestViolations.Count)
+                // A composable attempt always beats a structurally broken one; then fewest violations wins and a tie goes to
+                // the later attempt (D-14)
+                var structurallyBroken = IsStructural(violations);
+                var bestStructurallyBroken = IsStructural(bestViolations);
+                var better = best == null
+                    || (bestStructurallyBroken && !structurallyBroken)
+                    || (bestStructurallyBroken == structurallyBroken && violations.Count <= bestViolations.Count);
+                if (better)
                 {
                     best = rendered;
                     bestViolations = violations;
@@ -267,6 +273,9 @@ public class ThreadUnitOfWork
 
         return new ThreadOutcome { Kind = ThreadOutcomeKind.Failed, Record = record, Reason = reason };
     }
+
+    // A missing or empty message (V1, V5) cannot be composed into a thread
+    private static bool IsStructural(List<RenderViolation> violations) => violations.Any(v => v.Code is "V1" or "V5");
 
     private decimal Cost(int inputTokens, int outputTokens) => _storyModel?.CalculateTotalCost(inputTokens, outputTokens) ?? 0m;
 

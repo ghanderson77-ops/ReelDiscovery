@@ -316,6 +316,34 @@ public class ThreadUnitOfWorkTests : IDisposable
     }
 
     [Fact]
+    public async Task ComposableAttempt_BeatsStructurallyBrokenAttempts_WithFewerViolations()
+    {
+        // Attempts 1 and 3 drop a message (structural, few violations); attempt 2 is complete but names many strangers
+        _fake.Respond = Mutating((n, dto) =>
+        {
+            if (n == 2)
+                NameStrangers(dto, "Odell Prewitt", "Sabine Okafor", "Tobias Wrenfield", "Lucinda Marrow", "Anselm Crayle", "Petra Holloway");
+            else
+                dto.Messages.RemoveAt(dto.Messages.Count - 1);
+            return null;
+        });
+        var ctx = Context("F-003");
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit().RunAsync(ctx, run);
+
+        Assert.Equal(3, _fake.Requests.Count);
+        Assert.Equal(ThreadOutcomeKind.Warnings, outcome.Kind);
+        var record = SingleRecord(ctx.Thread);
+        Assert.Equal(JournalRecordType.ThreadDone, record.Type);
+        Assert.Equal(ThreadWriteStatus.Warnings, record.Status);
+        Assert.Equal(ctx.Thread.Messages.Count, record.Messages.Count);
+        Assert.Contains(record.Violations, v => v.Contains("Odell Prewitt"));
+        Assert.DoesNotContain(record.Violations, v => v.Contains("the plan has"));
+    }
+
+    [Fact]
     public async Task BlockedTargetPath_FailsAsWrite_WithoutThrowing()
     {
         _fake.Respond = EvidenceTestData.RenderResponder(_plan, _draft.Guide!);

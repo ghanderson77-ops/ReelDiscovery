@@ -50,8 +50,17 @@ public static class BusinessCalendar
         return new DateTimeOffset(local, tz.GetUtcOffset(local));
     }
 
-    public static DateOnly LocalDate(DateTimeOffset instant, TimeZoneInfo tz) =>
-        DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, tz).DateTime);
+    /// <summary>
+    /// Local calendar date in <paramref name="tz"/>. Instants at the edge of the DateTime range (only in a tampered
+    /// corpus-plan.json) use their own offset's date, because ConvertTime throws there (WR-05).
+    /// </summary>
+    public static DateOnly LocalDate(DateTimeOffset instant, TimeZoneInfo tz)
+    {
+        var year = instant.UtcDateTime.Year;
+        if (year < 2 || year > 9998)
+            return DateOnly.FromDateTime(instant.DateTime);
+        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(instant, tz).DateTime);
+    }
 
     public static bool IsBusinessTime(DateTimeOffset instant, TimeZoneInfo tz)
     {

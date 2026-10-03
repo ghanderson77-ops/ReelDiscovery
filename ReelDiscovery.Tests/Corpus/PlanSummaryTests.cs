@@ -135,6 +135,22 @@ public class PlanSummaryTests
         Assert.Equal(6, s.Custodians);
     }
 
+    [Theory]
+    [InlineData("0001-01-01T01:00:00+00:00")]
+    [InlineData("9999-12-31T23:00:00+00:00")]
+    public void From_SentAtAtDateTimeEdges_DoesNotThrow(string sentAt)
+    {
+        // WR-05: a tampered corpus-plan.json; ConvertTime throws at the edges of the DateTime range
+        var plan = InlinePlan();
+        plan.Threads[0].Messages[0].SentAt = DateTimeOffset.Parse(sentAt, System.Globalization.CultureInfo.InvariantCulture);
+        plan.Threads[0].Messages[0].TimeZoneId = "America/New_York";
+
+        var s = PlanSummary.From(plan, CorpusTestData.RichDraft().Guide!);
+
+        Assert.Equal(10, s.Emails);
+        Assert.Equal(10, s.Months.Sum(m => m.Relevant + m.NonRelevant));
+    }
+
     [Fact]
     public void RelevantPercent_RoundsToOneDecimal()
     {

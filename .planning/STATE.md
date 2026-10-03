@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-10-03T20:44:14.558Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-10-03T20:49:02.945Z"
 last_activity: 2026-10-03
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 81
-  completed_plans: 73
-  percent: 90
+  completed_plans: 74
+  percent: 91
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 5 (Relevant Evidence Generation & Narrative Ledger) — EXECUTING
-Plan: 10 of 17
+Plan: 11 of 17
 Status: Ready to execute
 Last activity: 2026-10-03
 
@@ -124,6 +124,7 @@ Progress: [██████████] 100%
 | Phase 05 P07 | 12min | 2 tasks | 2 files |
 | Phase 05 P08 | 15min | 3 tasks | 8 files |
 | Phase 05 P09 | 14min | 2 tasks | 2 files |
+| Phase 05 P10 | 4min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -340,6 +341,8 @@ Recent decisions affecting current work:
 - [Phase 05]: RenderRepair also drops a trailing body line equal to the sign-off and tidies spaces left before punctuation by id-token removal; ledger deltas keep model seq (LedgerMerger drops unknown seqs)
 - [Phase 05]: 05-09: V3 identifier registration is an equal/whole-token match against non-amount canonical and ledger values (IsRegistered containment would accept CO-0071 as CO-007)
 - [Phase 05]: 05-09: V4 checks only amounts and digit-bearing values; subject, quoted ancestors and the message's own plan facts count as known; V6 body dates match the About head phrase and skip reschedule sentences
+- [Phase 05]: 05-10: MailboxWriter uses a deterministic multipart boundary (SHA-256 of DocId|MessageId) and Prepare(SevenBit) so rewrites are byte-identical and RFC 5322 safe
+- [Phase 05]: 05-10: Journal replay keeps records for any thread in the plan (not only relevant) so Phase 6 can share the journal; ListAllFiles never throws
 
 ### Pending Todos
 
@@ -361,6 +364,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-03T20:44:04.602Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-10-03T20:48:51.254Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None

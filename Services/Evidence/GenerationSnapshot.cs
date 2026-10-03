@@ -66,14 +66,26 @@ public class GenerationSnapshot
     }
 
     /// <summary>
-    /// Counts one finished thread. Written and Warnings count as done; Failed counts separately.
+    /// Counts one finished thread. Written and Warnings count as done; Failed counts separately. <paramref name="previous"/>
+    /// is the thread's status before this run: a retried thread that had failed leaves the Failed count first, so Retry
+    /// Failed Threads never counts it twice.
     /// </summary>
-    public void RecordThread(int waveIndex, ThreadRunStatus status, int emails, int files, decimal cost)
+    public void RecordThread(int waveIndex, ThreadRunStatus status, int emails, int files, decimal cost,
+        ThreadRunStatus previous = ThreadRunStatus.Pending)
     {
         lock (_lock)
         {
             var wave = _waves.FirstOrDefault(w => w.Index == waveIndex);
             _counts.CostUsd += cost;
+
+            // Reset seeded Failed from the replay; this run's outcome replaces that earlier failure
+            if (previous == ThreadRunStatus.Failed)
+            {
+                _counts.FailedThreads = Math.Max(0, _counts.FailedThreads - 1);
+                if (wave != null)
+                    wave.Failed = Math.Max(0, wave.Failed - 1);
+            }
+
             switch (status)
             {
                 case ThreadRunStatus.Written:

@@ -22,6 +22,9 @@ public class ThreadRenderContext
     // 1-based wave of the thread; the ledger view holds earlier waves only (D-11)
     public int WaveIndex { get; set; }
 
+    // Status the journal held before this run (Failed when Retry Failed Threads re-runs it); keeps live counts exact
+    public ThreadRunStatus PreviousStatus { get; set; }
+
     public static ThreadRenderContext Create(CaseDraft draft, CorpusPlan plan, PlannedThread thread, ThreadAssignment assignment,
         PeopleDirectory people, IReadOnlyList<LedgerEntry> ledger, int waveIndex)
     {

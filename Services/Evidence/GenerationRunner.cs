@@ -195,9 +195,14 @@ public class GenerationRunner
                 // Earlier waves only: LedgerSelector filters by wave, and this wave's deltas are not merged yet
                 var ledger = LedgerMerger.Build(plan, guide, ctx.WaveOf, deltas);
                 var tasks = pending
-                    .Select(id => RunThreadAsync(ctx, uow, ThreadRenderContext.Create(input.Draft, plan, threads[id],
-                        ctx.Assignments.TryGetValue(id, out var a) ? a : new ThreadAssignment { ThreadId = id },
-                        ctx.People, ledger.Entries, wave.Index), run))
+                    .Select(id =>
+                    {
+                        var render = ThreadRenderContext.Create(input.Draft, plan, threads[id],
+                            ctx.Assignments.TryGetValue(id, out var a) ? a : new ThreadAssignment { ThreadId = id },
+                            ctx.People, ledger.Entries, wave.Index);
+                        render.PreviousStatus = Status(state, id);
+                        return RunThreadAsync(ctx, uow, render, run);
+                    })
                     .ToList();
                 var results = await Task.WhenAll(tasks).ConfigureAwait(false);
 

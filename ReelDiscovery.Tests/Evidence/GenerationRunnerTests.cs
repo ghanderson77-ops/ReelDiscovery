@@ -371,10 +371,16 @@ public partial class GenerationRunnerTests : IDisposable
 
         var before = RequestedThreads().Count;
         _fake.Respond = inner;
-        var second = await new GenerationRunner(_gateway).RunAsync(Input, new GenerationSnapshot(), Persist);
+        var retrySnapshot = new GenerationSnapshot();
+        var second = await new GenerationRunner(_gateway).RunAsync(Input, retrySnapshot, Persist);
 
         Assert.Equal(GenerationOutcome.Finished, second.Outcome);
         Assert.Equal(new[] { target }, RequestedThreads().Skip(before));
+
+        // The live view no longer counts the fixed failure (WR-01)
+        var counts = retrySnapshot.Peek().Counts;
+        Assert.Equal(0, counts.FailedThreads);
+        Assert.Equal(Relevant.Count, counts.DoneThreads);
         Assert.Equal(ThreadWriteStatus.Written, Replay().LastByThread[target].Status);
         Assert.Equal(JournalRecordType.ThreadDone, Replay().LastByThread[target].Type);
     }

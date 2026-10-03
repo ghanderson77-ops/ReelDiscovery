@@ -187,7 +187,7 @@ public class ThreadUnitOfWork
 
             // Tiles update per thread, not per wave
             var status = clean ? ThreadRunStatus.Written : ThreadRunStatus.Warnings;
-            _snapshot.RecordThread(ctx.WaveIndex, status, composed.Emails.Count, files.Count, cost);
+            _snapshot.RecordThread(ctx.WaveIndex, status, composed.Emails.Count, files.Count, cost, ctx.PreviousStatus);
             _snapshot.AddEvent(new GenerationEvent
             {
                 Kind = clean ? GenerationEventKind.ThreadWritten : GenerationEventKind.KeptWithWarnings,
@@ -258,7 +258,7 @@ public class ThreadUnitOfWork
             // Without a journal line the thread stays pending and Continue retries it; the run itself goes on (RUN-02)
         }
 
-        _snapshot.RecordThread(ctx.WaveIndex, ThreadRunStatus.Failed, 0, 0, cost);
+        _snapshot.RecordThread(ctx.WaveIndex, ThreadRunStatus.Failed, 0, 0, cost, ctx.PreviousStatus);
         _snapshot.AddEvent(new GenerationEvent
         {
             Kind = GenerationEventKind.ThreadFailed,

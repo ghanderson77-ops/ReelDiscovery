@@ -59,6 +59,26 @@ public class GenerationSnapshotTests
     }
 
     [Fact]
+    public void RecordThread_RetriedFailedThread_LeavesFailedCountOnce()
+    {
+        var snapshot = new GenerationSnapshot();
+        snapshot.Reset(new GenerationCounts { TotalThreads = 3, FailedThreads = 2 },
+            new[] { new WaveProgress { Index = 1, Threads = 3, Failed = 2 } });
+
+        // One earlier failure now written, the other fails again
+        snapshot.RecordThread(1, ThreadRunStatus.Written, 2, 2, 0m, ThreadRunStatus.Failed);
+        snapshot.RecordThread(1, ThreadRunStatus.Failed, 0, 0, 0m, ThreadRunStatus.Failed);
+        var view = snapshot.Drain();
+
+        Assert.Equal(1, view.Counts.DoneThreads);
+        Assert.Equal(1, view.Counts.FailedThreads);
+        var wave = view.Waves.Single();
+        Assert.Equal(1, wave.Done);
+        Assert.Equal(1, wave.Failed);
+        Assert.True(view.Counts.DoneThreads + view.Counts.FailedThreads <= view.Counts.TotalThreads);
+    }
+
+    [Fact]
     public async Task RecordThread_FromParallelTasks_CountsExactly()
     {
         var snapshot = Create();

@@ -112,6 +112,12 @@ public class StatTile : UserControl
         ArgumentNullException.ThrowIfNull(content);
         _lblCaption.Text = content.Caption;
         _lblValue.Text = content.Value;
+        _lblValue.ForeColor = content.Tone switch
+        {
+            TileTone.Warning => Theme.Warning,
+            TileTone.Danger => Theme.Danger,
+            _ => Theme.Text
+        };
         _lblSubLine.Text = content.SubLine;
 
         var summary = string.IsNullOrEmpty(content.SubLine)

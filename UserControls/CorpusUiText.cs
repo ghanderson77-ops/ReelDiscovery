@@ -53,12 +53,23 @@ public enum TileKind
     Cost
 }
 
+/// <summary>
+/// Color of a tile value: Warning/Danger only for the generation Warnings/Failed tiles above 0 (05-UI-SPEC U9).
+/// </summary>
+public enum TileTone
+{
+    Normal,
+    Warning,
+    Danger
+}
+
 public class TileContent
 {
     public string Caption = "";
     public string Value = "";
     public string SubLine = "";
     public string Tooltip = "";
+    public TileTone Tone = TileTone.Normal;
 }
 
 /// <summary>

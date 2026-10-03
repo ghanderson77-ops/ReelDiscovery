@@ -42,6 +42,20 @@ public class WavePlannerTests
         waves.Select(w => $"{w.Index}|{w.Start:yyyy-MM-dd}|{w.End:yyyy-MM-dd}|{w.MessageCount}|{string.Join(",", w.ThreadIds)}").ToList();
 
     [Fact]
+    public void Plan_DuplicateThreadId_ScheduledOnce()
+    {
+        var plan = PlanOfDays(0, 2);
+        plan.Threads.Add(Thread("T-0001", Day0.AddDays(1)));
+
+        var waves = WavePlanner.Plan(plan);
+
+        var ids = waves.SelectMany(w => w.ThreadIds).ToList();
+        Assert.Equal(ids.Distinct(StringComparer.Ordinal).Count(), ids.Count);
+        Assert.Equal(new[] { "T-0001", "T-0002" }, ids.OrderBy(i => i, StringComparer.Ordinal));
+        Assert.Equal(1, WavePlanner.WaveIndexByThread(waves)["T-0001"]);
+    }
+
+    [Fact]
     public void Plan_ClosesAtSevenDays_WhenWaveHasThree()
     {
         var waves = WavePlanner.Plan(PlanOfDays(0, 2, 6, 9, 30));

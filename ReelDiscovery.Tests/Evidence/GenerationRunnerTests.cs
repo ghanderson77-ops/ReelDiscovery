@@ -543,6 +543,20 @@ public partial class GenerationRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task DuplicateThreadIdInPlan_IsRenderedOnce()
+    {
+        _fake.Respond = Responder();
+        var duplicate = Relevant[0];
+        _plan.Threads.Add(duplicate);
+
+        var result = await new GenerationRunner(_gateway).RunAsync(Input, new GenerationSnapshot(), Persist);
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        Assert.Single(RequestedThreads(), id => id == duplicate.Id);
+        Assert.Single(JournalRecords(), r => r.Type == JournalRecordType.ThreadDone && r.ThreadId == duplicate.Id);
+    }
+
+    [Fact]
     public async Task UnreadableJournalMidRun_KeepsLastGoodKeyAndState()
     {
         _fake.Respond = Responder();

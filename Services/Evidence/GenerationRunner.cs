@@ -174,7 +174,9 @@ public class GenerationRunner
 
                 ct.ThrowIfCancellationRequested();
                 var wave = waves[i];
-                var pending = wave.ThreadIds.Where(id => !state.IsDone(id) && threads.ContainsKey(id)).ToList();
+                // Distinct: two units of work on one thread would pay twice and race on the same EML paths
+                var pending = wave.ThreadIds.Where(id => !state.IsDone(id) && threads.ContainsKey(id))
+                    .Distinct(StringComparer.Ordinal).ToList();
                 if (pending.Count == 0)
                     continue;
 

@@ -33,6 +33,9 @@ public static class WavePlanner
         // Always computed from the whole plan, never the remaining threads, so Continue sees identical waves and ledger visibility (Pitfall 3)
         var ordered = (plan?.Threads ?? new List<PlannedThread>())
             .Where(IsGeneratable)
+            // corpus-plan.json is read from disk: a repeated id is scheduled once, as the runner keeps the first copy
+            .GroupBy(t => t.Id, StringComparer.Ordinal)
+            .Select(g => g.First())
             .Select(t => (Thread: t, First: MessageTime.FirstUtc(t)))
             .OrderBy(x => x.First)
             .ThenBy(x => x.Thread.Id, StringComparer.Ordinal)

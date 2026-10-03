@@ -234,10 +234,10 @@ public class CorpusPlanner
 
     internal static Dictionary<string, double> MapWeights(CaseGuide guide, GuidanceWeightsDto dto)
     {
-        var known = guide.Facts
-            .Where(f => f != null && !string.IsNullOrWhiteSpace(f.Id))
-            .Select(f => f.Id)
-            .ToDictionary(id => RelevantThreadFiller.CanonicalId(id), id => id, StringComparer.Ordinal);
+        // Duplicate or case-variant fact ids (tampered case.json) are first-wins, like everywhere else in the planner (WR-07)
+        var known = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var fact in guide.Facts.Where(f => f != null && !string.IsNullOrWhiteSpace(f.Id)))
+            known.TryAdd(RelevantThreadFiller.CanonicalId(fact.Id), fact.Id);
 
         var multipliers = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var weight in dto.FactWeights ?? new List<FactWeightDto>())

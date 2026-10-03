@@ -531,6 +531,25 @@ public partial class CorpusPlannerTests
     }
 
     [Fact]
+    public void MapWeights_DuplicateAndCaseVariantFactIds_FirstWins()
+    {
+        // WR-07: duplicate canonical ids used to throw "An item with the same key has already been added"
+        var guide = new CaseGuide();
+        guide.Facts.Add(new KeyFact { Id = "F-003", Title = "First" });
+        guide.Facts.Add(new KeyFact { Id = "F-003", Title = "Duplicate" });
+        guide.Facts.Add(new KeyFact { Id = "f-003", Title = "Case variant" });
+        var dto = new CorpusPlanner.GuidanceWeightsDto
+        {
+            FactWeights = new List<CorpusPlanner.FactWeightDto> { new() { FactId = "F-003", Weight = "boost" } }
+        };
+
+        var weights = CorpusPlanner.MapWeights(guide, dto);
+
+        Assert.Equal(CorpusPlanner.BoostMultiplier, Assert.Single(weights).Value);
+        Assert.Equal("F-003", weights.Keys.Single());
+    }
+
+    [Fact]
     public void SchemaTypes_ContainEveryPlanningDto()
     {
         Assert.Equal(4, CorpusPlanner.SchemaTypes.Count);

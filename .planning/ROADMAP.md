@@ -169,7 +169,7 @@ Plans:
 - [x] 05-06-PLAN.md — GenerationUiText copy, entry decision, tile tone (Wave 2)
 - [x] 05-07-PLAN.md — EmailComposer (Message-IDs, threading, subjects, signatures, privilege markers, quoting) (Wave 3)
 - [x] 05-08-PLAN.md — ThreadRenderContext, EvidencePrompts, ThreadRenderer strict DTOs, RenderRepair, fake responder (Wave 3)
-- [ ] 05-09-PLAN.md — RenderValidator code checks V1-V8 (Wave 4)
+- [x] 05-09-PLAN.md — RenderValidator code checks V1-V8 (Wave 4)
 - [ ] 05-10-PLAN.md — MailboxWriter (per-custodian atomic EMLs) + GenerationJournal (append/replay) (Wave 4)
 - [ ] 05-11-PLAN.md — GenerationRunState, answer-key re-projection, story-so-far .docx, draft applier (Wave 5)
 - [ ] 05-12-PLAN.md — GenerationSnapshot + ThreadUnitOfWork (check-retry, keep best, write, journal) (Wave 5)

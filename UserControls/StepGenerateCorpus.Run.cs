@@ -30,6 +30,10 @@ public partial class StepGenerateCorpus : IWizardStep
     // Checkpoints posted to the UI thread and not yet applied; released on dispose so the runner can finish
     private readonly object _pendingLock = new();
     private readonly List<TaskCompletionSource> _pendingCheckpoints = new();
+    // Set under _pendingLock when the step is disposing: later checkpoints complete at once instead of posting (WR-03)
+    private bool _closing;
+    // The thread that created the step; only it may apply a checkpoint inline
+    private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
     // The last key/story write failure shown during the run; it outranks the outcome line at the end
     private (string Text, Color Color)? _fileErrorStatus;
 
@@ -450,18 +454,27 @@ public partial class StepGenerateCorpus : IWizardStep
 
     /// <summary>
     /// Persist callback for the runner (called on a pool thread): applies the checkpoint to the draft on the UI thread
-    /// and completes when it is applied and saved. The draft is never touched from a worker.
+    /// and completes when it is applied and saved. The draft is never touched from a worker. Internal for tests.
     /// </summary>
-    private Task PersistOnUiThreadAsync(GenerationCheckpoint checkpoint)
+    internal Task PersistOnUiThreadAsync(GenerationCheckpoint checkpoint)
     {
-        if (IsDisposed)
+        if (IsDisposed || Disposing)
             return Task.CompletedTask;
-        if (!InvokeRequired)
+
+        // InvokeRequired is false when no window handle exists (the step is disposing), so it cannot tell a worker from the
+        // UI thread; the creating thread id can, and a worker never applies a checkpoint inline (T-05-42)
+        if (Environment.CurrentManagedThreadId == _uiThreadId)
             return ApplyCheckpointAsync(checkpoint);
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_pendingLock)
+        {
+            // Released already: a posted callback could be dropped with the handle and the runner would wait forever
+            if (_closing)
+                return Task.CompletedTask;
             _pendingCheckpoints.Add(tcs);
+        }
+
         try
         {
             BeginInvoke(new Action(async () =>
@@ -499,6 +512,7 @@ public partial class StepGenerateCorpus : IWizardStep
         List<TaskCompletionSource> pending;
         lock (_pendingLock)
         {
+            _closing = true;
             pending = _pendingCheckpoints.ToList();
             _pendingCheckpoints.Clear();
         }

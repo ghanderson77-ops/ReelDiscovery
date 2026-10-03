@@ -271,6 +271,37 @@ public class GenerateCorpusStepTests
     }
 
     [Fact]
+    public void PersistFromWorker_WithoutWindowHandle_NeverAppliesOffTheUiThread()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            var applyThreads = new List<int>();
+            step.CheckpointApplied = () =>
+            {
+                lock (applyThreads)
+                    applyThreads.Add(Environment.CurrentManagedThreadId);
+            };
+            var uiThread = Environment.CurrentManagedThreadId;
+
+            // Never shown, so no handle exists and InvokeRequired is false on every thread (as while the step is disposing)
+            Assert.False(step.IsHandleCreated);
+            Pump(Task.Run(() => step.PersistOnUiThreadAsync(new GenerationCheckpoint { State = new GenerationRunState() })));
+
+            lock (applyThreads)
+                Assert.All(applyThreads, id => Assert.Equal(uiThread, id));
+
+            // After dispose released the pending checkpoints, a late checkpoint completes at once
+            step.Dispose();
+            var late = Task.Run(() => step.PersistOnUiThreadAsync(new GenerationCheckpoint()));
+            Pump(late);
+        });
+    }
+
+    [Fact]
     public void CancelAndWaitForRun_StopsTheRunWithinTimeout()
     {
         using var h = new Harness();

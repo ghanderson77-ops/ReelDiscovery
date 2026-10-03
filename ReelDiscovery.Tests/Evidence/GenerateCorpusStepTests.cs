@@ -4,6 +4,7 @@ using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Ai;
+using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Tests.Corpus;
@@ -296,6 +297,7 @@ public class GenerateCorpusStepTests
 
     // ----- Helpers -----
 
+
     private static GenerationCounts ToCounts(Harness h, GenerationState generation) => new()
     {
         TotalThreads = generation.ThreadsTotal,
@@ -369,12 +371,17 @@ public class GenerateCorpusStepTests
     /// <summary>
     /// Pumps messages on the STA thread until the task completes (30 s), running an optional check on every turn.
     /// </summary>
+    [ThreadStatic]
+    private static Exception? _uiError;
+
     internal static void Pump(Task task, Action? onTurn = null)
     {
         var deadline = DateTime.UtcNow + Timeout;
         while (!task.IsCompleted && DateTime.UtcNow < deadline)
         {
             Application.DoEvents();
+            if (_uiError != null)
+                throw new InvalidOperationException("A WinForms callback threw", _uiError);
             onTurn?.Invoke();
             if (!task.IsCompleted)
                 Thread.Sleep(5);
@@ -393,8 +400,23 @@ public class GenerateCorpusStepTests
         {
             try
             {
+                // Application.DoEvents would otherwise swap the WinForms context out, and awaits would resume on the pool
+                WindowsFormsSynchronizationContext.AutoInstall = false;
                 SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
-                body();
+                // An exception in a WinForms callback would otherwise open the modal ThreadException dialog and hang the test
+                ThreadExceptionEventHandler onError = (s, e) => _uiError ??= e.Exception;
+                Application.ThreadException += onError;
+                try
+                {
+                    _uiError = null;
+                    body();
+                    if (_uiError != null)
+                        throw new InvalidOperationException("A WinForms callback threw", _uiError);
+                }
+                finally
+                {
+                    Application.ThreadException -= onError;
+                }
             }
             catch (Exception ex)
             {

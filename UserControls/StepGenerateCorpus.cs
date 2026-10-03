@@ -91,6 +91,10 @@ public partial class StepGenerateCorpus : UserControl
 
     // Assigned by the run code (05-15)
     private bool _isGenerating = false;
+    // Start Over is deleting files; navigation waits for it
+    private bool _isResetting = false;
+    // Which state card is shown, so its single action button knows what to do
+    private GenerationStateCard _cardKind = GenerationStateCard.Ready;
     private bool _stateCardShown = true;
     private bool _bannerShown;
     private GenerationCounts? _lastCounts;
@@ -98,8 +102,8 @@ public partial class StepGenerateCorpus : UserControl
 
     public string StepTitle => "Generate Corpus";
     public string NextButtonText => "Next >";
-    public bool CanMoveNext => !_isGenerating;
-    public bool CanMoveBack => !_isGenerating;
+    public bool CanMoveNext => !_isGenerating && !_isResetting;
+    public bool CanMoveBack => !_isGenerating && !_isResetting;
 
     /// <summary>
     /// True while a generation run is active (closing asks C-G3).
@@ -111,6 +115,7 @@ public partial class StepGenerateCorpus : UserControl
     public StepGenerateCorpus()
     {
         InitializeUI();
+        WireRunHandlers();
     }
 
     private void RaiseStateChanged() => StateChanged?.Invoke(this, EventArgs.Empty);
@@ -823,9 +828,10 @@ public partial class StepGenerateCorpus : UserControl
     /// <summary>
     /// Shows a full-width state card (ready, not approved, plan changed, unreadable) in place of the banner, tiles and body.
     /// </summary>
-    internal void ShowStateCard(GenerationCardContent content)
+    internal void ShowStateCard(GenerationCardContent content, GenerationStateCard kind)
     {
         ArgumentNullException.ThrowIfNull(content);
+        _cardKind = kind;
         _lblStateHeading.Text = content.Heading;
         _lblStateBody.Text = content.Body;
         ButtonHelper.StyleButton(_btnStateAction, content.Danger ? ButtonStyle.Danger : ButtonStyle.Primary);
@@ -998,7 +1004,7 @@ public partial class StepGenerateCorpus : UserControl
         switch (render)
         {
             case GenerateCorpusRenderState.Ready:
-                ShowStateCard(ReadyCard(plan!));
+                ShowStateCard(ReadyCard(plan!), GenerationStateCard.Ready);
                 break;
             case GenerateCorpusRenderState.Running:
                 _isGenerating = true;
@@ -1018,13 +1024,13 @@ public partial class StepGenerateCorpus : UserControl
                 ShowOutcome(GenerationOutcome.Finished, counts, string.Empty);
                 break;
             case GenerateCorpusRenderState.NotApproved:
-                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty));
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty), GenerationStateCard.NotApproved);
                 break;
             case GenerateCorpusRenderState.PlanChanged:
-                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.PlanChanged, 0, 0, 0, 0m, string.Empty, earlierThreads, string.Empty));
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.PlanChanged, 0, 0, 0, 0m, string.Empty, earlierThreads, string.Empty), GenerationStateCard.PlanChanged);
                 break;
             default:
-                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.Unreadable, 0, 0, 0, 0m, string.Empty, 0, reason));
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.Unreadable, 0, 0, 0, 0m, string.Empty, 0, reason), GenerationStateCard.Unreadable);
                 break;
         }
     }
@@ -1043,6 +1049,7 @@ public partial class StepGenerateCorpus : UserControl
     internal string StateHeading => _lblStateHeading.Text;
     internal string StateBody => _lblStateBody.Text;
     internal string NoticeText => _noticeText;
+    internal string BannerHeadingText => _lblBannerHeading.Text;
 
     internal DataGridView WavesGrid => _gridWaves;
     internal DataGridView ActivityGrid => _gridActivity;

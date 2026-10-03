@@ -263,7 +263,24 @@ public class GenerationRunner
             if (outcome == GenerationOutcome.Cancelled)
                 snapshot.SetStage(GenerationStage.Stopping);
 
-            final = await CheckpointAsync(ctx, final: true, outcome, message).ConfigureAwait(false);
+            try
+            {
+                final = await CheckpointAsync(ctx, final: true, outcome, message).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Every checkpoint step catches its own failure; this only guards the "never throws" contract
+                final = new GenerationCheckpoint
+                {
+                    State = ctx.LastGoodState,
+                    Ledger = ctx.LastGoodLedger,
+                    IsFinal = true,
+                    Outcome = outcome,
+                    Message = message
+                };
+            }
+
+            // Always runs, so the snapshot never stays "running" without a RunEnded event
             FinishSnapshot(snapshot, final, outcome, message);
         }
 
@@ -425,9 +442,10 @@ public class GenerationRunner
             {
                 await ctx.Persist(checkpoint).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception)
             {
-                // The step may be gone (window closing); EMLs, journal and key are already on disk and reopen re-projects them
+                // Best effort, cancellation-type exceptions included: the step may be gone (window closing); EMLs, journal
+                // and key are already on disk and reopen re-projects them, and RunAsync must still end cleanly
             }
         }
 

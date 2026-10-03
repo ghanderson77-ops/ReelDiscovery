@@ -543,6 +543,24 @@ public partial class GenerationRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task PersistThrowingCancellation_RunStillEndsCleanly()
+    {
+        _fake.Respond = Responder();
+        var snapshot = new GenerationSnapshot();
+        Task ThrowingPersist(GenerationCheckpoint checkpoint) =>
+            checkpoint.IsFinal ? Task.FromException(new TaskCanceledException("save cancelled")) : Persist(checkpoint);
+
+        var result = await new GenerationRunner(_gateway).RunAsync(Input, snapshot, ThrowingPersist);
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        var view = snapshot.Peek();
+        Assert.False(view.Counts.Running);
+        Assert.True(view.Counts.Finished);
+        Assert.Contains(view.Events, e => e.Kind == GenerationEventKind.RunFinished);
+        Assert.Equal(JournalRecordType.RunEnded, JournalRecords().Last().Type);
+    }
+
+    [Fact]
     public async Task DuplicateThreadIdInPlan_IsRenderedOnce()
     {
         _fake.Respond = Responder();

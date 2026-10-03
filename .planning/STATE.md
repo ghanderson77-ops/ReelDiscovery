@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-10-03T20:04:08.072Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-10-03T20:11:49.103Z"
 last_activity: 2026-10-03
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 81
-  completed_plans: 69
-  percent: 85
+  completed_plans: 70
+  percent: 86
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 5 (Relevant Evidence Generation & Narrative Ledger) — EXECUTING
-Plan: 6 of 17
+Plan: 7 of 17
 Status: Ready to execute
 Last activity: 2026-10-03
 
@@ -120,6 +120,7 @@ Progress: [██████████] 100%
 | Phase 05 P03 | 8min | 2 tasks | 4 files |
 | Phase 05 P04 | 20min | 2 tasks | 6 files |
 | Phase 05 P05 | 14min | 2 tasks | 6 files |
+| Phase 05 P06 | 7min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -325,6 +326,10 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-05: ComposeFragment bold budget is per message across body and table cells; the privileged banner does not count against it
 - [Phase 05]: 05-05: A rejected pipe table (over 4x6 or rows wider than the header) renders as literal paragraph text and does not consume the one-table allowance
 - [Phase 05]: 05-05: OrganizationThemes and ComposeFragment re-sanitize palette colors/fonts through ThemeGenerator sanitizers (T-05-13)
+- [Phase 05]: 05-06: Every EML-file count in Phase 5 copy goes through Plural ('1 EML file') although 05-UI-SPEC writes {files:N0} EML files
+- [Phase 05]: 05-06: Plan-changed card and C-G1 use verb agreement at n = 1 ('was', 'stays'); all other counts keep the spec wording
+- [Phase 05]: 05-06: Finished-with-problems outcome drops the warnings clause when w = 0, mirroring the failed-clause drop at f = 0
+- [Phase 05]: 05-06: Mailboxes Case Summary row is Success only when every thread is written with 0 warnings and 0 failed
 
 ### Pending Todos
 
@@ -346,6 +351,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-03T20:04:08.066Z
+Last session: 2026-10-03T20:11:38.222Z
 Stopped at: Completed 05-05-PLAN.md
 Resume file: None

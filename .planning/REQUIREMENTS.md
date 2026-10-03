@@ -113,11 +113,11 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Run Reliability & Cost
 
 - [x] **RUN-01**: Each completed thread (EML files plus its answer-key rows) is saved immediately; an interruption never loses finished work
-- [ ] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
+- [x] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
 - [ ] **RUN-03**: Bulk generation can use the provider's Batch API (OpenAI and Anthropic) for lower cost
 - [ ] **RUN-04**: Submitted batch jobs are tracked on disk so results can be collected if the app is restarted
 - [ ] **RUN-05**: Shared case-guide context uses prompt caching where the provider supports it
-- [ ] **RUN-06**: User can cancel a run and keep everything generated so far
+- [x] **RUN-06**: User can cancel a run and keep everything generated so far
 - [x] **RUN-07**: Live progress and cost display stays responsive during long runs
 
 ### Output
@@ -243,11 +243,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QA-02 | Phase 7 | Pending |
 | QA-03 | Phase 7 | Pending |
 | RUN-01 | Phase 5 | Complete |
-| RUN-02 | Phase 5 | Pending |
+| RUN-02 | Phase 5 | Complete |
 | RUN-03 | Phase 7 | Pending |
 | RUN-04 | Phase 7 | Pending |
 | RUN-05 | Phase 7 | Pending |
-| RUN-06 | Phase 5 | Pending |
+| RUN-06 | Phase 5 | Complete |
 | RUN-07 | Phase 5 | Complete |
 | OUT-01 | Phase 5 | Pending |
 | OUT-02 | Phase 5 | Complete |

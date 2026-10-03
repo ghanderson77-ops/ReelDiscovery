@@ -157,8 +157,27 @@ Plans:
   3. The relevant emails read as natural business correspondence with varied subtlety, deliberate hot documents, privileged counsel threads, distinct per-character voices and signatures, and correct threading (quoting, Message-ID, In-Reply-To, References).
   4. EML files appear in each participating custodian's mailbox folder (sent and received), and each one carries an X-ReelDiscovery-DocID header that matches the answer key.
   5. Killing the app or pressing Cancel mid-run keeps every completed thread and its answer-key rows. A single failed email is logged and retried or skipped without aborting the run, and live progress and cost stay responsive throughout.
-**Plans**: TBD
+**Plans**: 17 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 05-01-PLAN.md — Evidence models (ledger, journal, assignments, progress), CaseStage.Generation, format v3, approved-plan fixture (Wave 1)
+- [ ] 05-02-PLAN.md — Gateway token totals, custodian folder map, amount parser, answer-key status/subject overlay (Wave 1)
+- [ ] 05-03-PLAN.md — WavePlanner (chronological waves) + RenderAssignments (subtlety/length/privilege mixes) (Wave 2)
+- [ ] 05-04-PLAN.md — KnowledgeGate (point-in-time context) + LedgerSelector + LedgerMerger (Wave 2)
+- [ ] 05-05-PLAN.md — PeopleDirectory, deterministic organization themes, allowlist-only ComposeHtml (Wave 2)
+- [ ] 05-06-PLAN.md — GenerationUiText copy, entry decision, tile tone (Wave 2)
+- [ ] 05-07-PLAN.md — EmailComposer (Message-IDs, threading, subjects, signatures, privilege markers, quoting) (Wave 3)
+- [ ] 05-08-PLAN.md — ThreadRenderContext, EvidencePrompts, ThreadRenderer strict DTOs, RenderRepair, fake responder (Wave 3)
+- [ ] 05-09-PLAN.md — RenderValidator code checks V1-V8 (Wave 4)
+- [ ] 05-10-PLAN.md — MailboxWriter (per-custodian atomic EMLs) + GenerationJournal (append/replay) (Wave 4)
+- [ ] 05-11-PLAN.md — GenerationRunState, answer-key re-projection, story-so-far .docx, draft applier (Wave 5)
+- [ ] 05-12-PLAN.md — GenerationSnapshot + ThreadUnitOfWork (check-retry, keep best, write, journal) (Wave 5)
+- [ ] 05-13-PLAN.md — GenerationRunner (waves, cancel, fatal, continue) + Start Over + end-to-end tests (Wave 6)
+- [ ] 05-14-PLAN.md — StepGenerateCorpus layout, entry display, 144-DPI render tests (Wave 7)
+- [ ] 05-15-PLAN.md — Run lifecycle (off-UI run, persistence, cancel, Start Over, reopen) + 8-step wizard shell (Wave 8)
+- [ ] 05-16-PLAN.md — Case Summary Mailboxes/Story so far rows + re-plan warning (Wave 9)
+- [ ] 05-17-PLAN.md — Phase gate: full/render suites + human verification at 144 DPI and live run (Wave 10)
 
 ### Phase 6: Attachments & Non-Relevant Corpus
 **Goal**: The corpus becomes a full mixed collection. Case-consistent attachments serve as evidence, and non-relevant traffic (including near-miss decoys) comes from the same pipeline, so nothing but content separates relevant from non-relevant.

@@ -508,17 +508,20 @@ foreach (var id in planned.CustodianIds)
 | A11 | Format version bump to 3 | Runtime State | Older builds silently dropping generation state if not bumped |
 | A12 | Disclaimer banner kept in every HTML part | Pitfall 9 | Disk size at Phase 7 scale |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should Phase 5 render planned attachments' references in prose before Phase 6 exists?**
    - What we know: attachments stay `Planned` and are not in the EML. Bodies should still say "see attached {title}" so Phase 6 can add the file without re-rendering.
    - Recommendation: include attachment titles in the prompt and journal the bodies (A9). Phase 6 recomposes the EML with attachments from journal data and the same Message-IDs.
+   - **RESOLVED:** adopted in 05-08 (message lines list `attachments: "{Title}"`) and 05-12 (bodies journaled per message).
 2. **Keep the embedded QuikData disclaimer banner in every generated email?**
    - What we know: it is existing product behavior (≈61 KB per HTML part).
    - Recommendation: keep it for Phase 5 (consistency with the legacy output). Raise it with the user before Phase 7 scale runs.
+   - **RESOLVED (for Phase 5):** the banner is kept via the reused `WrapInTemplate` (05-05). Deferred to Phase 7 for user review: banner size at 5K scale.
 3. **Budget guard for generation runs?**
    - What we know: research Pitfall 15 suggests a hard cap; CONTEXT does not ask for one. The Ready card shows an estimate.
    - Recommendation: no cap in Phase 5 (Phase 7 cost scope). The Cancel button and the live cost tile cover it.
+   - **RESOLVED (for Phase 5):** no budget cap; the Ready card estimate, the live Cost tile, Cancel and the fatal spend-limit stop cover it (05-06, 05-13, 05-15). Deferred to Phase 7 for user review: a hard budget guard.
 
 ## Environment Availability
 

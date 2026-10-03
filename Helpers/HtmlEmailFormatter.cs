@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using ReelDiscovery.Models;
 
 namespace ReelDiscovery.Helpers;
@@ -6,7 +7,7 @@ namespace ReelDiscovery.Helpers;
 /// <summary>
 /// Converts plain text email content to formatted HTML with organization-specific styling.
 /// </summary>
-public static class HtmlEmailFormatter
+public static partial class HtmlEmailFormatter
 {
     private static string? _disclaimerBannerBase64;
 
@@ -601,7 +602,255 @@ public static class HtmlEmailFormatter
         return html.ToString();
     }
 
-    private static string WrapInTemplate(string content, OrganizationTheme? theme)
+    public const string PrivilegedBannerText = "PRIVILEGED & CONFIDENTIAL - ATTORNEY-CLIENT COMMUNICATION";
+    public const int MaxBoldRuns = 2;
+    public const int MaxBulletItems = 6;
+    public const int MaxTableColumns = 4;
+    public const int MaxTableRows = 6;
+
+    private const string ForwardMarker = "---------- Forwarded message ----------";
+    private const string ReplyBlockquoteOpen = "<blockquote style=\"margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex\">";
+
+    // Bounded run length keeps the match linear on hostile input (T-05-14)
+    [GeneratedRegex(@"\*\*([^*\r\n]{1,120})\*\*")]
+    private static partial Regex BoldRunRegex();
+
+    // Markdown table separator row, e.g. |---|:---:|
+    [GeneratedRegex(@"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$")]
+    private static partial Regex TableSeparatorRegex();
+
+    /// <summary>
+    /// Full themed HTML document for a generated message (allowlist-only markup, D-16).
+    /// </summary>
+    public static string ComposeHtml(string body, string signOff, string signature, QuotedPart? quoted,
+        OrganizationTheme theme, bool privilegedBanner, bool allowTable = true) =>
+        WrapInTemplate(ComposeFragment(body, signOff, signature, quoted, theme, privilegedBanner, allowTable), theme);
+
+    /// <summary>
+    /// Body HTML for a generated message: every model string is HTML-encoded first, then only **bold** (2 runs),
+    /// one "- " list (6 items) and one pipe table (4 columns x 6 rows, when <paramref name="allowTable"/>) are rendered.
+    /// No italics, links, headings or raw HTML (T-05-12).
+    /// </summary>
+    public static string ComposeFragment(string body, string signOff, string signature, QuotedPart? quoted,
+        OrganizationTheme theme, bool privilegedBanner, bool allowTable = true)
+    {
+        // Never touch [ThreadStatic] _currentTheme: composition runs on pool threads
+        var t = theme ?? OrganizationTheme.Default;
+        var primary = "#" + (Services.ThemeGenerator.SanitizeHexColor(t.PrimaryColor) ?? "2B579A");
+        var secondary = "#" + (Services.ThemeGenerator.SanitizeHexColor(t.SecondaryColor) ?? "5B9BD5");
+        var fontStack = GetFontStack(Services.ThemeGenerator.SanitizeFont(t.BodyFont) ?? "Segoe UI");
+
+        var html = new System.Text.StringBuilder();
+        html.Append($"<div style=\"font-family: {fontStack};\">\n");
+
+        if (privilegedBanner)
+            html.Append($"<p style=\"margin: 0 0 10px 0;\"><strong>{Encode(PrivilegedBannerText)}</strong></p>\n");
+
+        var state = new ComposeState { TableAllowed = allowTable };
+        AppendComposedBody(html, body ?? string.Empty, state, primary, fontStack);
+        AppendComposedSignature(html, signOff, signature, secondary);
+
+        if (quoted != null)
+            AppendQuotedPart(html, quoted, primary);
+
+        html.Append("</div>\n");
+        return html.ToString();
+    }
+
+    private static void AppendComposedBody(System.Text.StringBuilder html, string body, ComposeState state, string primary, string fontStack)
+    {
+        var lines = body.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Select(l => l.TrimEnd()).ToArray();
+        var paragraph = new List<string>();
+
+        void FlushParagraph()
+        {
+            if (paragraph.Count == 0)
+                return;
+            html.Append("<p>").Append(string.Join("<br>", paragraph.Select(l => ComposeInline(l, state)))).Append("</p>\n");
+            paragraph.Clear();
+        }
+
+        var i = 0;
+        while (i < lines.Length)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                FlushParagraph();
+                i++;
+                continue;
+            }
+
+            // First run of consecutive "- " lines becomes the message's only list
+            if (!state.ListUsed && IsComposeBullet(line))
+            {
+                FlushParagraph();
+                var end = i;
+                while (end < lines.Length && IsComposeBullet(lines[end]))
+                    end++;
+
+                html.Append("<ul>\n");
+                for (var k = i; k < end && k - i < MaxBulletItems; k++)
+                    html.Append("<li>").Append(ComposeInline(lines[k].TrimStart()[2..].Trim(), state)).Append("</li>\n");
+                html.Append("</ul>\n");
+
+                // Items beyond the cap stay as plain paragraphs
+                for (var k = i + MaxBulletItems; k < end; k++)
+                    html.Append("<p>").Append(ComposeInline(lines[k].Trim(), state)).Append("</p>\n");
+
+                state.ListUsed = true;
+                i = end;
+                continue;
+            }
+
+            if (state.TableAllowed && !state.TableUsed && TryParseTable(lines, i, out var tableEnd, out var header, out var rows))
+            {
+                FlushParagraph();
+                AppendTable(html, header, rows, state, primary, fontStack);
+                state.TableUsed = true;
+                i = tableEnd;
+                continue;
+            }
+
+            paragraph.Add(line.Trim());
+            i++;
+        }
+
+        FlushParagraph();
+    }
+
+    private static bool IsComposeBullet(string line) => line.TrimStart().StartsWith("- ", StringComparison.Ordinal);
+
+    private static bool TryParseTable(string[] lines, int start, out int end, out List<string> header, out List<List<string>> rows)
+    {
+        end = start;
+        header = new List<string>();
+        rows = new List<List<string>>();
+
+        if (!lines[start].TrimStart().StartsWith('|') || start + 1 >= lines.Length)
+            return false;
+        if (!TableSeparatorRegex().IsMatch(lines[start + 1].Trim()))
+            return false;
+
+        header = SplitTableRow(lines[start]);
+        if (header.Count == 0 || header.Count > MaxTableColumns)
+            return false;
+
+        var j = start + 2;
+        while (j < lines.Length && lines[j].TrimStart().StartsWith('|'))
+        {
+            var cells = SplitTableRow(lines[j]);
+            if (cells.Count > header.Count)
+                return false;
+            while (cells.Count < header.Count)
+                cells.Add(string.Empty);
+            rows.Add(cells);
+            j++;
+        }
+
+        if (rows.Count == 0 || rows.Count > MaxTableRows)
+            return false;
+
+        end = j;
+        return true;
+    }
+
+    private static List<string> SplitTableRow(string line)
+    {
+        var trimmed = line.Trim();
+        if (trimmed.StartsWith('|'))
+            trimmed = trimmed[1..];
+        if (trimmed.EndsWith('|'))
+            trimmed = trimmed[..^1];
+        return trimmed.Split('|').Select(c => c.Trim()).ToList();
+    }
+
+    private static void AppendTable(System.Text.StringBuilder html, List<string> header, List<List<string>> rows,
+        ComposeState state, string primary, string fontStack)
+    {
+        const string cellStyle = "padding: 4px 8px; border: 1px solid #d0d0d0; text-align: left;";
+        html.Append($"<table style=\"border-collapse: collapse; margin: 10px 0; font-family: {fontStack}; font-size: 10pt;\">\n<tr>");
+        foreach (var cell in header)
+            html.Append($"<th style=\"{cellStyle} background-color: {primary}; color: #FFFFFF;\">").Append(ComposeInline(cell, state)).Append("</th>");
+        html.Append("</tr>\n");
+        foreach (var row in rows)
+        {
+            html.Append("<tr>");
+            foreach (var cell in row)
+                html.Append($"<td style=\"{cellStyle}\">").Append(ComposeInline(cell, state)).Append("</td>");
+            html.Append("</tr>\n");
+        }
+        html.Append("</table>\n");
+    }
+
+    // Encode first, then allow at most MaxBoldRuns bold runs per message; stray ** markers are dropped
+    private static string ComposeInline(string text, ComposeState state)
+    {
+        var encoded = BoldRunRegex().Replace(Encode(text), match =>
+        {
+            if (state.BoldRuns >= MaxBoldRuns)
+                return match.Groups[1].Value;
+            state.BoldRuns++;
+            return $"<strong>{match.Groups[1].Value}</strong>";
+        });
+        return encoded.Replace("**", string.Empty);
+    }
+
+    private static void AppendComposedSignature(System.Text.StringBuilder html, string signOff, string signature, string secondary)
+    {
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(signOff))
+            lines.AddRange(SplitTrimmedLines(signOff));
+        if (!string.IsNullOrWhiteSpace(signature))
+            lines.AddRange(SplitTrimmedLines(signature));
+        if (lines.Count == 0)
+            return;
+
+        html.Append("<div class=\"signature\" style=\"margin-top: 16px; color: #444444;\">")
+            .Append(string.Join("<br>", lines.Select(Encode)))
+            .Append("</div>\n");
+    }
+
+    private static void AppendQuotedPart(System.Text.StringBuilder html, QuotedPart quoted, string primary)
+    {
+        var headers = (quoted.HeaderLines ?? new List<string>()).Where(h => h != null).Select(h => Encode(h.Trim()));
+
+        if (quoted.IsForward)
+        {
+            html.Append("<div style=\"margin-top: 20px;\">\n")
+                .Append($"<div style=\"color: {primary}; font-size: 10pt;\">{Encode(ForwardMarker)}</div>\n")
+                .Append("<div style=\"font-size: 10pt; color: #505050; margin-bottom: 10px;\">")
+                .Append(string.Join("<br>", headers))
+                .Append("</div>\n")
+                .Append(quoted.ParentFragment ?? string.Empty)
+                .Append("</div>\n");
+            return;
+        }
+
+        html.Append("<div style=\"margin-top: 20px;\">\n")
+            .Append("<div style=\"font-size: 10pt; color: #505050; margin-bottom: 6px;\">")
+            .Append(string.Join("<br>", headers))
+            .Append("</div>\n")
+            .Append(ReplyBlockquoteOpen)
+            .Append(quoted.ParentFragment ?? string.Empty)
+            .Append("</blockquote>\n</div>\n");
+    }
+
+    private static IEnumerable<string> SplitTrimmedLines(string text) =>
+        text.Replace("\r\n", "\n").Trim('\n', '\r', ' ').Split('\n').Select(l => l.TrimEnd());
+
+    private static string Encode(string text) => System.Net.WebUtility.HtmlEncode(text);
+
+    // Per-message allowlist budget
+    private class ComposeState
+    {
+        public bool TableAllowed { get; set; }
+        public bool TableUsed { get; set; }
+        public bool ListUsed { get; set; }
+        public int BoldRuns { get; set; }
+    }
+
+    internal static string WrapInTemplate(string content, OrganizationTheme? theme)
     {
         var bannerBase64 = GetDisclaimerBannerBase64();
         var template = BuildEmailTemplate(theme);
@@ -639,4 +888,15 @@ public static class HtmlEmailFormatter
         _disclaimerBannerBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
         return _disclaimerBannerBase64;
     }
+}
+
+/// <summary>
+/// Quoted history for <see cref="HtmlEmailFormatter.ComposeHtml"/>: header lines are plain text (encoded on render);
+/// ParentFragment is the parent's ComposeFragment output (trusted HTML built by the formatter).
+/// </summary>
+public class QuotedPart
+{
+    public bool IsForward { get; set; }
+    public List<string> HeaderLines { get; set; } = new();
+    public string ParentFragment { get; set; } = string.Empty;
 }

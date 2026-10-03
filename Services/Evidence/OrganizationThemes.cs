@@ -41,6 +41,14 @@ public static class OrganizationThemes
         var index = (int)(BinaryPrimitives.ReadUInt64BigEndian(hash) % PaletteCount);
 
         var theme = Palettes[index]();
+        var fallback = OrganizationTheme.Default;
+
+        // Fixed palettes still pass the generator's sanitizers so no unchecked CSS reaches an EML (T-05-13)
+        theme.PrimaryColor = ThemeGenerator.SanitizeHexColor(theme.PrimaryColor) ?? fallback.PrimaryColor;
+        theme.SecondaryColor = ThemeGenerator.SanitizeHexColor(theme.SecondaryColor) ?? fallback.SecondaryColor;
+        theme.AccentColor = ThemeGenerator.SanitizeHexColor(theme.AccentColor) ?? fallback.AccentColor;
+        theme.HeadingFont = ThemeGenerator.SanitizeFont(theme.HeadingFont) ?? fallback.HeadingFont;
+        theme.BodyFont = ThemeGenerator.SanitizeFont(theme.BodyFont) ?? fallback.BodyFont;
         theme.Domain = key;
         return theme;
     }

@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-10-03T19:52:18.196Z"
+last_updated: "2026-10-03T19:58:13.744Z"
 last_activity: 2026-10-03
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 81
-  completed_plans: 67
-  percent: 83
+  completed_plans: 68
+  percent: 84
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 5 (Relevant Evidence Generation & Narrative Ledger) — EXECUTING
-Plan: 4 of 17
+Plan: 5 of 17
 Status: Ready to execute
 Last activity: 2026-10-03
 
@@ -118,6 +118,7 @@ Progress: [██████████] 100%
 | Phase 05 P01 | 15min | 2 tasks | 20 files |
 | Phase 05 P02 | 10min | 2 tasks | 11 files |
 | Phase 05 P03 | 8min | 2 tasks | 4 files |
+| Phase 05 P04 | 20min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -318,6 +319,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-02: Blank overlay Status falls back to Planned; blank Subject keeps the computed subject
 - [Phase 05]: 05-03: Length bands apportion over all relevant-thread messages; subtlety pool is own-basis non-privileged only; every hot message is Explicit
 - [Phase 05]: 05-03: Waves and render assignments are pure functions of the whole plan ranked by SHA-256 StableRank, never Random/GetHashCode
+- [Phase 05]: 05-04: KnowledgeGate values linked to a public fact are public but still date-gated by the earliest linked fact date
+- [Phase 05]: 05-04: LedgerMerger dedupes on Kind + normalized About (Statement when About is empty) + SameValue; cross-thread duplicates keep the earlier wave entry and union KnownByIds
 
 ### Pending Todos
 
@@ -339,6 +342,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-03T19:52:11.932Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-10-03T19:57:57.459Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None

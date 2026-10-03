@@ -69,7 +69,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Evidence Corpus Generation
 
-- [ ] **CORP-01**: Each email is written from a point-in-time context: only facts dated on or before it, limited to what its participants could know
+- [x] **CORP-01**: Each email is written from a point-in-time context: only facts dated on or before it, limited to what its participants could know
 - [ ] **CORP-02**: Emails use canonical registry values, and generated output is checked against the plan (participants, dates, values); violations trigger a retry
 - [x] **CORP-03**: Relevant emails evidence the alleged conduct with varied subtlety (not all "smoking guns"), in natural business voice without legal framing
 - [x] **CORP-04**: A small set of hot documents is deliberately generated for key facts
@@ -77,7 +77,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [ ] **CORP-06**: Threads have correct threading (replies quote the right prior message, Message-ID/In-Reply-To/References)
 - [x] **CORP-07**: Writing style varies by character (voice, length, signature) so emails don't all sound alike
 - [x] **CORP-08**: System maintains a running internal narrative as emails are generated: after each thread, new facts and details it introduced (commitments, decisions, meeting outcomes, dates, figures, people mentioned) are extracted into a narrative ledger tagged with date, participants and related issues/facts
-- [ ] **CORP-09**: Each later email's context includes the relevant narrative-ledger entries (dated before it, known to its participants, related to its issues/facts) so the story builds on what was already written
+- [x] **CORP-09**: Each later email's context includes the relevant narrative-ledger entries (dated before it, known to its participants, related to its issues/facts) so the story builds on what was already written
 - [x] **CORP-10**: Relevant threads are generated in chronological waves so earlier narrative is available to later threads; new content that contradicts the ledger or canonical values is flagged and retried
 - [x] **CORP-11**: The narrative ledger is saved with the case file and exportable as a readable "story so far" summary
 
@@ -214,7 +214,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAN-05 | Phase 4 | Complete |
 | PLAN-06 | Phase 4 | Complete |
 | PLAN-07 | Phase 4 | Complete |
-| CORP-01 | Phase 5 | Pending |
+| CORP-01 | Phase 5 | Complete |
 | CORP-02 | Phase 5 | Pending |
 | CORP-03 | Phase 5 | Complete |
 | CORP-04 | Phase 5 | Complete |
@@ -222,7 +222,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORP-06 | Phase 5 | Pending |
 | CORP-07 | Phase 5 | Complete |
 | CORP-08 | Phase 5 | Complete |
-| CORP-09 | Phase 5 | Pending |
+| CORP-09 | Phase 5 | Complete |
 | CORP-10 | Phase 5 | Complete |
 | CORP-11 | Phase 5 | Complete |
 | NOISE-01 | Phase 6 | Pending |

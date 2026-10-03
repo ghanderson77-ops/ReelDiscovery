@@ -165,7 +165,7 @@ Plans:
 - [x] 05-02-PLAN.md — Gateway token totals, custodian folder map, amount parser, answer-key status/subject overlay (Wave 1)
 - [x] 05-03-PLAN.md — WavePlanner (chronological waves) + RenderAssignments (subtlety/length/privilege mixes) (Wave 2)
 - [x] 05-04-PLAN.md — KnowledgeGate (point-in-time context) + LedgerSelector + LedgerMerger (Wave 2)
-- [ ] 05-05-PLAN.md — PeopleDirectory, deterministic organization themes, allowlist-only ComposeHtml (Wave 2)
+- [x] 05-05-PLAN.md — PeopleDirectory, deterministic organization themes, allowlist-only ComposeHtml (Wave 2)
 - [ ] 05-06-PLAN.md — GenerationUiText copy, entry decision, tile tone (Wave 2)
 - [ ] 05-07-PLAN.md — EmailComposer (Message-IDs, threading, subjects, signatures, privilege markers, quoting) (Wave 3)
 - [ ] 05-08-PLAN.md — ThreadRenderContext, EvidencePrompts, ThreadRenderer strict DTOs, RenderRepair, fake responder (Wave 3)

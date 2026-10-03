@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-10-03T19:58:13.744Z"
+stopped_at: Completed 05-05-PLAN.md
+last_updated: "2026-10-03T20:04:08.072Z"
 last_activity: 2026-10-03
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 81
-  completed_plans: 68
-  percent: 84
+  completed_plans: 69
+  percent: 85
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 5 (Relevant Evidence Generation & Narrative Ledger) — EXECUTING
-Plan: 5 of 17
+Plan: 6 of 17
 Status: Ready to execute
 Last activity: 2026-10-03
 
@@ -119,6 +119,7 @@ Progress: [██████████] 100%
 | Phase 05 P02 | 10min | 2 tasks | 11 files |
 | Phase 05 P03 | 8min | 2 tasks | 4 files |
 | Phase 05 P04 | 20min | 2 tasks | 6 files |
+| Phase 05 P05 | 14min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -321,6 +322,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-03: Waves and render assignments are pure functions of the whole plan ranked by SHA-256 StableRank, never Random/GetHashCode
 - [Phase 05]: 05-04: KnowledgeGate values linked to a public fact are public but still date-gated by the earliest linked fact date
 - [Phase 05]: 05-04: LedgerMerger dedupes on Kind + normalized About (Statement when About is empty) + SameValue; cross-thread duplicates keep the earlier wave entry and union KnownByIds
+- [Phase 05]: 05-05: ComposeFragment bold budget is per message across body and table cells; the privileged banner does not count against it
+- [Phase 05]: 05-05: A rejected pipe table (over 4x6 or rows wider than the header) renders as literal paragraph text and does not consume the one-table allowance
+- [Phase 05]: 05-05: OrganizationThemes and ComposeFragment re-sanitize palette colors/fonts through ThemeGenerator sanitizers (T-05-13)
 
 ### Pending Todos
 
@@ -342,6 +346,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-03T19:57:57.459Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-10-03T20:04:08.066Z
+Stopped at: Completed 05-05-PLAN.md
 Resume file: None

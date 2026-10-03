@@ -74,7 +74,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [x] **CORP-03**: Relevant emails evidence the alleged conduct with varied subtlety (not all "smoking guns"), in natural business voice without legal framing
 - [x] **CORP-04**: A small set of hot documents is deliberately generated for key facts
 - [x] **CORP-05**: Privileged attorney-client communications are generated with counsel characters
-- [ ] **CORP-06**: Threads have correct threading (replies quote the right prior message, Message-ID/In-Reply-To/References)
+- [x] **CORP-06**: Threads have correct threading (replies quote the right prior message, Message-ID/In-Reply-To/References)
 - [x] **CORP-07**: Writing style varies by character (voice, length, signature) so emails don't all sound alike
 - [x] **CORP-08**: System maintains a running internal narrative as emails are generated: after each thread, new facts and details it introduced (commitments, decisions, meeting outcomes, dates, figures, people mentioned) are extracted into a narrative ledger tagged with date, participants and related issues/facts
 - [x] **CORP-09**: Each later email's context includes the relevant narrative-ledger entries (dated before it, known to its participants, related to its issues/facts) so the story builds on what was already written
@@ -219,7 +219,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORP-03 | Phase 5 | Complete |
 | CORP-04 | Phase 5 | Complete |
 | CORP-05 | Phase 5 | Complete |
-| CORP-06 | Phase 5 | Pending |
+| CORP-06 | Phase 5 | Complete |
 | CORP-07 | Phase 5 | Complete |
 | CORP-08 | Phase 5 | Complete |
 | CORP-09 | Phase 5 | Complete |

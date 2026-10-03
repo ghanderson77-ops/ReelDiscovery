@@ -284,7 +284,7 @@ public partial class WizardForm : Form
             ? new[]
             {
                 typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
-                typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepCaseSummary)
+                typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepCaseSummary)
             }
             : new[]
             {
@@ -301,6 +301,7 @@ public partial class WizardForm : Form
         CaseStage.CaseGuide => typeof(StepCaseGuide),
         CaseStage.CorpusSettings => typeof(StepCorpusSettings),
         CaseStage.ReviewPlan => typeof(StepReviewPlan),
+        CaseStage.Generation => typeof(StepGenerateCorpus),
         CaseStage.Summary => typeof(StepCaseSummary),
         _ => typeof(StepCaseScenario)
     };
@@ -523,7 +524,8 @@ public partial class WizardForm : Form
 
         // Every case step commits its pending edits synchronously before its first await
         if (_currentStepIndex >= 0 && _currentStepIndex < _steps.Count
-            && _steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument or StepCaseGuide or StepCorpusSettings or StepReviewPlan or StepCaseSummary)
+            && _steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument or StepCaseGuide or StepCorpusSettings or StepReviewPlan or StepGenerateCorpus
+                or StepCaseSummary)
                 and IWizardStep step)
         {
             _ = step.OnLeaveStepAsync();
@@ -541,7 +543,7 @@ public partial class WizardForm : Form
             return false;
 
         return _steps[_currentStepIndex] is StepCoreDocument { IsGenerating: true } or StepCaseGuide { IsGenerating: true }
-            or StepReviewPlan { IsPlanning: true };
+            or StepReviewPlan { IsPlanning: true } or StepGenerateCorpus { IsGenerating: true };
     }
 
     // Disposing the running step cancels its token, so no further calls are billed (WR-07, T-03-61).
@@ -557,6 +559,9 @@ public partial class WizardForm : Form
         else if (step is StepReviewPlan review)
             // A planning run is cancelled and awaited, so no further calls are billed (T-04-61)
             WaitWhileStopping(() => review.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
+        else if (step is StepGenerateCorpus generate)
+            // In-flight threads are discarded; finished ones are already journaled and saved (RUN-06)
+            WaitWhileStopping(() => generate.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
 
         step.Dispose();
     }
@@ -591,10 +596,14 @@ public partial class WizardForm : Form
             {
                 if (decision == CloseDecision.AskDuringRun)
                 {
-                    // C-P2 ("Stop Planning?") while Review Plan is planning; C12 for the core document and guide runs
-                    var (runTitle, runText) = _steps[_currentStepIndex] is StepReviewPlan
-                        ? CorpusUiText.CP2ClosePlanning()
-                        : CaseGuideUiText.C12CloseDuringRun();
+                    // C-P2 ("Stop Planning?") while Review Plan is planning, C-G3 ("Stop Generating?") while Generate
+                    // Corpus is writing emails; C12 for the core document and guide runs
+                    var (runTitle, runText) = _steps[_currentStepIndex] switch
+                    {
+                        StepReviewPlan => CorpusUiText.CP2ClosePlanning(),
+                        StepGenerateCorpus => GenerationUiText.CG3CloseDuringRun(),
+                        _ => CaseGuideUiText.C12CloseDuringRun()
+                    };
                     if (MessageBox.Show(this, runText, runTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question,
                             MessageBoxDefaultButton.Button2) != DialogResult.Yes)
                     {

@@ -582,4 +582,390 @@ public class GenerationUiTextTests
     {
         Assert.Contains(expected, GenerationUiText.StartedOverText(n));
     }
+
+    // --- Entry decision (first match wins) ---
+
+    private static GenerationEntryInput Entry(
+        bool running = false, bool hasPlan = true, bool approved = true, bool hasSavedRun = true,
+        bool planChanged = false, string unreadable = "", int total = 10, int written = 10, int failed = 0) =>
+        new()
+        {
+            Running = running,
+            HasPlan = hasPlan,
+            Approved = approved,
+            HasSavedRun = hasSavedRun,
+            PlanChanged = planChanged,
+            UnreadableReason = unreadable,
+            Total = total,
+            Written = written,
+            Failed = failed
+        };
+
+    [Fact]
+    public void EntryDecision_RunningKeepsRun_EvenWhenNotApproved()
+    {
+        Assert.Equal(GenerationEntry.KeepRun, GenerationUiText.EntryDecision(Entry(running: true, approved: false, planChanged: true)));
+    }
+
+    [Fact]
+    public void EntryDecision_NoPlanOrNotApproved()
+    {
+        Assert.Equal(GenerationEntry.NotApprovedCard, GenerationUiText.EntryDecision(Entry(hasPlan: false)));
+        Assert.Equal(GenerationEntry.NotApprovedCard, GenerationUiText.EntryDecision(Entry(approved: false, planChanged: true, unreadable: "x")));
+    }
+
+    [Fact]
+    public void EntryDecision_PlanChangedBeforeUnreadable()
+    {
+        Assert.Equal(GenerationEntry.PlanChangedCard, GenerationUiText.EntryDecision(Entry(planChanged: true, unreadable: "bad")));
+    }
+
+    [Fact]
+    public void EntryDecision_PlanChangedNeedsSavedRun()
+    {
+        Assert.Equal(GenerationEntry.ReadyCard, GenerationUiText.EntryDecision(Entry(hasSavedRun: false, planChanged: true, written: 0)));
+    }
+
+    [Fact]
+    public void EntryDecision_Unreadable()
+    {
+        Assert.Equal(GenerationEntry.UnreadableCard, GenerationUiText.EntryDecision(Entry(unreadable: "The journal is larger than 200 MB")));
+    }
+
+    [Fact]
+    public void EntryDecision_NoSavedRun_ReadyCard_NeverAutoStarts()
+    {
+        Assert.Equal(GenerationEntry.ReadyCard, GenerationUiText.EntryDecision(Entry(hasSavedRun: false, written: 0)));
+    }
+
+    [Fact]
+    public void EntryDecision_UnfinishedRun_PartialDashboard()
+    {
+        Assert.Equal(GenerationEntry.PartialDashboard, GenerationUiText.EntryDecision(Entry(written: 4, failed: 2)));
+    }
+
+    [Fact]
+    public void EntryDecision_EveryThreadWrittenOrFailed_FinishedDashboard()
+    {
+        Assert.Equal(GenerationEntry.FinishedDashboard, GenerationUiText.EntryDecision(Entry(written: 8, failed: 2)));
+        Assert.Equal(GenerationEntry.FinishedDashboard, GenerationUiText.EntryDecision(Entry(written: 10)));
+    }
+
+    // --- State cards ---
+
+    [Fact]
+    public void StateCard_Ready()
+    {
+        var card = GenerationUiText.StateCard(GenerationStateCard.Ready, 12, 30, 4, 3.2m, "Claude Sonnet", 0, "");
+
+        Assert.Equal("Ready to write the relevant emails", card.Heading);
+        Assert.Equal(
+            "Generate Emails writes the 12 relevant threads (30 emails) from the approved plan, oldest first, in 4 waves. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later. Estimated cost: ≈$3.20 on Claude Sonnet, ±50%.",
+            card.Body);
+        Assert.Equal("Generate Emails", card.ButtonText);
+        Assert.False(card.Danger);
+    }
+
+    [Theory]
+    [InlineData(0, "0 relevant threads (0 emails)", "in 0 waves.")]
+    [InlineData(1, "1 relevant thread (1 email)", "in 1 wave.")]
+    [InlineData(2, "2 relevant threads (2 emails)", "in 2 waves.")]
+    [InlineData(1000, "1,000 relevant threads (1,000 emails)", "in 1,000 waves.")]
+    public void StateCard_Ready_Plurals(int n, string threads, string waves)
+    {
+        var body = GenerationUiText.StateCard(GenerationStateCard.Ready, n, n, n, 250m, "M", 0, "").Body;
+        Assert.Contains(threads, body);
+        Assert.Contains(waves, body);
+        Assert.Contains("≈$250 on M", body);
+    }
+
+    [Fact]
+    public void StateCard_NotApproved()
+    {
+        var card = GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, "", 0, "");
+
+        Assert.Equal("Approve the plan first", card.Heading);
+        Assert.Equal("Emails are written from an approved corpus plan. Approve the plan on Review Plan, then come back to this step.", card.Body);
+        Assert.Equal("Review Plan", card.ButtonText);
+        Assert.False(card.Danger);
+    }
+
+    [Fact]
+    public void StateCard_PlanChanged()
+    {
+        var card = GenerationUiText.StateCard(GenerationStateCard.PlanChanged, 0, 0, 0, 0m, "", 5, "");
+
+        Assert.Equal("The plan changed after emails were generated", card.Heading);
+        Assert.Equal(
+            "5 threads were written for an earlier plan, and their DocIDs no longer match the answer key. Start Over deletes those emails and the narrative ledger, then you can write the current plan.",
+            card.Body);
+        Assert.Equal("Start Over...", card.ButtonText);
+        Assert.True(card.Danger);
+    }
+
+    [Theory]
+    [InlineData(0, "0 threads were written")]
+    [InlineData(1, "1 thread was written")]
+    [InlineData(2, "2 threads were written")]
+    [InlineData(1000, "1,000 threads were written")]
+    public void StateCard_PlanChanged_Plurals(int n, string expectedStart)
+    {
+        Assert.StartsWith(expectedStart, GenerationUiText.StateCard(GenerationStateCard.PlanChanged, 0, 0, 0, 0m, "", n, "").Body);
+    }
+
+    [Fact]
+    public void StateCard_Unreadable()
+    {
+        var card = GenerationUiText.StateCard(GenerationStateCard.Unreadable, 0, 0, 0, 0m, "", 0, "The journal is larger than 200 MB");
+
+        Assert.Equal("The saved run could not be opened", card.Heading);
+        Assert.Equal(
+            "The journal is larger than 200 MB. Start Over clears the saved run, deletes the emails it wrote and starts again from the approved plan.",
+            card.Body);
+        Assert.Equal("Start Over...", card.ButtonText);
+        Assert.True(card.Danger);
+    }
+
+    // --- Partial-run banner ---
+
+    [Fact]
+    public void Banner_NoFailures()
+    {
+        Assert.Equal("The last run did not finish.", GenerationUiText.BannerHeading);
+        Assert.Equal("Continue Generating", GenerationUiText.BannerButton);
+        Assert.Equal(
+            "4 of 10 relevant threads are written and saved. Continue Generating writes the rest and keeps everything already saved.",
+            GenerationUiText.BannerBody(4, 10, 0));
+    }
+
+    [Fact]
+    public void Banner_WithFailures()
+    {
+        Assert.EndsWith(
+            "keeps everything already saved, and tries the 2 failed threads again.",
+            GenerationUiText.BannerBody(4, 10, 2));
+    }
+
+    [Theory]
+    [InlineData(1, "of 1 relevant thread are", "tries the 1 failed thread again.")]
+    [InlineData(2, "of 2 relevant threads are", "tries the 2 failed threads again.")]
+    [InlineData(1000, "of 1,000 relevant threads are", "tries the 1,000 failed threads again.")]
+    public void Banner_Plurals(int n, string totalPart, string failedPart)
+    {
+        var body = GenerationUiText.BannerBody(0, n, n);
+        Assert.Contains(totalPart, body);
+        Assert.EndsWith(failedPart, body);
+    }
+
+    [Fact]
+    public void Banner_ZeroTotal()
+    {
+        Assert.StartsWith("0 of 0 relevant threads are", GenerationUiText.BannerBody(0, 0, 0));
+    }
+
+    // --- Confirmations ---
+
+    [Fact]
+    public void CG1_CancelGeneration()
+    {
+        var (title, text) = GenerationUiText.CG1CancelGeneration(3);
+
+        Assert.Equal("Cancel Generation", title);
+        Assert.Equal("Stop generating? The 3 threads already written stay saved. Threads in progress are discarded and can be written later with Continue Generating.", text);
+    }
+
+    [Theory]
+    [InlineData(0, "The 0 threads already written stay saved.")]
+    [InlineData(1, "The 1 thread already written stays saved.")]
+    [InlineData(2, "The 2 threads already written stay saved.")]
+    [InlineData(1000, "The 1,000 threads already written stay saved.")]
+    public void CG1_Plurals(int n, string expected)
+    {
+        Assert.Contains(expected, GenerationUiText.CG1CancelGeneration(n).Text);
+    }
+
+    [Fact]
+    public void CG2_StartOver()
+    {
+        var (title, text) = GenerationUiText.CG2StartOver(42);
+
+        Assert.Equal("Start Over", title);
+        Assert.Equal(
+            "Delete the 42 generated EML files and the narrative ledger, and reset the answer key to Planned? This cannot be undone. The corpus plan and case guide are kept.",
+            text);
+    }
+
+    [Theory]
+    [InlineData(0, "Delete the 0 generated EML files")]
+    [InlineData(1, "Delete the 1 generated EML file ")]
+    [InlineData(2, "Delete the 2 generated EML files")]
+    [InlineData(1000, "Delete the 1,000 generated EML files")]
+    public void CG2_Plurals(int n, string expectedStart)
+    {
+        Assert.StartsWith(expectedStart, GenerationUiText.CG2StartOver(n).Text);
+    }
+
+    [Fact]
+    public void CG3_CloseDuringRun()
+    {
+        var (title, text) = GenerationUiText.CG3CloseDuringRun();
+
+        Assert.Equal("Stop Generating?", title);
+        Assert.Equal("Emails are still being written. Close and stop? Finished threads are saved; threads in progress are discarded and can be written later with Continue Generating.", text);
+    }
+
+    // --- Case Summary: Mailboxes row ---
+
+    [Fact]
+    public void MailboxesRow_NotGenerated()
+    {
+        var row = GenerationUiText.MailboxesRow(new MailboxesRowInput { Generated = false, Total = 10, FolderExists = false });
+
+        Assert.Equal("Not generated yet", row.Line3);
+        Assert.Equal(SummaryTone.Muted, row.Line3Tone);
+        Assert.Equal(SummaryTone.Muted, row.DotTone);
+        Assert.False(row.ShowPrimary);
+        Assert.True(row.ShowSecondary);
+
+        Assert.True(GenerationUiText.MailboxesRow(new MailboxesRowInput { Generated = false, FolderExists = true }).ShowPrimary);
+    }
+
+    [Fact]
+    public void MailboxesRow_Complete()
+    {
+        var row = GenerationUiText.MailboxesRow(new MailboxesRowInput
+        {
+            Generated = true, Total = 10, Written = 10, Files = 37, Mailboxes = 6, FolderExists = true
+        });
+
+        Assert.Equal("37 EML files in 6 custodian mailboxes · Mailboxes folder", row.Line2);
+        Assert.Equal("All 10 relevant threads written", row.Line3);
+        Assert.Equal(SummaryTone.Success, row.Line3Tone);
+        Assert.Equal(SummaryTone.Success, row.DotTone);
+        Assert.True(row.ShowPrimary);
+        Assert.False(row.ShowSecondary);
+    }
+
+    [Fact]
+    public void MailboxesRow_Partial()
+    {
+        var row = GenerationUiText.MailboxesRow(new MailboxesRowInput
+        {
+            Generated = true, Total = 10, Written = 7, Warnings = 1, Failed = 2, Files = 20, Mailboxes = 4, FolderExists = true
+        });
+
+        Assert.Equal("7 of 10 relevant threads written · 1 with warnings · 2 failed", row.Line3);
+        Assert.Equal(SummaryTone.Warning, row.Line3Tone);
+        Assert.Equal(SummaryTone.Warning, row.DotTone);
+    }
+
+    [Fact]
+    public void MailboxesRow_Partial_ZeroClausesDropped()
+    {
+        Assert.Equal(
+            "7 of 10 relevant threads written",
+            GenerationUiText.MailboxesRow(new MailboxesRowInput { Generated = true, Total = 10, Written = 7 }).Line3);
+        Assert.Equal(
+            "8 of 10 relevant threads written · 2 failed",
+            GenerationUiText.MailboxesRow(new MailboxesRowInput { Generated = true, Total = 10, Written = 8, Failed = 2 }).Line3);
+        Assert.Equal(
+            "10 of 10 relevant threads written · 3 with warnings",
+            GenerationUiText.MailboxesRow(new MailboxesRowInput { Generated = true, Total = 10, Written = 10, Warnings = 3 }).Line3);
+    }
+
+    [Fact]
+    public void MailboxesRow_EarlierPlan()
+    {
+        var row = GenerationUiText.MailboxesRow(new MailboxesRowInput
+        {
+            Generated = true, EarlierPlan = true, Total = 10, Written = 10, Files = 37, Mailboxes = 6, FolderExists = true
+        });
+
+        Assert.Equal("Written for an earlier plan. Start over on Generate Corpus.", row.Line3);
+        Assert.Equal(SummaryTone.Warning, row.Line3Tone);
+        Assert.Equal(SummaryTone.Warning, row.DotTone);
+    }
+
+    [Theory]
+    [InlineData(0, "0 EML files in 0 custodian mailboxes · Mailboxes folder", "All 0 relevant threads written")]
+    [InlineData(1, "1 EML file in 1 custodian mailbox · Mailboxes folder", "All 1 relevant thread written")]
+    [InlineData(2, "2 EML files in 2 custodian mailboxes · Mailboxes folder", "All 2 relevant threads written")]
+    [InlineData(1000, "1,000 EML files in 1,000 custodian mailboxes · Mailboxes folder", "All 1,000 relevant threads written")]
+    public void MailboxesRow_Plurals(int n, string line2, string line3)
+    {
+        var row = GenerationUiText.MailboxesRow(new MailboxesRowInput { Generated = true, Total = n, Written = n, Files = n, Mailboxes = n });
+        Assert.Equal(line2, row.Line2);
+        Assert.Equal(line3, row.Line3);
+    }
+
+    // --- Case Summary: Story so far row ---
+
+    [Fact]
+    public void StoryRow_Written()
+    {
+        var row = GenerationUiText.StoryRow(new StoryRowInput
+        {
+            Entries = 45, Threads = 10, FileName = "Case X - Story So Far.docx", FileExists = true,
+            WrittenLocal = new DateTime(2026, 10, 3, 14, 5, 0)
+        });
+
+        Assert.Equal("Narrative ledger · 45 details from 10 threads · Case X - Story So Far.docx", row.Line2);
+        Assert.Equal("Written Oct 3, 2026 2:05 PM", row.Line3);
+        Assert.Equal(SummaryTone.Success, row.Line3Tone);
+        Assert.Equal(SummaryTone.Success, row.DotTone);
+        Assert.True(row.ShowPrimary);
+        Assert.True(row.ShowSecondary);
+    }
+
+    [Fact]
+    public void StoryRow_NotWritten()
+    {
+        var row = GenerationUiText.StoryRow(new StoryRowInput { FileName = "Case X - Story So Far.docx" });
+
+        Assert.Equal("Not written yet. It is written when a generation run ends.", row.Line3);
+        Assert.Equal(SummaryTone.Muted, row.Line3Tone);
+        Assert.Equal(SummaryTone.Muted, row.DotTone);
+        Assert.False(row.ShowPrimary);
+        Assert.False(row.ShowSecondary);
+    }
+
+    [Fact]
+    public void StoryRow_Failed()
+    {
+        var row = GenerationUiText.StoryRow(new StoryRowInput
+        {
+            Entries = 3, Threads = 1, FileName = "Case X - Story So Far.docx", WrittenLocal = new DateTime(2026, 10, 3, 14, 5, 0),
+            Error = "The file is open in another program."
+        });
+
+        Assert.Equal("Could not write: The file is open in another program", row.Line3);
+        Assert.Equal(SummaryTone.Danger, row.Line3Tone);
+        Assert.Equal(SummaryTone.Danger, row.DotTone);
+        Assert.False(row.ShowPrimary);
+        Assert.True(row.ShowSecondary);
+    }
+
+    [Theory]
+    [InlineData(0, "0 details from 0 threads")]
+    [InlineData(1, "1 detail from 1 thread ")]
+    [InlineData(2, "2 details from 2 threads")]
+    [InlineData(1000, "1,000 details from 1,000 threads")]
+    public void StoryRow_Plurals(int n, string expected)
+    {
+        Assert.Contains(expected, GenerationUiText.StoryRow(new StoryRowInput { Entries = n, Threads = n, FileName = "f.docx" }).Line2);
+    }
+
+    [Fact]
+    public void AnswerKeyRunClause_AndStoryMissing()
+    {
+        Assert.Equal(
+            "Written Oct 3, 2026 2:05 PM · 30 generated, 270 planned",
+            GenerationUiText.AnswerKeyRunClause(new DateTime(2026, 10, 3, 14, 5, 0), 30, 270));
+        Assert.Equal(
+            "Written Oct 3, 2026 2:05 PM · 1,000 generated, 4,000 planned",
+            GenerationUiText.AnswerKeyRunClause(new DateTime(2026, 10, 3, 14, 5, 0), 1000, 4000));
+        Assert.Equal(
+            "Case X - Story So Far.docx is no longer in the case folder. Click Export Story So Far to write it again.",
+            GenerationUiText.StoryMissingText("Case X - Story So Far.docx"));
+    }
 }

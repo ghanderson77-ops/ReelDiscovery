@@ -142,11 +142,11 @@ public class SkeletonContext
         }
         else if (!hasStart)
         {
-            start = end.AddMonths(-3);
+            start = CorpusSettings.SafeAddMonths(end, -3);
         }
         else if (!hasEnd)
         {
-            end = start.AddMonths(3);
+            end = CorpusSettings.SafeAddMonths(start, 3);
         }
 
         if (end < start)

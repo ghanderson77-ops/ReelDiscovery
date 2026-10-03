@@ -106,6 +106,28 @@ public class CorpusSettingsTests
     }
 
     [Fact]
+    public void DefaultWindow_FactsAtDateTimeEdges_DoesNotThrow()
+    {
+        // WR-04: AddMonths used to throw for facts near DateTime.MinValue / MaxValue
+        var guide = new CaseGuide();
+        guide.Facts.Add(new KeyFact { Id = "F-001", Date = "0001-01-15" });
+        guide.Facts.Add(new KeyFact { Id = "F-002", Date = "9999-11-20" });
+
+        var (start, end) = CorpusSettings.DefaultWindow(guide);
+
+        Assert.Equal("0001-01-01", start);
+        Assert.Equal("9999-12-31", end);
+    }
+
+    [Fact]
+    public void SafeAddMonths_InRange_MatchesAddMonths()
+    {
+        var date = new DateTime(2024, 3, 31);
+        Assert.Equal(date.AddMonths(-1), CorpusSettings.SafeAddMonths(date, -1));
+        Assert.Equal(date.AddMonths(2), CorpusSettings.SafeAddMonths(date, 2));
+    }
+
+    [Fact]
     public void ClampWindow_KeepsEveryFactInside()
     {
         var guide = CaseTestData.SampleGuidedDraft().Guide;

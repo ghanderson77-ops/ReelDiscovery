@@ -119,7 +119,20 @@ public class CorpusSettings
         if (range == null)
             return (string.Empty, string.Empty);
 
-        return (Format(range.Value.First.AddMonths(-1)), Format(range.Value.Last.AddMonths(2)));
+        return (Format(SafeAddMonths(range.Value.First, -1)), Format(SafeAddMonths(range.Value.Last, 2)));
+    }
+
+    /// <summary>
+    /// AddMonths that stays put instead of throwing at the edges of the DateTime range; fact dates and windows come from
+    /// untrusted case.json or LLM output (e.g. 0001-01-15 or 9999-11-20, WR-04).
+    /// </summary>
+    public static DateTime SafeAddMonths(DateTime date, int months)
+    {
+        if (months < 0 && date < DateTime.MinValue.AddMonths(-months))
+            return DateTime.MinValue.Date;
+        if (months > 0 && date > DateTime.MaxValue.AddMonths(-months))
+            return DateTime.MaxValue.Date;
+        return date.AddMonths(months);
     }
 
     public static CorpusSettings CreateDefault(CaseDraft draft)

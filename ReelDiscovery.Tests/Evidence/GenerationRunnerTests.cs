@@ -535,6 +535,50 @@ public partial class GenerationRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task UnreadableJournalMidRun_KeepsLastGoodKeyAndState()
+    {
+        _fake.Respond = Responder();
+        var waves = WavePlanner.Plan(_plan);
+        Assert.True(waves.Count > 1);
+        FileStream? lockStream = null;
+        var runner = new GenerationRunner(_gateway, 1)
+        {
+            // From wave 2 on the journal is locked (antivirus, sync client): appends and replays both fail
+            BeforeWaveHook = i =>
+            {
+                if (i == 1 && lockStream == null)
+                    lockStream = new FileStream(GenerationJournal.PathFor(_folder), FileMode.Open, FileAccess.Read, FileShare.None);
+                return Task.CompletedTask;
+            }
+        };
+
+        GenerationRunResult result;
+        try
+        {
+            result = await runner.RunAsync(Input, new GenerationSnapshot(), Persist);
+        }
+        finally
+        {
+            lockStream?.Dispose();
+        }
+
+        var firstWave = waves[0].ThreadIds;
+        Assert.Equal(firstWave.Count, result.State.Written);
+
+        // The key still lists the first wave as generated rather than every row back to Planned
+        var key = KeyStatuses();
+        foreach (var id in firstWave)
+            foreach (var message in _plan.Threads.First(t => t.Id == id).Messages)
+                Assert.Equal("Generated", key[message.DocId]);
+
+        // No checkpoint after the lock persisted an empty run over the first wave's state
+        var persisted = Checkpoints();
+        Assert.NotEmpty(persisted);
+        Assert.All(persisted, c => Assert.Equal(firstWave.Count, c.Checkpoint.State.Written));
+        Assert.All(persisted, c => Assert.NotEmpty(c.Checkpoint.Ledger.Entries));
+    }
+
+    [Fact]
     public async Task RunAsync_OffUiThread_NeverPostsToCapturedContext()
     {
         _fake.Respond = Responder();

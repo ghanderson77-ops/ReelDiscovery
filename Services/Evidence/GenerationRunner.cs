@@ -126,6 +126,8 @@ public class GenerationRunner
         var deltas = new Dictionary<string, List<LedgerDelta>>(state.DeltasByThread, StringComparer.Ordinal);
 
         var startLedger = LedgerMerger.Build(plan, guide, ctx.WaveOf, deltas);
+        ctx.LastGoodState = state;
+        ctx.LastGoodLedger = startLedger;
         snapshot.Reset(
             state.ToCounts(plan, waves.Count, startLedger.Entries.Count,
                 GenerationRunState.EstimateRemaining(plan, state, ctx.StoryModel), running: true, finished: false),
@@ -331,19 +333,36 @@ public class GenerationRunner
         ctx.WriteLastProjection(DateTime.UtcNow);
 
         // The journal is the source of truth: anything journaled is in the key, whatever happened in memory
-        GenerationRunState state;
-        NarrativeLedger ledger;
+        GenerationRunState? state = null;
+        NarrativeLedger? ledger = null;
+        string unusableReason;
         try
         {
-            state = GenerationRunState.From(plan, GenerationJournal.Replay(input.CaseFolder, plan));
-            ledger = LedgerMerger.Build(plan, ctx.Guide, ctx.WaveOf, state.DeltasByThread);
+            var replay = GenerationJournal.Replay(input.CaseFolder, plan);
+            if (!replay.Readable || replay.PlanChanged)
+            {
+                // An unreadable (IO lock, size cap) or foreign journal replays as "nothing generated"
+                unusableReason = replay.PlanChanged ? PlanChangedMessage
+                    : replay.Reason.Length > 0 ? replay.Reason : "The saved run could not be found.";
+            }
+            else
+            {
+                state = GenerationRunState.From(plan, replay);
+                ledger = LedgerMerger.Build(plan, ctx.Guide, ctx.WaveOf, state.DeltasByThread);
+                unusableReason = string.Empty;
+            }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Replay never throws by contract; a bug in the projection must not stop the remaining end-of-run steps
-            state = new GenerationRunState();
-            ledger = new NarrativeLedger();
+            unusableReason = ex.Message;
         }
+
+        if (state == null || ledger == null)
+            return await UnprojectedCheckpointAsync(ctx, final, outcome, message, unusableReason).ConfigureAwait(false);
+
+        ctx.LastGoodState = state;
+        ctx.LastGoodLedger = ledger;
 
         var checkpoint = new GenerationCheckpoint
         {
@@ -388,23 +407,7 @@ public class GenerationRunner
         }
 
         if (final)
-        {
-            try
-            {
-                await ctx.Journal.AppendAsync(new JournalRecord
-                {
-                    Type = JournalRecordType.RunEnded,
-                    Utc = DateTime.UtcNow,
-                    PlanId = plan.PlanId,
-                    Outcome = outcome,
-                    Message = message ?? string.Empty
-                }, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // RunEnded is an audit line; replay works without it and every thread record is already flushed
-            }
-        }
+            await AppendRunEndedAsync(ctx, outcome, message).ConfigureAwait(false);
 
         if (ctx.Persist != null)
         {
@@ -421,6 +424,47 @@ public class GenerationRunner
         ctx.Snapshot.SetLedgerEntries(ledger.Entries.Count);
         ctx.Snapshot.SetRemainingCost(GenerationRunState.EstimateRemaining(plan, state, ctx.StoryModel));
         return checkpoint;
+    }
+
+    /// <summary>
+    /// The journal could not be projected (unreadable, foreign plan or a projection bug). Keeps the last good projection:
+    /// the key, story and case.json are left as they are rather than overwritten with an empty run, and the next readable
+    /// projection catches up. Never throws.
+    /// </summary>
+    private static async Task<GenerationCheckpoint> UnprojectedCheckpointAsync(RunContext ctx, bool final,
+        GenerationOutcome outcome, string message, string reason)
+    {
+        if (final)
+            await AppendRunEndedAsync(ctx, outcome, message).ConfigureAwait(false);
+
+        return new GenerationCheckpoint
+        {
+            State = ctx.LastGoodState,
+            Ledger = ctx.LastGoodLedger,
+            KeyResult = new GenerationFileResult { FailedFileName = AnswerKeyCsvWriter.FileName, Error = reason },
+            IsFinal = final,
+            Outcome = outcome,
+            Message = message ?? string.Empty
+        };
+    }
+
+    private static async Task AppendRunEndedAsync(RunContext ctx, GenerationOutcome outcome, string? message)
+    {
+        try
+        {
+            await ctx.Journal.AppendAsync(new JournalRecord
+            {
+                Type = JournalRecordType.RunEnded,
+                Utc = DateTime.UtcNow,
+                PlanId = ctx.Input.Plan.PlanId,
+                Outcome = outcome,
+                Message = message ?? string.Empty
+            }, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // RunEnded is an audit line; replay works without it and every thread record is already flushed
+        }
     }
 
     private static void FinishSnapshot(GenerationSnapshot snapshot, GenerationCheckpoint final, GenerationOutcome outcome,
@@ -472,6 +516,10 @@ public class GenerationRunner
         public GenerationPersist? Persist { get; init; }
         public AIModelConfig? StoryModel { get; init; }
         public SemaphoreSlim ProjectionGate { get; } = new(1, 1);
+
+        // Last projection that came from a readable journal; read and written only under ProjectionGate
+        public GenerationRunState LastGoodState { get; set; } = new();
+        public NarrativeLedger LastGoodLedger { get; set; } = new();
 
         public DateTime LastProjectionUtc
         {

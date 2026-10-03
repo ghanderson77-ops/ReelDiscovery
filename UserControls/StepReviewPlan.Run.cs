@@ -440,13 +440,25 @@ public partial class StepReviewPlan
 
     // ----- Re-plan, keep plan (D-23, D-25) -----
 
+    /// <summary>
+    /// Threads already written (including kept with warnings) by a saved run for the current plan; 0 when there is no
+    /// run or the run belongs to an earlier plan (05-UI-SPEC S2).
+    /// </summary>
+    internal static int ReplanGeneratedThreads(CorpusState? corpus)
+    {
+        var generation = corpus?.Generation;
+        if (generation == null || generation.RunPlanId != corpus!.PlanId)
+            return 0;
+        return generation.ThreadsWritten + generation.ThreadsWithWarnings;
+    }
+
     private async Task ReplanAsync()
     {
         if (_state == null || _isPlanning || _isApproving || Draft.Corpus?.Plan == null)
             return;
 
         string guidance;
-        using (var dialog = new ReplanDialog(Draft.Corpus.Approved))
+        using (var dialog = new ReplanDialog(Draft.Corpus.Approved, ReplanGeneratedThreads(Draft.Corpus)))
         {
             if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
                 return;

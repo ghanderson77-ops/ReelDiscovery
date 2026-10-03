@@ -309,12 +309,18 @@ public static class CorpusUiText
     public const string ReplanPlaceholder = "e.g. more traffic around the March change-order dispute";
     public const string ReplanHint = "Guidance can shift volume toward or away from facts and periods. Dates, people and labels still come from the case guide.";
 
-    public static string ReplanBody(bool approved)
+    /// <summary>
+    /// D-RP body. generatedThreads &gt; 0 (threads already written for the current plan) adds the start-over warning (05-UI-SPEC S2).
+    /// </summary>
+    public static string ReplanBody(bool approved, int generatedThreads = 0)
     {
         const string body = "Builds a new plan from the case guide and the current corpus settings, and replaces this one. Every DocID changes. This makes new Story-model calls.";
-        return approved
+        var text = approved
             ? body + " The answer key and review protocol in the case folder are rewritten when you approve the new plan."
             : body;
+        if (generatedThreads > 0)
+            text += $" {CaseGuideUiText.Plural(generatedThreads, "thread", "threads")} already generated for this plan will no longer match it. After re-planning, Generate Corpus asks you to start over.";
+        return text;
     }
 
     // --- Case Summary corpus rows ---

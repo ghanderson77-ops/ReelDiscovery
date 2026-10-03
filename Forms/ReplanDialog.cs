@@ -10,14 +10,17 @@ namespace ReelDiscovery.Forms;
 public class ReplanDialog : ThemedDialog
 {
     private readonly bool _approved;
+    private readonly int _generatedThreads;
     private TextBox _txtGuidance = null!;
     private Button _btnCancel = null!;
     private Button _btnReplan = null!;
 
-    public ReplanDialog(bool approved)
+    /// <param name="generatedThreads">Threads already generated for the current plan; &gt; 0 adds the start-over warning.</param>
+    public ReplanDialog(bool approved, int generatedThreads = 0)
         : base(CorpusUiText.ReplanTitle)
     {
         _approved = approved;
+        _generatedThreads = generatedThreads;
         InitializeUI();
     }
 
@@ -29,7 +32,7 @@ public class ReplanDialog : ThemedDialog
     private void InitializeUI()
     {
         AddHeadline(CorpusUiText.ReplanHeadline);
-        AddBody(CorpusUiText.ReplanBody(_approved));
+        AddBody(CorpusUiText.ReplanBody(_approved, _generatedThreads));
 
         var caption = CreateWrappingLabel(CorpusUiText.ReplanGuidanceCaption, Theme.SmallFont(), Theme.TextMuted);
         caption.Margin = new Padding(0, 0, 0, LDU(4));

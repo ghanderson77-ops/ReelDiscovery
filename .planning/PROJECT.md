@@ -34,6 +34,10 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 - ✓ User controls corpus size (up to 5,000) and the relevant vs. non-relevant proportion, plus the non-relevant mix, date window and attachment types — Validated in Phase 4
 - ✓ Code plans every thread and message (dates in business hours/time zones/holidays, participants, reply structure, facts/issues, labels, attachments) before any prose; a validator checks the plan and the user reviews, re-plans or approves it — Validated in Phase 4
 - ✓ System produces a CSV/Excel answer key (one row per email and attachment, family relevance propagated, statistics + legend sheets) and a review protocol .docx, both derived from the approved plan — Validated in Phase 4 (rows carry Status = Planned until Phase 5 renders the emails)
+- ✓ Relevant emails/threads are generated against specific key facts/events, with the characters involved at that point in time, so the corpus builds a cohesive story — Validated in Phase 5 (chronological waves, point-in-time knowledge gate, narrative ledger)
+- ✓ Continuity is maintained across batches (dates, roles, amounts, prior messages) so threads don't lose the thread — Validated in Phase 5 (ledger + code checks with retry)
+- ✓ Completed threads are saved incrementally — an interruption or single failure never loses finished work — Validated in Phase 5 (append-only run journal; cancel/kill/continue/start over)
+- ✓ Relevant emails land in each participating custodian's Sent Items / Inbox with an X-ReelDiscovery-DocID header matching the answer key — Validated in Phase 5 (non-relevant mail follows in Phase 6)
 
 ### Active
 
@@ -47,15 +51,12 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 - [ ] All ancillary documents are consistent with the core document and key facts
 
 **Timeline-driven evidence corpus**
-- [ ] Relevant emails/threads are generated against specific key facts/events, with the characters involved at that point in time, so the corpus builds a cohesive story
-- [ ] Continuity is maintained across batches (dates, roles, amounts, prior messages) so threads don't lose the thread
 - [ ] Multiple overlapping issues/storylines can run concurrently among the same people without contradiction
 - [ ] Existing attachment types (Office docs, calendar invites, images, voicemail) are generated as evidence driven by the case guide
 - [ ] Non-relevant material includes: same custodians' daily business, other ancillary characters, newsletters/spam/personal, and near-miss decoys (same project/keywords, not about the alleged conduct)
 - [ ] Corpus scales to ~5,000 emails (majority may be non-relevant)
 
 **Reliability & cost at scale**
-- [ ] Completed threads are saved incrementally — an interruption or single failure never loses finished work
 - [ ] One failed item (attachment, image, etc.) does not abort the run
 - [ ] Bulk generation (especially non-relevant filler) can use provider Batch APIs for lower cost
 
@@ -127,4 +128,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-03 after Phase 4 (Corpus Plan & Answer Key) completion*
+*Last updated: 2026-10-03 after Phase 5 (Relevant Evidence Generation & Narrative Ledger) completion*

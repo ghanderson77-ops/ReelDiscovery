@@ -1,7 +1,10 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Tests.Corpus;
 
@@ -238,5 +241,83 @@ public class EvidencePromptsTests
         var lines = MessageLines(EvidencePrompts.BuildThreadPrompt(Context(draft, plan, thread)));
 
         Assert.Contains("attachments: \"Change Order 7 pricing\"", lines[0]);
+    }
+
+    [Fact]
+    public void BuildRequest_IsStoryTierWithStablePrefixAndAttemptLabel()
+    {
+        var (draft, plan, thread) = HotCase();
+        var ctx = Context(draft, plan, thread);
+        var feedback = new List<RenderViolation> { new() { Code = "V2", Seq = 2, Text = "names \"X\", who is not in the cast" } };
+
+        var first = ThreadRenderer.BuildRequest(ctx, 1, null);
+        var second = ThreadRenderer.BuildRequest(ctx, 2, feedback);
+
+        Assert.Equal(LlmTier.Story, first.Tier);
+        Assert.Equal(12_000, first.MaxOutputTokens);
+        Assert.Equal(ThreadRenderer.MaxOutputTokens, second.MaxOutputTokens);
+        Assert.Equal(EvidencePrompts.SystemPrompt, first.SystemPrompt);
+        Assert.Equal(EvidencePrompts.SystemPrompt, second.SystemPrompt);
+        Assert.Equal($"Generate Corpus - {thread.Id}", first.OperationName);
+        Assert.Equal($"Generate Corpus - {thread.Id} attempt 2", second.OperationName);
+        Assert.StartsWith(first.UserPrompt, second.UserPrompt, StringComparison.Ordinal);
+        Assert.EndsWith("- msg 2: names \"X\", who is not in the cast" + Environment.NewLine, second.UserPrompt);
+    }
+
+    [Fact]
+    public void RenderResponder_AnswersByThreadIdWithinLengthBands()
+    {
+        var (draft, plan, thread) = HotCase();
+        var ctx = Context(draft, plan, thread);
+        var responder = EvidenceTestData.RenderResponder(plan, draft.Guide!);
+        var request = ThreadRenderer.BuildRequest(ctx, 1, null);
+
+        var response = responder(new LlmProviderRequest { SystemPrompt = request.SystemPrompt, UserPrompt = request.UserPrompt });
+
+        Assert.Equal(LlmOutcome.Succeeded, response.Outcome);
+        var dto = JsonSerializer.Deserialize<ThreadRenderer.ThreadRenderDto>(response.Text,
+            new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } })!;
+        Assert.Equal(thread.Messages.OrderBy(m => m.Seq).Select(m => m.Seq), dto.Messages.Select(m => m.Seq));
+
+        var assignment = RenderAssignments.Compute(plan)[thread.Id];
+        foreach (var message in dto.Messages)
+        {
+            var spec = RenderAssignments.Spec(assignment.For(message.Seq)!.Length);
+            var words = message.Body.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+            Assert.InRange(words, spec.MinWords, spec.MaxWords);
+            Assert.Equal("Thanks,", message.SignOff);
+            Assert.Empty(message.PeopleNamed);
+        }
+
+        var detail = Assert.Single(dto.NewDetails);
+        var n = int.Parse(thread.Id[2..]).ToString();
+        Assert.Equal(1, detail.Seq);
+        Assert.Equal(LedgerKind.Commitment, detail.Kind);
+        Assert.Equal($"site walk {n}", detail.About);
+        Assert.Equal($"The team agreed to a site walk {n}.", detail.Statement);
+        Assert.Equal(string.Empty, detail.Value);
+    }
+
+    [Fact]
+    public void RenderResponder_OverrideReceivesAttemptAndUnknownThreadFails()
+    {
+        var (draft, plan, thread) = HotCase();
+        var ctx = Context(draft, plan, thread);
+        var attempts = new List<int>();
+        var responder = EvidenceTestData.RenderResponder(plan, draft.Guide!, (id, attempt) =>
+        {
+            attempts.Add(attempt);
+            return attempt == 1 ? "{\"messages\":[],\"newDetails\":[]}" : null;
+        });
+        var prompt = ThreadRenderer.BuildRequest(ctx, 1, null).UserPrompt;
+
+        var first = responder(new LlmProviderRequest { UserPrompt = prompt });
+        var second = responder(new LlmProviderRequest { UserPrompt = prompt });
+        var unknown = responder(new LlmProviderRequest { UserPrompt = "Thread id: T-9999" });
+
+        Assert.Equal("{\"messages\":[],\"newDetails\":[]}", first.Text);
+        Assert.Contains("site walk", second.Text);
+        Assert.Equal(new[] { 1, 2 }, attempts);
+        Assert.Equal(LlmOutcome.Failed, unknown.Outcome);
     }
 }

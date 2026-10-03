@@ -399,7 +399,7 @@ public static class CorpusUiText
             {
                 Variant = variant,
                 Heading = "The plan is out of date with the case guide.",
-                Body = "The case guide changed after this plan was built. Re-plan builds a new plan from the current guide. Approval is withdrawn until you re-plan or keep this plan.",
+                Body = "The case guide changed after this plan was built. Re-plan builds a new plan from the current guide. Approval is withdrawn until you re-plan, or keep this plan and approve it again.",
                 PrimaryText = "Re-plan...",
                 SecondaryText = "Keep This Plan"
             },

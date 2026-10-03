@@ -212,7 +212,8 @@ public static class CorpusApproval
     }
 
     /// <summary>
-    /// Keep This Plan: dismisses the stale banner for the current guide hash only.
+    /// Keep This Plan: dismisses the stale banner for the current guide hash only. Approval withdrawn for staleness stays
+    /// withdrawn: approving again rewrites the protocol from the current guide (banner text says so, WR-11).
     /// </summary>
     public static void KeepStalePlan(CaseDraft draft)
     {

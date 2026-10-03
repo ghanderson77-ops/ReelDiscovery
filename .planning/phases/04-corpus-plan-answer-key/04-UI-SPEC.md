@@ -309,7 +309,7 @@ Approval badge: a borderless `Label`-sized control, height 34, painting an 8 px 
 
 | Variant | Shown when | Heading | Body | Buttons |
 |---------|-----------|---------|------|---------|
-| Stale vs case guide (D-25) | `plan.GuideHash != guide.ComputeHash()` and that hash was not dismissed | `The plan is out of date with the case guide.` | `The case guide changed after this plan was built. Re-plan builds a new plan from the current guide. Approval is withdrawn until you re-plan or keep this plan.` | `Re-plan...` (Primary), `Keep This Plan` (Default) |
+| Stale vs case guide (D-25) | `plan.GuideHash != guide.ComputeHash()` and that hash was not dismissed | `The plan is out of date with the case guide.` | `The case guide changed after this plan was built. Re-plan builds a new plan from the current guide. Approval is withdrawn until you re-plan, or keep this plan and approve it again.` | `Re-plan...` (Primary), `Keep This Plan` (Default) |
 | Settings changed after approval | plan approved and `plan.SettingsHash != settings.ComputeHash()` and not dismissed | `The corpus settings changed after this plan was approved.` | `This plan still uses the earlier settings ({Plural(n, "email")}, {p}% relevant). Re-plan builds a new plan with the current settings. Keep This Plan leaves the approved plan and its answer key as they are.` | `Re-plan...` (Primary), `Keep This Plan` (Default) |
 
 - Stale: entering the step sets `Approved = false` (D-25) and saves; the files already on disk stay but Case Summary marks them out of date. `Keep This Plan` stores the dismissed hash and hides the banner; the user can then click `Approve Plan` again, which rewrites the files. Nothing re-plans silently.

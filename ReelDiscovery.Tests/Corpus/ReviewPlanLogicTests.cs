@@ -176,7 +176,7 @@ public class ReviewPlanLogicTests
         Assert.NotNull(banner);
         Assert.Equal(PlanBannerVariant.StaleGuide, banner!.Variant);
         Assert.Equal("The plan is out of date with the case guide.", banner.Heading);
-        Assert.Equal("The case guide changed after this plan was built. Re-plan builds a new plan from the current guide. Approval is withdrawn until you re-plan or keep this plan.", banner.Body);
+        Assert.Equal("The case guide changed after this plan was built. Re-plan builds a new plan from the current guide. Approval is withdrawn until you re-plan, or keep this plan and approve it again.", banner.Body);
         Assert.Equal("Re-plan...", banner.PrimaryText);
         Assert.Equal("Keep This Plan", banner.SecondaryText);
     }

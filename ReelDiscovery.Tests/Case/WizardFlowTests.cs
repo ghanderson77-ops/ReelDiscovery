@@ -15,7 +15,7 @@ public class WizardFlowTests
             new[]
             {
                 typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
-                typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepCaseSummary)
+                typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepCaseSummary)
             },
             WizardForm.StepTypesFor(WizardFlow.CaseDriven));
     }
@@ -26,6 +26,7 @@ public class WizardFlowTests
     [InlineData(CaseStage.CaseGuide, typeof(StepCaseGuide))]
     [InlineData(CaseStage.CorpusSettings, typeof(StepCorpusSettings))]
     [InlineData(CaseStage.ReviewPlan, typeof(StepReviewPlan))]
+    [InlineData(CaseStage.Generation, typeof(StepGenerateCorpus))]
     [InlineData(CaseStage.Summary, typeof(StepCaseSummary))]
     public void StepTypeForStage_MapsEveryStage(CaseStage stage, Type expected)
     {
@@ -43,11 +44,13 @@ public class WizardFlowTests
     [Fact]
     public void CaseDriven_CorpusStepsSitBetweenGuideAndSummary()
     {
-        // D-12: Corpus Settings is step 5 of 7 and Review Plan is step 6 of 7
+        // D-12: Corpus Settings is step 5 of 8, Review Plan step 6 and Generate Corpus step 7 (UI-SPEC S4)
         var types = WizardForm.StepTypesFor(WizardFlow.CaseDriven);
-        Assert.Equal(7, types.Count);
+        Assert.Equal(8, types.Count);
         Assert.Equal(4, types.ToList().IndexOf(typeof(StepCorpusSettings)));
         Assert.Equal(5, types.ToList().IndexOf(typeof(StepReviewPlan)));
+        Assert.Equal(6, types.ToList().IndexOf(typeof(StepGenerateCorpus)));
+        Assert.Equal(7, types.ToList().IndexOf(typeof(StepCaseSummary)));
     }
 
     [Fact]

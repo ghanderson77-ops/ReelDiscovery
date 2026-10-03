@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-11-PLAN.md
-last_updated: "2026-10-03T20:56:27.862Z"
+stopped_at: Completed 05-12-PLAN.md
+last_updated: "2026-10-03T21:02:02.446Z"
 last_activity: 2026-10-03
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 81
-  completed_plans: 75
-  percent: 93
+  completed_plans: 76
+  percent: 94
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 5 (Relevant Evidence Generation & Narrative Ledger) — EXECUTING
-Plan: 12 of 17
+Plan: 13 of 17
 Status: Ready to execute
 Last activity: 2026-10-03
 
@@ -126,6 +126,7 @@ Progress: [██████████] 100%
 | Phase 05 P09 | 14min | 2 tasks | 2 files |
 | Phase 05 P10 | 4min | 2 tasks | 4 files |
 | Phase 05 P11 | 15min | 3 tasks | 5 files |
+| Phase 05 P12 | 20min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -346,6 +347,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-10: Journal replay keeps records for any thread in the plan (not only relevant) so Phase 6 can share the journal; ListAllFiles never throws
 - [Phase 05]: Generation run state covers relevant threads only; remaining cost includes Failed threads (Continue retries them)
 - [Phase 05]: Story-so-far and answer-key files are rewritten independently from plan + journal; first failure reported, others still written
+- [Phase 05]: 05-12: ThreadUnitOfWork returns NotRun whenever run.IsFatal is set after a call (thread stays pending for Continue, D-06)
+- [Phase 05]: 05-12: Every ThreadFailed record carries summed tokens and story-model cost; a failed failure-append is swallowed so the run continues
 
 ### Pending Todos
 
@@ -367,6 +370,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-03T20:56:20.084Z
-Stopped at: Completed 05-11-PLAN.md
+Last session: 2026-10-03T21:02:02.441Z
+Stopped at: Completed 05-12-PLAN.md
 Resume file: None

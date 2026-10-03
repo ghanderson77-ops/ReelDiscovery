@@ -172,7 +172,7 @@ Plans:
 - [x] 05-09-PLAN.md — RenderValidator code checks V1-V8 (Wave 4)
 - [x] 05-10-PLAN.md — MailboxWriter (per-custodian atomic EMLs) + GenerationJournal (append/replay) (Wave 4)
 - [x] 05-11-PLAN.md — GenerationRunState, answer-key re-projection, story-so-far .docx, draft applier (Wave 5)
-- [ ] 05-12-PLAN.md — GenerationSnapshot + ThreadUnitOfWork (check-retry, keep best, write, journal) (Wave 5)
+- [x] 05-12-PLAN.md — GenerationSnapshot + ThreadUnitOfWork (check-retry, keep best, write, journal) (Wave 5)
 - [ ] 05-13-PLAN.md — GenerationRunner (waves, cancel, fatal, continue) + Start Over + end-to-end tests (Wave 6)
 - [ ] 05-14-PLAN.md — StepGenerateCorpus layout, entry display, 144-DPI render tests (Wave 7)
 - [ ] 05-15-PLAN.md — Run lifecycle (off-UI run, persistence, cancel, Start Over, reopen) + 8-step wizard shell (Wave 8)

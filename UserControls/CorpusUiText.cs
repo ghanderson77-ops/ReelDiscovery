@@ -570,6 +570,9 @@ public static class CorpusUiText
     public static string ReadyWithWarningsText(int warnings) =>
         $"Plan ready with {CaseGuideUiText.Plural(warnings, "warning", "warnings")}. Review the Checks list, then click Approve Plan.";
 
+    // Cancel confirmed after the planner had finished and the new plan was being saved (WR-09)
+    public const string CancelTooLateText = "Planning had already finished, so the new plan was kept. Use Re-plan to build another.";
+
     public static string CancelledText(bool previousPlan) =>
         previousPlan
             ? "Planning cancelled. The previous plan is still in place."

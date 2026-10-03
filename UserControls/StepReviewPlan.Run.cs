@@ -272,6 +272,11 @@ public partial class StepReviewPlan
             if (IsDisposed)
                 return;
 
+            // Past this point the plan is applied without a token: Cancel can no longer stop it, so it goes away, and a
+            // cancel confirmed while the planner was finishing still discards the new plan (D-18, WR-09)
+            _btnCancel.Enabled = false;
+            _cts.Token.ThrowIfCancellationRequested();
+
             if (result.Succeeded)
             {
                 // corpus-plan.json first, then the draft points at it; the stage advances to ReviewPlan (D-04)
@@ -413,6 +418,14 @@ public partial class StepReviewPlan
         var answer = MessageBox.Show(FindForm(), text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
         if (answer != DialogResult.Yes)
             return;
+
+        // The run may have moved on to saving the new plan while the confirmation was open (WR-09)
+        if (!_isPlanning || _cts == null || !_btnCancel.Enabled)
+        {
+            if (!_isPlanning && Draft.Corpus?.Plan != null)
+                SetStatus(CorpusUiText.CancelTooLateText, Theme.Warning);
+            return;
+        }
 
         _btnCancel.Enabled = false;
         try

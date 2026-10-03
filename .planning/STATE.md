@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-10-03T19:48:31.722Z"
+last_updated: "2026-10-03T19:52:18.196Z"
 last_activity: 2026-10-03
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 81
-  completed_plans: 66
-  percent: 81
+  completed_plans: 67
+  percent: 83
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 5 (Relevant Evidence Generation & Narrative Ledger) — EXECUTING
-Plan: 3 of 17
+Plan: 4 of 17
 Status: Ready to execute
 Last activity: 2026-10-03
 
@@ -117,6 +117,7 @@ Progress: [██████████] 100%
 | Phase 04 P20 | 25min | 2 tasks | 1 files |
 | Phase 05 P01 | 15min | 2 tasks | 20 files |
 | Phase 05 P02 | 10min | 2 tasks | 11 files |
+| Phase 05 P03 | 8min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -315,6 +316,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-01: case.json FormatVersion 3 and CaseStage.Generation (stored by name) carry Corpus.Generation ledger state
 - [Phase 05]: 05-02: Answer-key overlay applies only to email rows, before attachment rows are built (attachments copy subject, stay Planned)
 - [Phase 05]: 05-02: Blank overlay Status falls back to Planned; blank Subject keeps the computed subject
+- [Phase 05]: 05-03: Length bands apportion over all relevant-thread messages; subtlety pool is own-basis non-privileged only; every hot message is Explicit
+- [Phase 05]: 05-03: Waves and render assignments are pure functions of the whole plan ranked by SHA-256 StableRank, never Random/GetHashCode
 
 ### Pending Todos
 
@@ -336,6 +339,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-03T19:48:24.391Z
+Last session: 2026-10-03T19:52:11.932Z
 Stopped at: Completed 05-01-PLAN.md
 Resume file: None

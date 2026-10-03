@@ -377,4 +377,139 @@ public class GenerationRunStateTests
 
         Assert.Null(draft.Corpus);
     }
+    // ---- GenerationOutputs (Task 3) ----
+
+    private const int SharingViolation = unchecked((int)0x80070020);
+
+    private static AnswerKeyOverlay MixedOverlay(CorpusPlan plan, GenerationRunState state) =>
+        state.BuildOverlay(plan, RenderAssignments.Compute(plan));
+
+    [Fact]
+    public async Task WriteAnswerKeyAsync_WritesCsvAndXlsxWithOverlay()
+    {
+        var (draft, plan, state, threads) = Mixed();
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var result = await GenerationOutputs.WriteAnswerKeyAsync(folder, draft.Guide!, plan, MixedOverlay(plan, state));
+
+            Assert.True(result.Succeeded);
+            Assert.Equal(new[] { CorpusFileKind.AnswerKeyCsv, CorpusFileKind.AnswerKeyXlsx }, result.Files.Select(f => f.Kind));
+            Assert.All(result.Files, f => Assert.Equal(plan.PlanId, f.PlanId));
+            Assert.Equal(AnswerKeyCsvWriter.FileName, result.Files[0].FileName);
+            Assert.Equal(AnswerKeyXlsxWriter.FileName, result.Files[1].FileName);
+            Assert.True(File.Exists(Path.Combine(folder, AnswerKeyXlsxWriter.FileName)));
+
+            var csv = await File.ReadAllTextAsync(Path.Combine(folder, AnswerKeyCsvWriter.FileName));
+            var written = csv.Split('\n').Select(l => l.TrimEnd('\r'))
+                .First(l => l.StartsWith(threads[0].Messages[0].DocId + ",", StringComparison.Ordinal));
+            Assert.Contains("Generated", written.Split(','));
+            Assert.Contains("Generated - with warnings", csv);
+            Assert.Contains("Failed", csv);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task WriteAnswerKeyAsync_LockedCsv_StillWritesXlsx()
+    {
+        var (draft, plan, state, _) = Mixed();
+        var written = new List<string>();
+        Task Writer(string path, byte[] bytes, CancellationToken ct)
+        {
+            if (path.EndsWith(AnswerKeyCsvWriter.FileName, StringComparison.Ordinal))
+                throw new IOException("The file is in use", SharingViolation);
+            written.Add(Path.GetFileName(path));
+            return Task.CompletedTask;
+        }
+
+        var result = await GenerationOutputs.WriteAnswerKeyAsync(@"C:\Cases\Brightline", draft.Guide!, plan, MixedOverlay(plan, state), Writer);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(AnswerKeyCsvWriter.FileName, result.FailedFileName);
+        Assert.Equal("The file is in use", result.Error);
+        Assert.True(result.FileOpenElsewhere);
+        Assert.Equal(CorpusFileKind.AnswerKeyXlsx, Assert.Single(result.Files).Kind);
+        Assert.Equal(new[] { AnswerKeyXlsxWriter.FileName }, written);
+    }
+
+    [Fact]
+    public async Task WriteAnswerKeyAsync_PlainIoError_NotOpenElsewhere_FirstFailureKept()
+    {
+        var (draft, plan, state, _) = Mixed();
+        Task Writer(string path, byte[] bytes, CancellationToken ct) => throw new IOException("Disk full: " + Path.GetFileName(path));
+
+        var result = await GenerationOutputs.WriteAnswerKeyAsync(@"C:\Cases\Brightline", draft.Guide!, plan, MixedOverlay(plan, state), Writer);
+
+        Assert.Equal(AnswerKeyCsvWriter.FileName, result.FailedFileName);
+        Assert.Equal("Disk full: answer-key.csv", result.Error);
+        Assert.False(result.FileOpenElsewhere);
+        Assert.Empty(result.Files);
+    }
+
+    [Fact]
+    public async Task WriteAnswerKeyAsync_Cancellation_Propagates()
+    {
+        var (draft, plan, state, _) = Mixed();
+        Task Writer(string path, byte[] bytes, CancellationToken ct) => throw new OperationCanceledException();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            GenerationOutputs.WriteAnswerKeyAsync(@"C:\Cases\Brightline", draft.Guide!, plan, MixedOverlay(plan, state), Writer));
+    }
+
+    [Fact]
+    public async Task WriteStorySoFarAsync_WritesFolderNamedDocx()
+    {
+        var (draft, plan, state, _) = Mixed();
+        var root = EvidenceTestData.TempCaseFolder();
+        var folder = Path.Combine(root, "Brightline v Harmon");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var people = PeopleDirectory.Create(draft.Guide!, plan);
+            var result = await GenerationOutputs.WriteStorySoFarAsync(folder + Path.DirectorySeparatorChar, draft, plan,
+                Ledger("T-0001-L01"), state, people);
+
+            Assert.True(result.Succeeded);
+            var file = Assert.Single(result.Files);
+            Assert.Equal(CorpusFileKind.StorySoFar, file.Kind);
+            Assert.Equal("Brightline v Harmon - Story So Far.docx", file.FileName);
+            Assert.Equal(plan.PlanId, file.PlanId);
+            Assert.True(File.Exists(Path.Combine(folder, "Brightline v Harmon - Story So Far.docx")));
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(root);
+        }
+    }
+
+    [Fact]
+    public async Task WriteStorySoFarAsync_IoError_IsReported()
+    {
+        var (draft, plan, state, _) = Mixed();
+        var people = PeopleDirectory.Create(draft.Guide!, plan);
+        Task Writer(string path, byte[] bytes, CancellationToken ct) => throw new UnauthorizedAccessException("Access denied");
+
+        var result = await GenerationOutputs.WriteStorySoFarAsync(@"C:\Cases\Brightline v Harmon", draft, plan,
+            Ledger("T-0001-L01"), state, people, Writer);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("Brightline v Harmon - Story So Far.docx", result.FailedFileName);
+        Assert.Equal("Access denied", result.Error);
+        Assert.Empty(result.Files);
+    }
+
+    [Fact]
+    public async Task WriteStorySoFarAsync_Cancellation_Propagates()
+    {
+        var (draft, plan, state, _) = Mixed();
+        var people = PeopleDirectory.Create(draft.Guide!, plan);
+        Task Writer(string path, byte[] bytes, CancellationToken ct) => throw new OperationCanceledException();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GenerationOutputs.WriteStorySoFarAsync(
+            @"C:\Cases\Brightline v Harmon", draft, plan, Ledger("T-0001-L01"), state, people, Writer));
+    }
 }

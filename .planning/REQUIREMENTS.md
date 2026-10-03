@@ -70,7 +70,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Evidence Corpus Generation
 
 - [x] **CORP-01**: Each email is written from a point-in-time context: only facts dated on or before it, limited to what its participants could know
-- [ ] **CORP-02**: Emails use canonical registry values, and generated output is checked against the plan (participants, dates, values); violations trigger a retry
+- [x] **CORP-02**: Emails use canonical registry values, and generated output is checked against the plan (participants, dates, values); violations trigger a retry
 - [x] **CORP-03**: Relevant emails evidence the alleged conduct with varied subtlety (not all "smoking guns"), in natural business voice without legal framing
 - [x] **CORP-04**: A small set of hot documents is deliberately generated for key facts
 - [x] **CORP-05**: Privileged attorney-client communications are generated with counsel characters
@@ -113,7 +113,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Run Reliability & Cost
 
 - [x] **RUN-01**: Each completed thread (EML files plus its answer-key rows) is saved immediately; an interruption never loses finished work
-- [x] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
+- [ ] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
 - [ ] **RUN-03**: Bulk generation can use the provider's Batch API (OpenAI and Anthropic) for lower cost
 - [ ] **RUN-04**: Submitted batch jobs are tracked on disk so results can be collected if the app is restarted
 - [ ] **RUN-05**: Shared case-guide context uses prompt caching where the provider supports it
@@ -215,7 +215,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAN-06 | Phase 4 | Complete |
 | PLAN-07 | Phase 4 | Complete |
 | CORP-01 | Phase 5 | Complete |
-| CORP-02 | Phase 5 | Pending |
+| CORP-02 | Phase 5 | Complete |
 | CORP-03 | Phase 5 | Complete |
 | CORP-04 | Phase 5 | Complete |
 | CORP-05 | Phase 5 | Complete |
@@ -243,13 +243,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QA-02 | Phase 7 | Pending |
 | QA-03 | Phase 7 | Pending |
 | RUN-01 | Phase 5 | Complete |
-| RUN-02 | Phase 5 | Complete |
+| RUN-02 | Phase 5, 6 | Partial (emails done in Phase 5; attachments, images, invites, voicemails in Phase 6) |
 | RUN-03 | Phase 7 | Pending |
 | RUN-04 | Phase 7 | Pending |
 | RUN-05 | Phase 7 | Pending |
 | RUN-06 | Phase 5 | Complete |
 | RUN-07 | Phase 5 | Complete |
-| OUT-01 | Phase 5 | Pending |
+| OUT-01 | Phase 5, 6 | Partial (relevant mail in Phase 5; non-relevant mail in Phase 6) |
 | OUT-02 | Phase 5 | Complete |
 | OUT-03 | Phase 7 | Pending |
 

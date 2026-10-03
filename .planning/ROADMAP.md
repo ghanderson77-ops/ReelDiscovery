@@ -182,7 +182,7 @@ Plans:
 ### Phase 6: Attachments & Non-Relevant Corpus
 **Goal**: The corpus becomes a full mixed collection. Case-consistent attachments serve as evidence, and non-relevant traffic (including near-miss decoys) comes from the same pipeline, so nothing but content separates relevant from non-relevant.
 **Depends on**: Phase 5
-**Requirements**: ATT-01, ATT-02, ATT-03, ATT-04, NOISE-01, NOISE-02, NOISE-03, NOISE-04, NOISE-05
+**Requirements**: ATT-01, ATT-02, ATT-03, ATT-04, NOISE-01, NOISE-02, NOISE-03, NOISE-04, NOISE-05, OUT-01, RUN-02
 **Success Criteria** (what must be TRUE):
   1. Planned Word, Excel and PowerPoint attachments, calendar invites, inline images and voicemails are generated. Their content matches the case guide and canonical values, and media types follow the provider availability rules.
   2. The corpus includes the custodians' own daily business, ancillary-character traffic, and newsletters/spam/personal email in the proportion the user set.

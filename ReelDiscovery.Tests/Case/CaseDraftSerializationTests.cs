@@ -7,10 +7,10 @@ namespace ReelDiscovery.Tests.Case;
 public class CaseDraftSerializationTests
 {
     [Fact]
-    public void FormatVersion_IsTwo()
+    public void FormatVersion_IsThree()
     {
-        Assert.Equal(2, CaseDraft.CurrentFormatVersion);
-        Assert.Contains("\"FormatVersion\": 2", new CaseDraft().ToJson());
+        Assert.Equal(3, CaseDraft.CurrentFormatVersion);
+        Assert.Contains("\"FormatVersion\": 3", new CaseDraft().ToJson());
     }
 
     [Fact]

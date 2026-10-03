@@ -11,5 +11,6 @@ public enum CaseStage
     CaseGuide,
     CorpusSettings,
     ReviewPlan,
+    Generation,
     Summary
 }

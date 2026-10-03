@@ -241,7 +241,7 @@ public class CaseGuideModelTests
     public void CaseStage_OrderAndAdvance()
     {
         Assert.Equal(
-            new[] { CaseStage.Described, CaseStage.CoreDocument, CaseStage.CaseGuide, CaseStage.CorpusSettings, CaseStage.ReviewPlan, CaseStage.Summary },
+            new[] { CaseStage.Described, CaseStage.CoreDocument, CaseStage.CaseGuide, CaseStage.CorpusSettings, CaseStage.ReviewPlan, CaseStage.Generation, CaseStage.Summary },
             Enum.GetValues<CaseStage>());
 
         var draft = CaseTestData.SampleGuidedDraft();

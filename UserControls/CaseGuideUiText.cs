@@ -510,6 +510,7 @@ public static class CaseGuideUiText
             CaseStage.CaseGuide => "Case guide",
             CaseStage.CorpusSettings => "Corpus settings",
             CaseStage.ReviewPlan => "Plan review",
+            CaseStage.Generation => "Generating emails",
             CaseStage.Summary => "Complete",
             _ => "Core document"
         };

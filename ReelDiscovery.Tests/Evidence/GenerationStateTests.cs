@@ -293,6 +293,93 @@ public class GenerationStateTests
     }
 
     [Fact]
+    public void CaseDraft_GenerationState_RoundTrips()
+    {
+        var (draft, _) = EvidenceTestData.ApprovedCase();
+        var state = new GenerationState { RunPlanId = draft.Corpus!.PlanId, LastOutcome = GenerationOutcome.Cancelled, LastMessage = "Stopped" };
+        state.Ledger.Entries.Add(Entry("T-0003-L01"));
+        state.Ledger.Entries.Add(Entry("T-0003-L02", "2024-03-20", "Shop drawings resubmitted"));
+        draft.Corpus.Generation = state;
+
+        var json = draft.ToJson();
+        Assert.Contains("\"FormatVersion\": 3", json);
+        var loaded = CaseDraft.FromJson(json);
+        loaded.Normalize();
+
+        var generation = loaded.Corpus!.Generation!;
+        Assert.Equal(state.RunPlanId, generation.RunPlanId);
+        Assert.Equal(GenerationOutcome.Cancelled, generation.LastOutcome);
+        Assert.Equal("Stopped", generation.LastMessage);
+        Assert.Equal(2, generation.Ledger.Entries.Count);
+        AssertSameEntry(state.Ledger.Entries[0], generation.Ledger.Entries[0]);
+        AssertSameEntry(state.Ledger.Entries[1], generation.Ledger.Entries[1]);
+    }
+
+    [Fact]
+    public void CaseDraft_NullGenerationParts_NormalizeToEmpty()
+    {
+        var draft = CaseDraft.FromJson("{\"FormatVersion\":3,\"Corpus\":{\"Generation\":{\"Ledger\":null,\"LastMessage\":null}}}");
+        draft.Normalize();
+
+        var generation = draft.Corpus!.Generation!;
+        Assert.NotNull(generation.Ledger);
+        Assert.Empty(generation.Ledger.Entries);
+        Assert.Equal(string.Empty, generation.LastMessage);
+    }
+
+    [Fact]
+    public void CorpusState_Normalize_RepairsGeneration()
+    {
+        var corpus = new CorpusState { Generation = new GenerationState { ThreadsFailed = -3, Ledger = null! } };
+        corpus.Normalize();
+        Assert.Equal(0, corpus.Generation!.ThreadsFailed);
+        Assert.NotNull(corpus.Generation.Ledger);
+    }
+
+    [Fact]
+    public void ApprovedCase_CoversEveryThreadShape()
+    {
+        var (draft, plan) = EvidenceTestData.ApprovedCase();
+        var guide = draft.Guide!;
+
+        Assert.True(draft.Corpus!.Approved);
+        Assert.Same(plan, draft.Corpus.Plan);
+        Assert.Equal(plan.PlanId, draft.Corpus.PlanId);
+
+        var relevant = plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant).ToList();
+
+        var fourMessage = Assert.Single(relevant, t => t.Messages.Count == 4);
+        Assert.Equal(new[] { MessageKind.New, MessageKind.Reply, MessageKind.ReplyAll, MessageKind.Forward },
+            fourMessage.Messages.OrderBy(m => m.Seq).Select(m => m.Kind));
+        Assert.Equal(new[] { 0, 1, 2, 3 }, fourMessage.Messages.OrderBy(m => m.Seq).Select(m => m.ReplyToSeq));
+        Assert.Contains(fourMessage.Messages, m => m.IsHot);
+
+        var vendor = plan.Externals.Single(e => e.Id == EvidenceTestData.VendorId);
+        Assert.Equal(ExternalKind.Vendor, vendor.Kind);
+        Assert.Contains(relevant, t => t.Messages.OrderBy(m => m.Seq).First().FromId == vendor.Id);
+
+        Assert.Contains(relevant, t => t.IsPrivileged
+            && t.Messages.SelectMany(m => new[] { m.FromId }.Concat(m.ToIds).Concat(m.CcIds))
+                .Select(id => guide.FindCast(id))
+                .Any(c => c != null && c.Role is CastRole.InHouseCounsel or CastRole.OutsideCounsel));
+
+        Assert.Contains(plan.AllMessages(), m => m.CustodianIds.Count >= 3);
+
+        foreach (var message in relevant.SelectMany(t => t.Messages))
+        {
+            Assert.False(string.IsNullOrEmpty(message.DocId), message.Id);
+            Assert.True(CorpusPlan.IsSafeEmlPath(message.FilePath), message.FilePath);
+        }
+
+        // Seq order is time order within every thread
+        foreach (var thread in plan.Threads)
+        {
+            var ordered = thread.Messages.OrderBy(m => m.Seq).Select(m => m.SentAt.UtcDateTime).ToList();
+            Assert.Equal(ordered.OrderBy(x => x), ordered);
+        }
+    }
+
+    [Fact]
     public void ThreadAssignment_For_FindsBySeq()
     {
         var assignment = new ThreadAssignment

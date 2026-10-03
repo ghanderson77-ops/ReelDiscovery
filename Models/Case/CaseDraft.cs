@@ -28,7 +28,7 @@ public enum CourtPreference
 public class CaseDraft
 {
     public const int MaxScenarioLength = 8_000;
-    public const int CurrentFormatVersion = 2;
+    public const int CurrentFormatVersion = 3;
 
     // Shared with Phase 3 case.json; enums as strings
     public static readonly JsonSerializerOptions JsonOptions = new()
@@ -139,7 +139,8 @@ public class CaseDraft
         Corpus?.Normalize();
 
         // Older files are upgraded on load so a saved file carries the current version and older builds refuse it
-        // instead of silently dropping Corpus (T-04-03); newer files never get here (CaseStore checks first)
+        // instead of silently dropping Corpus or its generation state (T-04-03, T-05-03); newer files never get here
+        // (CaseStore checks first)
         if (FormatVersion < CurrentFormatVersion)
             FormatVersion = CurrentFormatVersion;
         if (CaseId == Guid.Empty)

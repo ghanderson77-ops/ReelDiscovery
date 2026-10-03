@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Models.Evidence;
 
 namespace ReelDiscovery.Models.Corpus;
 
@@ -7,7 +8,8 @@ public enum CorpusFileKind
 {
     AnswerKeyCsv,
     AnswerKeyXlsx,
-    ReviewProtocol
+    ReviewProtocol,
+    StorySoFar
 }
 
 /// <summary>
@@ -47,6 +49,11 @@ public class CorpusState
 
     public List<WrittenCorpusFile> WrittenFiles { get; set; } = new();
 
+    /// <summary>
+    /// Relevant-email generation state (Phase 5): ledger, last outcome and cached counts. Saved in case.json (D-10).
+    /// </summary>
+    public GenerationState? Generation { get; set; }
+
     // Loaded from corpus-plan.json by CorpusPlanStore; never serialized into case.json
     [JsonIgnore]
     public CorpusPlan? Plan { get; set; }
@@ -68,5 +75,6 @@ public class CorpusState
         WrittenFiles = CaseGuide.CleanList(WrittenFiles);
         foreach (var file in WrittenFiles)
             file.FileName ??= string.Empty;
+        Generation?.Normalize();
     }
 }

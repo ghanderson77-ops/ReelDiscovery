@@ -298,4 +298,46 @@ public class LlmGatewayTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => gateway2.GenerateAsync<ResultDto>(Request(), cts.Token));
         Assert.Empty(fake2.Requests);
     }
+
+    [Fact]
+    public async Task TokenTotals_SumEveryBilledAttempt()
+    {
+        var (gateway, fake, _) = Create();
+        fake.Responses.Enqueue(FakeLlmProvider.Truncated(10, 5));
+        fake.Responses.Enqueue(FakeLlmProvider.Ok("{\"name\":\"B\",\"count\":1}", 20, 7));
+
+        var result = await gateway.GenerateAsync<ResultDto>(Request());
+
+        Assert.Equal(LlmOutcome.Succeeded, result.Outcome);
+        Assert.Equal(2, result.Attempts);
+        Assert.Equal(30, result.InputTokens);
+        Assert.Equal(12, result.OutputTokens);
+    }
+
+    [Fact]
+    public async Task TokenTotals_RefusedReportsSingleResponse()
+    {
+        var (gateway, fake, _) = Create();
+        fake.Responses.Enqueue(FakeLlmProvider.Refused("no"));
+
+        var result = await gateway.GenerateAsync<ResultDto>(Request());
+
+        Assert.Equal(LlmOutcome.Refused, result.Outcome);
+        Assert.Equal(10, result.InputTokens);
+        Assert.Equal(2, result.OutputTokens);
+    }
+
+    [Fact]
+    public async Task TokenTotals_InvalidRetriesAreCounted()
+    {
+        var (gateway, fake, _) = Create();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok("not json", 3, 1));
+        fake.Responses.Enqueue(FakeLlmProvider.Ok("{\"name\":\"C\",\"count\":3}", 4, 2));
+
+        var result = await gateway.GenerateAsync<ResultDto>(Request());
+
+        Assert.Equal(LlmOutcome.Succeeded, result.Outcome);
+        Assert.Equal(7, result.InputTokens);
+        Assert.Equal(3, result.OutputTokens);
+    }
 }

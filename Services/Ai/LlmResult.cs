@@ -37,6 +37,12 @@ public class LlmResult
     public string ModelId { get; set; } = string.Empty;
     public int Attempts { get; set; }
 
+    /// <summary>Input tokens summed over every billed attempt of this call.</summary>
+    public int InputTokens { get; set; }
+
+    /// <summary>Output tokens summed over every billed attempt of this call.</summary>
+    public int OutputTokens { get; set; }
+
     /// <summary>
     /// True when the failure cannot be fixed by retrying (bad key or exhausted spend limit);
     /// the whole run should stop.

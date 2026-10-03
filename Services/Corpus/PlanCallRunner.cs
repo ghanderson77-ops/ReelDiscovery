@@ -66,6 +66,12 @@ internal sealed class PlanCallOutcome<T> where T : class
     public string Error { get; set; } = string.Empty;
     public bool Refused { get; set; }
     public string RefusalMessage { get; set; } = string.Empty;
+
+    /// <summary>Input tokens billed for this call, including failed attempts.</summary>
+    public int InputTokens { get; set; }
+
+    /// <summary>Output tokens billed for this call, including failed attempts.</summary>
+    public int OutputTokens { get; set; }
 }
 
 internal static class PlanCallRunner
@@ -92,8 +98,9 @@ internal static class PlanCallRunner
             }
 
             onStart?.Invoke();
-            var value = (await llm.GenerateAsync<T>(request, run.Cts.Token)).GetValueOrThrow();
-            return new PlanCallOutcome<T> { Value = value };
+            var result = await llm.GenerateAsync<T>(request, run.Cts.Token);
+            var value = result.GetValueOrThrow();
+            return new PlanCallOutcome<T> { Value = value, InputTokens = result.InputTokens, OutputTokens = result.OutputTokens };
         }
         catch (OperationCanceledException) when (run.UserToken.IsCancellationRequested)
         {
@@ -113,7 +120,7 @@ internal static class PlanCallRunner
         {
             // Bad key or exhausted spend limit: stop all further calls, keep completed units
             run.SetFatal(ex.Result.Message ?? ex.Message);
-            return new PlanCallOutcome<T>();
+            return new PlanCallOutcome<T> { InputTokens = ex.Result.InputTokens, OutputTokens = ex.Result.OutputTokens };
         }
         catch (LlmCallException ex)
         {
@@ -122,7 +129,9 @@ internal static class PlanCallRunner
             {
                 Error = DescribeOutcome(ex.Result, run.RetryHint),
                 Refused = refused,
-                RefusalMessage = refused ? ex.Result.Message ?? string.Empty : string.Empty
+                RefusalMessage = refused ? ex.Result.Message ?? string.Empty : string.Empty,
+                InputTokens = ex.Result.InputTokens,
+                OutputTokens = ex.Result.OutputTokens
             };
         }
         catch (Exception ex)

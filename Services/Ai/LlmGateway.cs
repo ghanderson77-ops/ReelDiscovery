@@ -75,6 +75,8 @@ public class LlmGateway : ILlmGateway
         var attempts = 0;
         var invalidAttempts = 0;
         var truncationRetries = 0;
+        var inputTotal = 0;
+        var outputTotal = 0;
 
         while (true)
         {
@@ -82,6 +84,7 @@ public class LlmGateway : ILlmGateway
             ct.ThrowIfCancellationRequested();
 
             var response = await _provider.SendAsync(providerRequest, ct);
+            inputTotal += Math.Max(0, response.InputTokens); outputTotal += Math.Max(0, response.OutputTokens);
 
             // Every attempt is billed, including failed parses and truncations
             if (response.InputTokens > 0 || response.OutputTokens > 0)
@@ -115,14 +118,14 @@ public class LlmGateway : ILlmGateway
                         }
 
                         if (value != null)
-                            return BuildResult(request, model, attempts, response, LlmOutcome.Succeeded, LlmFailureKind.None, response.Message, value);
+                            return BuildResult(request, model, attempts, inputTotal, outputTotal, response, LlmOutcome.Succeeded, LlmFailureKind.None, response.Message, value);
                     }
 
                     invalidAttempts++;
                     if (invalidAttempts < MaxInvalidAttempts)
                         continue;
 
-                    return BuildResult<T>(request, model, attempts, response, LlmOutcome.Invalid, LlmFailureKind.None, invalidMessage, null);
+                    return BuildResult<T>(request, model, attempts, inputTotal, outputTotal, response, LlmOutcome.Invalid, LlmFailureKind.None, invalidMessage, null);
                 }
 
                 case LlmOutcome.Truncated:
@@ -133,12 +136,12 @@ public class LlmGateway : ILlmGateway
                         continue;
                     }
 
-                    return BuildResult<T>(request, model, attempts, response, LlmOutcome.Truncated, LlmFailureKind.None,
+                    return BuildResult<T>(request, model, attempts, inputTotal, outputTotal, response, LlmOutcome.Truncated, LlmFailureKind.None,
                         response.Message ?? $"Output truncated at {providerRequest.MaxTokens} max tokens", null);
 
                 default:
                     // Refused / Failed: no app retry (the SDKs already retried 429/5xx)
-                    return BuildResult<T>(request, model, attempts, response, response.Outcome, response.FailureKind, response.Message, null);
+                    return BuildResult<T>(request, model, attempts, inputTotal, outputTotal, response, response.Outcome, response.FailureKind, response.Message, null);
             }
         }
     }
@@ -147,6 +150,8 @@ public class LlmGateway : ILlmGateway
         LlmRequest request,
         AIModelConfig model,
         int attempts,
+        int inputTokens,
+        int outputTokens,
         LlmProviderResponse response,
         LlmOutcome outcome,
         LlmFailureKind failureKind,
@@ -163,6 +168,8 @@ public class LlmGateway : ILlmGateway
             Provider = _provider.Kind,
             ModelId = model.ModelId,
             Attempts = attempts,
+            InputTokens = inputTokens,
+            OutputTokens = outputTokens,
             Value = value
         };
     }

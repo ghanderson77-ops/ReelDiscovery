@@ -240,4 +240,68 @@ public class PlanCallRunnerTests
         result.FatalError = "Invalid API key.";
         Assert.True(result.IsFatal);
     }
+
+    [Fact]
+    public async Task Tokens_SuccessCopiesGatewayTotals()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Truncated(10, 5));
+        fake.Responses.Enqueue(FakeLlmProvider.Ok(EchoJson, 20, 7));
+        using var run = new PlanCallRun(CancellationToken.None, 3, Hint);
+
+        var outcome = await PlanCallRunner.RunAsync<EchoDto>(gateway, Request(), run);
+
+        Assert.Equal("hello", outcome.Value!.Text);
+        Assert.Equal(30, outcome.InputTokens);
+        Assert.Equal(12, outcome.OutputTokens);
+    }
+
+    [Fact]
+    public async Task Tokens_RefusalCopiesResultTotals()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(FakeLlmProvider.Refused("no"));
+        using var run = new PlanCallRun(CancellationToken.None, 3, Hint);
+
+        var outcome = await PlanCallRunner.RunAsync<EchoDto>(gateway, Request(), run);
+
+        Assert.True(outcome.Refused);
+        Assert.Equal(10, outcome.InputTokens);
+        Assert.Equal(2, outcome.OutputTokens);
+    }
+
+    [Fact]
+    public async Task Tokens_FatalCopiesResultTotals()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.Responses.Enqueue(new LlmProviderResponse
+        {
+            Outcome = LlmOutcome.Failed,
+            FailureKind = LlmFailureKind.Auth,
+            Message = "Invalid API key.",
+            InputTokens = 4,
+            OutputTokens = 1
+        });
+        using var run = new PlanCallRun(CancellationToken.None, 3, Hint);
+
+        var outcome = await PlanCallRunner.RunAsync<EchoDto>(gateway, Request(), run);
+
+        Assert.True(run.IsFatal);
+        Assert.Equal(4, outcome.InputTokens);
+        Assert.Equal(1, outcome.OutputTokens);
+    }
+
+    [Fact]
+    public async Task Tokens_TimeoutReportsZero()
+    {
+        var (gateway, fake) = CaseTestData.CreateGateway();
+        fake.ThrowOnSend = new OperationCanceledException();
+        using var run = new PlanCallRun(CancellationToken.None, 3, Hint);
+
+        var outcome = await PlanCallRunner.RunAsync<EchoDto>(gateway, Request(), run);
+
+        Assert.StartsWith("The request timed out", outcome.Error);
+        Assert.Equal(0, outcome.InputTokens);
+        Assert.Equal(0, outcome.OutputTokens);
+    }
 }

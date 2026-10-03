@@ -55,6 +55,26 @@ public class NonRelevantSkeletonTests
     }
 
     [Fact]
+    public void Build_NoCastActiveInWindow_PlansWithWholeCastAndNotes()
+    {
+        // WR-03: every active range misses the window; sender lists used to be empty and indexed at -1 / 0
+        var draft = CorpusTestData.RichDraft();
+        foreach (var member in draft.Guide!.Cast)
+        {
+            member.ActiveFrom = "1990-01-01";
+            member.ActiveTo = "1990-12-31";
+        }
+        var ctx = SkeletonContext.Create(draft, new CorpusSettings(), false, new Random(42));
+        var mix = Mix(daily: 120, ancillary: 40, newsletter: 30, decoy: 20);
+
+        var skeleton = NonRelevantSkeletonBuilder.Build(ctx, mix, new List<PlannedThread>());
+
+        foreach (var category in BusinessLike)
+            Assert.Equal(mix[category], Of(skeleton, category).Sum(t => t.Messages.Count));
+        Assert.Contains(ctx.Notes, n => n.Contains("No cast member is active inside the date window"));
+    }
+
+    [Fact]
     public void Build_CategoryTotalsExactAndThreadFields()
     {
         var mix = Mix(daily: 400, ancillary: 160, decoy: 80);

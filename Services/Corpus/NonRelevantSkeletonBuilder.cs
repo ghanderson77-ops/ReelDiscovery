@@ -113,6 +113,7 @@ public static class NonRelevantSkeletonBuilder
         public List<DateOnly> BusinessDays { get; set; } = new();
         public Dictionary<string, List<DateOnly>> EligibleDays { get; } = new(StringComparer.Ordinal);
         public int Counter { get; set; }
+        public bool NotedNoActiveCast { get; set; }
     }
 
     /// <summary>
@@ -162,7 +163,7 @@ public static class NonRelevantSkeletonBuilder
             .SelectMany(t => t.Messages.Where(m => m != null))
             .GroupBy(m => m.FromId ?? string.Empty)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        var senders = ctx.CastById.Keys.Where(id => Eligible(run, id).Count > 0).ToList();
+        var senders = ActiveSenders(run);
         var weights = senders.Select(id => 1 + (sent.TryGetValue(id, out var n) ? n : 0)).ToList();
 
         var specs = new List<Spec>();
@@ -245,7 +246,7 @@ public static class NonRelevantSkeletonBuilder
         if (senders.Count == 0)
         {
             ctx.Notes.Add("The cast has no background staff, so ancillary emails are written by key characters.");
-            senders = ctx.CastById.Keys.Where(id => Eligible(run, id).Count > 0).ToList();
+            senders = ActiveSenders(run);
         }
 
         var threads = new List<PlannedThread>();
@@ -303,7 +304,7 @@ public static class NonRelevantSkeletonBuilder
         {
             // No fact to borrow from: keep the totals exact with business-like threads that borrow no issues
             ctx.Notes.Add("No dated key fact has a cast member who knew about it, so decoy emails borrow no issues.");
-            var senders = ctx.CastById.Keys.Where(id => Eligible(run, id).Count > 0).ToList();
+            var senders = ActiveSenders(run);
             foreach (var size in sizes)
             {
                 var sender = senders[ctx.Random.Next(senders.Count)];
@@ -798,6 +799,25 @@ public static class NonRelevantSkeletonBuilder
         return days;
     }
 
+    /// <summary>
+    /// Cast members active on at least one business day of the window; when nobody is (active ranges from the guide all
+    /// miss the window), every cast member, with a note, so the sender lists are never empty (WR-03).
+    /// </summary>
+    private static List<string> ActiveSenders(Run run)
+    {
+        var ctx = run.Ctx;
+        var senders = ctx.CastById.Keys.Where(id => Eligible(run, id).Count > 0).ToList();
+        if (senders.Count > 0)
+            return senders;
+
+        if (!run.NotedNoActiveCast)
+        {
+            ctx.Notes.Add("No cast member is active inside the date window, so non-relevant emails use the whole cast.");
+            run.NotedNoActiveCast = true;
+        }
+        return ctx.CastById.Keys.ToList();
+    }
+
     private static DateOnly PickDay(Run run, string id)
     {
         var days = Eligible(run, id);
@@ -866,7 +886,12 @@ public static class NonRelevantSkeletonBuilder
 
     private static int WeightedIndex(List<int> weights, Random random)
     {
-        var roll = random.Next(weights.Sum());
+        // No positive weight: the first item, never -1 (WR-03)
+        var total = weights.Sum();
+        if (total <= 0)
+            return 0;
+
+        var roll = random.Next(total);
         for (var i = 0; i < weights.Count; i++)
         {
             if (roll < weights[i])

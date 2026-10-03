@@ -44,6 +44,107 @@ public class OutcomeLine
 }
 
 /// <summary>
+/// What entering Generate Corpus shows (05-UI-SPEC S1 interaction rules 1-7).
+/// </summary>
+public enum GenerationEntry
+{
+    KeepRun,
+    NotApprovedCard,
+    PlanChangedCard,
+    UnreadableCard,
+    ReadyCard,
+    PartialDashboard,
+    FinishedDashboard
+}
+
+public class GenerationEntryInput
+{
+    public bool Running;
+    public bool HasPlan;
+    public bool Approved;
+    public bool HasSavedRun;
+
+    // The saved run's plan identity differs from the current plan
+    public bool PlanChanged;
+
+    // Non-empty when the saved run could not be read
+    public string UnreadableReason = "";
+    public int Total;
+
+    // Includes kept-with-warnings
+    public int Written;
+    public int Failed;
+}
+
+public enum GenerationStateCard
+{
+    Ready,
+    NotApproved,
+    PlanChanged,
+    Unreadable
+}
+
+public class GenerationCardContent
+{
+    public string Heading = "";
+    public string Body = "";
+    public string ButtonText = "";
+
+    // Danger button (Start Over...) instead of Primary
+    public bool Danger;
+}
+
+/// <summary>
+/// Line-3 and status-dot tone of a Case Summary row, mapped to Theme tokens (TextMuted/BorderStrong, Success, Warning, Danger).
+/// </summary>
+public enum SummaryTone
+{
+    Muted,
+    Success,
+    Warning,
+    Danger
+}
+
+public class SummaryRowContent
+{
+    public string Line2 = "";
+    public string Line3 = "";
+    public SummaryTone Line3Tone;
+    public SummaryTone DotTone;
+
+    // Mailboxes: Open Mailboxes Folder / Generate Emails. Story so far: Open in Word / Export Story So Far
+    public bool ShowPrimary;
+    public bool ShowSecondary;
+}
+
+public class MailboxesRowInput
+{
+    public bool Generated;
+    public bool EarlierPlan;
+    public int Total;
+
+    // Includes kept-with-warnings
+    public int Written;
+    public int Warnings;
+    public int Failed;
+    public int Files;
+    public int Mailboxes;
+    public bool FolderExists;
+}
+
+public class StoryRowInput
+{
+    public int Entries;
+    public int Threads;
+    public string FileName = "";
+    public bool FileExists;
+    public DateTime? WrittenLocal;
+
+    // Non-empty when the last write failed
+    public string Error = "";
+}
+
+/// <summary>
 /// All Phase 5 Generate Corpus and Case Summary copy with counts, dates or conditions (05-UI-SPEC), pure and
 /// unit-tested so the generation step stays layout-only (03-06 precedent). Every string is plain text and may carry
 /// model-written subjects or violation texts; labels showing it set UseMnemonic = false (T-04-33, T-05-15).
@@ -287,6 +388,166 @@ public static class GenerationUiText
 
     public static string MissingEmlText(string docId) => $"{docId}.eml is no longer in the case folder.";
 
+    // --- Entering the step ---
+
+    public static GenerationEntry EntryDecision(GenerationEntryInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.Running)
+            return GenerationEntry.KeepRun;
+        if (!input.HasPlan || !input.Approved)
+            return GenerationEntry.NotApprovedCard;
+        if (input.HasSavedRun && input.PlanChanged)
+            return GenerationEntry.PlanChangedCard;
+        if (!string.IsNullOrWhiteSpace(input.UnreadableReason))
+            return GenerationEntry.UnreadableCard;
+
+        // Never auto-starts: generation spends real money (UI-SPEC rule 5, U3)
+        if (!input.HasSavedRun)
+            return GenerationEntry.ReadyCard;
+        return input.Written + input.Failed < input.Total
+            ? GenerationEntry.PartialDashboard
+            : GenerationEntry.FinishedDashboard;
+    }
+
+    public static GenerationCardContent StateCard(
+        GenerationStateCard card, int threads, int emails, int waves, decimal cost, string modelName, int earlierThreads, string reason)
+    {
+        return card switch
+        {
+            GenerationStateCard.NotApproved => new GenerationCardContent
+            {
+                Heading = "Approve the plan first",
+                Body = "Emails are written from an approved corpus plan. Approve the plan on Review Plan, then come back to this step.",
+                ButtonText = "Review Plan"
+            },
+            GenerationStateCard.PlanChanged => new GenerationCardContent
+            {
+                Heading = "The plan changed after emails were generated",
+                Body = $"{Plural(earlierThreads, "thread", "threads")} {(earlierThreads == 1 ? "was" : "were")} written for an earlier plan, and their DocIDs no longer match the answer key. Start Over deletes those emails and the narrative ledger, then you can write the current plan.",
+                ButtonText = "Start Over...",
+                Danger = true
+            },
+            GenerationStateCard.Unreadable => new GenerationCardContent
+            {
+                Heading = "The saved run could not be opened",
+                Body = $"{TrimMessage(reason)}. Start Over clears the saved run, deletes the emails it wrote and starts again from the approved plan.",
+                ButtonText = "Start Over...",
+                Danger = true
+            },
+            _ => new GenerationCardContent
+            {
+                Heading = "Ready to write the relevant emails",
+                Body = $"Generate Emails writes the {Plural(threads, "relevant thread", "relevant threads")} ({Plural(emails, "email", "emails")}) from the approved plan, oldest first, in {Plural(waves, "wave", "waves")}. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later. Estimated cost: ≈{Money(cost)} on {modelName}, ±50%.",
+                ButtonText = "Generate Emails"
+            }
+        };
+    }
+
+    // --- Partial-run banner ---
+
+    public const string BannerHeading = "The last run did not finish.";
+    public const string BannerButton = "Continue Generating";
+
+    public static string BannerBody(int done, int total, int failed)
+    {
+        var failedClause = failed > 0 ? $", and tries the {Plural(failed, "failed thread", "failed threads")} again" : "";
+        return $"{N(done)} of {Plural(total, "relevant thread", "relevant threads")} are written and saved. Continue Generating writes the rest and keeps everything already saved{failedClause}.";
+    }
+
+    // --- Confirmations (MessageBox, default button = the safe choice) ---
+
+    public static (string Title, string Text) CG1CancelGeneration(int done) =>
+        ("Cancel Generation",
+            $"Stop generating? The {Plural(done, "thread", "threads")} already written {(done == 1 ? "stays" : "stay")} saved. Threads in progress are discarded and can be written later with Continue Generating.");
+
+    public static (string Title, string Text) CG2StartOver(int files) =>
+        ("Start Over",
+            $"Delete the {Plural(files, "generated EML file", "generated EML files")} and the narrative ledger, and reset the answer key to Planned? This cannot be undone. The corpus plan and case guide are kept.");
+
+    public static (string Title, string Text) CG3CloseDuringRun() =>
+        ("Stop Generating?",
+            "Emails are still being written. Close and stop? Finished threads are saved; threads in progress are discarded and can be written later with Continue Generating.");
+
+    // --- Case Summary rows (S3) ---
+
+    public static SummaryRowContent MailboxesRow(MailboxesRowInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var row = new SummaryRowContent
+        {
+            Line2 = $"{Plural(input.Files, "EML file", "EML files")} in {Plural(input.Mailboxes, "custodian mailbox", "custodian mailboxes")} · Mailboxes folder",
+            ShowPrimary = input.FolderExists,
+            ShowSecondary = !input.Generated
+        };
+
+        if (!input.Generated)
+        {
+            row.Line3 = "Not generated yet";
+            row.Line3Tone = SummaryTone.Muted;
+        }
+        else if (input.EarlierPlan)
+        {
+            row.Line3 = "Written for an earlier plan. Start over on Generate Corpus.";
+            row.Line3Tone = SummaryTone.Warning;
+        }
+        else if (input.Written >= input.Total && input.Warnings == 0 && input.Failed == 0)
+        {
+            row.Line3 = $"All {Plural(input.Total, "relevant thread", "relevant threads")} written";
+            row.Line3Tone = SummaryTone.Success;
+        }
+        else
+        {
+            // Zero clauses are dropped
+            var text = $"{N(input.Written)} of {N(input.Total)} relevant threads written";
+            if (input.Warnings > 0)
+                text += $" · {N(input.Warnings)} with warnings";
+            if (input.Failed > 0)
+                text += $" · {N(input.Failed)} failed";
+            row.Line3 = text;
+            row.Line3Tone = SummaryTone.Warning;
+        }
+
+        row.DotTone = row.Line3Tone;
+        return row;
+    }
+
+    public static SummaryRowContent StoryRow(StoryRowInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var row = new SummaryRowContent
+        {
+            Line2 = $"Narrative ledger · {Plural(input.Entries, "detail", "details")} from {Plural(input.Threads, "thread", "threads")} · {input.FileName}",
+            ShowPrimary = input.FileExists,
+            ShowSecondary = input.Entries > 0
+        };
+
+        if (!string.IsNullOrWhiteSpace(input.Error))
+        {
+            row.Line3 = $"Could not write: {TrimMessage(input.Error)}";
+            row.Line3Tone = SummaryTone.Danger;
+        }
+        else if (input.WrittenLocal.HasValue)
+        {
+            row.Line3 = $"Written {DateTimeText(input.WrittenLocal.Value)}";
+            row.Line3Tone = SummaryTone.Success;
+        }
+        else
+        {
+            row.Line3 = "Not written yet. It is written when a generation run ends.";
+            row.Line3Tone = SummaryTone.Muted;
+        }
+
+        row.DotTone = row.Line3Tone;
+        return row;
+    }
+
+    public static string AnswerKeyRunClause(DateTime writtenLocal, int generated, int planned) =>
+        $"Written {DateTimeText(writtenLocal)} · {N(generated)} generated, {N(planned)} planned";
+
+    public static string StoryMissingText(string fileName) =>
+        $"{fileName} is no longer in the case folder. Click Export Story So Far to write it again.";
+
     // --- Shared formatting ---
 
     private static string Plural(int n, string singular, string plural) => CaseGuideUiText.Plural(n, singular, plural);
@@ -314,4 +575,7 @@ public static class GenerationUiText
     }
 
     private static string N(int value) => value.ToString("N0", Invariant);
+
+    // Same "MMM d, yyyy h:mm tt" format as CorpusUiText.DateTimeText (private there)
+    private static string DateTimeText(DateTime value) => value.ToString("MMM d, yyyy h:mm tt", Invariant);
 }

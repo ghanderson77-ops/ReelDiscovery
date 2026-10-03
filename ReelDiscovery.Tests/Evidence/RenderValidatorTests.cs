@@ -344,4 +344,259 @@ public class RenderValidatorTests
         yield return new RenderViolation { Code = "V3", Text = "partial" };
         throw new InvalidOperationException("late failure");
     }
+
+    // ---------- V3 canonical value variants ----------
+
+    private static Action<CaseGuide> Values(params CanonicalValue[] values) => guide => guide.Values = values.ToList();
+
+    private static CanonicalValue Value(string id, ValueKind kind, string label, string value, params string[] factIds) => new()
+    {
+        Id = id,
+        Kind = kind,
+        Label = label,
+        Value = value,
+        FactIds = factIds.ToList()
+    };
+
+    private static readonly CanonicalValue ChangeOrderAmount = Value("V-101", ValueKind.Amount, "Change Order 7", "$184,250");
+    private static readonly CanonicalValue ChangeOrderNumber = Value("V-102", ValueKind.ChangeOrderNumber, "Change order number", "CO-007");
+
+    [Fact]
+    public void V3_AmountVariantWithinWindow_IsFlagged()
+    {
+        var (ctx, _) = Context(editGuide: Values(ChangeOrderAmount, ChangeOrderNumber));
+
+        var violations = Check(With(1, "The revised total on the change order is $184,520 as of today."), ctx);
+
+        var v = Assert.Single(violations);
+        Assert.Equal("V3", v.Code);
+        Assert.Equal("uses $184,520 for Change Order 7; the case value is $184,250", v.Text);
+        Assert.Equal(1, v.Seq);
+    }
+
+    [Theory]
+    [InlineData("The approved amount is $184,250.00 per the signed form.")]
+    [InlineData("The approved amount is $184,250 per the signed form.")]
+    [InlineData("Lunch for the crew came to $12,000 over the whole job, believe it or not.")]
+    [InlineData("Please reference CO-007 on the invoice.")]
+    [InlineData("Purchase order PO-4471 covers the sealant.")]
+    [InlineData("Ticket #4471 is still open with the supplier.")]
+    public void V3_EqualFormsUnrelatedAmountsAndOtherPrefixes_AreNotFlagged(string body)
+    {
+        var (ctx, _) = Context(editGuide: Values(ChangeOrderAmount, ChangeOrderNumber));
+
+        Assert.DoesNotContain(Check(With(1, body), ctx), x => x.Code == "V3");
+    }
+
+    [Fact]
+    public void V3_UnregisteredIdentifierWithCanonicalPrefix_IsFlagged()
+    {
+        var (ctx, _) = Context(editGuide: Values(ChangeOrderAmount, ChangeOrderNumber));
+
+        var violations = Check(With(1, "Please reference CO-0071 on the invoice."), ctx);
+
+        var v = Assert.Single(violations);
+        Assert.Equal("V3", v.Code);
+        Assert.Equal("uses CO-0071, which is not a case document number", v.Text);
+    }
+
+    // ---------- V4 knowledge ----------
+
+    // F-007 (2024-06-01) is known to CH-001 and CH-005; F-008 (2024-07-04) only to CH-008
+    private static readonly CanonicalValue LateFee = Value("V-201", ValueKind.Amount, "Late fee", "$9,850", "F-007");
+    private static readonly CanonicalValue Interest = Value("V-202", ValueKind.Amount, "Interest accrued", "$4,615.50", "F-008");
+    private static readonly CanonicalValue PublicFee = Value("V-203", ValueKind.Amount, "Permit fee", "$2,000");
+
+    private static List<PlannedMessage> AugustMessages(string firstSender) => new()
+    {
+        Msg(1, 0, firstSender, new[] { firstSender == "CH-002" ? "CH-004" : "CH-002" }, new DateTime(2024, 8, 5, 10, 0, 0)),
+        Msg(2, 1, "CH-002", new[] { firstSender }, new DateTime(2024, 8, 5, 15, 0, 0))
+    };
+
+    [Fact]
+    public void V4_ValueDatedAfterMessage_IsFlagged()
+    {
+        var (ctx, _) = Context(editGuide: Values(LateFee));
+
+        var violations = Check(With(1, "Harmon will owe $9,850 in late fees on this."), ctx);
+
+        var v = Assert.Single(violations);
+        Assert.Equal("V4", v.Code);
+        Assert.Equal("mentions Late fee, dated after this email", v.Text);
+        Assert.Equal(1, v.Seq);
+    }
+
+    [Fact]
+    public void V4_ValueKnownOnlyToOthers_IsFlagged()
+    {
+        var (ctx, _) = Context(AugustMessages("CH-002"), editGuide: Values(Interest));
+        var rendered = Rendered("Interest is up to $4,615.50 on the invoice.", "Noted, thanks for the update.");
+
+        var v = Assert.Single(Check(rendered, ctx));
+        Assert.Equal("V4", v.Code);
+        Assert.Equal("uses $4,615.50, which Tom does not know yet", v.Text);
+    }
+
+    [Fact]
+    public void V4_ValueSeenInQuotedAncestor_IsNotFlagged()
+    {
+        var (ctx, _) = Context(AugustMessages("CH-008"), editGuide: Values(Interest));
+        var rendered = Rendered("Interest is up to $4,615.50 on the invoice.", "Understood, $4,615.50 it is. I will tell the team.");
+
+        Assert.Empty(Check(rendered, ctx));
+    }
+
+    [Fact]
+    public void V4_PublicValue_IsNeverFlagged()
+    {
+        var (ctx, _) = Context(editGuide: Values(PublicFee));
+
+        Assert.Empty(Check(With(1, "The city charged $2,000 for the street closure permit."), ctx));
+    }
+
+    [Fact]
+    public void V4_LedgerValueUnknownToSender_IsFlagged()
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry>
+        {
+            new() { Id = "T-0100-L01", Kind = LedgerKind.Meeting, About = "crane inspection", Value = "2024-04-02", KnownByIds = new List<string> { "CH-001" } }
+        };
+
+        var violations = Check(With(1, "Confirming 2024-04-02 for the crane people."), ctx);
+
+        var v = Assert.Single(violations);
+        Assert.Equal("V4", v.Code);
+        Assert.Equal("uses 2024-04-02, which Lisa does not know yet", v.Text);
+    }
+
+    [Fact]
+    public void V4_LedgerValueKnownToSender_IsNotFlagged()
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry>
+        {
+            new() { Id = "T-0100-L01", Kind = LedgerKind.Meeting, About = "crane inspection", Value = "2024-04-02", KnownByIds = new List<string> { "CH-004" } }
+        };
+
+        Assert.Empty(Check(With(1, "Confirming 2024-04-02 for the crane people."), ctx));
+    }
+
+    // ---------- V6 ledger contradictions ----------
+
+    private static LedgerEntry Retainage() => new()
+    {
+        Id = "T-0100-L02",
+        Kind = LedgerKind.Figure,
+        About = "retainage on pay application 7",
+        Value = "$18,425",
+        KnownByIds = new List<string> { "CH-002", "CH-004" }
+    };
+
+    private static LedgerEntry SiteWalk(LedgerKind kind = LedgerKind.Meeting) => new()
+    {
+        Id = "T-0100-L03",
+        Kind = kind,
+        About = "site walk with the glazing crew",
+        Value = "2024-04-02",
+        KnownByIds = new List<string> { "CH-002", "CH-004" }
+    };
+
+    [Fact]
+    public void V6_DeltaWithDifferentValueForSameDetail_IsFlagged()
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry> { Retainage() };
+        var rendered = With(0, "unused");
+        rendered.NewDetails.Add(new LedgerDelta { Seq = 2, Kind = LedgerKind.Figure, About = "Retainage on pay application 7", Value = "$18,524" });
+
+        var v = Assert.Single(Check(rendered, ctx));
+        Assert.Equal("V6", v.Code);
+        Assert.Equal("gives retainage on pay application 7 as $18,524; earlier emails say $18,425", v.Text);
+        Assert.Equal(2, v.Seq);
+    }
+
+    [Theory]
+    [InlineData(LedgerKind.Figure, "retainage on pay application 7", "$18,425.00")]
+    [InlineData(LedgerKind.Figure, "retainage on pay application 8", "$18,524")]
+    [InlineData(LedgerKind.Decision, "retainage on pay application 7", "$18,524")]
+    [InlineData(LedgerKind.Figure, "retainage on pay application 7", "")]
+    public void V6_SameValueOtherSubjectOtherKindOrEmpty_IsNotFlagged(LedgerKind kind, string about, string value)
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry> { Retainage() };
+        var rendered = With(0, "unused");
+        rendered.NewDetails.Add(new LedgerDelta { Seq = 2, Kind = kind, About = about, Value = value });
+
+        Assert.Empty(Check(rendered, ctx));
+    }
+
+    [Fact]
+    public void V6_BodyAmountNearLedgerFigure_IsFlagged()
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry> { Retainage() };
+
+        var v = Assert.Single(Check(With(2, "Retainage held back is $18,524 on this one."), ctx));
+        Assert.Equal("V6", v.Code);
+        Assert.Equal("gives retainage on pay application 7 as $18,524; earlier emails say $18,425", v.Text);
+    }
+
+    [Theory]
+    [InlineData("Retainage held back is $18,425.00 on this one.")]
+    [InlineData("The dumpster swap cost $450 this week.")]
+    public void V6_BodyAmountEqualOrUnrelated_IsNotFlagged(string body)
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry> { Retainage() };
+
+        Assert.Empty(Check(With(2, body), ctx));
+    }
+
+    [Theory]
+    [InlineData("We moved things around, so the site walk is now April 9.")]
+    [InlineData("We moved things around, so the site walk is now Apr 9, 2024.")]
+    [InlineData("We moved things around, so the site walk is now 2024-04-09.")]
+    public void V6_BodyDateContradictingMeeting_IsFlagged(string body)
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry> { SiteWalk() };
+
+        var v = Assert.Single(Check(With(1, body), ctx));
+        Assert.Equal("V6", v.Code);
+        Assert.Equal("gives site walk with the glazing crew as 2024-04-09; earlier emails say 2024-04-02", v.Text);
+        Assert.Equal(1, v.Seq);
+    }
+
+    [Theory]
+    [InlineData("As agreed, the site walk is on April 2.")]
+    [InlineData("As agreed, the site walk is on 2024-04-02.")]
+    [InlineData("The site walk went fine. Invoice review is on April 9.")]
+    [InlineData("We moved the site walk from April 2 to April 9.")]
+    [InlineData("See you in March for the site walk follow-up.")]
+    public void V6_BodyDateMatchingOrUnrelated_IsNotFlagged(string body)
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry> { SiteWalk() };
+
+        Assert.Empty(Check(With(1, body), ctx));
+    }
+
+    [Fact]
+    public void V6_BodyDateOnDecisionEntry_IsNotChecked()
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry> { SiteWalk(LedgerKind.Decision) };
+
+        Assert.Empty(Check(With(1, "We moved things around, so the site walk is now April 9."), ctx));
+    }
+
+    [Fact]
+    public void V6_CommitmentEntry_IsChecked()
+    {
+        var (ctx, _) = Context();
+        ctx.LedgerView = new List<LedgerEntry> { SiteWalk(LedgerKind.Commitment) };
+
+        Assert.Single(Check(With(1, "We moved things around, so the site walk is now April 9."), ctx), x => x.Code == "V6");
+    }
 }

@@ -295,6 +295,189 @@ public class GenerateCorpusStepTests
         });
     }
 
+    // ----- Task 2: Start Over, reopen, leave-step retries, opening an EML -----
+
+    [Fact]
+    public void StartOver_Yes_DeletesRunFiles_ResetsKeyToPlanned_ShowsReady()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+            Assert.True(step.StartOverButton.Visible);
+
+            var mailboxes = Path.Combine(h.Folder, CorpusPlan.MailboxesRoot);
+            var emls = Directory.GetFiles(mailboxes, "*.eml", SearchOption.AllDirectories).Length;
+            Assert.True(emls > 0);
+            var story = Path.Combine(h.Folder, StorySoFarDocxBuilder.FileNameFor(Path.GetFileName(h.Folder)));
+            Assert.True(File.Exists(story));
+
+            var icons = new List<MessageBoxIcon>();
+            step.Confirm = (title, text, icon) =>
+            {
+                icons.Add(icon);
+                Assert.Equal(GenerationUiText.CG2StartOver(emls), (title, text));
+                return true;
+            };
+            Pump(step.ClickStartOverAsync());
+
+            Assert.Equal(new[] { MessageBoxIcon.Warning }, icons);
+            Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+            Assert.Empty(Directory.GetFiles(mailboxes, "*.eml", SearchOption.AllDirectories));
+            Assert.False(File.Exists(story));
+            Assert.Null(h.Draft.Corpus!.Generation);
+            Assert.DoesNotContain(h.Draft.Corpus.WrittenFiles, f => f.Kind == CorpusFileKind.StorySoFar);
+
+            var key = KeyStatuses(h.Folder);
+            foreach (var message in h.Relevant.SelectMany(t => t.Messages))
+                Assert.Equal("Planned", key[message.DocId]);
+
+            Assert.Equal(GenerationUiText.StartedOverText(emls), step.StatusLabel.Text);
+            Assert.Equal(Theme.Success, step.StatusLabel.ForeColor);
+            Assert.True(step.StateCardShown);
+            Assert.Equal("Ready to write the relevant emails", step.StateHeading);
+            Assert.True(step.CanMoveNext);
+        });
+    }
+
+    [Fact]
+    public void StartOver_No_ChangesNothing()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+            var status = step.StatusLabel.Text;
+            var mailboxes = Path.Combine(h.Folder, CorpusPlan.MailboxesRoot);
+            var emls = Directory.GetFiles(mailboxes, "*.eml", SearchOption.AllDirectories).Length;
+
+            step.Confirm = (title, text, icon) => false;
+            Pump(step.ClickStartOverAsync());
+
+            Assert.True(File.Exists(GenerationJournal.PathFor(h.Folder)));
+            Assert.Equal(emls, Directory.GetFiles(mailboxes, "*.eml", SearchOption.AllDirectories).Length);
+            Assert.NotNull(h.Draft.Corpus!.Generation);
+            Assert.Equal(status, step.StatusLabel.Text);
+            Assert.False(step.StateCardShown);
+        });
+    }
+
+    [Fact]
+    public void Reopen_JournalNewerThanCaseJson_MaterializesLedgerCountsAndKey_WithoutProviderCalls()
+    {
+        using var h = new Harness();
+        var threads = h.Relevant.OrderBy(t => t.Id, StringComparer.Ordinal).Take(2).ToList();
+        var journal = new GenerationJournal(h.Folder);
+        journal.AppendAsync(new JournalRecord { Type = JournalRecordType.RunStarted, PlanId = h.Plan.PlanId, Utc = DateTime.UtcNow })
+            .GetAwaiter().GetResult();
+        foreach (var thread in threads)
+            journal.AppendAsync(GenerationRunStateTests.Done(h.Plan, thread, ThreadWriteStatus.Written, 0.10m)).GetAwaiter().GetResult();
+        Assert.Null(h.Draft.Corpus!.Generation);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            step.GatewayFactory = () => throw new InvalidOperationException("entering the step must not build a provider");
+            Pump(step.OnEnterStepAsync());
+
+            var generation = h.Draft.Corpus.Generation;
+            Assert.NotNull(generation);
+            Assert.Equal(2, generation!.ThreadsWritten);
+            Assert.Equal(h.Plan.PlanId, generation.RunPlanId);
+            Assert.NotEmpty(generation.Ledger.Entries);
+            Assert.NotNull(generation.ProjectedUtc);
+            Assert.False(step.IsGenerating);
+            Assert.True(step.BannerShown);
+
+            var key = KeyStatuses(h.Folder);
+            foreach (var thread in h.Relevant)
+                foreach (var message in thread.Messages)
+                    Assert.Equal(threads.Contains(thread) ? "Generated" : "Planned", key[message.DocId]);
+
+            var saved = System.Text.Json.JsonSerializer.Deserialize<CaseDraft>(File.ReadAllText(Path.Combine(h.Folder, CaseStore.CaseFileName)), CaseDraft.JsonOptions);
+            Assert.Equal(2, saved?.Corpus?.Generation?.ThreadsWritten);
+        });
+
+        Assert.Empty(h.Fake.Requests);
+    }
+
+    [Fact]
+    public void OpenEml_OnlyOpensExistingFilesUnderTheCaseFolder()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            var opened = new List<string>();
+            step.OpenFile = opened.Add;
+            step.SetStatus("before", Theme.TextMuted);
+
+            // Outside the case folder or not an EML: nothing happens
+            step.OpenEml(new GenerationEvent { Kind = GenerationEventKind.ThreadWritten, FilePath = "../../outside/DOC-000001.eml" });
+            step.OpenEml(new GenerationEvent { Kind = GenerationEventKind.ThreadWritten, FilePath = "C:/Windows/notepad.exe" });
+            Assert.Empty(opened);
+            Assert.Equal("before", step.StatusLabel.Text);
+
+            // Other rows do nothing
+            var relative = MailboxWriter.CopyPathsFor(h.Relevant[0].Messages[0], PlanNumbering.CustodianFolders(h.Draft.Guide!))[0];
+            step.OpenEml(new GenerationEvent { Kind = GenerationEventKind.ThreadFailed, FilePath = relative });
+            Assert.Empty(opened);
+            Assert.Equal("before", step.StatusLabel.Text);
+
+            // Missing file
+            step.OpenEml(new GenerationEvent { Kind = GenerationEventKind.ThreadWritten, FilePath = relative });
+            Assert.Equal(GenerationUiText.MissingEmlText(Path.GetFileNameWithoutExtension(relative)), step.StatusLabel.Text);
+            Assert.Equal(Theme.Danger, step.StatusLabel.ForeColor);
+            Assert.Empty(opened);
+
+            // Existing file under the case folder
+            var full = Path.Combine(h.Folder, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, "x");
+            step.OpenEml(new GenerationEvent { Kind = GenerationEventKind.KeptWithWarnings, FilePath = relative });
+            Assert.Equal(new[] { Path.GetFullPath(full) }, opened);
+        });
+    }
+
+    [Fact]
+    public void LeaveStep_RetriesLockedKey_ClearsKeyErrorOnceReleased()
+    {
+        using var h = new Harness();
+        var xlsx = Path.Combine(h.Folder, AnswerKeyXlsxWriter.FileName);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            using (var lockStream = new FileStream(xlsx, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+            {
+                Pump(step.ClickStateActionAsync());
+                Assert.NotEqual(string.Empty, h.Draft.Corpus!.Generation!.KeyError);
+
+                // Still locked: the retry fails quietly and keeps the error
+                Pump(step.OnLeaveStepAsync());
+                Assert.NotEqual(string.Empty, h.Draft.Corpus.Generation!.KeyError);
+                Assert.Equal(0, lockStream.Length);
+            }
+
+            Pump(step.OnLeaveStepAsync());
+            Assert.Equal(string.Empty, h.Draft.Corpus.Generation!.KeyError);
+            Assert.True(new FileInfo(xlsx).Length > 0);
+            Assert.Contains(h.Draft.Corpus.WrittenFiles, f => f.Kind == CorpusFileKind.AnswerKeyXlsx && f.PlanId == h.Plan.PlanId);
+            var key = KeyStatuses(h.Folder);
+            foreach (var message in h.Relevant.SelectMany(t => t.Messages))
+                Assert.Equal("Generated", key[message.DocId]);
+        });
+    }
+
     // ----- Helpers -----
 
 

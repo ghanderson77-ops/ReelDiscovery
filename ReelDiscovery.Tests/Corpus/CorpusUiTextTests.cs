@@ -241,6 +241,44 @@ public class CorpusUiTextTests
         Assert.Equal("Guidance can shift volume toward or away from facts and periods. Dates, people and labels still come from the case guide.", CorpusUiText.ReplanHint);
     }
 
+    [Theory]
+    [InlineData(true, 1, " 1 thread already generated for this plan will no longer match it. After re-planning, Generate Corpus asks you to start over.")]
+    [InlineData(false, 12, " 12 threads already generated for this plan will no longer match it. After re-planning, Generate Corpus asks you to start over.")]
+    [InlineData(true, 1000, " 1,000 threads already generated for this plan will no longer match it. After re-planning, Generate Corpus asks you to start over.")]
+    public void ReplanBody_GeneratedThreads_AddsTheStartOverSentence(bool approved, int generated, string suffix)
+    {
+        Assert.Equal(CorpusUiText.ReplanBody(approved) + suffix, CorpusUiText.ReplanBody(approved, generated));
+        Assert.EndsWith(suffix, CorpusUiText.ReplanBody(approved, generated));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ReplanBody_NoGeneratedThreads_IsUnchanged(bool approved)
+    {
+        Assert.Equal(CorpusUiText.ReplanBody(approved), CorpusUiText.ReplanBody(approved, 0));
+        Assert.DoesNotContain("already generated", CorpusUiText.ReplanBody(approved, 0));
+    }
+
+    [Fact]
+    public void ReplanGeneratedThreads_CountsWrittenThreadsOfTheCurrentPlanOnly()
+    {
+        var planId = Guid.NewGuid();
+        var corpus = new CorpusState
+        {
+            PlanId = planId,
+            Generation = new Models.Evidence.GenerationState { RunPlanId = planId, ThreadsWritten = 7, ThreadsWithWarnings = 2, ThreadsFailed = 3 }
+        };
+        Assert.Equal(9, StepReviewPlan.ReplanGeneratedThreads(corpus));
+
+        corpus.Generation.RunPlanId = Guid.NewGuid();
+        Assert.Equal(0, StepReviewPlan.ReplanGeneratedThreads(corpus));
+
+        corpus.Generation = null;
+        Assert.Equal(0, StepReviewPlan.ReplanGeneratedThreads(corpus));
+        Assert.Equal(0, StepReviewPlan.ReplanGeneratedThreads(null));
+    }
+
     // --- Case Summary rows ---
 
     [Theory]

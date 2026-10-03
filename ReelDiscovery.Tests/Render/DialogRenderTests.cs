@@ -72,6 +72,33 @@ public class DialogRenderTests
         });
     }
 
+    // Render state 8 (05-UI-SPEC S2): D-RP with the generated-threads sentence
+    [Theory]
+    [InlineData(true, 12, "replan-dialog-generated")]
+    [InlineData(false, 1, "replan-dialog-generated-unapproved")]
+    public void ReplanDialog_WithGeneratedThreads_RendersWithoutClipping(bool approved, int generated, string name)
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var height = 0;
+            var workingHeight = 0;
+            var bodyShown = false;
+            var narrowButtons = new List<string>();
+            var result = RenderHarness.RenderForm(() => new ReplanDialog(approved, generated), name, form =>
+            {
+                height = form.ClientSize.Height;
+                workingHeight = Screen.FromControl(form).WorkingArea.Height;
+                bodyShown = Descendants(form).OfType<Label>().Any(l => l.Text == CorpusUiText.ReplanBody(approved, generated));
+                // No ellipsized button text: every button is at least as wide as its caption needs
+                narrowButtons = Descendants(form).OfType<Button>().Where(b => b.Width < b.PreferredSize.Width).Select(b => b.Text).ToList();
+            });
+
+            AssertRendered(result, height, workingHeight);
+            Assert.True(bodyShown);
+            Assert.Empty(narrowButtons);
+        });
+    }
+
     private static IEnumerable<Control> Descendants(Control root)
     {
         foreach (Control child in root.Controls)

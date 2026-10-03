@@ -91,6 +91,38 @@ public class GenerationResetTests : IDisposable
     }
 
     [Fact]
+    public async Task StartOver_JournalNotReadable_KeepsJournalAndReportsIt()
+    {
+        // An EML written under an earlier plan: only the journal knows about it
+        WriteFile("Mailboxes/x/Inbox/earlier-plan.eml");
+        AppendRawRecord(new JournalRecord
+        {
+            Type = JournalRecordType.ThreadDone,
+            PlanId = Guid.NewGuid(),
+            ThreadId = "T-0001",
+            Files = new List<string> { "Mailboxes/x/Inbox/earlier-plan.eml" }
+        });
+        var journal = GenerationJournal.PathFor(_folder);
+
+        StartOverResult result;
+        // A reader (antivirus, sync client) that blocks reads but allows delete
+        using (new FileStream(journal, FileMode.Open, FileAccess.Read, FileShare.Write | FileShare.Delete))
+        {
+            Assert.False(GenerationJournal.TryListAllFiles(_folder, out _));
+            result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+        }
+
+        Assert.True(File.Exists(journal));
+        Assert.Contains(result.Errors, e => e.Contains(GenerationReset.JournalKeptMessage));
+
+        // Once readable, Start Over finds the earlier plan's EML and removes the journal
+        var retry = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+        Assert.Empty(retry.Errors);
+        Assert.False(File.Exists(Path.Combine(_folder, "Mailboxes", "x", "Inbox", "earlier-plan.eml")));
+        Assert.False(File.Exists(journal));
+    }
+
+    [Fact]
     public async Task StartOver_TraversalPathInJournal_NeverLeavesMailboxes()
     {
         File.WriteAllText(Path.Combine(_folder, "outside.eml"), "keep");

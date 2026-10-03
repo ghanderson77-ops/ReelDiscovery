@@ -187,16 +187,26 @@ public class GenerationJournal
     /// </summary>
     public static List<string> ListAllFiles(string caseFolder)
     {
-        var files = new List<string>();
+        TryListAllFiles(caseFolder, out var files);
+        return files;
+    }
+
+    /// <summary>
+    /// Same as <see cref="ListAllFiles"/>; returns false when the journal exists but could not be read in full (over the
+    /// size cap or an IO error mid-read), so the caller knows files may be missing from the list. Never throws.
+    /// </summary>
+    public static bool TryListAllFiles(string caseFolder, out List<string> files)
+    {
+        files = new List<string>();
         if (!Exists(caseFolder))
-            return files;
+            return true;
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
         try
         {
             var path = PathFor(caseFolder);
             if (TooLarge(path))
-                return files;
+                return false;
 
             foreach (var record in ReadRecords(path, () => { }))
             {
@@ -211,9 +221,10 @@ public class GenerationJournal
                                        or ArgumentException)
         {
             // Partial list: the caller sweeps what was readable; planned paths cover the rest
+            return false;
         }
 
-        return files;
+        return true;
     }
 
     /// <summary>

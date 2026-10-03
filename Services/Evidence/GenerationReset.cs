@@ -20,9 +20,12 @@ public class StartOverResult
 /// </summary>
 public static class GenerationReset
 {
+    public const string JournalKeptMessage =
+        "The saved run could not be read in full, so it was kept. Emails it lists may still be in Mailboxes; try Start Over again.";
+
     /// <summary>
-    /// Deletes every EML listed by the journal (any plan) and every planned relevant copy path, then the journal and the
-    /// story file. Files that cannot be deleted are reported in Errors; only OperationCanceledException escapes.
+    /// Deletes every EML listed by the journal (any plan) and every planned relevant copy path, then the journal (only when
+    /// it was read in full) and the story file. Files that cannot be deleted are reported in Errors; only OperationCanceledException escapes.
     /// </summary>
     public static async Task<StartOverResult> StartOverAsync(string caseFolder, CorpusPlan? plan, CaseGuide? guide, CancellationToken ct = default)
     {
@@ -39,7 +42,8 @@ public static class GenerationReset
     private static void DeleteAll(string caseFolder, CorpusPlan? plan, CaseGuide? guide, StartOverResult result,
         CancellationToken ct)
     {
-        var candidates = new List<string>(GenerationJournal.ListAllFiles(caseFolder));
+        var complete = GenerationJournal.TryListAllFiles(caseFolder, out var listed);
+        var candidates = new List<string>(listed);
 
         // Planned copies catch files of a thread killed before its journal line was written
         if (plan != null && guide != null)
@@ -65,7 +69,13 @@ public static class GenerationReset
         }
 
         ct.ThrowIfCancellationRequested();
-        TryDelete(GenerationJournal.PathFor(caseFolder), GenerationState.JournalFileName, result);
+
+        // The journal is the only record of EMLs written under an earlier plan: keep it until it could be read in full,
+        // so a later Start Over can still find and remove them
+        if (complete)
+            TryDelete(GenerationJournal.PathFor(caseFolder), GenerationState.JournalFileName, result);
+        else
+            result.Errors.Add($"{GenerationState.JournalFileName}: {JournalKeptMessage}");
 
         // Name = verified case folder name + constant suffix, never a name read from case.json (T-05-33)
         var folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(caseFolder));

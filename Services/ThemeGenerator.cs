@@ -137,7 +137,7 @@ Sans-serif: Segoe UI, Arial, Calibri, Trebuchet MS, Century Gothic, Verdana, Tah
     /// <summary>
     /// Validates and sanitizes a hex color string (removes # if present, validates length).
     /// </summary>
-    private static string? SanitizeHexColor(string? color)
+    internal static string? SanitizeHexColor(string? color)
     {
         if (string.IsNullOrEmpty(color))
             return null;
@@ -197,7 +197,7 @@ Sans-serif: Segoe UI, Arial, Calibri, Trebuchet MS, Century Gothic, Verdana, Tah
     }
 
     // Allowed fonts that are commonly installed on Windows
-    private static readonly HashSet<string> AllowedFonts = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> AllowedFonts = new(StringComparer.OrdinalIgnoreCase)
     {
         // Serif
         "Georgia", "Times New Roman", "Garamond", "Book Antiqua", "Palatino Linotype",
@@ -209,7 +209,7 @@ Sans-serif: Segoe UI, Arial, Calibri, Trebuchet MS, Century Gothic, Verdana, Tah
     /// <summary>
     /// Validates font name against allowed list, returns null if invalid.
     /// </summary>
-    private static string? SanitizeFont(string? font)
+    internal static string? SanitizeFont(string? font)
     {
         if (string.IsNullOrWhiteSpace(font))
             return null;

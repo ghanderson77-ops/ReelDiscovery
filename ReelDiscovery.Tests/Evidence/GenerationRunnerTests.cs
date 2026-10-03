@@ -535,21 +535,25 @@ public partial class GenerationRunnerTests : IDisposable
     }
 
     [Fact]
-    public void RunAsync_OffUiThread_NeverPostsToCapturedContext()
+    public async Task RunAsync_OffUiThread_NeverPostsToCapturedContext()
     {
         _fake.Respond = Responder();
+        var runner = new GenerationRunner(_gateway);
         var previous = SynchronizationContext.Current;
+        Task<GenerationRunResult> task;
         try
         {
+            // Started under a context whose Post throws, as the step does from the UI thread
             SynchronizationContext.SetSynchronizationContext(new ThrowingContext());
-            var runner = new GenerationRunner(_gateway);
-            var result = Task.Run(() => runner.RunAsync(Input, new GenerationSnapshot(), Persist)).GetAwaiter().GetResult();
-            Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+            task = Task.Run(() => runner.RunAsync(Input, new GenerationSnapshot(), Persist));
         }
         finally
         {
             SynchronizationContext.SetSynchronizationContext(previous);
         }
+
+        var result = await task;
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
     }
 
     private sealed class ThrowingContext : SynchronizationContext

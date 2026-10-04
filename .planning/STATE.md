@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 6 UI-SPEC approved
-last_updated: "2026-10-04T20:39:43.497Z"
+last_updated: "2026-10-04T20:50:21.256Z"
 last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 84
-  percent: 79
+  completed_plans: 85
+  percent: 80
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 4 of 25
+Plan: 5 of 25
 Status: Ready to execute
 Last activity: 2026-10-04
 
@@ -135,6 +135,7 @@ Progress: [██████████] 100%
 | Phase 6 P01 | 27 min | 3 tasks | 7 files |
 | Phase 06 P02 | 11min | 2 tasks | 8 files |
 | Phase 06 P03 | 16min | 2 tasks | 6 files |
+| Phase 06 P04 | 12min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -373,6 +374,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-02: Attachment snapshot counters are per-DocId status transitions (RecordAttachment replaces previous status); uncommitted spend goes through AddCost; CostUsd includes MediaCostUsd
 - [Phase 06]: 06-03: Office builders strip control characters from model text; Excel cells are numeric only for $ amounts or plain decimals without a leading zero
 - [Phase 06]: 06-03: ICS DESCRIPTION keeps escaped line breaks; SUMMARY/LOCATION/CN collapse them to spaces; a blank UID falls back to SHA-256 (never random)
+- [Phase 06]: 06-04: Media seam (IMediaGenerator) never throws except on user cancel; 401/403 and quota/billing 429 -> Stopped, other 429/5xx/malformed -> Failed (retryable)
+- [Phase 06]: 06-04: Media cost charged only on Ok results via TokenUsageTracker.RecordMediaUsage; entries labelled Image - {label} / Voicemail - {label}
 
 ### Pending Todos
 
@@ -394,6 +397,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T20:39:37.085Z
+Last session: 2026-10-04T20:50:14.557Z
 Stopped at: Phase 6 UI-SPEC approved
 Resume file: None

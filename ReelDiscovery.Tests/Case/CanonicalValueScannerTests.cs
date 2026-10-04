@@ -65,6 +65,40 @@ public class CanonicalValueScannerTests
     }
 
     [Fact]
+    public void Amounts_AbbreviatedSuffix()
+    {
+        var found = CanonicalValueScanner.Scan("the total came to $1.25M");
+
+        Assert.Equal(new[] { "$1.25M" }, Texts(found, ScannedKind.Amount));
+    }
+
+    [Theory]
+    [InlineData("we owe $500K now", "$500K")]
+    [InlineData("budget of $2.5MM total", "$2.5MM")]
+    [InlineData("a $3B fund", "$3B")]
+    [InlineData("about $1.25 M overall", "$1.25 M")]
+    [InlineData("$12 Main Street", "$12")]
+    [InlineData("$5 Mbps plan", "$5")]
+    [InlineData("$40 kits", "$40")]
+    public void Amounts_SuffixOnlyAtWordBoundary(string text, string expected)
+    {
+        Assert.Equal(new[] { expected }, Texts(CanonicalValueScanner.Scan(text), ScannedKind.Amount));
+    }
+
+    [Theory]
+    [InlineData("$1.25M", "$1,250,000", true)]
+    [InlineData("$500K", "$500,000", true)]
+    [InlineData("$2.5MM", "$2,500,000", true)]
+    [InlineData("$3B", "$3,000,000,000", true)]
+    [InlineData("$1.25 M", "$1,250,000", true)]
+    [InlineData("$1.25m", "$1,250,000.00", true)]
+    [InlineData("$1.25M", "$1,250,001", false)]
+    public void AmountsEqual_AbbreviatedSuffix(string a, string b, bool expected)
+    {
+        Assert.Equal(expected, CanonicalValueScanner.AmountsEqual(a, b));
+    }
+
+    [Fact]
     public void IsRegistered_Amount_UsesAmountKindValues()
     {
         var values = new List<CanonicalValue>

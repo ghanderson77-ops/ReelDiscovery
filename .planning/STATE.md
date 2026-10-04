@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 6 UI-SPEC approved
-last_updated: "2026-10-04T20:08:03.228Z"
+last_updated: "2026-10-04T20:21:52.100Z"
 last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 82
-  percent: 77
+  completed_plans: 83
+  percent: 78
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 2 of 25
+Plan: 3 of 25
 Status: Ready to execute
 Last activity: 2026-10-04
 
@@ -133,6 +133,7 @@ Progress: [██████████] 100%
 | Phase 05 P15 | 50min | 3 tasks | 6 files |
 | Phase 05 P16 | 20min | 2 tasks | 9 files |
 | Phase 6 P01 | 27 min | 3 tasks | 7 files |
+| Phase 06 P02 | 11min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -368,6 +369,7 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-16: The answer-key run clause replaces Case Summary line 3 (it starts with 'Written {time}') only when the key is Written for the current plan and the run generated something
 - [Phase 06]: 06-01: attachment outcomes nest inside their ThreadDone line (one flush); replay applies state only when the plan's owning thread and parent DocId match, spend always counts
 - [Phase 06]: 06-01: LatestAttemptEnded = newest RunStarted has a later RunEnded (line-index compare); legacy RunEnded-only journals count as ended
+- [Phase 06]: 06-02: Attachment snapshot counters are per-DocId status transitions (RecordAttachment replaces previous status); uncommitted spend goes through AddCost; CostUsd includes MediaCostUsd
 
 ### Pending Todos
 
@@ -389,6 +391,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T20:05:49.445Z
+Last session: 2026-10-04T20:21:45.290Z
 Stopped at: Phase 6 UI-SPEC approved
 Resume file: None

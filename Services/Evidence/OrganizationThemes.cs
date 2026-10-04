@@ -52,4 +52,15 @@ public static class OrganizationThemes
         theme.Domain = key;
         return theme;
     }
+
+    /// <summary>
+    /// <see cref="ForDomain"/> plus the organization name, for the branded header of Office attachments.
+    /// </summary>
+    public static OrganizationTheme ForOrganization(string? domain, string? organizationName)
+    {
+        // Office documents only: the email HTML keeps ForDomain so Phase 5 EMLs stay byte-identical (D-19, Pitfall 8)
+        var theme = ForDomain(domain);
+        theme.OrganizationName = organizationName?.Trim() ?? string.Empty;
+        return theme;
+    }
 }

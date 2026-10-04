@@ -481,6 +481,25 @@ public class EmailComposerTests
         Assert.EndsWith("@summitglazingsupply.com", m[0].MessageId);
     }
 
+    // ---- Frozen Phase 5 compatibility (06-09) ----
+
+    [Theory]
+    [InlineData("Reply", "F-003", PrivilegeMarking.None)]
+    [InlineData("Banner", "F-001", PrivilegeMarking.Banner)]
+    [InlineData("External", "F-004", PrivilegeMarking.None)]
+    public void Compose_NoAttachments_MatchesGolden(string name, string factId, PrivilegeMarking marking)
+    {
+        var composed = ComposeFact(factId, marking,
+            seq => $"Body of message {seq} about the window schedule.\n\nSecond **paragraph** & <stuff>.");
+
+        string Joined(Func<ComposedEmail, string> field) => string.Join(Golden.EmailComposerGolden.Separator,
+            composed.Emails.Select(e => Golden.ComposeHtmlGoldenFixtures.MaskBanner(field(e)).Replace("\r\n", "\n")));
+
+        Assert.Equal(Golden.EmailComposerGolden.Get(name + "PlainText"), Joined(e => e.PlainText));
+        Assert.Equal(Golden.EmailComposerGolden.Get(name + "Html"), Joined(e => e.Html));
+        Assert.Equal(Golden.EmailComposerGolden.Get(name + "HtmlFragment"), Joined(e => e.HtmlFragment));
+    }
+
     private static int CountOf(string text, string value)
     {
         var count = 0;

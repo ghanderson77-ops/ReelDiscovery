@@ -194,7 +194,7 @@ Plans:
 Plans:
 - [x] 06-01-PLAN.md — Journal commit groups (attachment outcomes nested in ThreadDone / AttachmentsRepaired), identity-validated replay, latest-attempt detection, side world and cast voices, adversarial mixed fixture (Wave 1)
 - [x] 06-02-PLAN.md — Progress/state contracts: per-DocId attachment status transitions, uncommitted spend, stage rows, events, composed attachment parts (Wave 1)
-- [ ] 06-03-PLAN.md — Office builder overloads (branded, numeric Excel, safe sheet names, real subtitles, metadata) + deterministic RFC 5545 invites (Wave 1)
+- [x] 06-03-PLAN.md — Office builder overloads (branded, numeric Excel, safe sheet names, real subtitles, metadata) + deterministic RFC 5545 invites (Wave 1)
 - [ ] 06-04-PLAN.md — Media seam (Ok/Failed/Stopped), media prices, media cost tracking, FakeMediaGenerator (Wave 1)
 - [ ] 06-05-PLAN.md — Organization-scoped version chains, final attachment names (D-02 exception documented), meeting-keyed invite scheduling, TTS voice lookup (Wave 2)
 - [ ] 06-06-PLAN.md — Filler length/privilege assignments + decoy must-not-mention scanner + "$1.25M"-style amount suffixes (Wave 2)
@@ -254,6 +254,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
 | 4. Corpus Plan & Answer Key | 22/22 | Complete    | 2026-10-03 |
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
-| 6. Attachments & Non-Relevant Corpus | 2/25 | In Progress|  |
+| 6. Attachments & Non-Relevant Corpus | 3/25 | In Progress|  |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |
 | 8. Ancillary Discovery Documents | 0/TBD | Not started | - |

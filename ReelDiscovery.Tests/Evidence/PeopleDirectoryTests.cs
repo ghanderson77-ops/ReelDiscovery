@@ -193,4 +193,32 @@ public class PeopleDirectoryTests
 
         Assert.Equal(original, OrganizationThemes.ForDomain("brightline.com").PrimaryColor);
     }
+    [Fact]
+    public void Create_SetsExternalKindForExternalsAndOrganizationNameForCast()
+    {
+        var (draft, plan) = AttachmentTestData.MixedCase();
+        var guide = draft.Guide!;
+        var directory = PeopleDirectory.Create(guide, plan);
+
+        Assert.Equal(Models.Corpus.ExternalKind.Newsletter, directory.Find(AttachmentTestData.NewsletterId)!.ExternalKind);
+        Assert.Equal(Models.Corpus.ExternalKind.Spam, directory.Find(AttachmentTestData.SpamId)!.ExternalKind);
+        Assert.Equal(Models.Corpus.ExternalKind.Personal, directory.Find(AttachmentTestData.PersonalId)!.ExternalKind);
+        Assert.Equal(Models.Corpus.ExternalKind.Vendor, directory.Find(EvidenceTestData.VendorId)!.ExternalKind);
+        Assert.Equal(string.Empty, directory.Find(EvidenceTestData.VendorId)!.OrganizationName);
+
+        var cast = directory.Find("CH-001")!;
+        Assert.Null(cast.ExternalKind);
+        var organization = guide.FindOrganization(guide.FindCast("CH-001")!.OrganizationId)!;
+        Assert.False(string.IsNullOrWhiteSpace(organization.Name));
+        Assert.Equal(organization.Name, cast.OrganizationName);
+    }
+
+    [Fact]
+    public void Create_CastWithoutOrganization_HasEmptyOrganizationName()
+    {
+        var (draft, plan) = EvidenceTestData.ApprovedCase();
+        draft.Guide!.FindCast("CH-001")!.OrganizationId = "ORG-MISSING";
+
+        Assert.Equal(string.Empty, PeopleDirectory.Create(draft.Guide!, plan).Find("CH-001")!.OrganizationName);
+    }
 }

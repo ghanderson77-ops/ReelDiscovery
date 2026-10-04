@@ -1,5 +1,6 @@
 using System.Globalization;
 using ReelDiscovery.Helpers;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
@@ -498,6 +499,204 @@ public class EmailComposerTests
         Assert.Equal(Golden.EmailComposerGolden.Get(name + "PlainText"), Joined(e => e.PlainText));
         Assert.Equal(Golden.EmailComposerGolden.Get(name + "Html"), Joined(e => e.Html));
         Assert.Equal(Golden.EmailComposerGolden.Get(name + "HtmlFragment"), Joined(e => e.HtmlFragment));
+        Assert.All(composed.Emails, e => Assert.Equal(e.HtmlFragment, e.QuoteFragment));
+        Assert.All(composed.Emails, e => Assert.Empty(e.Attachments));
+    }
+
+    // ---- Attachments and inline images (06-09) ----
+
+    private const string ContentId = "0123456789abcdef@dundermifflin.com";
+
+    private static PlannedAttachment Plan(PlannedMessage message, AttachmentType kind, string title, bool inline = false)
+    {
+        var spec = new PlannedAttachment
+        {
+            DocId = $"{message.DocId}.{message.Attachments.Count + 1:0000}",
+            Kind = kind,
+            Title = title,
+            FileName = title + (kind == AttachmentType.Image ? ".png" : ".docx"),
+            IsInline = inline
+        };
+        message.Attachments.Add(spec);
+        return spec;
+    }
+
+    private static ComposedAttachment Part(PlannedAttachment spec, string contentId = "") => new()
+    {
+        DocId = spec.DocId,
+        Kind = spec.Kind,
+        FileName = spec.FileName,
+        Title = spec.Title,
+        MimeType = spec.Kind == AttachmentType.Image ? "image/png" : "application/octet-stream",
+        Bytes = new byte[] { 1, 2, 3 },
+        IsInline = spec.IsInline,
+        ContentId = contentId
+    };
+
+    [Fact]
+    public void Compose_inline_image_renders_by_cid_and_quotes_as_placeholder()
+    {
+        var (_, plan, people) = Fixture();
+        var thread = PlanFixtures.Thread(plan, "F-003");
+        var image = Plan(thread.Messages[0], AttachmentType.Image, "Mockup photo", inline: true);
+        var parts = new Dictionary<string, ComposedAttachment> { [image.DocId] = Part(image, ContentId) };
+
+        var m = EmailComposer.Compose(plan.PlanId, thread, Assignment(thread, PrivilegeMarking.None), Rendered(thread), people, parts).Emails;
+
+        Assert.Contains($"src=\"cid:{ContentId}\"", m[0].Html);
+        Assert.Same(parts[image.DocId], Assert.Single(m[0].Attachments));
+        Assert.Contains("[image: Mockup photo]", m[0].QuoteFragment);
+        Assert.DoesNotContain("cid:", m[0].QuoteFragment);
+
+        Assert.Contains("[image: Mockup photo]", m[1].Html);
+        Assert.DoesNotContain("cid:", m[1].Html);
+        Assert.Empty(m[1].Attachments);
+    }
+
+    [Fact]
+    public void Compose_attaches_only_present_parts_in_plan_order()
+    {
+        var (_, plan, people) = Fixture();
+        var thread = PlanFixtures.Thread(plan, "F-003");
+        var first = Plan(thread.Messages[0], AttachmentType.Word, "Pricing memo");
+        var missing = Plan(thread.Messages[0], AttachmentType.Excel, "Pricing sheet");
+        var third = Plan(thread.Messages[0], AttachmentType.PowerPoint, "Pricing deck");
+        var other = Plan(thread.Messages[1], AttachmentType.Word, "Reply notes");
+
+        // Inserted out of plan order; the missing part was never generated
+        var parts = new Dictionary<string, ComposedAttachment>
+        {
+            [third.DocId] = Part(third),
+            [other.DocId] = Part(other),
+            [first.DocId] = Part(first)
+        };
+
+        var m = EmailComposer.Compose(plan.PlanId, thread, Assignment(thread, PrivilegeMarking.None), Rendered(thread), people, parts).Emails;
+
+        Assert.Equal(new[] { first.DocId, third.DocId }, m[0].Attachments.Select(a => a.DocId));
+        Assert.DoesNotContain(m[0].Attachments, a => a.DocId == missing.DocId);
+        Assert.Equal(new[] { other.DocId }, m[1].Attachments.Select(a => a.DocId));
+        Assert.Empty(m[2].Attachments);
+        Assert.Empty(m[3].Attachments);
+    }
+
+    // ---- Bulk mail (06-09, D-22, NOISE-05) ----
+
+    private static (CaseGuide Guide, CorpusPlan Plan, PeopleDirectory People) Mixed()
+    {
+        var (draft, plan) = AttachmentTestData.MixedCase();
+        return (draft.Guide!, plan, PeopleDirectory.Create(draft.Guide!, plan));
+    }
+
+    private static ComposedThread ComposeMixed(CorpusPlan plan, PeopleDirectory people, PlannedThread thread,
+        IReadOnlyDictionary<string, ComposedAttachment>? parts = null) =>
+        EmailComposer.Compose(plan.PlanId, thread, Assignment(thread, PrivilegeMarking.None), Rendered(thread), people, parts);
+
+    [Fact]
+    public void Compose_newsletter_sender_uses_the_bulk_newsletter_formatter()
+    {
+        var (_, plan, people) = Mixed();
+        var email = ComposeMixed(plan, people, AttachmentTestData.Thread(plan, AttachmentTestData.NewsletterThreadId)).Emails.Single();
+
+        Assert.Contains("Glass &amp; Facade Digest", email.Html);
+        Assert.Contains("Unsubscribe", email.Html);
+        Assert.DoesNotContain("class=\"signature\"", email.Html);
+        Assert.Equal(string.Empty, email.Signature);
+        Assert.Equal("Body of message 1 about the window schedule.\n\nThanks,", email.PlainText);
+        Assert.Contains("Unsubscribe", email.HtmlFragment);
+    }
+
+    [Fact]
+    public void Compose_spam_and_personal_senders_use_their_bulk_variants()
+    {
+        var (_, plan, people) = Mixed();
+        var spam = ComposeMixed(plan, people, AttachmentTestData.Thread(plan, AttachmentTestData.SpamThreadId)).Emails.Single();
+        Assert.Contains("Reply STOP to opt out", spam.Html);
+        Assert.DoesNotContain("class=\"signature\"", spam.Html);
+        Assert.Equal(string.Empty, spam.Signature);
+
+        var personal = ComposeMixed(plan, people, AttachmentTestData.Thread(plan, AttachmentTestData.PersonalThreadId)).Emails.Single();
+        Assert.DoesNotContain("class=\"signature\"", personal.Html);
+        Assert.DoesNotContain("Unsubscribe", personal.Html);
+        Assert.Contains("<p>Thanks,</p>", personal.Html);
+        Assert.Equal(string.Empty, personal.Signature);
+        Assert.Equal("Body of message 1 about the window schedule.\n\nThanks,", personal.PlainText);
+    }
+
+    [Fact]
+    public void Compose_vendor_or_newsletter_in_business_thread_uses_the_business_formatter()
+    {
+        var (_, plan, people) = Mixed();
+        var vendor = ComposeMixed(plan, people, PlanFixtures.Thread(plan, "F-004")).Emails[0];
+        Assert.Contains("class=\"signature\"", vendor.Html);
+        Assert.Equal("Dana Whitfield", vendor.Signature);
+
+        var daily = AttachmentTestData.Thread(plan, AttachmentTestData.DailyBusinessThreadId);
+        daily.Messages[0].FromId = AttachmentTestData.NewsletterId;
+        var email = ComposeMixed(plan, people, daily).Emails[0];
+        Assert.Contains("class=\"signature\"", email.Html);
+        Assert.DoesNotContain("Unsubscribe", email.Html);
+        Assert.Equal("Glass & Facade Digest", email.Signature);
+    }
+
+    [Fact]
+    public void Compose_quoted_spam_image_becomes_a_placeholder_in_the_reply()
+    {
+        var (_, plan, people) = Mixed();
+        var thread = AttachmentTestData.Thread(plan, AttachmentTestData.SpamThreadId);
+        var root = thread.Messages[0];
+        thread.Messages.Add(new PlannedMessage
+        {
+            Id = thread.Id + "-M02",
+            DocId = root.DocId + "R",
+            Seq = 2,
+            ReplyToSeq = 1,
+            Kind = MessageKind.Reply,
+            FromId = root.ToIds[0],
+            ToIds = new List<string> { root.FromId },
+            SentAt = root.SentAt.AddHours(1),
+            TimeZoneId = root.TimeZoneId
+        });
+        var image = root.Attachments.Single(a => a.Kind == AttachmentType.Image);
+        var parts = new Dictionary<string, ComposedAttachment> { [image.DocId] = Part(image, ContentId) };
+
+        var m = ComposeMixed(plan, people, thread, parts).Emails;
+
+        Assert.Contains($"src=\"cid:{ContentId}\"", m[0].Html);
+        Assert.Contains("[image: Offer banner]", m[1].Html);
+        Assert.DoesNotContain("cid:", m[1].Html);
+    }
+
+    [Fact]
+    public void Compose_headers_match_between_bulk_and_business_paths()
+    {
+        var (_, plan, people) = Mixed();
+        var thread = AttachmentTestData.Thread(plan, AttachmentTestData.NewsletterThreadId);
+        var bulk = ComposeMixed(plan, people, thread).Emails.Single();
+
+        thread.Category = NonRelevantCategory.DailyBusiness;
+        var business = ComposeMixed(plan, people, thread).Emails.Single();
+
+        Assert.NotEqual(bulk.Html, business.Html);
+        Assert.Equal(bulk.MessageId, business.MessageId);
+        Assert.Equal(bulk.InReplyTo, business.InReplyTo);
+        Assert.Equal(bulk.References, business.References);
+        Assert.Equal(bulk.Subject, business.Subject);
+        Assert.Equal(bulk.Date, business.Date);
+        Assert.Equal(bulk.From.Email, business.From.Email);
+        Assert.Equal(bulk.To.Select(t => t.Email), business.To.Select(t => t.Email));
+        Assert.Equal(bulk.Cc.Select(t => t.Email), business.Cc.Select(t => t.Email));
+    }
+
+    [Fact]
+    public void Compose_bulk_is_deterministic()
+    {
+        var (_, plan, people) = Mixed();
+        var thread = AttachmentTestData.Thread(plan, AttachmentTestData.NewsletterThreadId);
+        var first = ComposeMixed(plan, people, thread).Emails.Single();
+        var second = ComposeMixed(plan, people, thread).Emails.Single();
+        Assert.Equal(first.Html, second.Html);
+        Assert.Equal(first.PlainText, second.PlainText);
     }
 
     private static int CountOf(string text, string value)

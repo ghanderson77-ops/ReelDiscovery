@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
@@ -170,7 +171,12 @@ public static class EvidencePrompts
 
         sb.Append($" | {MessageTime.Local(message).ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}");
         sb.Append($" | subtlety: {SubtletyGuidance(subtlety)}");
-        sb.Append($" | length: {band.MinWords}-{band.MaxWords} words");
+        // D-28: a single-message voicemail thread's body is the spoken transcript
+        var isVoicemail = (ctx.Thread.Messages ?? new List<PlannedMessage>()).Count(m => m != null) == 1
+            && (message.Attachments ?? new List<PlannedAttachment>()).Any(a => a != null && a.Kind == AttachmentType.Voicemail);
+        sb.Append(isVoicemail
+            ? $" | {VoicemailInstruction(ctx.People.NameOf(message.FromId))}"
+            : $" | length: {band.MinWords}-{band.MaxWords} words");
 
         var mayMention = ctx.Knowledge.MayMentionBySeq.TryGetValue(message.Seq, out var ids) ? ids : new List<string>();
         var mention = mayMention
@@ -199,8 +205,12 @@ public static class EvidencePrompts
         return sb.ToString();
     }
 
+    internal static string VoicemailInstruction(string caller) =>
+        $"voicemail: write what {caller} says on the phone, 20-90 words, spoken style, no greeting line or sign-off";
+
+    // Shared with AttachmentPrompts and FillerPrompts (06-PATTERNS)
     // "CH-004 Lisa Chen, Project Executive, Harmon Builders, Inc. | voice: ... | signs off: Full"; externals "EXT-002 Dana Whitfield, summitglazingsupply.com"
-    private static string PersonLine(ThreadRenderContext ctx, CaseGuide guide, string id)
+    internal static string PersonLine(ThreadRenderContext ctx, CaseGuide guide, string id)
     {
         var person = ctx.People.Find(id);
         if (person == null)
@@ -223,7 +233,7 @@ public static class EvidencePrompts
     }
 
     // Knowers on the thread by name; "everyone" when public; every knower when none of them is on the thread
-    private static string KnownTo(ThreadRenderContext ctx, IReadOnlyCollection<string> knowers, HashSet<string> onThread)
+    internal static string KnownTo(ThreadRenderContext ctx, IReadOnlyCollection<string> knowers, HashSet<string> onThread)
     {
         if (knowers.Count == 0)
             return "everyone";
@@ -232,11 +242,11 @@ public static class EvidencePrompts
         return string.Join(", ", listed.Select(ctx.People.NameOf));
     }
 
-    private static string Names(ThreadRenderContext ctx, IEnumerable<string> ids) =>
+    internal static string Names(ThreadRenderContext ctx, IEnumerable<string> ids) =>
         string.Join(", ", (ids ?? Enumerable.Empty<string>()).Where(id => !string.IsNullOrWhiteSpace(id)).Select(ctx.People.NameOf));
 
     // Participants in order of first appearance (sender, to, cc by seq)
-    private static List<string> OrderedParticipants(IEnumerable<PlannedMessage> messages)
+    internal static List<string> OrderedParticipants(IEnumerable<PlannedMessage> messages)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var ordered = new List<string>();

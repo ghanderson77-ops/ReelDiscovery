@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Services.Evidence;
 
@@ -68,6 +69,19 @@ public static partial class AttachmentRenderer
 
     [GeneratedRegex(@"\p{Cc}")]
     private static partial Regex ControlChars();
+
+    /// <summary>
+    /// The request for one attempt: relevant attachments use the case system prompt, filler the mundane one; attempts after
+    /// the first carry the previous attempt's violations at the end of the user prompt (D-13).
+    /// </summary>
+    internal static LlmRequest BuildRequest(AttachmentRenderContext ctx, int attempt, IReadOnlyList<RenderViolation>? feedback) => new()
+    {
+        Tier = ctx.Tier,
+        OperationName = $"Generate Corpus - {ctx.Spec.DocId}" + (attempt > 1 ? $" attempt {attempt}" : string.Empty),
+        SystemPrompt = ctx.Relevant ? AttachmentPrompts.SystemPrompt : AttachmentPrompts.FillerSystemPrompt,
+        UserPrompt = AttachmentPrompts.Build(ctx, feedback),
+        MaxOutputTokens = MaxOutputTokens
+    };
 
     /// <summary>
     /// The DTO the call asks for: relevant Office kinds return newDetails, filler kinds never can (D-13); invites have one

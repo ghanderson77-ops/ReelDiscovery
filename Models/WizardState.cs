@@ -1,6 +1,7 @@
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Services.Evidence;
 
 namespace ReelDiscovery.Models;
 
@@ -94,6 +95,15 @@ public class WizardState
 
     public OpenAIMediaClient? CreateMediaClient() =>
         IsMediaAvailable ? new OpenAIMediaClient(OpenAIApiKey, Config.ImageModel, Config.ImageQuality) : null;
+
+    /// <summary>Editable per-unit media prices (D-29); cloned into each media generator.</summary>
+    public MediaPrices MediaPrices { get; set; } = MediaPrices.Defaults();
+
+    /// <summary>Media seam for the evidence pipeline; null without a tested OpenAI key (PROV-06).</summary>
+    public IMediaGenerator? CreateMediaGenerator() =>
+        IsMediaAvailable
+            ? new OpenAIMediaGenerator(new OpenAIMediaClient(OpenAIApiKey, Config.ImageModel, Config.ImageQuality), MediaPrices.Clone(), UsageTracker)
+            : null;
 
     // Model Configurations
     public List<AIModelConfig> AvailableModelConfigs { get; set; } = AIModelConfig.GetDefaultModels();

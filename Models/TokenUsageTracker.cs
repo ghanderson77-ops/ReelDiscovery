@@ -43,6 +43,28 @@ public class TokenUsageTracker
         }
     }
 
+    /// <summary>
+    /// Records a per-unit priced media call (image or speech) on the session ticker; tokens stay 0 (D-29).
+    /// </summary>
+    public void RecordMediaUsage(string operation, decimal cost)
+    {
+        lock (_lock)
+        {
+            TotalCost += cost;
+
+            _entries.Add(new TokenUsageEntry
+            {
+                Timestamp = DateTime.Now,
+                Operation = operation,
+                ModelId = "media",
+                Provider = "OpenAI",
+                InputTokens = 0,
+                OutputTokens = 0,
+                Cost = cost
+            });
+        }
+    }
+
     public void Reset()
     {
         lock (_lock)

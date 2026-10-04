@@ -277,6 +277,72 @@ public class ComposeHtmlTests
         }
     }
 
+    private const string MockupCid = "0123456789abcdef@dundermifflin.com";
+
+    private static List<InlineImageRef> Mockup(string contentId = MockupCid) =>
+        new() { new InlineImageRef { ContentId = contentId, Title = "Mockup <photo>" } };
+
+    [Fact]
+    public void InlineImage_RendersCidImgAfterBodyBeforeSignature()
+    {
+        var html = HtmlEmailFormatter.ComposeFragment("See the mockup.", "Thanks,", "Maria Delgado", null, Theme, false, true,
+            inlineImages: Mockup());
+
+        var img = "<img src=\"cid:0123456789abcdef@dundermifflin.com\" alt=\"Mockup &lt;photo&gt;\" style=\"max-width:100%\">";
+        Assert.Contains(img, html);
+        var at = html.IndexOf(img, StringComparison.Ordinal);
+        Assert.True(html.IndexOf("See the mockup.", StringComparison.Ordinal) < at);
+        Assert.True(at < html.IndexOf("class=\"signature\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void InlineImage_Placeholders_RenderTitleAndNoCid()
+    {
+        var html = HtmlEmailFormatter.ComposeFragment("See the mockup.", "Thanks,", "Maria Delgado", null, Theme, false, true,
+            inlineImages: Mockup(), imagePlaceholders: true);
+
+        Assert.Contains("[image: Mockup &lt;photo&gt;]", html);
+        Assert.DoesNotContain("cid:", html);
+        Assert.DoesNotContain("<img", html);
+    }
+
+    [Theory]
+    [InlineData("0123456789abcdef@x.com\" onerror=\"x")]
+    [InlineData("0123456789abcdef@<x>.com")]
+    [InlineData("0123456789ABCDEF@dundermifflin.com")]
+    [InlineData("123@dundermifflin.com")]
+    [InlineData("")]
+    public void InlineImage_InvalidContentId_IsOmitted(string contentId)
+    {
+        var html = HtmlEmailFormatter.ComposeFragment("Body", "", "", null, Theme, false, true, inlineImages: Mockup(contentId));
+
+        Assert.DoesNotContain("<img", html);
+        Assert.DoesNotContain("cid:", html);
+        Assert.DoesNotContain("onerror", html);
+    }
+
+    [Fact]
+    public void InlineImages_EmptyList_MatchesGolden()
+    {
+        var empty = new List<InlineImageRef>();
+        var html = HtmlEmailFormatter.ComposeFragment("Summary below.\n\n| Item | Amount |\n|---|---|\n| CO 7 | $184,250 |\n| CO 8 | $12,000 |",
+            "Thanks,", "Maria Delgado", null, Theme, false, true, inlineImages: empty);
+
+        Assert.Equal(ComposeHtmlGolden.Fragment("Table"), Lf(html));
+    }
+
+    [Fact]
+    public void ComposeHtml_PassesInlineImagesThrough()
+    {
+        var html = HtmlEmailFormatter.ComposeHtml("See the mockup.", "", "", null, Theme, false, true, inlineImages: Mockup());
+        var quoted = HtmlEmailFormatter.ComposeHtml("See the mockup.", "", "", null, Theme, false, true,
+            inlineImages: Mockup(), imagePlaceholders: true);
+
+        Assert.Contains("src=\"cid:" + MockupCid + "\"", html);
+        Assert.Contains("[image: Mockup &lt;photo&gt;]", quoted);
+        Assert.DoesNotContain("cid:", quoted);
+    }
+
     private static string Lf(string text) => text.Replace("\r\n", "\n");
 
     private static string Hash(string text) =>

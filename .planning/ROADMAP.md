@@ -201,7 +201,7 @@ Plans:
 - [x] 06-07-PLAN.md — Inline images/quote fragments in HtmlEmailFormatter (frozen golden) + newsletter/spam/personal formatter with quote placeholders (Wave 1)
 - [ ] 06-08-PLAN.md — CheckAttachment with complete V6 inputs and ancestry gating, V1/V5-only filler checks (no V8), voicemail-aware V8, stable attachment ledger ids (Wave 3)
 - [x] 06-09-PLAN.md — Composer: attachment parts, inline images, bulk branch, voicemail phone-system notice (Wave 2)
-- [ ] 06-10-PLAN.md — Deterministic multipart MIME (frozen golden) + per-message, multi-copy, bounded attachment harvester (Wave 2)
+- [x] 06-10-PLAN.md — Deterministic multipart MIME (frozen golden) + per-message, multi-copy, bounded attachment harvester (Wave 2)
 - [ ] 06-11-PLAN.md — Attachment DTOs, prompts, image prompt, voicemail transcript line, test responder (Wave 3)
 - [ ] 06-12-PLAN.md — Per-organization side world with collision checks and fallback + per-cast voicemail voice call (Wave 3)
 - [ ] 06-13-PLAN.md — Phase 6 UI copy (tiles, stages, activity, banners, Ready card, summary rows) (Wave 2)
@@ -254,6 +254,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
 | 4. Corpus Plan & Answer Key | 22/22 | Complete    | 2026-10-03 |
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
-| 6. Attachments & Non-Relevant Corpus | 8/25 | In Progress|  |
+| 6. Attachments & Non-Relevant Corpus | 9/25 | In Progress|  |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |
 | 8. Ancillary Discovery Documents | 0/TBD | Not started | - |

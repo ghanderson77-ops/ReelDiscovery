@@ -182,7 +182,7 @@ public partial class StepGenerateCorpus : IWizardStep
                 ApplyView(data!.View!);
                 var counts = data.View!.Counts;
                 ShowDashboard(decision == GenerationEntry.PartialDashboard, counts.DoneThreads, counts.TotalThreads,
-                    counts.FailedThreads, counts.FailedThreads > 0, GenerationUiText.EntryBannerHeading(input));
+                    counts.FailedThreads, counts.FailedThreads > 0, input.LatestAttemptEnded);
                 return;
         }
     }

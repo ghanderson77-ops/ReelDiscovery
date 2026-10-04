@@ -16,12 +16,22 @@ internal enum GenerateCorpusRenderState
     FinishedIssues,
     NotApproved,
     PlanChanged,
-    Unreadable
+    Unreadable,
+    ReadyWithMedia,
+    ReadyMediaUnavailable,
+    RunningNonRelevant,
+    PartialUpgrade,
+    FinishedSkippedMedia,
+    FinishedSkippedMediaWithFailures,
+    FinishedSkippedMediaUnavailable
 }
 
+// What the row-2 banner slot holds (06-UI-SPEC S1 Row 2: at most one banner, partial-run first)
+internal enum GenerateCorpusBanner { None, PartialRun, Media }
+
 /// <summary>
-/// Generate Corpus step (05-UI-SPEC S1): header with save state and Start Over / Retry Failed Threads, the scope notice,
-/// the partial-run banner, seven stat tiles, the Waves and Activity cards (or a full-width state card) and the status
+/// Generate Corpus step (05-UI-SPEC S1, 06-UI-SPEC S1): header with save state and Start Over / Retry Failed Items, the
+/// scope notice, the partial-run or media banner, seven stat tiles, the Stages and Activity cards (or a full-width state card) and the status
 /// strip. This file holds the layout and paints any GenerationView snapshot; StepGenerateCorpus.Run.cs holds the wizard
 /// lifecycle and the entry decision. All copy comes from GenerationUiText.
 /// </summary>
@@ -30,7 +40,7 @@ public partial class StepGenerateCorpus : UserControl
     // Activity view cap; the journal keeps everything (UI-SPEC S1)
     internal const int MaxActivityRows = 500;
 
-    private const string WavesHint = "Oldest first. Each wave builds on the ones before.";
+    private const string StagesHint = "Relevant waves oldest first, then non-relevant mail";
     private const string ActivityHint = "Newest first";
 
     // Tiles 0-2 (Relevant, Non-relevant, Attachments) show "done / total" and pick a DPI rule-19 variant
@@ -78,6 +88,8 @@ public partial class StepGenerateCorpus : UserControl
     private FlowLayoutPanel _stateContent = null!;
     private Label _lblStateHeading = null!;
     private Label _lblStateBody = null!;
+    private Label _lblStateEstimate = null!;
+    private Label _lblStateMediaNotice = null!;
     private Button _btnStateAction = null!;
 
     private Label _lblStatus = null!;
@@ -100,6 +112,9 @@ public partial class StepGenerateCorpus : UserControl
     private GenerationStateCard _cardKind = GenerationStateCard.Ready;
     private bool _stateCardShown = true;
     private bool _bannerShown;
+    private GenerateCorpusBanner _bannerKind = GenerateCorpusBanner.None;
+    // Visible reads false while a parent is hidden, so the banner layout keeps its own flag
+    private bool _bannerHasButton = true;
     private GenerationCounts? _lastCounts;
     private string _noticeText = string.Empty;
 
@@ -245,6 +260,7 @@ public partial class StepGenerateCorpus : UserControl
         _btnRetryFailed = ButtonHelper.CreateButton(GenerationUiText.RetryFailedButtonText, 0, _buttonHeight, ButtonStyle.Primary);
         _btnRetryFailed.Margin = new Padding(smallGap, 0, 0, 0);
         _btnRetryFailed.Visible = false;
+        _toolTip.SetToolTip(_btnRetryFailed, GenerationUiText.RetryFailedTooltip);
         _headerButtons.Controls.Add(_btnStartOver);
         _headerButtons.Controls.Add(_btnRetryFailed);
 
@@ -383,7 +399,7 @@ public partial class StepGenerateCorpus : UserControl
         };
         _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         _bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        _bodyLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 0: Waves card | Activity card
+        _bodyLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 0: Stages card | Activity card
 
         _wavesCard = BuildWavesCard(inset);
         _wavesCard.Margin = new Padding(0, 0, smallGap, 0);
@@ -422,11 +438,36 @@ public partial class StepGenerateCorpus : UserControl
             BackColor = Theme.Surface,
             Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(20))
         };
+        // Ready card only: the estimate line and the Warning media notice (06-UI-SPEC S1 Row 4); hidden when empty
+        _lblStateEstimate = new Label
+        {
+            AutoSize = true,
+            UseMnemonic = false,
+            MaximumSize = new Size(LogicalToDeviceUnits(520), 0),
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Surface,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(20)),
+            Visible = false
+        };
+        _lblStateMediaNotice = new Label
+        {
+            AutoSize = true,
+            UseMnemonic = false,
+            MaximumSize = new Size(LogicalToDeviceUnits(520), 0),
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.Warning,
+            BackColor = Theme.Surface,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(20)),
+            Visible = false
+        };
         _btnStateAction = ButtonHelper.CreateButton("Generate Emails", 0, _buttonHeight, ButtonStyle.Primary);
         _btnStateAction.Margin = new Padding(0);
 
         _stateContent.Controls.Add(_lblStateHeading);
         _stateContent.Controls.Add(_lblStateBody);
+        _stateContent.Controls.Add(_lblStateEstimate);
+        _stateContent.Controls.Add(_lblStateMediaNotice);
         _stateContent.Controls.Add(_btnStateAction);
         _stateCard.Controls.Add(_stateContent);
         _bodyHost.Controls.Add(_stateCard);
@@ -510,14 +551,15 @@ public partial class StepGenerateCorpus : UserControl
         var layout = NewCardLayout();
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Card header (caption | hint)
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 1: Waves grid
-        layout.Controls.Add(NewCardHeader(inset, "Waves", WavesHint), 0, 0);
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 1: Stages grid
+        layout.Controls.Add(NewCardHeader(inset, "Stages", StagesHint), 0, 0);
 
         _gridWaves = NewGrid();
         GridStyle.AddDotColumn(_gridWaves, this);
         AddRightColumn(_gridWaves, "Wave", "Wave", 56);
         AddFillColumn(_gridWaves, "Dates", "Dates", 120);
-        AddRightColumn(_gridWaves, "Threads", "Threads", 80);
+        // Stage rows count items (threads or attachments), so the column is Done (06-UI-SPEC S1 Row 4)
+        AddRightColumn(_gridWaves, "Done", "Done", 80);
         AddRightColumn(_gridWaves, "Warnings", "Warnings", 80);
         AddRightColumn(_gridWaves, "Failed", "Failed", 64);
         layout.Controls.Add(_gridWaves, 0, 1);
@@ -666,8 +708,7 @@ public partial class StepGenerateCorpus : UserControl
         _lastCounts = counts.Clone();
         for (var i = FractionTiles; i < TileKinds.Length; i++)
             _tiles[i].SetContent(GenerationUiText.Tile(TileKinds[i], counts));
-        for (var i = 0; i < FractionTiles; i++)
-            ApplyFractionTile(i);
+        ApplyProgressTiles();
 
         ApplyWaves(view.Waves ?? new List<WaveProgress>());
         AddActivity(view.Events ?? new List<GenerationEvent>());
@@ -685,7 +726,16 @@ public partial class StepGenerateCorpus : UserControl
     }
 
     /// <summary>
-    /// Relevant, Non-relevant and Attachments tiles: each takes the widest variant whose value fits it at TitleFont
+    /// Relevant, Non-relevant and Attachments tiles, each fitted on its own (DPI rule 21).
+    /// </summary>
+    private void ApplyProgressTiles()
+    {
+        for (var i = 0; i < FractionTiles; i++)
+            ApplyFractionTile(i);
+    }
+
+    /// <summary>
+    /// One of the Relevant, Non-relevant and Attachments tiles: it takes the widest variant whose value fits it at TitleFont
     /// (DPI rules 19 and 21, independently per tile).
     /// </summary>
     private void ApplyFractionTile(int index)
@@ -716,7 +766,8 @@ public partial class StepGenerateCorpus : UserControl
     }
 
     /// <summary>
-    /// Waves grid: rows created once per wave count, then updated in place (no rebuild, no scroll jump).
+    /// Stages grid: relevant wave rows, then the Non-relevant mail and Attachments for written threads rows. Rows are
+    /// created once per row count, then updated in place by position (no rebuild, no scroll jump).
     /// </summary>
     private void ApplyWaves(List<WaveProgress> waves)
     {
@@ -729,26 +780,36 @@ public partial class StepGenerateCorpus : UserControl
 
         for (var i = 0; i < waves.Count; i++)
         {
-            var wave = waves[i];
+            var stage = waves[i];
             var row = _gridWaves.Rows[i];
-            var color = WaveColor(wave);
+            var color = StageColor(stage);
             if (row.Tag is not DotTag tag || tag.Color != color)
             {
                 row.Tag = new DotTag { Color = color };
                 _gridWaves.InvalidateCell(0, i);
             }
 
-            SetCell(row, "Wave", wave.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            var (dates, done, tooltip) = GenerationUiText.StageRowText(wave);
+            // Stage rows have no wave number
+            SetCell(row, "Wave", stage.RowKind == StageRowKind.Wave
+                ? stage.Index.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : string.Empty);
+            var (dates, done, tooltip) = GenerationUiText.StageRowText(stage);
             SetCell(row, "Dates", dates);
             row.Cells["Dates"].ToolTipText = tooltip;
-            SetCell(row, "Threads", done);
-            SetCell(row, "Warnings", wave.Warnings > 0 ? wave.Warnings.ToString("N0") : string.Empty);
-            SetCell(row, "Failed", wave.Failed > 0 ? wave.Failed.ToString("N0") : string.Empty);
+            SetCell(row, "Done", done);
+            var (warnings, failed) = StageProblems(stage);
+            SetCell(row, "Warnings", warnings > 0 ? warnings.ToString("N0") : string.Empty);
+            SetCell(row, "Failed", failed > 0 ? failed.ToString("N0") : string.Empty);
         }
 
         _gridWaves.ClearSelection();
     }
+
+    // Wave and Non-relevant rows count their threads and attachments; the repair row counts attachments only
+    private static (int Warnings, int Failed) StageProblems(WaveProgress stage) =>
+        stage.RowKind == StageRowKind.Attachments
+            ? (stage.AttachmentWarnings, stage.AttachmentsFailed)
+            : (stage.Warnings + stage.AttachmentWarnings, stage.Failed + stage.AttachmentsFailed);
 
     private static void SetCell(DataGridViewRow row, string column, string value)
     {
@@ -757,15 +818,25 @@ public partial class StepGenerateCorpus : UserControl
             cell.Value = value;
     }
 
-    private static Color WaveColor(WaveProgress wave)
+    /// <summary>
+    /// Phase 5 wave dot rules for every stage row: running Accent, any failure Danger, pending BorderStrong, warnings or
+    /// skipped Warning, otherwise Success.
+    /// </summary>
+    private static Color StageColor(WaveProgress stage)
     {
-        if (wave.Running)
+        if (stage.Running)
             return Theme.Accent;
-        if (wave.Failed > 0)
+
+        var (warnings, failed) = StageProblems(stage);
+        if (failed > 0)
             return Theme.Danger;
-        if (wave.Done + wave.Failed < wave.Threads || wave.Threads == 0)
+
+        var (total, finished) = stage.RowKind == StageRowKind.Attachments
+            ? (stage.Attachments, stage.AttachmentsDone + stage.AttachmentsFailed + stage.AttachmentsSkipped)
+            : (stage.Threads, stage.Done + stage.Failed);
+        if (total == 0 || finished < total)
             return Theme.BorderStrong;
-        return wave.Warnings > 0 ? Theme.Warning : Theme.Success;
+        return warnings > 0 || stage.AttachmentsSkipped > 0 ? Theme.Warning : Theme.Success;
     }
 
     /// <summary>
@@ -842,9 +913,18 @@ public partial class StepGenerateCorpus : UserControl
         ArgumentNullException.ThrowIfNull(content);
         _cardKind = kind;
         _lblStateHeading.Text = content.Heading;
-        // The Ready card's estimate and media notice lines get their own Small labels in 06-22; until then they follow the body
-        _lblStateBody.Text = string.Join(Environment.NewLine + Environment.NewLine,
-            new[] { content.Body, content.EstimateLine, content.MediaNotice }.Where(t => t.Length > 0));
+        _lblStateBody.Text = content.Body;
+
+        // Ready card: body bottom 8 when the estimate follows, estimate bottom 4 when the notice follows, last line 20
+        var estimate = content.EstimateLine ?? string.Empty;
+        var notice = content.MediaNotice ?? string.Empty;
+        var last = LogicalToDeviceUnits(20);
+        _lblStateBody.Margin = new Padding(0, 0, 0, estimate.Length > 0 || notice.Length > 0 ? LogicalToDeviceUnits(Theme.SmallGap) : last);
+        _lblStateEstimate.Text = estimate;
+        _lblStateEstimate.Visible = estimate.Length > 0;
+        _lblStateEstimate.Margin = new Padding(0, 0, 0, notice.Length > 0 ? LogicalToDeviceUnits(4) : last);
+        _lblStateMediaNotice.Text = notice;
+        _lblStateMediaNotice.Visible = notice.Length > 0;
         ButtonHelper.StyleButton(_btnStateAction, content.Danger ? ButtonStyle.Danger : ButtonStyle.Primary);
         _btnStateAction.Text = content.ButtonText;
         if (_btnStateAction is ThemedButton themed)
@@ -853,6 +933,7 @@ public partial class StepGenerateCorpus : UserControl
 
         SetRunChrome(false);
         _bannerShown = false;
+        _bannerKind = GenerateCorpusBanner.None;
         _btnStartOver.Visible = false;
         _btnRetryFailed.Visible = false;
         SetStateCardShown(true);
@@ -861,25 +942,78 @@ public partial class StepGenerateCorpus : UserControl
     }
 
     /// <summary>
-    /// Shows the dashboard (tiles, waves, activity) after a run or on reopen: the partial-run banner when threads are
-    /// left, Start Over in the header, and Retry Failed Threads when a finished run has failures (UI-SPEC Row 0 table).
+    /// Shows the dashboard (tiles, stages, activity) after a run or on reopen: the partial-run banner when items are left,
+    /// Start Over in the header, and Retry Failed Items when a finished run has failed items (UI-SPEC Row 0 table).
+    /// <paramref name="failed"/> counts failed threads + attachments; <paramref name="runEnded"/> picks the banner heading.
     /// </summary>
-    internal void ShowDashboard(bool banner, int done, int total, int failed, bool finishedWithFailures, string? bannerHeading = null)
+    internal void ShowDashboard(bool banner, int done, int total, int failed, bool finishedWithFailures, bool runEnded = false,
+        int attachmentsDone = 0, int attachmentsTotal = 0)
     {
         SetRunChrome(false);
-        _bannerShown = banner;
-        if (banner)
-        {
-            // Attachment counts reach the banner in 06-23; until then the body counts threads only
-            _lblBannerHeading.Text = bannerHeading ?? GenerationUiText.BannerHeading(runEnded: false);
-            _lblBannerBody.Text = GenerationUiText.BannerBody(done, total, 0, 0, failed);
-        }
         _btnStartOver.Visible = true;
-        _btnRetryFailed.Visible = !banner && finishedWithFailures;
         _btnRetryFailed.Margin = new Padding(LogicalToDeviceUnits(Theme.SmallGap), 0, 0, 0);
+        _btnRetryFailed.Visible = !banner && finishedWithFailures;
+        if (banner)
+            SetBanner(GenerateCorpusBanner.PartialRun, GenerationUiText.BannerHeading(runEnded),
+                GenerationUiText.BannerBody(done, total, attachmentsDone, attachmentsTotal, failed), GenerationUiText.BannerButton);
+        else
+            SetBanner(GenerateCorpusBanner.None, string.Empty, string.Empty, string.Empty);
         SetStateCardShown(false);
         RefreshHeader();
         RaiseStateChanged();
+    }
+
+    /// <summary>
+    /// Partial-run banner (06-UI-SPEC S1 Row 2): heading by how the last run ended, Continue Generating; it takes the
+    /// banner slot over any media banner and hides the header's Retry Failed Items.
+    /// </summary>
+    internal void ShowPartialBanner(bool runEnded, int threadsDone, int threadsTotal, int attachmentsDone, int attachmentsTotal,
+        int failedItems)
+    {
+        _btnRetryFailed.Visible = false;
+        SetBanner(GenerateCorpusBanner.PartialRun, GenerationUiText.BannerHeading(runEnded),
+            GenerationUiText.BannerBody(threadsDone, threadsTotal, attachmentsDone, attachmentsTotal, failedItems),
+            GenerationUiText.BannerButton);
+        RaiseStateChanged();
+    }
+
+    /// <summary>
+    /// Media banner after a finished run with skipped images or voicemails. Ignored while the partial-run banner shows
+    /// (precedence rule); a banner button hides the header's Retry Failed Items (one Primary rule). An empty ButtonText
+    /// shows no button. Every banner button starts the same run as Continue Generating.
+    /// </summary>
+    internal void ShowMediaBanner(MediaBannerContent content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (_bannerKind == GenerateCorpusBanner.PartialRun && _bannerShown)
+            return;
+
+        var button = content.ButtonText ?? string.Empty;
+        if (button.Length > 0)
+            _btnRetryFailed.Visible = false;
+        SetBanner(GenerateCorpusBanner.Media, content.Heading ?? string.Empty, content.Body ?? string.Empty, button);
+        RaiseStateChanged();
+    }
+
+    /// <summary>
+    /// Fills the single banner card; the button sizes to its text (never ellipsized) and is hidden when empty.
+    /// </summary>
+    private void SetBanner(GenerateCorpusBanner kind, string heading, string body, string buttonText)
+    {
+        _bannerKind = kind;
+        _bannerShown = kind != GenerateCorpusBanner.None;
+        if (_bannerShown)
+        {
+            _lblBannerHeading.Text = heading;
+            _lblBannerBody.Text = body;
+            _btnContinue.Text = buttonText;
+            if (_btnContinue is ThemedButton themed && buttonText.Length > 0)
+                themed.FitToText(0, _buttonHeight);
+            _bannerHasButton = buttonText.Length > 0;
+            _btnContinue.Visible = _bannerHasButton;
+            _bannerButtons.Visible = _bannerHasButton;
+        }
+        UpdateBannerVisibility();
     }
 
     /// <summary>
@@ -901,6 +1035,7 @@ public partial class StepGenerateCorpus : UserControl
         if (_bannerShown)
         {
             _bannerShown = false;
+            _bannerKind = GenerateCorpusBanner.None;
             UpdateBannerVisibility();
         }
         if (_stateCardShown)
@@ -945,10 +1080,12 @@ public partial class StepGenerateCorpus : UserControl
         }
 
         // The text wraps beside the button; the card is as tall as the taller of the two plus its padding.
-        // Measured from the page width (the banner spans the single root column), so it is right before the first layout
+        // Measured from the page width (the banner spans the single root column), so it is right before the first layout.
+        // A media banner without a button gives the text the full width
         var inner = Math.Max(1, _root.ClientSize.Width - _banner.Margin.Horizontal - _banner.Padding.Horizontal);
-        var buttons = _bannerButtons.GetPreferredSize(Size.Empty);
-        var textWidth = Math.Max(1, inner - buttons.Width - _bannerButtons.Margin.Horizontal);
+        var buttons = _bannerHasButton ? _bannerButtons.GetPreferredSize(Size.Empty) : Size.Empty;
+        var buttonsMargin = _bannerHasButton ? _bannerButtons.Margin.Horizontal : 0;
+        var textWidth = Math.Max(1, inner - buttons.Width - buttonsMargin);
         if (_lblBannerHeading.MaximumSize.Width != textWidth)
             _lblBannerHeading.MaximumSize = new Size(textWidth, 0);
         if (_lblBannerBody.MaximumSize.Width != textWidth)
@@ -1006,37 +1143,59 @@ public partial class StepGenerateCorpus : UserControl
 
     /// <summary>
     /// Binds and shows one state synchronously for render tests; never reads the journal, starts a run or saves.
+    /// <paramref name="ready"/> overrides the Ready card input, <paramref name="media"/> the media banner content, and
+    /// <paramref name="runEnded"/> picks the partial-run heading.
     /// </summary>
     internal void LoadForRender(WizardState state, GenerateCorpusRenderState render, GenerationView? view = null, string reason = "",
-        int earlierThreads = 0)
+        int earlierThreads = 0, GenerationReadyInput? ready = null, MediaBannerContent? media = null, bool runEnded = false)
     {
         BindState(state);
         RefreshHeader();
         var plan = state.Case.Corpus?.Plan;
         SetNotice(plan == null || render == GenerateCorpusRenderState.NotApproved ? string.Empty : NoticeFor(plan));
         var counts = view?.Counts ?? new GenerationCounts();
+        var failedItems = counts.FailedThreads + counts.AttachmentsFailed;
 
         switch (render)
         {
             case GenerateCorpusRenderState.Ready:
-                ShowStateCard(ReadyCard(plan!), GenerationStateCard.Ready);
+            case GenerateCorpusRenderState.ReadyWithMedia:
+            case GenerateCorpusRenderState.ReadyMediaUnavailable:
+                ShowStateCard(ready == null ? ReadyCard(plan!) : GenerationUiText.ReadyCard(ready), GenerationStateCard.Ready);
                 break;
             case GenerateCorpusRenderState.Running:
+            case GenerateCorpusRenderState.RunningNonRelevant:
                 _isGenerating = true;
                 ShowDashboard(false, 0, 0, 0, false);
                 ApplyView(view!);
                 RaiseStateChanged();
                 break;
             case GenerateCorpusRenderState.Partial:
+            case GenerateCorpusRenderState.PartialUpgrade:
                 ApplyView(view!);
-                ShowDashboard(true, counts.DoneThreads, counts.TotalThreads, counts.FailedThreads, false);
-                ShowOutcome(GenerationOutcome.Cancelled, counts, string.Empty);
+                ShowDashboard(true, counts.DoneThreads, counts.TotalThreads, failedItems, false,
+                    runEnded || render == GenerateCorpusRenderState.PartialUpgrade, counts.AttachmentsDone, counts.AttachmentsTotal);
+                // Entering a Phase 5 run shows no outcome line; the cancelled case shows the line a cancel leaves behind
+                if (render == GenerateCorpusRenderState.Partial)
+                    ShowOutcome(GenerationOutcome.Cancelled, counts, string.Empty, retryButtonShown: false);
                 break;
             case GenerateCorpusRenderState.FinishedClean:
             case GenerateCorpusRenderState.FinishedIssues:
                 ApplyView(view!);
-                ShowDashboard(false, counts.DoneThreads, counts.TotalThreads, counts.FailedThreads, counts.FailedThreads > 0);
-                ShowOutcome(GenerationOutcome.Finished, counts, string.Empty);
+                ShowDashboard(false, counts.DoneThreads, counts.TotalThreads, failedItems, failedItems > 0);
+                ShowOutcome(GenerationOutcome.Finished, counts, string.Empty, retryButtonShown: failedItems > 0);
+                break;
+            case GenerateCorpusRenderState.FinishedSkippedMedia:
+            case GenerateCorpusRenderState.FinishedSkippedMediaWithFailures:
+            case GenerateCorpusRenderState.FinishedSkippedMediaUnavailable:
+                ApplyView(view!);
+                ShowDashboard(false, counts.DoneThreads, counts.TotalThreads, failedItems, failedItems > 0);
+                var content = media ?? GenerationUiText.MediaBanner(counts.AttachmentsSkipped, failedItems,
+                    render != GenerateCorpusRenderState.FinishedSkippedMediaUnavailable, string.Empty);
+                ShowMediaBanner(content);
+                // The outcome's Retry tail only names the header button when it shows
+                ShowOutcome(GenerationOutcome.Finished, counts, string.Empty,
+                    retryButtonShown: failedItems > 0 && string.IsNullOrEmpty(content.ButtonText));
                 break;
             case GenerateCorpusRenderState.NotApproved:
                 ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty), GenerationStateCard.NotApproved);
@@ -1051,11 +1210,12 @@ public partial class StepGenerateCorpus : UserControl
     }
 
     /// <summary>
-    /// Outcome status line in its tone (UI-SPEC outcome table).
+    /// Outcome status line in its tone (UI-SPEC outcome table); <paramref name="retryButtonShown"/> keeps the Retry tail
+    /// only when the header button is showing.
     /// </summary>
-    internal void ShowOutcome(GenerationOutcome outcome, GenerationCounts counts, string message)
+    internal void ShowOutcome(GenerationOutcome outcome, GenerationCounts counts, string message, bool retryButtonShown = true)
     {
-        var line = GenerationUiText.OutcomeText(outcome, counts, message);
+        var line = GenerationUiText.OutcomeText(outcome, counts, message, retryButtonShown);
         SetStatus(line.Text, ToneColor(line.Tone));
     }
 
@@ -1065,6 +1225,8 @@ public partial class StepGenerateCorpus : UserControl
     internal string StateBody => _lblStateBody.Text;
     internal string NoticeText => _noticeText;
     internal string BannerHeadingText => _lblBannerHeading.Text;
+    internal string BannerBodyText => _lblBannerBody.Text;
+    internal GenerateCorpusBanner BannerKind => _bannerShown && !_stateCardShown ? _bannerKind : GenerateCorpusBanner.None;
 
     internal DataGridView WavesGrid => _gridWaves;
     internal DataGridView ActivityGrid => _gridActivity;
@@ -1078,6 +1240,9 @@ public partial class StepGenerateCorpus : UserControl
     internal Button RetryFailedButton => _btnRetryFailed;
     internal Button StateActionButton => _btnStateAction;
     internal Button ContinueButton => _btnContinue;
+    internal Button BannerButton => _btnContinue;
+    internal Label EstimateLabel => _lblStateEstimate;
+    internal Label MediaNoticeLabel => _lblStateMediaNotice;
     internal Label StatusLabel => _lblStatus;
     internal Label NoticeLabel => _lblNotice;
     internal SlimProgressBar ProgressBar => _progress;

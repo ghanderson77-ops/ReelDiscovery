@@ -22,8 +22,9 @@ public class ScannedValue
 /// </summary>
 public static partial class CanonicalValueScanner
 {
-    // "$184,250.00", "$12,000", "$7.5 million", "$ 500"; the grouped form is tried first so commas are kept
-    [GeneratedRegex(@"\$\s?\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?:\s(?:million|billion|thousand)\b)?|\$\s?\d+(?:\.\d+)?(?:\s(?:million|billion|thousand)\b)?", RegexOptions.IgnoreCase, CitationScanner.MatchTimeoutMs)]
+    // "$184,250.00", "$12,000", "$7.5 million", "$ 500", "$1.25M", "$500K", "$2.5MM"; the grouped form is tried first so
+    // commas are kept; a K/M/MM/B suffix must not run into a letter ("$12 Main Street", "$5 Mbps" stay unscaled)
+    [GeneratedRegex(@"\$\s?\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?:\s(?:million|billion|thousand)\b|\s?(?:MM|[KMB])(?![A-Za-z]))?|\$\s?\d+(?:\.\d+)?(?:\s(?:million|billion|thousand)\b|\s?(?:MM|[KMB])(?![A-Za-z]))?", RegexOptions.IgnoreCase, CitationScanner.MatchTimeoutMs)]
     private static partial Regex Amount();
 
     // "CO-007", "INV-2024-118", "PO-4471", "SOW-3", "ACCT-99812"
@@ -113,7 +114,7 @@ public static partial class CanonicalValueScanner
         }
     }
 
-    /// <summary>Parses "$7.5 million"-style amounts; used by the Phase 5 render checks for the +/-15% variant window.</summary>
+    /// <summary>Parses "$7.5 million"- and "$1.25M"-style amounts; used by the Phase 5 render checks for the +/-15% variant window.</summary>
     internal static bool TryParseAmount(string? text, out decimal amount)
     {
         amount = 0;
@@ -129,6 +130,20 @@ public static partial class CanonicalValueScanner
                 multiplier = factor;
                 s = s[..^word.Length];
                 break;
+            }
+        }
+
+        // Abbreviated amounts are common in business mail; "$1.25M" used to scan as $1.25 (review 06-06)
+        if (multiplier == 1)
+        {
+            foreach (var (suffix, factor) in new[] { ("mm", 1_000_000m), ("k", 1_000m), ("m", 1_000_000m), ("b", 1_000_000_000m) })
+            {
+                if (s.EndsWith(suffix, StringComparison.Ordinal))
+                {
+                    multiplier = factor;
+                    s = s[..^suffix.Length];
+                    break;
+                }
             }
         }
 

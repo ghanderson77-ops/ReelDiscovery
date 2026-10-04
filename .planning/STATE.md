@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-06-PLAN.md
-last_updated: "2026-10-04T21:36:55.154Z"
+stopped_at: Completed 06-09-PLAN.md
+last_updated: "2026-10-04T21:53:20.614Z"
 last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 88
-  percent: 83
+  completed_plans: 89
+  percent: 84
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 8 of 25
+Plan: 9 of 25
 Status: Ready to execute
 Last activity: 2026-10-04
 
@@ -139,6 +139,7 @@ Progress: [██████████] 100%
 | Phase 06 P07 | 45min | 2 tasks | 6 files |
 | Phase 06 P05 | 18min | 2 tasks | 8 files |
 | Phase 06 P06 | 12min | 2 tasks | 6 files |
+| Phase 6 P09 | 40 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -383,6 +384,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-07: BulkMailFormatter.Compose sanitizes theme before WrapInTemplate; spam button label fixed list by stable hash; newsletter bold cap per section
 - [Phase 06]: 06-06: Filler length/privilege apportioned separately from relevant mail with own salts, reusing RenderAssignments shares; bulk mail banded by sender kind (Newsletter Long, else Short)
 - [Phase 06]: 06-06: DecoyScanner D1 = whole-word or same-value amount match on MustNotMention; CanonicalValueScanner parses K/M/MM/B suffixes
+- [Phase 06]: 06-09: Bulk formatter only for New messages from Newsletter/Spam/Personal senders in NewsletterSpamPersonal threads; vendors and bulk senders elsewhere use the business path
+- [Phase 06]: 06-09: Voicemail notice From '{Recipient org} Voice Mail' <voicemail@{recipient domain}>, Subject 'Voicemail from {Caller} ({m:ss})', duration max(5, round(words/2.5)) s; no banner or signature; BodyPlain keeps the transcript
+- [Phase 06]: 06-09: Compose(..., voicemailNotice: false) keeps Phase 5 voicemail text for 06-20 repair (D-26); quotes always nest parent.QuoteFragment
 
 ### Pending Todos
 
@@ -404,6 +408,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T21:36:46.191Z
-Stopped at: Completed 06-06-PLAN.md
+Last session: 2026-10-04T21:53:20.608Z
+Stopped at: Completed 06-09-PLAN.md
 Resume file: None

@@ -255,7 +255,7 @@ public class CaseSummaryRenderTests
                         Assert.DoesNotContain("generated", answerKeyLine);
                         break;
                     case RunSeed.Partial:
-                        Assert.Equal("7 of 10 relevant threads written · 1 with warnings · 2 failed", mailboxesLine);
+                        Assert.Equal("7 of 10 threads written · 1 item with warnings · 2 failed items", mailboxesLine);
                         Assert.Equal(Helpers.Theme.Warning, mailboxesColor);
                         Assert.Equal(Helpers.Theme.Warning, mailboxesDot);
                         Assert.True(openMailboxes);
@@ -268,7 +268,7 @@ public class CaseSummaryRenderTests
                         Assert.EndsWith($" · 18 generated, {Math.Max(0, plan.EmailCount + plan.AttachmentCount - 18 - 4):N0} planned", answerKeyLine);
                         break;
                     case RunSeed.Complete:
-                        Assert.Equal("All 10 relevant threads written", mailboxesLine);
+                        Assert.Equal("All 10 threads written", mailboxesLine);
                         Assert.Equal(Helpers.Theme.Success, mailboxesColor);
                         Assert.Equal(Helpers.Theme.Success, mailboxesDot);
                         Assert.True(openMailboxes);

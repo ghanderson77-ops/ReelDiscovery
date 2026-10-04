@@ -219,6 +219,22 @@ public class MediaGeneratorTests
     }
 
     [Fact]
+    public async Task FakeMediaGenerator_StopAfter_ReturnsStopped()
+    {
+        var fake = new FakeMediaGenerator { StopAfter = 1 };
+
+        var first = await fake.GenerateImageAsync("a photo", "img-1");
+        var second = await fake.GenerateSpeechAsync("hello", "onyx", "vm-1");
+
+        Assert.Equal(MediaResultKind.Ok, first.Kind);
+        Assert.Equal(0x89, first.Bytes![0]);
+        Assert.Equal(MediaResultKind.Stopped, second.Kind);
+        Assert.Equal("the OpenAI key was rejected", second.Reason);
+        Assert.Equal(2, fake.Requests.Count);
+        Assert.Equal(("speech", "hello", "onyx", "vm-1"), fake.Requests[1]);
+    }
+
+    [Fact]
     public void MediaPrices_DefaultsAndNormalize()
     {
         var defaults = MediaPrices.Defaults();

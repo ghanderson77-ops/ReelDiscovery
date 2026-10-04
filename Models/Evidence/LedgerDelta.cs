@@ -12,4 +12,8 @@ public class LedgerDelta
     public string Statement { get; set; } = string.Empty;
     public string Value { get; set; } = string.Empty;
     public List<string> FactIds { get; set; } = new();
+
+    // D-18: details an attachment introduced; LedgerMerger gives them ids derived from this DocId so repairs never renumber entries (review concern 7)
+    public bool FromAttachment { get; set; }
+    public string AttachmentDocId { get; set; } = string.Empty;
 }

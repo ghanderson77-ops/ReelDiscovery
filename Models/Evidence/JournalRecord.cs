@@ -1,9 +1,14 @@
+using System.Text.RegularExpressions;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 
 namespace ReelDiscovery.Models.Evidence;
 
-public enum JournalRecordType { RunStarted, ThreadDone, ThreadFailed, RunEnded }
+// Appended only: an older build reads an unknown name as a JsonException and skips the line (06-RESEARCH Pattern 12)
+public enum JournalRecordType
+{
+    RunStarted, ThreadDone, ThreadFailed, RunEnded, AttachmentDone, AttachmentFailed, AttachmentSkipped, SideWorld, CastVoices, AttachmentsRepaired
+}
 
 public enum ThreadWriteStatus { Written, Warnings }
 
@@ -19,13 +24,25 @@ public class JournalMessage
     public string Subject { get; set; } = string.Empty;
     public string BodyPlain { get; set; } = string.Empty;
     public string SignOff { get; set; } = string.Empty;
+
+    // Display sender "Name <email>" (D-28)
+    public string From { get; set; } = string.Empty;
+
+    // Filler titles per planned attachment, in plan order (NOISE-05 Pitfall 1)
+    public List<string> AttachmentTitles { get; set; } = new();
 }
 
 /// <summary>
 /// One line of generation-journal.jsonl (RUN-01). Unused fields keep their defaults for each record type.
 /// </summary>
-public class JournalRecord
+public partial class JournalRecord
 {
+    public const int MaxFlattenedTextChars = 20_000;
+    public const int MaxAttachmentTitles = 8;
+    public const int MaxTitleChars = 120;
+    public const int MaxNestedAttachments = 32;
+    public const int MaxMeetingKeyChars = 120;
+
     public JournalRecordType Type { get; set; }
     public DateTime Utc { get; set; }
     public Guid PlanId { get; set; }
@@ -53,6 +70,39 @@ public class JournalRecord
     public GenerationOutcome Outcome { get; set; }
     public string Message { get; set; } = string.Empty;
 
+    // Attachment outcome (nested in ThreadDone / AttachmentsRepaired, or a standalone line written by older test data)
+    public string AttachmentDocId { get; set; } = string.Empty;
+    public string ParentDocId { get; set; } = string.Empty;
+    public AttachmentType AttachmentKind { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string FlattenedText { get; set; } = string.Empty;
+    public decimal MediaCostUsd { get; set; }
+
+    // Repaired after later waves were written: deltas stay out of the ledger (review concern 5)
+    public bool LateRepair { get; set; }
+
+    // D-20: one persisted schedule per matched meeting (review concern 6)
+    public string InviteMeetingKey { get; set; } = string.Empty;
+    public DateTimeOffset? InviteStart { get; set; }
+    public DateTimeOffset? InviteEnd { get; set; }
+
+    // Commit group: attachment outcomes journaled in the same line as their thread (review concern 1)
+    /// <summary>
+    /// On ThreadDone: outcomes of every attachment that ran inside the thread unit. On AttachmentsRepaired: outcomes added by
+    /// a repair, with Files = the rewritten copies. One line, one flush: a thread and its attachments are durable together.
+    /// </summary>
+    public List<JournalRecord> Attachments { get; set; } = new();
+
+    // SideWorld
+    public SideWorld? SideWorld { get; set; }
+
+    // CastVoices (D-28; written at run start before any voicemail is spoken)
+    public CastVoiceSet? CastVoices { get; set; }
+
+    [GeneratedRegex(@"\p{Cc}")]
+    private static partial Regex ControlChars();
+
     /// <summary>
     /// Repairs a record replayed from the journal file; never throws.
     /// </summary>
@@ -75,6 +125,11 @@ public class JournalRecord
             message.Subject ??= string.Empty;
             message.BodyPlain ??= string.Empty;
             message.SignOff ??= string.Empty;
+            message.From ??= string.Empty;
+            message.AttachmentTitles = CaseGuide.CleanStrings(message.AttachmentTitles)
+                .Take(MaxAttachmentTitles)
+                .Select(t => Clip(t, MaxTitleChars))
+                .ToList();
         }
 
         LedgerDelta = CaseGuide.CleanList(LedgerDelta);
@@ -84,9 +139,30 @@ public class JournalRecord
             delta.Statement ??= string.Empty;
             delta.Value ??= string.Empty;
             delta.FactIds = CaseGuide.CleanStrings(delta.FactIds);
+            delta.AttachmentDocId ??= string.Empty;
             if (!Enum.IsDefined(delta.Kind))
                 delta.Kind = LedgerKind.Other;
+            delta.FromAttachment |= delta.AttachmentDocId.Length > 0;
         }
+
+        NormalizeAttachmentFields();
+
+        // Nested outcomes are one level deep and only of attachment types; each is repaired like a top-level record
+        Attachments = CaseGuide.CleanList(Attachments)
+            .Where(a => a.Type is JournalRecordType.AttachmentDone or JournalRecordType.AttachmentFailed
+                            or JournalRecordType.AttachmentSkipped
+                        && !string.IsNullOrWhiteSpace(a.AttachmentDocId))
+            .Take(MaxNestedAttachments)
+            .ToList();
+        foreach (var attachment in Attachments)
+        {
+            attachment.Attachments ??= new();
+            attachment.Attachments.Clear();
+            attachment.Normalize();
+        }
+
+        SideWorld?.Normalize();
+        CastVoices?.Normalize();
 
         // An undefined Type is left as-is so the replayer can skip the record rather than misread it
         if (!Enum.IsDefined(Status))
@@ -100,5 +176,33 @@ public class JournalRecord
         InputTokens = Math.Max(0, InputTokens);
         OutputTokens = Math.Max(0, OutputTokens);
         CostUsd = Math.Max(0m, CostUsd);
+        MediaCostUsd = Math.Max(0m, MediaCostUsd);
+    }
+
+    private void NormalizeAttachmentFields()
+    {
+        AttachmentDocId ??= string.Empty;
+        ParentDocId ??= string.Empty;
+        FlattenedText = Clip(FlattenedText, MaxFlattenedTextChars);
+        InviteMeetingKey = Clip(InviteMeetingKey, MaxMeetingKeyChars);
+
+        // A replayed name never leaves the mailbox folder (T-06-01)
+        FileName = CorpusPlan.IsSafeFileName(FileName) ? FileName : string.Empty;
+        Title = Clip(ControlChars().Replace(Title ?? string.Empty, string.Empty), MaxTitleChars);
+
+        if (!Enum.IsDefined(AttachmentKind))
+            AttachmentKind = AttachmentType.Word;
+
+        if (InviteStart == null || InviteEnd == null || InviteEnd <= InviteStart)
+        {
+            InviteStart = null;
+            InviteEnd = null;
+        }
+    }
+
+    private static string Clip(string? value, int max)
+    {
+        value ??= string.Empty;
+        return value.Length > max ? value[..max] : value;
     }
 }

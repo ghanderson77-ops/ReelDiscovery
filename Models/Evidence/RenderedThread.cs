@@ -8,6 +8,9 @@ public class RenderedMessage
 
     // People the body names (CH-xxx / EXT-xxx), used by knowledge checks
     public List<string> PeopleNamed { get; set; } = new();
+
+    // Filler only: one title per planned attachment, in plan order (Pitfall 1)
+    public List<string> AttachmentTitles { get; set; } = new();
 }
 
 /// <summary>

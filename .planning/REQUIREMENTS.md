@@ -83,7 +83,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Non-Relevant Material
 
-- [x] **NOISE-01**: Non-relevant corpus includes the same custodians' daily business (other projects, scheduling, admin)
+- [ ] **NOISE-01**: Non-relevant corpus includes the same custodians' daily business (other projects, scheduling, admin)
 - [ ] **NOISE-02**: Non-relevant corpus includes traffic from ancillary characters
 - [ ] **NOISE-03**: Non-relevant corpus includes newsletters, spam and personal email
 - [ ] **NOISE-04**: Non-relevant corpus includes near-miss decoys that share project names/keywords but are not about the alleged conduct
@@ -94,7 +94,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [ ] **ATT-01**: Word, Excel and PowerPoint attachments are generated from the plan and case guide (reusing existing builders)
 - [ ] **ATT-02**: Calendar invites (.ics) are generated for planned meetings
 - [ ] **ATT-03**: Inline images and voicemail audio are generated where planned (subject to PROV-06)
-- [x] **ATT-04**: Attachment content is consistent with the case guide and canonical values
+- [ ] **ATT-04**: Attachment content is consistent with the case guide and canonical values
 
 ### Answer Key
 
@@ -113,7 +113,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Run Reliability & Cost
 
 - [x] **RUN-01**: Each completed thread (EML files plus its answer-key rows) is saved immediately; an interruption never loses finished work
-- [x] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
+- [ ] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
 - [ ] **RUN-03**: Bulk generation can use the provider's Batch API (OpenAI and Anthropic) for lower cost
 - [ ] **RUN-04**: Submitted batch jobs are tracked on disk so results can be collected if the app is restarted
 - [ ] **RUN-05**: Shared case-guide context uses prompt caching where the provider supports it
@@ -225,7 +225,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORP-09 | Phase 5 | Complete |
 | CORP-10 | Phase 5 | Complete |
 | CORP-11 | Phase 5 | Complete |
-| NOISE-01 | Phase 6 | Complete |
+| NOISE-01 | Phase 6 | Pending |
 | NOISE-02 | Phase 6 | Pending |
 | NOISE-03 | Phase 6 | Pending |
 | NOISE-04 | Phase 6 | Pending |
@@ -233,7 +233,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ATT-01 | Phase 6 | Pending |
 | ATT-02 | Phase 6 | Pending |
 | ATT-03 | Phase 6 | Pending |
-| ATT-04 | Phase 6 | Complete |
+| ATT-04 | Phase 6 | Pending |
 | KEY-01 | Phase 4 | Complete |
 | KEY-02 | Phase 4 | Complete |
 | KEY-03 | Phase 4 | Complete |

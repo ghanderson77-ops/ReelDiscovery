@@ -166,6 +166,107 @@ public class GenerationResetTests : IDisposable
     }
 
     [Fact]
+    public async Task StartOver_OrphanNonRelevantPlannedCopy_IsDeleted()
+    {
+        // Pitfall 13: a non-relevant thread killed before its journal line leaves its planned copies behind
+        var thread = _plan.Threads.First(t => t.Relevance == ThreadRelevance.NotRelevant && t.Messages.Count > 0);
+        var paths = thread.Messages.SelectMany(m => MailboxWriter.CopyPathsFor(m, Folders)).Distinct().ToList();
+        Assert.NotEmpty(paths);
+        foreach (var path in paths)
+            WriteFile(path, "partial");
+
+        var result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+
+        Assert.Empty(result.Errors);
+        Assert.Equal(paths.Count, result.FilesDeleted);
+        Assert.Empty(EmlFiles());
+    }
+
+    [Fact]
+    public async Task StartOver_CountsRelevantAndNonRelevantOrphans()
+    {
+        var relevant = _plan.Threads.First(t => t.Relevance == ThreadRelevance.Relevant && t.Messages.Count > 0);
+        var other = _plan.Threads.First(t => t.Relevance == ThreadRelevance.NotRelevant && t.Messages.Count > 0);
+        var paths = new[] { relevant, other }
+            .SelectMany(t => t.Messages)
+            .SelectMany(m => MailboxWriter.CopyPathsFor(m, Folders))
+            .Distinct()
+            .ToList();
+        foreach (var path in paths)
+            WriteFile(path, "partial");
+
+        var result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+
+        Assert.Equal(paths.Count, result.FilesDeleted);
+        Assert.Empty(EmlFiles());
+    }
+
+    [Fact]
+    public async Task StartOver_UnsafePlannedPath_IsNeverDeleted()
+    {
+        File.WriteAllText(Path.Combine(_folder, "outside.eml"), "keep");
+        File.WriteAllText(Path.Combine(_root, "outside.eml"), "keep");
+        var plan = PlanFixtures.Clone(_plan);
+        var other = plan.Threads.First(t => t.Relevance == ThreadRelevance.NotRelevant && t.Messages.Count > 0);
+        other.Messages[0].FilePath = "Mailboxes/x/Inbox/../../../outside.eml";
+        other.Messages[0].CustodianIds = new List<string>();
+        if (other.Messages.Count > 1)
+            other.Messages[1].FilePath = "../outside.eml";
+
+        var result = await GenerationReset.StartOverAsync(_folder, plan, Guide);
+
+        Assert.Equal(0, result.FilesDeleted);
+        Assert.True(File.Exists(Path.Combine(_folder, "outside.eml")));
+        Assert.True(File.Exists(Path.Combine(_root, "outside.eml")));
+    }
+
+    [Fact]
+    public async Task StartOver_AttachmentsRepairedFiles_AreDeleted()
+    {
+        WriteFile("Mailboxes/x/Inbox/repaired.eml");
+        AppendRawRecord(new JournalRecord
+        {
+            Type = JournalRecordType.AttachmentsRepaired,
+            PlanId = _plan.PlanId,
+            ThreadId = "T-0001",
+            Files = new List<string> { "Mailboxes/x/Inbox/repaired.eml" }
+        });
+
+        var result = await GenerationReset.StartOverAsync(_folder, null, null);
+
+        Assert.Equal(1, result.FilesDeleted);
+        Assert.Empty(EmlFiles());
+        Assert.False(File.Exists(GenerationJournal.PathFor(_folder)));
+    }
+
+    [Fact]
+    public async Task StartOver_SideWorldAndCastVoices_GoWithTheJournal()
+    {
+        AppendRawRecord(new JournalRecord
+        {
+            Type = JournalRecordType.SideWorld,
+            PlanId = _plan.PlanId,
+            SideWorld = new SideWorld()
+        });
+        AppendRawRecord(new JournalRecord
+        {
+            Type = JournalRecordType.CastVoices,
+            PlanId = _plan.PlanId,
+            CastVoices = new CastVoiceSet()
+        });
+        var before = GenerationJournal.Replay(_folder, _plan);
+        Assert.NotNull(before.LastSideWorld);
+        Assert.NotNull(before.LastCastVoices);
+
+        var result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+
+        Assert.Empty(result.Errors);
+        var after = GenerationJournal.Replay(_folder, _plan);
+        Assert.Null(after.LastSideWorld);
+        Assert.Null(after.LastCastVoices);
+    }
+
+    [Fact]
     public async Task StartOver_JournalForAnotherPlan_StillDeletesListedFiles()
     {
         WriteFile("Mailboxes/old/Sent Items/OLD-000001.eml");

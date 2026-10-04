@@ -142,7 +142,8 @@ public static partial class HtmlEmailFormatter
     /// <summary>
     /// Gets a CSS font stack for the given font name.
     /// </summary>
-    private static string GetFontStack(string fontName)
+    // Shared with BulkMailFormatter; do not duplicate the encoder (06-PATTERNS)
+    internal static string GetFontStack(string fontName)
     {
         // Serif fonts
         if (fontName.Contains("Georgia") || fontName.Contains("Times") ||
@@ -615,6 +616,10 @@ public static partial class HtmlEmailFormatter
     [GeneratedRegex(@"\*\*([^*\r\n]{1,120})\*\*")]
     private static partial Regex BoldRunRegex();
 
+    // Content ids are generated as 16 lowercase hex chars @ the sender domain
+    [GeneratedRegex(@"^[0-9a-f]{16}@[a-z0-9.-]+$")]
+    private static partial Regex ContentIdRegex();
+
     // Markdown table separator row, e.g. |---|:---:|
     [GeneratedRegex(@"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$")]
     private static partial Regex TableSeparatorRegex();
@@ -623,16 +628,21 @@ public static partial class HtmlEmailFormatter
     /// Full themed HTML document for a generated message (allowlist-only markup, D-16).
     /// </summary>
     public static string ComposeHtml(string body, string signOff, string signature, QuotedPart? quoted,
-        OrganizationTheme theme, bool privilegedBanner, bool allowTable = true) =>
-        WrapInTemplate(ComposeFragment(body, signOff, signature, quoted, theme, privilegedBanner, allowTable), theme);
+        OrganizationTheme theme, bool privilegedBanner, bool allowTable = true,
+        IReadOnlyList<InlineImageRef>? inlineImages = null, bool imagePlaceholders = false) =>
+        WrapInTemplate(ComposeFragment(body, signOff, signature, quoted, theme, privilegedBanner, allowTable,
+            inlineImages, imagePlaceholders), theme);
 
     /// <summary>
     /// Body HTML for a generated message: every model string is HTML-encoded first, then only **bold** (2 runs),
     /// one "- " list (6 items) and one pipe table (4 columns x 6 rows, when <paramref name="allowTable"/>) are rendered.
     /// No italics, links, headings or raw HTML (T-05-12).
+    /// Inline images render after the body and before the signature as cid images, or as [image: title] when
+    /// <paramref name="imagePlaceholders"/> (quoted history never references a part it does not carry, Pitfall 10).
     /// </summary>
     public static string ComposeFragment(string body, string signOff, string signature, QuotedPart? quoted,
-        OrganizationTheme theme, bool privilegedBanner, bool allowTable = true)
+        OrganizationTheme theme, bool privilegedBanner, bool allowTable = true,
+        IReadOnlyList<InlineImageRef>? inlineImages = null, bool imagePlaceholders = false)
     {
         // Never touch [ThreadStatic] _currentTheme: composition runs on pool threads
         var t = theme ?? OrganizationTheme.Default;
@@ -648,6 +658,7 @@ public static partial class HtmlEmailFormatter
 
         var state = new ComposeState { TableAllowed = allowTable };
         AppendComposedBody(html, body ?? string.Empty, state, primary, fontStack);
+        AppendInlineImages(html, inlineImages, imagePlaceholders);
         AppendComposedSignature(html, signOff, signature, secondary);
 
         if (quoted != null)
@@ -655,6 +666,25 @@ public static partial class HtmlEmailFormatter
 
         html.Append("</div>\n");
         return html.ToString();
+    }
+
+    internal static void AppendInlineImages(System.Text.StringBuilder html, IReadOnlyList<InlineImageRef>? images, bool placeholders)
+    {
+        if (images == null)
+            return;
+
+        foreach (var image in images)
+        {
+            // Unvalidated ids could break out of the src attribute (T-06-20): omit the image instead
+            if (image == null || !ContentIdRegex().IsMatch(image.ContentId ?? string.Empty))
+                continue;
+
+            var title = Encode(image.Title ?? string.Empty);
+            if (placeholders)
+                html.Append($"<p>[image: {title}]</p>\n");
+            else
+                html.Append($"<p><img src=\"cid:{image.ContentId}\" alt=\"{title}\" style=\"max-width:100%\"></p>\n");
+        }
     }
 
     private static void AppendComposedBody(System.Text.StringBuilder html, string body, ComposeState state, string primary, string fontStack)
@@ -784,7 +814,8 @@ public static partial class HtmlEmailFormatter
     }
 
     // Encode first, then allow at most MaxBoldRuns bold runs per message; stray ** markers are dropped
-    private static string ComposeInline(string text, ComposeState state)
+    // Shared with BulkMailFormatter; do not duplicate the encoder (06-PATTERNS)
+    internal static string ComposeInline(string text, ComposeState state)
     {
         var encoded = BoldRunRegex().Replace(Encode(text), match =>
         {
@@ -839,10 +870,11 @@ public static partial class HtmlEmailFormatter
     private static IEnumerable<string> SplitTrimmedLines(string text) =>
         text.Replace("\r\n", "\n").Trim('\n', '\r', ' ').Split('\n').Select(l => l.TrimEnd());
 
-    private static string Encode(string text) => System.Net.WebUtility.HtmlEncode(text);
+    // Shared with BulkMailFormatter; do not duplicate the encoder (06-PATTERNS)
+    internal static string Encode(string text) => System.Net.WebUtility.HtmlEncode(text);
 
-    // Per-message allowlist budget
-    private class ComposeState
+    // Per-message allowlist budget (shared with BulkMailFormatter)
+    internal class ComposeState
     {
         public bool TableAllowed { get; set; }
         public bool TableUsed { get; set; }
@@ -899,4 +931,14 @@ public class QuotedPart
     public bool IsForward { get; set; }
     public List<string> HeaderLines { get; set; } = new();
     public string ParentFragment { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Inline image reference for the composed body: ContentId must match ^[0-9a-f]{16}@[a-z0-9.-]+$ (otherwise the image
+/// is omitted); Title is plain text (encoded on render) used as alt text and in [image: title] quote placeholders.
+/// </summary>
+public class InlineImageRef
+{
+    public string ContentId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
 }

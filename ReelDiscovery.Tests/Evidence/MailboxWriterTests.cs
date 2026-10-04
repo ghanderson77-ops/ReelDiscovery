@@ -2,6 +2,7 @@ using MimeKit;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Tests.Evidence.Golden;
 using Xunit;
 
 namespace ReelDiscovery.Tests.Evidence;
@@ -184,6 +185,16 @@ public class MailboxWriterTests : IDisposable
         var cc = Assert.Single(loaded.Cc.Mailboxes);
         Assert.Equal("Dana Cho", cc.Name);
         Assert.Equal("dana.cho@contoso.example", cc.Address);
+    }
+
+    [Fact]
+    public void MailboxWriter_NoAttachments_MatchesGolden()
+    {
+        // Frozen before the Phase 6 change: comparing two calls to the new code would not prove compatibility (review 06-07/06-10)
+        using var ms = new MemoryStream();
+        MailboxWriter.BuildMime(Composed()).WriteTo(ms);
+
+        Assert.Equal(Convert.FromBase64String(MailboxWriterGolden.NoAttachmentsEml), ms.ToArray());
     }
 
     [Fact]

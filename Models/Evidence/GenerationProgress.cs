@@ -1,6 +1,9 @@
 namespace ReelDiscovery.Models.Evidence;
 
-public enum GenerationStage { Idle, Writing, Merging, UpdatingKey, WritingStory, Stopping }
+public enum GenerationStage { Idle, Writing, Merging, UpdatingKey, WritingStory, Stopping, SideProjects, NonRelevant, Attachments }
+
+// Stages-grid row type: a wave, the Non-relevant mail row or the Attachments for written threads row (UI-SPEC S1 Row 4)
+public enum StageRowKind { Wave, NonRelevant, Attachments }
 
 public enum GenerationEventKind
 {
@@ -14,7 +17,18 @@ public enum GenerationEventKind
     WaveFinished,
     RunCancelled,
     RunStopped,
-    RunFinished
+    RunFinished,
+    SideProjectsReady,
+    NonRelevantStarted,
+    NonRelevantFinished,
+    AttachmentRetry,
+    AttachmentKeptWithWarnings,
+    AttachmentFailed,
+    AttachmentSkipped,
+    MediaStopped,
+    AttachmentRepairStarted,
+    AttachmentsAdded,
+    AttachmentRegenerated
 }
 
 /// <summary>
@@ -22,6 +36,7 @@ public enum GenerationEventKind
 /// </summary>
 public class GenerationCounts
 {
+    // TotalThreads/DoneThreads/WarningThreads/FailedThreads count every generatable thread (relevant + non-relevant)
     public int TotalThreads { get; set; }
 
     // Written + kept-with-warnings
@@ -40,6 +55,37 @@ public class GenerationCounts
     public bool Running { get; set; }
     public bool Finished { get; set; }
 
+    // Relevant / non-relevant split of the thread counts (D-25)
+    public int RelevantTotal { get; set; }
+    public int RelevantDone { get; set; }
+    public int NonRelevantTotal { get; set; }
+    public int NonRelevantDone { get; set; }
+    public int NonRelevantDailyBusiness { get; set; }
+    public int NonRelevantAncillary { get; set; }
+    public int NonRelevantBulk { get; set; }
+    public int NonRelevantDecoy { get; set; }
+
+    // Attachment counts are per-DocId status transitions: Done (Written + Warnings) + Failed + Skipped <= Total
+    public int AttachmentsTotal { get; set; }
+    public int AttachmentsDone { get; set; }
+    public int AttachmentsWarnings { get; set; }
+    public int AttachmentsFailed { get; set; }
+    public int AttachmentsSkipped { get; set; }
+
+    // Planned attachments by kind
+    public int AttachmentsWord { get; set; }
+    public int AttachmentsExcel { get; set; }
+    public int AttachmentsPowerPoint { get; set; }
+    public int AttachmentsInvite { get; set; }
+    public int AttachmentsImage { get; set; }
+    public int AttachmentsVoicemail { get; set; }
+
+    // Image + voicemail attachments that need a paid media call (D-29)
+    public int MediaPlanned { get; set; }
+
+    // Media share of CostUsd (CostUsd already includes it)
+    public decimal MediaCostUsd { get; set; }
+
     public GenerationCounts Clone() => (GenerationCounts)MemberwiseClone();
 }
 
@@ -57,6 +103,15 @@ public class WaveProgress
     public int Warnings { get; set; }
     public int Failed { get; set; }
     public bool Running { get; set; }
+
+    // Wave rows keep the default; the Non-relevant and Attachments rows use their own Index
+    public StageRowKind RowKind { get; set; }
+
+    public int Attachments { get; set; }
+    public int AttachmentsDone { get; set; }
+    public int AttachmentWarnings { get; set; }
+    public int AttachmentsFailed { get; set; }
+    public int AttachmentsSkipped { get; set; }
 
     public WaveProgress Clone() => (WaveProgress)MemberwiseClone();
 }
@@ -89,6 +144,26 @@ public class GenerationEvent
 
     // Plan FilePath of the thread's last message, for the Activity double-click
     public string FilePath { get; set; } = string.Empty;
+
+    // Attachment events: file name of the part
+    public string FileName { get; set; } = string.Empty;
+
+    public int Attachments { get; set; }
+
+    // SideProjectsReady: side projects and organizations created
+    public int Projects { get; set; }
+    public int Organizations { get; set; }
+
+    public int Files { get; set; }
+
+    // NonRelevantFinished / AttachmentsAdded: whether the thread or part belongs to relevant mail
+    public bool Relevant { get; set; }
+
+    public int AttachmentsDone { get; set; }
+    public int AttachmentsTotal { get; set; }
+
+    // MediaStopped: media attachments left unrendered
+    public int MediaRemaining { get; set; }
 }
 
 /// <summary>

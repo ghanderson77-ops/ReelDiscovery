@@ -14,6 +14,7 @@ public class GenerationSnapshot
     private readonly Queue<GenerationEvent> _events = new();
     private GenerationCounts _counts = new();
     private List<WaveProgress> _waves = new();
+    private Dictionary<string, AttachmentSeed> _attachments = new(StringComparer.Ordinal);
     private GenerationStage _stage;
     private int _stageWave;
     private int _stageWaveCount;
@@ -22,16 +23,31 @@ public class GenerationSnapshot
     private int _stageCount;
 
     /// <summary>
-    /// Starts a run view: replaces counts and wave rows and clears queued events and the stage.
+    /// Starts a run view: replaces counts and stage rows and clears queued events and the stage.
+    /// <paramref name="attachments"/> seeds the replayed status of each attachment DocId so later
+    /// <see cref="RecordAttachment"/> calls replace it instead of adding to it; counts and rows must already include the
+    /// seeded statuses.
     /// </summary>
-    public void Reset(GenerationCounts counts, IEnumerable<WaveProgress> waves)
+    public void Reset(GenerationCounts counts, IEnumerable<WaveProgress> waves,
+        IReadOnlyDictionary<string, AttachmentSeed>? attachments = null)
     {
         var countsCopy = (counts ?? new GenerationCounts()).Clone();
         var wavesCopy = (waves ?? Enumerable.Empty<WaveProgress>()).Select(w => w.Clone()).ToList();
+        var seedsCopy = new Dictionary<string, AttachmentSeed>(StringComparer.Ordinal);
+        if (attachments != null)
+        {
+            foreach (var (docId, seed) in attachments)
+            {
+                if (!string.IsNullOrEmpty(docId) && seed != null)
+                    seedsCopy[docId] = new AttachmentSeed { RowIndex = seed.RowIndex, Status = seed.Status };
+            }
+        }
+
         lock (_lock)
         {
             _counts = countsCopy;
             _waves = wavesCopy;
+            _attachments = seedsCopy;
             _events.Clear();
             _stage = GenerationStage.Idle;
             _stageWave = 0;
@@ -69,10 +85,10 @@ public class GenerationSnapshot
     /// Counts one finished thread. Written and Warnings count as done; Failed counts separately; Pending adds only the
     /// spend (a fatal stop left the thread unjournaled). <paramref name="previous"/>
     /// is the thread's status before this run: a retried thread that had failed leaves the Failed count first, so Retry
-    /// Failed Threads never counts it twice.
+    /// Failed Threads never counts it twice. <paramref name="relevant"/> picks RelevantDone or NonRelevantDone.
     /// </summary>
     public void RecordThread(int waveIndex, ThreadRunStatus status, int emails, int files, decimal cost,
-        ThreadRunStatus previous = ThreadRunStatus.Pending)
+        ThreadRunStatus previous = ThreadRunStatus.Pending, bool relevant = true)
     {
         lock (_lock)
         {
@@ -80,6 +96,7 @@ public class GenerationSnapshot
             _counts.CostUsd += cost;
 
             // Reset seeded Failed from the replay; this run's outcome replaces that earlier failure
+            // (failures are not split by relevance, so only the shared counters move)
             if (previous == ThreadRunStatus.Failed)
             {
                 _counts.FailedThreads = Math.Max(0, _counts.FailedThreads - 1);
@@ -92,6 +109,10 @@ public class GenerationSnapshot
                 case ThreadRunStatus.Written:
                 case ThreadRunStatus.Warnings:
                     _counts.DoneThreads++;
+                    if (relevant)
+                        _counts.RelevantDone++;
+                    else
+                        _counts.NonRelevantDone++;
                     _counts.EmailsWritten += emails;
                     _counts.FilesWritten += files;
                     if (wave != null)
@@ -109,6 +130,73 @@ public class GenerationSnapshot
                         wave.Failed++;
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// Records the committed outcome of one attachment. Call only after the outcome is durable (EML copies written and
+    /// its journal line flushed); the status replaces the DocId's previous status (review MEDIUM), moving it between
+    /// counters and from its previous stage row to <paramref name="rowIndex"/>. Written and Warnings count as done.
+    /// <paramref name="cost"/> and <paramref name="mediaCost"/> are always added; CostUsd includes the media spend.
+    /// </summary>
+    public void RecordAttachment(string docId, int rowIndex, AttachmentRunStatus status, decimal cost, decimal mediaCost = 0m)
+    {
+        docId ??= string.Empty;
+        lock (_lock)
+        {
+            _counts.CostUsd += cost + mediaCost;
+            _counts.MediaCostUsd += mediaCost;
+
+            if (_attachments.TryGetValue(docId, out var previous))
+                Apply(previous.Status, _waves.FirstOrDefault(w => w.Index == previous.RowIndex), -1);
+
+            Apply(status, _waves.FirstOrDefault(w => w.Index == rowIndex), 1);
+            _attachments[docId] = new AttachmentSeed { RowIndex = rowIndex, Status = status };
+        }
+    }
+
+    /// <summary>
+    /// Spend of calls whose outcome was not committed: NotRun, cancelled or persistence failures (review concern 1).
+    /// Changes only CostUsd (which includes media) and MediaCostUsd.
+    /// </summary>
+    public void AddCost(decimal cost, decimal mediaCost = 0m)
+    {
+        lock (_lock)
+        {
+            _counts.CostUsd += cost + mediaCost;
+            _counts.MediaCostUsd += mediaCost;
+        }
+    }
+
+    // Caller holds _lock. delta is +1 to count a status or -1 to remove it; removals clamp at 0.
+    private void Apply(AttachmentRunStatus status, WaveProgress? row, int delta)
+    {
+        static int Step(int value, int delta) => Math.Max(0, value + delta);
+
+        switch (status)
+        {
+            case AttachmentRunStatus.Written:
+            case AttachmentRunStatus.Warnings:
+                _counts.AttachmentsDone = Step(_counts.AttachmentsDone, delta);
+                if (row != null)
+                    row.AttachmentsDone = Step(row.AttachmentsDone, delta);
+                if (status == AttachmentRunStatus.Warnings)
+                {
+                    _counts.AttachmentsWarnings = Step(_counts.AttachmentsWarnings, delta);
+                    if (row != null)
+                        row.AttachmentWarnings = Step(row.AttachmentWarnings, delta);
+                }
+                break;
+            case AttachmentRunStatus.Failed:
+                _counts.AttachmentsFailed = Step(_counts.AttachmentsFailed, delta);
+                if (row != null)
+                    row.AttachmentsFailed = Step(row.AttachmentsFailed, delta);
+                break;
+            case AttachmentRunStatus.Skipped:
+                _counts.AttachmentsSkipped = Step(_counts.AttachmentsSkipped, delta);
+                if (row != null)
+                    row.AttachmentsSkipped = Step(row.AttachmentsSkipped, delta);
+                break;
         }
     }
 

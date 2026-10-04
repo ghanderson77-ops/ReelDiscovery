@@ -1,7 +1,8 @@
 ---
 phase: 6
 slug: attachments-non-relevant-corpus
-status: draft
+status: approved
+reviewed_at: 2026-10-04
 shadcn_initialized: false
 preset: none
 created: 2026-10-04
@@ -15,7 +16,7 @@ created: 2026-10-04
 >
 > **Units:** All pixel values are **logical px at 96 DPI**. Each one goes through `LogicalToDeviceUnits(n)` on the owning step, dialog or control. Font sizes are in **points** and come only from `Theme` factories.
 >
-> **Baseline:** this phase **extends `05-UI-SPEC.md` (approved)**. That spec and its baselines (03- and 04-UI-SPEC) define the palette, type scale, spacing tokens, Content x rule, `GridStyle`, `CardPanel`, `StatTile`, `SlimProgressBar`, banner, state card, status strip, `Plural` helper, tone rules, the DPI & Render Contract (rules 1-20) and the confirmation format. **All of it applies unchanged** and is not repeated here. This document covers only what Phase 6 changes. The screen layout is not redesigned. Values not taken from 06-CONTEXT.md, 06-RESEARCH.md, earlier UI-SPECs or the code are marked **[DEFAULT]**. Answers to the research open questions are marked **[RECOMMENDED - confirm]** and listed under Open Decisions.
+> **Baseline:** this phase **extends `05-UI-SPEC.md` (approved)**. That spec and its baselines (03- and 04-UI-SPEC) define the palette, type scale, spacing tokens, Content x rule, `GridStyle`, `CardPanel`, `StatTile`, `SlimProgressBar`, banner, state card, status strip, `Plural` helper, tone rules, the DPI & Render Contract (rules 1-20) and the confirmation format. **All of it applies unchanged** and is not repeated here. This document covers only what Phase 6 changes. The screen layout is not redesigned. Values not taken from 06-CONTEXT.md, 06-RESEARCH.md, earlier UI-SPECs or the code are marked **[DEFAULT]**. Answers to the research open questions are marked **[CONFIRMED by user 2026-10-04]** and listed under Open Decisions.
 >
 > **Quality bar (CONTEXT D-04):** the user runs Windows at 150%. A screen is not done until its 144-DPI render has been inspected against the DPI & Render Contract.
 >
@@ -42,7 +43,7 @@ created: 2026-10-04
 | `GenerationUiText` | `UserControls/GenerationUiText.cs` | New and changed copy (every template in this document). Stays pure and unit-tested |
 | `StepGenerateCorpus` | `UserControls/StepGenerateCorpus.cs` + `.Run.cs` | Tile kinds, Stages grid rows, new activity events, media banner variant, Ready-card estimate line, progress over all work units |
 | `StepCaseSummary` | `UserControls/StepCaseSummary.cs` | Mailboxes row line 3 and tooltip; Answer key run clause |
-| `ModelConfigurationDialog` | `UserControls/ModelConfigurationDialog.cs` | One `Media prices` row (S4) [RECOMMENDED - confirm] |
+| `ModelConfigurationDialog` | `UserControls/ModelConfigurationDialog.cs` | One `Media prices` row (S4) [CONFIRMED by user 2026-10-04] |
 | `GenerationTileKind` | `UserControls/GenerationUiText.cs` | Becomes `Relevant, NonRelevant, Attachments, Emails, Warnings, Failed, Cost` (replaces `Threads, Emails, EmlFiles, Ledger, ...`) |
 
 ---
@@ -146,7 +147,7 @@ Body (`GenerationUiText.BannerBody(threadsDone, threadsTotal, attDone, attTotal,
 
 Button: `Continue Generating` (Primary).
 
-*Media banner* (new; shown when no partial-run banner applies and the finished run has Skipped image or voicemail items) [RECOMMENDED - confirm, Open Decision 2]:
+*Media banner* (new; shown when no partial-run banner applies and the finished run has Skipped image or voicemail items) [CONFIRMED by user 2026-10-04, Open Decision 2]:
 
 | Media available now? | Heading | Body | Button |
 |---|---|---|---|
@@ -163,8 +164,8 @@ Button: `Continue Generating` (Primary).
 | 2 | `Non-relevant` | `{d:N0} / {t:N0}` | `threads` | `{d:N0} of {t:N0} non-relevant threads written: {db} daily business, {an} ancillary, {bk} newsletters, spam and personal, {dc} near-miss decoys.` (zero clauses dropped) |
 | 3 | `Attachments` | `{d:N0} / {t:N0}` | `{s:N0} skipped` when s > 0, else `files and media` | `{d:N0} of {t:N0} attachments written: {w} Word, {x} Excel, {p} PowerPoint, {i} invites, {g} images, {v} voicemails.` + when s > 0: ` {Plural(s, "item")} skipped because images and voicemail were unavailable.` (zero kinds dropped) |
 | 4 | `Emails` | `{written:N0}` | `{files:N0} EML files` | `{written:N0} of {planned:N0} planned emails written, saved as {files:N0} .eml files in {Plural(c, "custodian mailbox")} under the Mailboxes folder.` |
-| 5 | `Warnings` | `{w:N0}` | `items kept` | `{Plural(wt, "thread")} and {Plural(wa, "attachment")} still broke a consistency check after 3 attempts. The best attempt was kept and marked "Generated - with warnings" in the answer key.` |
-| 6 | `Failed` | `{f:N0}` | `items not written` | `{Plural(ft, "thread")} and {Plural(fa, "attachment")} could not be written. An email whose attachment failed is saved without it. Retry them with Continue Generating or Retry Failed Items.` |
+| 5 | `Warnings` | `{w:N0}` | `items kept` | `{Plural(wt, "thread")} and {Plural(wa, "attachment")} still broke a consistency check after 3 attempts. The best attempt was kept and marked "Generated - with warnings" in the answer key.` (a zero clause is dropped together with its "and") |
+| 6 | `Failed` | `{f:N0}` | `items not written` | `{Plural(ft, "thread")} and {Plural(fa, "attachment")} could not be written. An email whose attachment failed is saved without it. Retry them with Continue Generating or Retry Failed Items.` (a zero clause is dropped together with its "and") |
 | 7 | `Cost` | unchanged | unchanged | `Spent on generation in this case: ${a:0.00} (text ${t:0.00}, images and voicemail ${m:0.00}). Estimate for the remaining items: ≈${r}, ±50%. The cost ticker in the header shows the whole session.` (media clause dropped when no media is planned) |
 
 - Warnings and Failed count **items** (threads + attachments). Value color rule unchanged (Warning / Danger when > 0). Skipped items are not counted as failed.
@@ -250,7 +251,7 @@ When the Story and Volume models are the same model, the estimate line reads `Es
 **Interaction rules (changes only).**
 - Entry decision: "unfinished" now means any thread **or attachment** without a final record. Skipped media alone does not make a run unfinished; it shows the media banner instead.
 - `Generate Emails`, `Continue Generating`, `Retry Failed Items`, `Create Skipped Media` and `Retry Failed and Skipped Items` all start the **same** run: skip journaled Written / Warnings items, write pending, cancelled and failed items, and retry Skipped media only when media is available now. No confirm (Phase 5 U5).
-- Media stop during a run (401/403/quota from the OpenAI media client): one "Images and voicemail stopped" activity row, the remaining media items journal as Skipped, and the run continues with text. The status strip stays on the normal progress text. Media stop never ends the run and never uses the fatal line [RECOMMENDED - confirm, Open Decision 2].
+- Media stop during a run (401/403/quota from the OpenAI media client): one "Images and voicemail stopped" activity row, the remaining media items journal as Skipped, and the run continues with text. The status strip stays on the normal progress text. Media stop never ends the run and never uses the fatal line [CONFIRMED by user 2026-10-04, Open Decision 2].
 - Close and cancel confirmations: same triggers, new copy below.
 
 ### S2. `StepCaseSummary` changes
@@ -262,7 +263,7 @@ Mailboxes row (`GenerationUiText.MailboxesRow`). Line 3 is `AutoEllipsis` in cod
 | Not generated | `Not generated yet` (unchanged) | Muted |
 | Earlier plan | unchanged | Warning |
 | Complete clean | `All {Plural(t, "thread")} and {Plural(a, "attachment")} written` (attachment clause dropped when a = 0) | Success |
-| Partial or with problems | `{d:N0} of {t:N0} threads written · {w} with warnings · {f} failed · {s} skipped` (zero clauses dropped; counts are items) | Warning |
+| Partial or with problems | `{d:N0} of {t:N0} threads written · {Plural(w, "item")} with warnings · {Plural(f, "failed item")} · {Plural(s, "skipped item")}` (zero clauses dropped; warning/failed/skipped are item counts: threads + attachments) | Warning |
 
 Line-3 tooltip (all states except Not generated): `Relevant: {rd:N0} of {rt:N0} threads. Non-relevant: {nd:N0} of {nt:N0} threads. Attachments: {ad:N0} of {at:N0}{skippedClause}.` with `{skippedClause}` = ` ({s:N0} skipped)`.
 
@@ -278,13 +279,14 @@ Line 2 is unchanged. Buttons unchanged. Answer key row: run clause unchanged (`{
 
 Attachment clauses are dropped when the count is 0. `ReplanDialog`'s extra sentence is unchanged (it already says "threads").
 
-### S4. `ModelConfigurationDialog`: media prices [RECOMMENDED - confirm, Open Decision 3]
+### S4. `ModelConfigurationDialog`: media prices [CONFIRMED by user 2026-10-04, Open Decision 3]
 
 One new AutoSize row between the grid (row 1) and the bottom buttons (row 2), so `RowCount` becomes 4 (`// 2: Media prices`):
 - `FlowLayoutPanel` (LeftToRight, `WrapContents = true`, top margin 16): label `Image ($ per image):` + `NumericUpDown` (width 80, 3 decimals, 0-10, increment 0.001), gap 16, label `Voicemail audio ($ per 1M characters):` + `NumericUpDown` (width 80, 2 decimals, 0-1000, increment 0.5). Label-to-field gap 8.
 - Defaults: image `0.006`, voicemail audio `15.00` (research A6, LOW confidence, hence editable). `Reset Defaults` also resets them.
 - Header label text gains: ` Images and voicemail are priced per unit below.`
 - The dialog's existing fonts, paddings and grid styling stay as they are (no restyle in this phase). The row must not clip at 144 DPI at the dialog's 820 x 360 minimum. It may wrap to two lines.
+- Alignment: the row's left edge lines up with the grid's left edge (the 16 px is a top margin only; no extra left inset inside the dialog's legacy 10 px padding). Render check 9 verifies this at 144 DPI.
 - Validation: same `NumericUpDown` bounds; no MessageBox needed.
 
 The shell's cost ticker look is unchanged. Its value now includes media cost (`TokenUsageTracker.RecordMediaUsage`).
@@ -301,7 +303,7 @@ Not app chrome, but it is what the user sees in a mail client and in Office, so 
 - **Attachments in the EML:** `multipart/mixed` with files in plan order; file names from `AttachmentNaming` (never `Document 1.docx`); inline images in `multipart/related`, placed after the body and before the signature as `<img src="cid:..." alt="{title}" style="max-width:100%">`. Quoted history replaces inline images with `[image: {title}]`.
 - **Office documents (D-19):** org-branded header bar with the organization name and theme colors; Word: title, 1-6 headed sections, at most one simple table; Excel: one sheet, bold header row in the theme color, real numeric cells, currency format for amounts; PowerPoint: title slide subtitle `{Org} | {Month yyyy}` (never "Generated Email Dataset"), then content slides with title + bullets. Document properties: author = sender, dates = just before the email. Never "ReelDiscovery" in metadata.
 - **Images (D-27):** contextual photo or graphic, no legible text, numbers, logos or signage, no faces in focus, no names in prompts. 1024 x 1024 PNG.
-- **Voicemail email (D-28)** [RECOMMENDED - confirm, Open Decision 1]: From `"{Recipient org} Voice Mail" <voicemail@{recipient org domain}>`; Subject `Voicemail from {Caller} ({m:ss})`; body (business template, no signature):
+- **Voicemail email (D-28)** [CONFIRMED by user 2026-10-04, Open Decision 1]: From `"{Recipient org} Voice Mail" <voicemail@{recipient org domain}>`; Subject `Voicemail from {Caller} ({m:ss})`; body (business template, no signature):
   `You received a voicemail from {Caller} ({phone}) on {ddd, MMM d, yyyy} at {h:mm tt}.` + blank line + `Duration: {m:ss}` + blank line + `Transcript (auto-generated):` + the transcript. Audio attached as `Voicemail {yyyy-MM-dd} {h-mm tt}.mp3`.
 - **Calendar invites (D-20):** `text/calendar; method=REQUEST` attachment named `{title}.ics`; organizer = sender, attendees = plan To + Cc; LLM supplies only title, agenda and location.
 
@@ -309,7 +311,7 @@ Not app chrome, but it is what the user sees in a mail client and in Office, so 
 
 - Attachment and non-relevant rows show real Status: `Planned`, `Generated`, `Generated - with warnings`, `Failed`, `Skipped`.
 - `File Name` shows the final attachment name (same as the EML).
-- **Voicemail rows** [RECOMMENDED - confirm, Open Decision 1]: `From` and `Subject` match the EML (voicemail-system sender, `Voicemail from {Caller} ({m:ss})`). The caller stays visible in the row's description as `Voicemail from {Caller}`. Every planned custodian copy is kept, including the caller's Sent Items copy (plan owns structure, D-02).
+- **Voicemail rows** [CONFIRMED by user 2026-10-04, Open Decision 1]: `From` and `Subject` match the EML (voicemail-system sender, `Voicemail from {Caller} ({m:ss})`). The caller stays visible in the row's description as `Voicemail from {Caller}`. Every planned custodian copy is kept, including the caller's Sent Items copy (plan owns structure, D-02).
 - Skipped rows carry the reason in the existing notes/description column: `Skipped: {reason}`.
 
 ---
@@ -335,7 +337,7 @@ Not app chrome, but it is what the user sees in a mail client and in Office, so 
 | Primary CTA (other states) | `Continue Generating` (partial-run banner), `Retry Failed Items` (header), `Create Skipped Media` / `Retry Failed and Skipped Items` (media banner), `Review Plan` (not-approved card) |
 | Secondary actions | unchanged from Phase 5 |
 | Empty state heading | `Ready to write the corpus` |
-| Empty state body | `Generate Emails writes the {Plural(r, "relevant thread")} first, oldest first in {Plural(w, "wave")}, then the {Plural(n, "non-relevant thread")}: {Plural(m, "email")} in total, with {Plural(a, "attachment")}. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later.` + estimate line |
+| Empty state body | `Generate Emails writes the {Plural(r, "relevant thread")} first, oldest first in {Plural(w, "wave")}, then the {Plural(n, "non-relevant thread")}: {Plural(m, "email")} in total{attClause}. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later.` with `{attClause}` = `, with {Plural(a, "attachment")}` when a > 0 + estimate line |
 | Error state (fatal) | `Generation stopped: {message}. Finished threads and attachments are saved. Fix the problem on the API Configuration step, then click Continue Generating.` |
 | Error state (one item) | `Failed: {reason}. The run continues.` (thread) / `{file name} failed: {reason}. The email was saved without it.` (attachment) |
 | Error state (media stop) | Activity: `Images and voicemail stopped: {reason}. Text generation continues; ...`; after the run: media banner |
@@ -372,9 +374,12 @@ Automated clipping detector on every state, plus no horizontal scrollbar in eith
 
 ---
 
-## Open Decisions (recommended defaults; planner/user confirm)
+## Decisions Confirmed (user, 2026-10-04)
 
-| # | Question (06-RESEARCH) | Recommended default used in this spec | Alternative |
+All three recommended defaults below were confirmed by the user, along with dropping the Ledger tile (U-default) and the Story/Volume/media breakdown in the Ready-card estimate. The header cost ticker stays a single total. Decision 2 refines D-06: a media-provider auth/quota failure stops only images and voicemail; text-provider fatal stops still end the run.
+
+
+| # | Question (06-RESEARCH) | Confirmed decision | Rejected alternative |
 |---|------------------------|----------------------------------------|-------------|
 | 1 | Voicemail sender in the answer key vs. the planned sender | Key `From`/`Subject` match the EML (voicemail-system sender); caller in the description; all planned copies kept, including the caller's Sent Items copy | Drop the caller's Sent copy (more realistic, changes plan paths and the key `FilePath`) |
 | 2 | Media auth/quota failure mid-run | Stop only images and voicemail: one Warning activity row, remaining media items Skipped, text continues; after the run a media banner offers `Create Skipped Media` when a tested key exists | Treat as a fatal stop of the whole run (D-06 wording); then the fatal outcome line and partial-run banner apply instead |
@@ -411,11 +416,11 @@ No new NuGet packages or UI libraries.
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-10-04 (gsd-ui-checker; Dimensions 1 and 5 passed with flags, fixed in place)

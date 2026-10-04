@@ -179,11 +179,16 @@ public static partial class LedgerMerger
         return TryParseDate(a, out var left) && TryParseDate(b, out var right) && left == right;
     }
 
-    private static bool TryParseDate(string text, out DateOnly date) =>
+    /// <summary>
+    /// The date formats SameValue accepts (yyyy-MM-dd, "MMMM d, yyyy", en-US); InviteScheduler reads meeting dates with it.
+    /// </summary>
+    internal static bool TryParseDate(string text, out DateOnly date) =>
         DateOnly.TryParseExact(text, DateFormats, EnUs, DateTimeStyles.None, out date);
 
-    // About decides identity; when the model left it empty the statement stands in
-    private static string DetailKey(LedgerEntry entry)
+    /// <summary>
+    /// Identity of a detail: Kind plus normalized About; when the model left About empty the statement stands in.
+    /// </summary>
+    internal static string DetailKey(LedgerEntry entry)
     {
         var about = NormalizeAbout(entry.About);
         if (about.Length == 0)
@@ -191,7 +196,11 @@ public static partial class LedgerMerger
         return ((int)entry.Kind).ToString(CultureInfo.InvariantCulture) + "|" + about;
     }
 
-    private static bool SameDetail(LedgerEntry a, LedgerEntry b) =>
+    /// <summary>
+    /// The duplicate rule EntriesFor and Build use (Build's index on DetailKey + SameValue is the same test). InviteScheduler
+    /// keys meetings with it, so a key never disagrees with the ledger (checker 06-05).
+    /// </summary>
+    internal static bool SameDetail(LedgerEntry a, LedgerEntry b) =>
         string.Equals(DetailKey(a), DetailKey(b), StringComparison.Ordinal) && SameValue(a.Value, b.Value);
 
     private static void Absorb(LedgerEntry target, LedgerEntry source, CaseGuide guide)

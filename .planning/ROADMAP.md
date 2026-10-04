@@ -204,7 +204,7 @@ Plans:
 - [x] 06-10-PLAN.md — Deterministic multipart MIME (frozen golden) + per-message, multi-copy, bounded attachment harvester (Wave 2)
 - [ ] 06-11-PLAN.md — Attachment DTOs, prompts, image prompt, voicemail transcript line, test responder (Wave 3)
 - [ ] 06-12-PLAN.md — Per-organization side world with collision checks and fallback + per-cast voicemail voice call (Wave 3)
-- [ ] 06-13-PLAN.md — Phase 6 UI copy (tiles, stages, activity, banners, Ready card, summary rows) (Wave 2)
+- [x] 06-13-PLAN.md — Phase 6 UI copy (tiles, stages, activity, banners, Ready card, summary rows) (Wave 2)
 - [ ] 06-14-PLAN.md — Whole-corpus run state from committed records, chronological repair groups, persisted invite slots, shared estimate, answer-key overlay (Wave 4)
 - [ ] 06-15-PLAN.md — Start Over for all threads + Story/Volume/media cost estimate (Wave 2)
 - [ ] 06-16-PLAN.md — Filler prompts and DTO on the shared skeleton + schema registration (Wave 4)
@@ -254,6 +254,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
 | 4. Corpus Plan & Answer Key | 22/22 | Complete    | 2026-10-03 |
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
-| 6. Attachments & Non-Relevant Corpus | 9/25 | In Progress|  |
+| 6. Attachments & Non-Relevant Corpus | 10/25 | In Progress|  |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |
 | 8. Ancillary Discovery Documents | 0/TBD | Not started | - |

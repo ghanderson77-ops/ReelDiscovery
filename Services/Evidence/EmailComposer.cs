@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using ReelDiscovery.Helpers;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
@@ -171,8 +172,12 @@ public static partial class EmailComposer
     /// <summary>
     /// Composes every planned message of a thread from the repaired model text. Rendered messages are matched by Seq;
     /// a planned message without one throws <see cref="ArgumentException"/> (callers validate first).
+    /// <paramref name="attachments"/> maps attachment DocId to its generated part; each email carries the parts of its
+    /// own planned attachments that are present, in plan order (ATT-03). Newsletter, spam and personal senders in
+    /// NewsletterSpamPersonal threads use the bulk formatter; every other header comes from the same path (NOISE-05).
     /// </summary>
-    public static ComposedThread Compose(Guid planId, PlannedThread thread, ThreadAssignment assignment, RenderedThread rendered, PeopleDirectory people)
+    public static ComposedThread Compose(Guid planId, PlannedThread thread, ThreadAssignment assignment, RenderedThread rendered,
+        PeopleDirectory people, IReadOnlyDictionary<string, ComposedAttachment>? attachments = null)
     {
         ArgumentNullException.ThrowIfNull(thread);
         ArgumentNullException.ThrowIfNull(rendered);
@@ -195,7 +200,12 @@ public static partial class EmailComposer
             var parent = planned.Kind != MessageKind.New && bySeq.TryGetValue(planned.ReplyToSeq, out var p) ? p : null;
             var body = Normalize(text.Body).Trim();
             var signOff = Normalize(text.SignOff).Trim();
-            var signature = SignatureFor(sender, assignment?.For(planned.Seq)?.Length ?? LengthBand.Medium, planned.Kind);
+            var bulk = BulkKindFor(thread, planned, sender);
+
+            // D-22: bulk mail (newsletter, spam, personal) carries no business signature block
+            var signature = bulk != null
+                ? string.Empty
+                : SignatureFor(sender, assignment?.For(planned.Seq)?.Length ?? LengthBand.Medium, planned.Kind);
 
             var email = new ComposedEmail
             {
@@ -214,10 +224,16 @@ public static partial class EmailComposer
                 Date = planned.SentAt,
                 BodyPlain = body,
                 SignOff = signOff,
-                Signature = signature
+                Signature = signature,
+                Attachments = PartsFor(planned, attachments)
             };
 
-            email.PlainText = PlainTextOf(email, parent, banner);
+            email.PlainText = PlainTextOf(email, parent, banner, bulk != null);
+
+            var images = email.Attachments
+                .Where(a => a.IsInline && a.Kind == AttachmentType.Image && a.ContentId.Length > 0)
+                .Select(a => new InlineImageRef { ContentId = a.ContentId, Title = a.Title })
+                .ToList();
 
             // Quoted history is composer-built HTML only; model text is encoded inside ComposeFragment (T-05-19)
             QuotedPart? quoted = null;
@@ -230,17 +246,58 @@ public static partial class EmailComposer
                     HeaderLines = forward
                         ? ForwardHeaderLines(parent)
                         : new List<string> { QuoteHeader(MessageTime.Local(parent.Planned), parent.From.Name, parent.From.Email) },
-                    ParentFragment = parent.HtmlFragment
+                    // Pitfall 10: quotes never reference a cid the reply does not carry
+                    ParentFragment = parent.QuoteFragment
                 };
             }
 
             var theme = OrganizationThemes.ForDomain(domain);
             var allowTable = !tableUsed;
-            email.HtmlFragment = HtmlEmailFormatter.ComposeFragment(body, signOff, signature, quoted, theme, banner, allowTable);
-            email.Html = HtmlEmailFormatter.ComposeHtml(body, signOff, signature, quoted, theme, banner, allowTable);
+            if (bulk != null)
+            {
+                // Only new messages take the bulk path (BulkKindFor), so there is never a quoted part to nest
+                var content = new BulkMailContent
+                {
+                    Kind = bulk.Value,
+                    Body = body,
+                    SignOff = signOff,
+                    SenderName = sender!.FullName,
+                    Publication = sender.FullName,
+                    IssueDate = MessageTime.Local(planned),
+                    PostalAddress = PostalAddressFor(sender.Domain),
+                    Theme = theme,
+                    InlineImages = images
+                };
+                email.Html = BulkMailFormatter.Compose(content);
+                email.HtmlFragment = BulkMailFormatter.ComposeFragment(content);
+
+                // 06-07 contract: quoted bulk mail shows [image: title], never a cid the reply lacks
+                var quoteContent = new BulkMailContent
+                {
+                    Kind = content.Kind,
+                    Body = content.Body,
+                    SignOff = content.SignOff,
+                    SenderName = content.SenderName,
+                    Publication = content.Publication,
+                    IssueDate = content.IssueDate,
+                    PostalAddress = content.PostalAddress,
+                    Theme = content.Theme,
+                    InlineImages = content.InlineImages,
+                    ImagePlaceholders = true
+                };
+                email.QuoteFragment = BulkMailFormatter.ComposeFragment(quoteContent);
+            }
+            else
+            {
+                email.HtmlFragment = HtmlEmailFormatter.ComposeFragment(body, signOff, signature, quoted, theme, banner, allowTable, images);
+                email.QuoteFragment = images.Count == 0
+                    ? email.HtmlFragment
+                    : HtmlEmailFormatter.ComposeFragment(body, signOff, signature, quoted, theme, banner, allowTable, images, imagePlaceholders: true);
+                email.Html = HtmlEmailFormatter.ComposeHtml(body, signOff, signature, quoted, theme, banner, allowTable, images);
+            }
 
             // One table per thread: only a table that actually rendered (not a rejected oversize one) uses the allowance
-            if (allowTable && PipeTableRegex().IsMatch(body)
+            if (bulk == null && allowTable && PipeTableRegex().IsMatch(body)
                 && CountOf(email.HtmlFragment, "<table") > CountOf(parent?.HtmlFragment ?? string.Empty, "<table"))
                 tableUsed = true;
 
@@ -251,16 +308,24 @@ public static partial class EmailComposer
         return result;
     }
 
-    private static string PlainTextOf(ComposedEmail email, ComposedEmail? parent, bool banner)
+    private static string PlainTextOf(ComposedEmail email, ComposedEmail? parent, bool banner, bool bulk)
     {
         var text = new StringBuilder();
         if (banner)
             text.Append(HtmlEmailFormatter.PrivilegedBannerText).Append("\n\n");
 
         text.Append(email.BodyPlain).Append("\n\n");
-        if (email.SignOff.Length > 0)
-            text.Append(email.SignOff).Append('\n');
-        text.Append(email.Signature);
+        if (bulk)
+        {
+            // Bulk mail has no signature block: the sign-off (if any) ends the text
+            text.Append(email.SignOff);
+        }
+        else
+        {
+            if (email.SignOff.Length > 0)
+                text.Append(email.SignOff).Append('\n');
+            text.Append(email.Signature);
+        }
 
         // The model never re-quotes; code builds the whole quoted history
         if (parent != null && email.Planned.Kind is MessageKind.Reply or MessageKind.ReplyAll)
@@ -279,6 +344,52 @@ public static partial class EmailComposer
         }
 
         return text.ToString();
+    }
+
+    // Present parts of this message's own planned attachments, in plan order; missing parts are simply absent
+    private static List<ComposedAttachment> PartsFor(PlannedMessage planned, IReadOnlyDictionary<string, ComposedAttachment>? attachments)
+    {
+        if (attachments == null || planned.Attachments == null)
+            return new List<ComposedAttachment>();
+
+        return planned.Attachments
+            .Where(a => a != null && attachments.TryGetValue(a.DocId, out var part) && part != null)
+            .Select(a => attachments[a.DocId])
+            .ToList();
+    }
+
+    /// <summary>
+    /// The bulk variant for a new message from a newsletter, spam or personal sender in a NewsletterSpamPersonal
+    /// thread; null (business formatter) for everything else, including vendors and bulk senders elsewhere.
+    /// </summary>
+    public static BulkMailKind? BulkKindFor(PlannedThread thread, PlannedMessage planned, PersonInfo? sender)
+    {
+        if (thread?.Category != NonRelevantCategory.NewsletterSpamPersonal || planned?.Kind != MessageKind.New)
+            return null;
+
+        return sender?.ExternalKind switch
+        {
+            ExternalKind.Newsletter => BulkMailKind.Newsletter,
+            ExternalKind.Spam => BulkMailKind.Spam,
+            ExternalKind.Personal => BulkMailKind.Personal,
+            _ => null
+        };
+    }
+
+    // Generic placeholder cities only (no real brands); the PO box keeps the footer realistic without a real address
+    private static readonly string[] PostalCities =
+    {
+        "Springfield, IL 62701", "Riverside, CA 92501", "Fairview, TN 37062", "Madison, WI 53703",
+        "Franklin, OH 45005", "Greenville, SC 29601", "Clinton, IA 52732", "Salem, OR 97301"
+    };
+
+    // Deterministic per domain: the same sender always prints the same footer address
+    private static string PostalAddressFor(string domain)
+    {
+        var rank = RenderAssignments.StableRank((domain ?? string.Empty) + ":postal");
+        var box = 1000 + (int)(rank % 9000UL);
+        var city = PostalCities[(int)((rank / 9000UL) % (ulong)PostalCities.Length)];
+        return string.Format(CultureInfo.InvariantCulture, "PO Box {0}, {1}", box, city);
     }
 
     private static EmailAddressPart Address(PeopleDirectory people, string id) =>

@@ -22,6 +22,16 @@ public class PersonInfo
     public string OrganizationId { get; set; } = string.Empty;
     public CastMember? Cast { get; set; }
     public bool IsExternal { get; set; }
+
+    /// <summary>
+    /// The plan kind of an external party (picks the bulk-mail formatter); null for cast members.
+    /// </summary>
+    public ExternalKind? ExternalKind { get; set; }
+
+    /// <summary>
+    /// Cast organization name from the guide; empty for externals and cast without a resolvable organization.
+    /// </summary>
+    public string OrganizationName { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -59,7 +69,9 @@ public class PeopleDirectory
                 Domain = orgDomain.Length > 0 ? orgDomain : HostOf(email),
                 OrganizationId = member.OrganizationId ?? string.Empty,
                 Cast = member,
-                IsExternal = false
+                IsExternal = false,
+                ExternalKind = null,
+                OrganizationName = organization?.Name?.Trim() ?? string.Empty
             });
         }
 
@@ -84,7 +96,8 @@ public class PeopleDirectory
                 Domain = domain.Length > 0 ? domain : HostOf(email),
                 OrganizationId = string.Empty,
                 Cast = null,
-                IsExternal = true
+                IsExternal = true,
+                ExternalKind = external.Kind
             });
         }
 

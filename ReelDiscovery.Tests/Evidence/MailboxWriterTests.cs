@@ -1,5 +1,7 @@
 using MimeKit;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Tests.Evidence.Golden;
@@ -263,5 +265,211 @@ public class MailboxWriterTests : IDisposable
 
         Assert.Equal(3, written.Count);
         Assert.Equal("Mailboxes/pat.lee/Sent Items/PL-000042.eml", written[0]);
+    }
+
+    private static ComposedAttachment Attachment(string docId, AttachmentType kind, string fileName, bool inline = false, string contentId = "")
+        => new()
+        {
+            DocId = docId,
+            Kind = kind,
+            FileName = fileName,
+            Title = fileName,
+            Bytes = System.Text.Encoding.UTF8.GetBytes($"bytes of {docId} {fileName}"),
+            IsInline = inline,
+            ContentId = contentId
+        };
+
+    private static byte[] Serialize(ComposedEmail email)
+    {
+        using var ms = new MemoryStream();
+        MailboxWriter.BuildMime(email).WriteTo(ms);
+        return ms.ToArray();
+    }
+
+    private static MimeMessage Reload(ComposedEmail email)
+    {
+        using var ms = new MemoryStream(Serialize(email));
+        return MimeMessage.Load(ms);
+    }
+
+    private static IEnumerable<Multipart> Multiparts(MimeEntity entity)
+    {
+        if (entity is not Multipart multipart)
+            yield break;
+        yield return multipart;
+        foreach (var child in multipart)
+            foreach (var nested in Multiparts(child))
+                yield return nested;
+    }
+
+    [Fact]
+    public void BuildMime_WordAndExcel_MixedWithFilesInPlanOrder()
+    {
+        var email = Composed();
+        email.Attachments.Add(Attachment("PL-000043", AttachmentType.Word, "Schedule.docx"));
+        email.Attachments.Add(Attachment("PL-000044", AttachmentType.Excel, "Costs.xlsx"));
+
+        var loaded = Reload(email);
+
+        var mixed = Assert.IsType<Multipart>(loaded.Body);
+        Assert.Equal("multipart/mixed", mixed.ContentType.MimeType);
+        Assert.Equal(3, mixed.Count);
+        var alternative = Assert.IsType<MultipartAlternative>(mixed[0]);
+        Assert.Equal("text/plain", alternative[0].ContentType.MimeType);
+        Assert.Equal("text/html", alternative[1].ContentType.MimeType);
+
+        var word = Assert.IsType<MimePart>(mixed[1]);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.wordprocessingml.document", word.ContentType.MimeType);
+        Assert.Equal("Schedule.docx", word.FileName);
+        Assert.True(word.IsAttachment);
+        Assert.Equal("PL-000043", word.Headers[MailboxWriter.DocIdHeader]);
+
+        var excel = Assert.IsType<MimePart>(mixed[2]);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", excel.ContentType.MimeType);
+        Assert.Equal("Costs.xlsx", excel.FileName);
+        Assert.Equal("PL-000044", excel.Headers[MailboxWriter.DocIdHeader]);
+
+        using var decoded = new MemoryStream();
+        excel.Content.DecodeTo(decoded);
+        Assert.Equal(email.Attachments[1].Bytes, decoded.ToArray());
+    }
+
+    [Fact]
+    public void BuildMime_PowerPoint_OpenXmlType()
+    {
+        var email = Composed();
+        email.Attachments.Add(Attachment("PL-000043", AttachmentType.PowerPoint, "Deck.pptx"));
+
+        var part = Assert.Single(Reload(email).Attachments.OfType<MimePart>());
+        Assert.Equal("application/vnd.openxmlformats-officedocument.presentationml.presentation", part.ContentType.MimeType);
+    }
+
+    [Fact]
+    public void BuildMime_InlineImageOnly_AlternativeWithRelatedHtml()
+    {
+        var email = Composed();
+        email.Html = "<html><body><p>See photo</p><img src=\"cid:img1.PL-000043@reeldiscovery\"></body></html>";
+        email.Attachments.Add(Attachment("PL-000043", AttachmentType.Image, "photo.png", inline: true, contentId: "img1.PL-000043@reeldiscovery"));
+
+        var loaded = Reload(email);
+
+        var alternative = Assert.IsType<MultipartAlternative>(loaded.Body);
+        Assert.DoesNotContain(Multiparts(loaded.Body), m => m.ContentType.MimeType == "multipart/mixed");
+        Assert.Equal("text/plain", alternative[0].ContentType.MimeType);
+        var related = Assert.IsType<MultipartRelated>(alternative[1]);
+        Assert.Equal("text/html", related[0].ContentType.MimeType);
+        var image = Assert.IsType<MimePart>(related[1]);
+        Assert.Equal("image/png", image.ContentType.MimeType);
+        Assert.Equal("img1.PL-000043@reeldiscovery", image.ContentId);
+        Assert.Equal("PL-000043", image.Headers[MailboxWriter.DocIdHeader]);
+    }
+
+    [Fact]
+    public void BuildMime_NonInlineImage_AttachedAsPng()
+    {
+        var email = Composed();
+        email.Attachments.Add(Attachment("PL-000043", AttachmentType.Image, "site.png"));
+
+        var part = Assert.Single(Reload(email).Attachments.OfType<MimePart>());
+        Assert.Equal("image/png", part.ContentType.MimeType);
+        Assert.Equal("PL-000043", part.Headers[MailboxWriter.DocIdHeader]);
+    }
+
+    [Fact]
+    public void BuildMime_InviteAndVoicemail_CalendarRequestAndAudio()
+    {
+        var email = Composed();
+        email.Attachments.Add(Attachment("PL-000043", AttachmentType.CalendarInvite, "Site walk.ics"));
+        email.Attachments.Add(Attachment("PL-000044", AttachmentType.Voicemail, "Voicemail.mp3"));
+
+        var parts = Reload(email).Attachments.OfType<MimePart>().ToList();
+
+        Assert.Equal(2, parts.Count);
+        Assert.Equal("text/calendar", parts[0].ContentType.MimeType);
+        Assert.Equal("REQUEST", parts[0].ContentType.Parameters["method"]);
+        Assert.Equal("utf-8", parts[0].ContentType.Charset);
+        Assert.EndsWith(".ics", parts[0].FileName);
+        Assert.Equal("PL-000043", parts[0].Headers[MailboxWriter.DocIdHeader]);
+        Assert.Equal("audio/mpeg", parts[1].ContentType.MimeType);
+        Assert.Equal("PL-000044", parts[1].Headers[MailboxWriter.DocIdHeader]);
+    }
+
+    [Fact]
+    public void BuildMime_WithAttachments_DeterministicDistinctBoundaries()
+    {
+        static ComposedEmail Build()
+        {
+            var email = Composed();
+            email.Html = "<html><body><img src=\"cid:img1@rd\"></body></html>";
+            email.Attachments.Add(Attachment("PL-000043", AttachmentType.Image, "photo.png", inline: true, contentId: "img1@rd"));
+            email.Attachments.Add(Attachment("PL-000044", AttachmentType.Word, "Schedule.docx"));
+            return email;
+        }
+
+        Assert.Equal(Serialize(Build()), Serialize(Build()));
+
+        var multiparts = Multiparts(MailboxWriter.BuildMime(Build()).Body).ToList();
+        Assert.Equal(3, multiparts.Count);
+        var boundaries = multiparts.Select(m => m.Boundary).ToList();
+        Assert.All(boundaries, b => Assert.StartsWith("=-rd-", b));
+        Assert.Equal(boundaries.Count, boundaries.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void BuildMime_FileNameWithPath_ReducedToName()
+    {
+        var email = Composed();
+        email.Attachments.Add(Attachment("PL-000043", AttachmentType.Word, "folder\\sub\\Schedule.docx"));
+
+        var part = Assert.Single(Reload(email).Attachments.OfType<MimePart>());
+        Assert.Equal("Schedule.docx", part.FileName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("..")]
+    [InlineData("bad<name>.docx")]
+    public void BuildMime_UnsafeFileName_PartSkipped(string fileName)
+    {
+        var email = Composed();
+        email.Attachments.Add(Attachment("PL-000043", AttachmentType.Word, fileName));
+        email.Attachments.Add(Attachment("PL-000044", AttachmentType.Excel, "Costs.xlsx"));
+
+        var part = Assert.Single(Reload(email).Attachments.OfType<MimePart>());
+        Assert.Equal("PL-000044", part.Headers[MailboxWriter.DocIdHeader]);
+    }
+
+    [Fact]
+    public async Task WriteAsync_WithAttachments_SameBytesInEveryCopy()
+    {
+        var email = Composed();
+        email.Attachments.Add(Attachment("PL-000043", AttachmentType.Word, "Schedule.docx"));
+
+        var written = await new MailboxWriter(_folder, Folders).WriteAsync(email);
+
+        Assert.Equal(3, written.Count);
+        var expected = Serialize(email);
+        foreach (var relative in written)
+            Assert.Equal(expected, await File.ReadAllBytesAsync(Path.Combine(_folder, relative.Replace('/', Path.DirectorySeparatorChar))));
+    }
+
+    [Fact]
+    public async Task WriteAsync_NonRelevantExternalSender_OnlyInboxCopies()
+    {
+        var email = Composed();
+        email.Planned = new PlannedMessage
+        {
+            DocId = "PL-000060",
+            FromId = "EXT-002",
+            ToIds = new List<string> { "CH-002", "CH-005" },
+            CustodianIds = new List<string> { "CH-002", "CH-005" },
+            Basis = RelevanceBasis.None,
+            FilePath = "Mailboxes/kim.park/Inbox/PL-000060.eml"
+        };
+        email.Attachments.Add(Attachment("PL-000061", AttachmentType.Excel, "Menu.xlsx"));
+
+        var written = await new MailboxWriter(_folder, Folders).WriteAsync(email);
+
+        Assert.Equal(new[] { "Mailboxes/kim.park/Inbox/PL-000060.eml", "Mailboxes/sam.ortiz/Inbox/PL-000060.eml" }, written);
     }
 }

@@ -69,7 +69,7 @@ public class GenerateCorpusStepTests
             var changes = 0;
             step.StateChanged += (s, e) => changes++;
             Pump(step.OnEnterStepAsync());
-            Assert.Equal("Ready to write the relevant emails", step.StateHeading);
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
             changes = 0;
 
             var uiThread = Environment.CurrentManagedThreadId;
@@ -167,7 +167,7 @@ public class GenerateCorpusStepTests
             Assert.Equal(Theme.Warning, step.StatusLabel.ForeColor);
             Assert.StartsWith("Cancelled.", step.StatusLabel.Text);
             Assert.True(step.BannerShown);
-            Assert.Equal(GenerationUiText.BannerHeading, step.BannerHeadingText);
+            Assert.Equal(GenerationUiText.BannerHeading(runEnded: false), step.BannerHeadingText);
             Assert.Equal(GenerationOutcome.Cancelled, h.Draft.Corpus!.Generation!.LastOutcome);
 
             var replay = GenerationJournal.Replay(h.Folder, h.Plan);
@@ -369,7 +369,7 @@ public class GenerateCorpusStepTests
             Assert.Equal(GenerationUiText.StartedOverText(emls), step.StatusLabel.Text);
             Assert.Equal(Theme.Success, step.StatusLabel.ForeColor);
             Assert.True(step.StateCardShown);
-            Assert.Equal("Ready to write the relevant emails", step.StateHeading);
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
             Assert.True(step.CanMoveNext);
         });
     }

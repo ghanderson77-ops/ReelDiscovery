@@ -26,8 +26,8 @@ public class GenerateCorpusRenderTests
         RenderBoth("generate-corpus-ready", GenerateCorpusRenderState.Ready, null, (step, labels) =>
         {
             Assert.True(step.StateCardShown);
-            Assert.Equal("Ready to write the relevant emails", step.StateHeading);
-            Assert.Contains("Estimated cost: ≈$", step.StateBody);
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
+            Assert.Contains("Estimated cost ≈$", step.StateBody);
             Assert.True(step.StateActionButton.Visible);
             Assert.Equal("Generate Emails", step.StateActionButton.Text);
             Assert.Equal(ButtonStyle.Primary, ((ThemedButton)step.StateActionButton).Variant);
@@ -69,8 +69,8 @@ public class GenerateCorpusRenderTests
         RenderBoth("generate-corpus-partial", GenerateCorpusRenderState.Partial, view, (step, labels) =>
         {
             Assert.True(step.BannerPanel.Visible);
-            Assert.Contains(GenerationUiText.BannerHeading, labels);
-            Assert.Contains(GenerationUiText.BannerBody(21, 60, 2), labels);
+            Assert.Contains(GenerationUiText.BannerHeading(runEnded: false), labels);
+            Assert.Contains(GenerationUiText.BannerBody(21, 60, 0, 0, 2), labels);
             Assert.True(step.ContinueButton.Visible);
             Assert.True(step.StartOverButton.Visible);
             Assert.False(step.RetryFailedButton.Visible);
@@ -516,7 +516,7 @@ public class GenerateCorpusEntryTests
         Enter(fixture, step =>
         {
             Assert.True(step.StateCardShown);
-            Assert.Equal("Ready to write the relevant emails", step.StateHeading);
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
             Assert.False(step.IsGenerating);
             // Never auto-starts: no journal, no mailboxes (U3)
             Assert.False(File.Exists(GenerationJournal.PathFor(fixture.Folder)));

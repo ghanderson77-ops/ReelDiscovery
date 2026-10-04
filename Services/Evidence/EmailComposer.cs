@@ -175,9 +175,12 @@ public static partial class EmailComposer
     /// <paramref name="attachments"/> maps attachment DocId to its generated part; each email carries the parts of its
     /// own planned attachments that are present, in plan order (ATT-03). Newsletter, spam and personal senders in
     /// NewsletterSpamPersonal threads use the bulk formatter; every other header comes from the same path (NOISE-05).
+    /// A single-message voicemail thread becomes a phone-system notice (D-28) unless <paramref name="voicemailNotice"/> is false.
     /// </summary>
     public static ComposedThread Compose(Guid planId, PlannedThread thread, ThreadAssignment assignment, RenderedThread rendered,
-        PeopleDirectory people, IReadOnlyDictionary<string, ComposedAttachment>? attachments = null)
+        PeopleDirectory people, IReadOnlyDictionary<string, ComposedAttachment>? attachments = null,
+        // false only for Phase 5 voicemail threads recomposed by attachment repair (06-20): their text stays as written (D-26)
+        bool voicemailNotice = true)
     {
         ArgumentNullException.ThrowIfNull(thread);
         ArgumentNullException.ThrowIfNull(rendered);
@@ -301,6 +304,10 @@ public static partial class EmailComposer
                 && CountOf(email.HtmlFragment, "<table") > CountOf(parent?.HtmlFragment ?? string.Empty, "<table"))
                 tableUsed = true;
 
+            // D-28: the voicemail override replaces From, Subject and text; Message-ID, Date and recipients stay planned
+            if (voicemailNotice && VoicemailComposer.IsVoicemail(thread, planned))
+                VoicemailComposer.Apply(email, thread, people);
+
             bySeq[planned.Seq] = email;
             result.Emails.Add(email);
         }
@@ -414,7 +421,7 @@ public static partial class EmailComposer
         part.Email.Length > 0 ? $"{part.Name} <{part.Email}>" : part.Name;
 
     // Only [a-z0-9.-] survive; blank results use the fallback (T-05-18)
-    private static string SanitizeDomain(string? domain)
+    internal static string SanitizeDomain(string? domain)
     {
         var clean = UnsafeDomainCharRegex().Replace((domain ?? string.Empty).Trim().ToLowerInvariant(), string.Empty).Trim('.', '-');
         return clean.Length > 0 ? clean : FallbackDomain;

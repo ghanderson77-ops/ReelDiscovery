@@ -23,9 +23,46 @@ public class GenerationJournalTests : IDisposable
             PlanId = Guid.NewGuid(),
             Threads = new List<PlannedThread>
             {
-                new() { Id = "T-0003", Relevance = ThreadRelevance.Relevant },
-                new() { Id = "T-0005", Relevance = ThreadRelevance.Relevant },
-                new() { Id = "T-0007", Relevance = ThreadRelevance.Relevant }
+                new()
+                {
+                    Id = "T-0003",
+                    Relevance = ThreadRelevance.Relevant,
+                    Messages = new List<PlannedMessage>
+                    {
+                        new()
+                        {
+                            Seq = 1,
+                            DocId = "PL-000001",
+                            Attachments = new List<PlannedAttachment>
+                            {
+                                new() { DocId = "PL-000001.0001", Kind = AttachmentType.Word },
+                                new() { DocId = "PL-000001.0002", Kind = AttachmentType.Excel }
+                            }
+                        }
+                    }
+                },
+                new()
+                {
+                    Id = "T-0005",
+                    Relevance = ThreadRelevance.Relevant,
+                    Messages = new List<PlannedMessage>
+                    {
+                        new()
+                        {
+                            Seq = 1,
+                            DocId = "PL-000002",
+                            Attachments = new List<PlannedAttachment> { new() { DocId = "PL-000002.0001", Kind = AttachmentType.Voicemail } }
+                        }
+                    }
+                },
+                new() { Id = "T-0007", Relevance = ThreadRelevance.Relevant },
+                new()
+                {
+                    Id = "T-0011",
+                    Relevance = ThreadRelevance.NotRelevant,
+                    Category = NonRelevantCategory.DailyBusiness,
+                    Messages = new List<PlannedMessage> { new() { Seq = 1, DocId = "PL-000003" } }
+                }
             }
         };
     }
@@ -636,5 +673,264 @@ public class GenerationJournalTests : IDisposable
     public void RenderedMessage_AttachmentTitles_DefaultEmpty()
     {
         Assert.Empty(new RenderedMessage().AttachmentTitles);
+    }
+
+    // ---- Phase 6 replay (06-01 Task 2) ----
+
+    private static JournalRecord Outcome(JournalRecordType type, string docId, string parent, decimal cost = 0m,
+        decimal media = 0m, string threadId = "") => new()
+    {
+        Type = type,
+        AttachmentDocId = docId,
+        ParentDocId = parent,
+        ThreadId = threadId,
+        CostUsd = cost,
+        MediaCostUsd = media
+    };
+
+    private JournalRecord Repaired(string threadId, params JournalRecord[] attachments) => new()
+    {
+        Type = JournalRecordType.AttachmentsRepaired,
+        PlanId = _plan.PlanId,
+        ThreadId = threadId,
+        Files = new List<string> { $"Mailboxes/pat.lee/Inbox/{threadId}-repaired.eml" },
+        Attachments = attachments.ToList()
+    };
+
+    [Fact]
+    public async Task Replay_NestedAttachment_StateAndSpend()
+    {
+        var done = Done("T-0003");
+        done.CostUsd = 0.20m;
+        done.Attachments.Add(Outcome(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000001", 0.03m, 0.04m));
+        await new GenerationJournal(_folder).AppendAsync(done);
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        var attachment = replay.LastByAttachment["PL-000001.0001"];
+        Assert.Equal(JournalRecordType.AttachmentDone, attachment.Type);
+        Assert.Equal("T-0003", attachment.ThreadId);
+        Assert.Equal(0.27m, replay.SpentCostUsd);
+        Assert.Equal(0.04m, replay.MediaSpentCostUsd);
+    }
+
+    [Fact]
+    public async Task Replay_ForeignIdentity_IgnoredButSpendCounted()
+    {
+        var done = Done("T-0003");
+        done.Attachments.Add(Outcome(JournalRecordType.AttachmentDone, "PL-000099.0001", "PL-000099", 0.01m));
+        done.Attachments.Add(Outcome(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000002", 0.01m));
+        done.Attachments.Add(Outcome(JournalRecordType.AttachmentDone, "PL-000002.0001", "PL-000002", 0.01m, 0.02m));
+        await new GenerationJournal(_folder).AppendAsync(done);
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Empty(replay.LastByAttachment);
+        Assert.Equal(0.05m, replay.SpentCostUsd);
+        Assert.Equal(0.02m, replay.MediaSpentCostUsd);
+    }
+
+    [Fact]
+    public async Task Replay_RepairAfterFailure_LastWinsSpendSums()
+    {
+        var journal = new GenerationJournal(_folder);
+        var done = Done("T-0003");
+        done.Attachments.Add(Outcome(JournalRecordType.AttachmentFailed, "PL-000001.0001", "PL-000001", 0.01m, 0.02m));
+        await journal.AppendAsync(done);
+        await journal.AppendAsync(Repaired("T-0003",
+            Outcome(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000001", 0.01m, 0.05m)));
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(JournalRecordType.AttachmentDone, replay.LastByAttachment["PL-000001.0001"].Type);
+        Assert.Equal(0.09m, replay.SpentCostUsd);
+        Assert.Equal(0.07m, replay.MediaSpentCostUsd);
+        Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread["T-0003"].Type);
+    }
+
+    [Fact]
+    public async Task Replay_RepairWithoutWrittenThread_Ignored()
+    {
+        var journal = new GenerationJournal(_folder);
+        await journal.AppendAsync(Repaired("T-0005",
+            Outcome(JournalRecordType.AttachmentDone, "PL-000002.0001", "PL-000002", 0.01m)));
+        await journal.AppendAsync(Failed("T-0003"));
+        await journal.AppendAsync(Repaired("T-0003",
+            Outcome(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000001", 0.02m, 0.01m)));
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Empty(replay.LastByAttachment);
+        Assert.Equal(0.04m, replay.SpentCostUsd);
+        Assert.Equal(0.01m, replay.MediaSpentCostUsd);
+    }
+
+    [Fact]
+    public async Task Replay_FreshThreadDone_ResetsThatThreadsAttachments()
+    {
+        var journal = new GenerationJournal(_folder);
+        var first = Done("T-0003");
+        first.Attachments.Add(Outcome(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000001"));
+        first.Attachments.Add(Outcome(JournalRecordType.AttachmentDone, "PL-000001.0002", "PL-000001"));
+        var other = Done("T-0005");
+        other.Attachments.Add(Outcome(JournalRecordType.AttachmentDone, "PL-000002.0001", "PL-000002"));
+        await journal.AppendAsync(first);
+        await journal.AppendAsync(other);
+        await journal.AppendAsync(Failed("T-0003"));
+        var second = Done("T-0003");
+        second.Attachments.Add(Outcome(JournalRecordType.AttachmentSkipped, "PL-000001.0002", "PL-000001"));
+        await journal.AppendAsync(second);
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.False(replay.LastByAttachment.ContainsKey("PL-000001.0001"));
+        Assert.Equal(JournalRecordType.AttachmentSkipped, replay.LastByAttachment["PL-000001.0002"].Type);
+        Assert.Equal(JournalRecordType.AttachmentDone, replay.LastByAttachment["PL-000002.0001"].Type);
+    }
+
+    [Fact]
+    public async Task Replay_StandaloneAttachmentLines_Validated()
+    {
+        var journal = new GenerationJournal(_folder);
+        foreach (var record in new[]
+                 {
+                     Outcome(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000001", 0.01m, threadId: "T-0003"),
+                     Outcome(JournalRecordType.AttachmentFailed, "PL-000002.0001", "PL-000002", 0.01m, threadId: "T-0003"),
+                     Outcome(JournalRecordType.AttachmentSkipped, "PL-000001.0002", "PL-000001", threadId: "T-0003")
+                 })
+        {
+            record.PlanId = _plan.PlanId;
+            await journal.AppendAsync(record);
+        }
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(new[] { "PL-000001.0001", "PL-000001.0002" }, replay.LastByAttachment.Keys.OrderBy(k => k).ToArray());
+        Assert.Equal(0.02m, replay.SpentCostUsd);
+    }
+
+    [Fact]
+    public async Task Replay_LatestAttemptEnded_TracksNewestRunStarted()
+    {
+        var journal = new GenerationJournal(_folder);
+        var ended = new JournalRecord { Type = JournalRecordType.RunEnded, PlanId = _plan.PlanId, Outcome = GenerationOutcome.Cancelled };
+        await journal.AppendAsync(Started());
+        await journal.AppendAsync(ended);
+
+        var once = GenerationJournal.Replay(_folder, _plan);
+        Assert.True(once.LatestAttemptEnded);
+
+        await journal.AppendAsync(Started());
+        var interrupted = GenerationJournal.Replay(_folder, _plan);
+        Assert.NotNull(interrupted.LastRunEnded);
+        Assert.False(interrupted.LatestAttemptEnded);
+    }
+
+    [Fact]
+    public async Task Replay_LatestAttemptEnded_LegacyRunEndedOnly()
+    {
+        await new GenerationJournal(_folder).AppendAsync(
+            new JournalRecord { Type = JournalRecordType.RunEnded, PlanId = _plan.PlanId, Outcome = GenerationOutcome.Finished });
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.True(replay.LatestAttemptEnded);
+        Assert.False(GenerationJournal.Replay(Path.Combine(_folder, "missing"), _plan).LatestAttemptEnded);
+    }
+
+    [Fact]
+    public async Task Replay_SideWorldAndCastVoices_LastWinsCostCounted()
+    {
+        var journal = new GenerationJournal(_folder);
+        foreach (var name in new[] { "first", "second" })
+        {
+            await journal.AppendAsync(new JournalRecord
+            {
+                Type = JournalRecordType.SideWorld,
+                PlanId = _plan.PlanId,
+                CostUsd = 0.01m,
+                SideWorld = new SideWorld
+                {
+                    Organizations = new List<SideWorldOrganization>
+                    {
+                        new() { OrganizationId = name, Projects = new List<SideProject> { new() { Name = name } } }
+                    }
+                }
+            });
+            await journal.AppendAsync(new JournalRecord
+            {
+                Type = JournalRecordType.CastVoices,
+                PlanId = _plan.PlanId,
+                CostUsd = 0.02m,
+                CastVoices = new CastVoiceSet
+                {
+                    Voices = new List<CastVoice> { new() { PersonId = "CH-001", Voice = name == "first" ? "echo" : "nova" } }
+                }
+            });
+        }
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal("second", replay.LastSideWorld!.SideWorld!.Organizations[0].OrganizationId);
+        Assert.Equal("nova", replay.LastCastVoices!.CastVoices!.VoiceFor("CH-001"));
+        Assert.Equal(0.06m, replay.SpentCostUsd);
+    }
+
+    [Fact]
+    public async Task Replay_FutureTypeName_SkippedLine()
+    {
+        await new GenerationJournal(_folder).AppendAsync(Done("T-0003"));
+        await File.AppendAllTextAsync(JournalPath, "{\"Type\":\"FutureThing\",\"PlanId\":\"" + _plan.PlanId + "\"}\n");
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(1, replay.SkippedLines);
+        Assert.Single(replay.LastByThread);
+    }
+
+    [Fact]
+    public async Task Replay_NotRelevantThread_Kept()
+    {
+        await new GenerationJournal(_folder).AppendAsync(Done("T-0011"));
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread["T-0011"].Type);
+    }
+
+    [Fact]
+    public async Task ListAllFiles_IncludesRepairedCopies()
+    {
+        var journal = new GenerationJournal(_folder);
+        await journal.AppendAsync(Done("T-0003", null, "Mailboxes/a/Inbox/PL-000001.eml"));
+        var repair = Repaired("T-0003");
+        repair.Files = new List<string> { "Mailboxes/b/Inbox/PL-000001.eml", "../evil.eml" };
+        await journal.AppendAsync(repair);
+
+        var files = GenerationJournal.ListAllFiles(_folder);
+
+        Assert.Equal(new[] { "Mailboxes/a/Inbox/PL-000001.eml", "Mailboxes/b/Inbox/PL-000001.eml" }, files);
+    }
+
+    [Fact]
+    public async Task Replay_Locked_ClearsPhase6State()
+    {
+        var done = Done("T-0003");
+        done.Attachments.Add(Outcome(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000001", 0.01m, 0.01m));
+        await new GenerationJournal(_folder).AppendAsync(done);
+
+        using (new FileStream(JournalPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            var replay = GenerationJournal.Replay(_folder, _plan);
+
+            Assert.False(replay.Readable);
+            Assert.Empty(replay.LastByAttachment);
+            Assert.Null(replay.LastSideWorld);
+            Assert.Null(replay.LastCastVoices);
+            Assert.Equal(0m, replay.MediaSpentCostUsd);
+            Assert.Equal(-1, replay.LastRunStartedLine);
+            Assert.Equal(-1, replay.LastRunEndedLine);
+            Assert.False(replay.LatestAttemptEnded);
+        }
     }
 }

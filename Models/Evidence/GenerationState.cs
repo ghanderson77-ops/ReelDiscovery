@@ -42,6 +42,20 @@ public class GenerationState
     public int Mailboxes { get; set; }
     public decimal CostUsd { get; set; }
 
+    // Phase 6 cached counts; ThreadsTotal..ThreadsFailed above keep meaning relevant threads
+    public int NonRelevantTotal { get; set; }
+    public int NonRelevantWritten { get; set; }
+    public int NonRelevantWithWarnings { get; set; }
+    public int NonRelevantFailed { get; set; }
+    public int AttachmentsTotal { get; set; }
+    public int AttachmentsWritten { get; set; }
+    public int AttachmentsWithWarnings { get; set; }
+    public int AttachmentsFailed { get; set; }
+    public int AttachmentsSkipped { get; set; }
+
+    // Media (image + voicemail) share of CostUsd
+    public decimal MediaCostUsd { get; set; }
+
     // Last answer-key / story-so-far write error; empty when fine
     public string KeyError { get; set; } = string.Empty;
     public string StoryError { get; set; } = string.Empty;
@@ -68,5 +82,17 @@ public class GenerationState
         FilesWritten = Math.Max(0, FilesWritten);
         Mailboxes = Math.Max(0, Mailboxes);
         CostUsd = Math.Max(0m, CostUsd);
+
+        // Missing in Phase 5 case.json files: default 0 (06-RESEARCH Existing Run State)
+        NonRelevantTotal = Math.Max(0, NonRelevantTotal);
+        NonRelevantWritten = Math.Max(0, NonRelevantWritten);
+        NonRelevantWithWarnings = Math.Max(0, NonRelevantWithWarnings);
+        NonRelevantFailed = Math.Max(0, NonRelevantFailed);
+        AttachmentsTotal = Math.Max(0, AttachmentsTotal);
+        AttachmentsWritten = Math.Max(0, AttachmentsWritten);
+        AttachmentsWithWarnings = Math.Max(0, AttachmentsWithWarnings);
+        AttachmentsFailed = Math.Max(0, AttachmentsFailed);
+        AttachmentsSkipped = Math.Max(0, AttachmentsSkipped);
+        MediaCostUsd = Math.Max(0m, MediaCostUsd);
     }
 }

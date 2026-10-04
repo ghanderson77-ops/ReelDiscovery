@@ -53,9 +53,16 @@ public class ComposedEmail
     public string SignOff { get; set; } = string.Empty;
     public string Signature { get; set; } = string.Empty;
 
+    // Attachment parts of this email (ATT-03); empty when the email has none
+    public List<ComposedAttachment> Attachments { get; set; } = new();
+
     // Body HTML without the template, nested into replies and forwards
     [JsonIgnore]
     internal string HtmlFragment { get; set; } = string.Empty;
+
+    // HtmlFragment with inline images replaced by [image: title], used when a reply quotes this email (Pitfall 10)
+    [JsonIgnore]
+    internal string QuoteFragment { get; set; } = string.Empty;
 }
 
 public class ComposedThread

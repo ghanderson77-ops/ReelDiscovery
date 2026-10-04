@@ -394,7 +394,7 @@ This is not a rename phase, but runs already on disk change meaning:
 
 ### Pitfall 3: Length/CC/depth distributions drift between tiers
 **What goes wrong:** The Volume model ignores length bands or writes uniform medium emails. Bulk mail is naturally longer.
-**How to avoid:** Apportion bands separately over non-relevant business messages (DailyBusiness + Ancillary + Decoy) with the identical 55/35/10 shares and the same Long-only-for-New/Forward rule. Run V8 (length) as a *structure* check for filler; D-12 allows count/order checks, and V8 is a gross-length check, not a ledger check (confirm, Open Question 3). Exclude newsletter/spam/personal from the parity population. CC counts and thread depth come from the plan, so they already match.
+**How to avoid:** Apportion bands separately over non-relevant business messages (DailyBusiness + Ancillary + Decoy) with the identical 55/35/10 shares and the same Long-only-for-New/Forward rule. Run V8 (length) as a *structure* check for filler; D-12 allows count/order checks, and V8 is a gross-length check, not a ledger check (confirm, Open Question 3). **Superseded (user, 2026-10-04): no V8 on filler; parity comes from the prompt band only.** Exclude newsletter/spam/personal from the parity population. CC counts and thread depth come from the plan, so they already match.
 **Warning signs:** A parity test over a fake run shows different band shares between the populations.
 
 ### Pitfall 4: Gating attachment knowledge to the wrong date
@@ -530,19 +530,25 @@ public static List<RenderViolation> Scan(RenderedThread rendered, PlannedThread 
 | A5 | text/calendar as a regular attachment is accepted by review tools and Outlook | Pattern 5 | Low |
 | A6 | Media unit prices: image ≈ $0.006 (low, 1024²), TTS $15/1M chars | Pitfall 14 | Medium: estimate accuracy only; must be editable catalog values |
 | A7 | Cost heuristics for filler/attachment tokens (`GenerationCostEstimator` constants) still hold | Pitfall 14 | Medium: estimate accuracy; recalibrate from the first live run |
-| A8 | V8 (gross length) counts as a "structure-only" check acceptable for filler under D-12 | Pitfall 3 | Medium: if not, filler length parity is unenforced |
+| A8 | V8 (gross length) counts as a "structure-only" check acceptable for filler under D-12 | Pitfall 3 | Medium: if not, filler length parity is unenforced. **Rejected by the user (2026-10-04): strict D-12; filler length follows the prompt band without a check** |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Voicemail From address vs plan sender and the caller's Sent Items copy.**
    - What we know: D-28 requires a voicemail-system From. The plan's `FromId` is the caller, `CustodianIds`/`FilePath` include the caller's Sent Items copy, and the key's From column is the caller.
    - What's unclear: whether to keep the caller's Sent copy (unrealistic) or drop it (changes plan structure and the key FilePath).
    - Recommendation: keep every planned copy (D-02), override only the EML From/Subject/body, and add `From` + `Subject` to `AnswerKeyOverlayEntry` so the key shows the voicemail-system sender. Note the realism trade-off for the user.
+   - **RESOLVED:** confirmed in 06-UI-SPEC "Decisions Confirmed" (row 1: all planned copies kept; key From/Subject match the EML). Phase 5 voicemail threads keep their Phase 5 composition and only gain the audio (06-20).
 2. **Media auth/quota failure mid-run:** stop media only (recommended) or the whole run (D-06 wording "Fatal provider stops end the run")? D-06 most plausibly means the text provider. Recommend media-only stop with Skipped rows; confirm with the user.
+   - **RESOLVED:** confirmed in 06-UI-SPEC "Decisions Confirmed" (row 2: media-only stop, remaining media Skipped, text continues).
 3. **Is V8 allowed for filler under D-12?** It is needed for length parity (NOISE-05). Recommend yes: it is a gross length check, not a ledger or knowledge check.
+   - **RESOLVED (user, 2026-10-04): No, strict D-12.** Non-relevant threads get V1/V5 structure checks only (message count/order, non-empty). No V8 retry on filler. Filler length parity relies on the code-assigned length band in the prompt (D-07/D-11). The parity suite (06-21) measures length distributions on fake output with loose tolerances and does not assume retries. The estimate has no filler length-retry factor.
 4. **Where media unit prices live:** D-29 says "from the model catalog", but `AIModelConfig` has token prices only. Recommend `PricePerUnit` entries (image per image by quality; TTS per 1M characters) editable in `ModelConfigurationDialog`, or constants in `GenerationConfig` next to `ImageModel`. Planner's choice; it touches the model dialog UI.
+   - **RESOLVED:** confirmed in 06-UI-SPEC "Decisions Confirmed" (row 3: a `Media prices` row in `ModelConfigurationDialog`, S4; values held in `MediaPrices`).
 5. **Cast TTS voice:** CastMember has no voice id or gender. Recommend deterministic `VoiceAssignments.For(personId)` = StableRank over the 6 voices (stable, no LLM), optionally overridable later. Gender mismatch is possible. If unacceptable, one Volume call per cast member at filler start, persisted in the `SideWorld` journal record.
+   - **RESOLVED (user, 2026-10-04): per-cast voice call.** One cheap Volume call (`CastVoiceBuilder`, 06-12) picks a fitting tts-1 voice for every cast member from name, title, organization and involvement. It runs at run start (before the first relevant wave, since relevant voicemails are spoken in Stage A) when a voicemail is pending and media is available, and is persisted as a `CastVoices` journal record alongside the `SideWorld` record, so voices are deterministic on Continue / Retry Failed and are removed with the journal by Start Over. `VoiceAssignments.Fallback` (StableRank) is used only when the call fails or gives no valid voice for a person.
 6. **Side-world method:** recommend one Volume call for all organizations (names + 2-3 topics each) at Stage B start. Validate in code against fact titles, canonical values, issue titles and existing project names (case-insensitive whole word). Fall back to code templates ("{Org} {Quarter} facilities refresh"). Persist as a `SideWorld` journal record so Continue reuses it.
+   - **RESOLVED (planner, 06-12):** one Volume call for all organizations at Stage B start; whole-word, case-insensitive collision checks (`RenderValidator.ContainsWord`) against fact titles, issue titles, canonical values and project names; colliding entries dropped and topped up from deterministic code templates (StableRank per organization), full template fallback on refusal/failure; persisted as a `SideWorld` journal record and replayed on Continue.
 
 ## Environment Availability
 

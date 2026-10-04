@@ -61,6 +61,10 @@ Requirements: ATT-01..04, NOISE-01..05, OUT-01, RUN-02.
 - **D-28:** **Voicemails are delivered as phone-system emails with a transcript.** A single-message thread from a voicemail-system address ("Voicemail from {caller}, 0:42") carries an audio attachment and an auto-transcript in the body. TTS uses the caller's cast voice. A relevant voicemail transcript goes through the same code checks as relevant email.
 - **D-29:** **Costs fold into the existing ticker.** Attachment text calls count on their tier. Image and TTS calls add per-unit costs from the model catalog. The Generate Corpus Ready-card estimate is extended to cover attachments, filler and media.
 
+### Clarifications (2026-10-04, user, during plan revision)
+- **D-12 clarification (2026-10-04, user):** filler structure checks are **V1/V5 only** (message count/order, non-empty). **No V8** length check or length retry on non-relevant threads. Filler length parity relies on the code-assigned length bands in the prompt (D-07/D-11). Resolves 06-RESEARCH Open Question 3.
+- **D-28 clarification (2026-10-04, user):** the caller's "cast voice" is **chosen by one per-cast voice call** (cheap Volume tier) that picks a fitting tts-1 voice for each cast member from name/role/description. The choice is persisted in the journal (CastVoices record, alongside the SideWorld record), reused on Continue / Retry Failed and removed by Start Over. A deterministic StableRank voice is used only if the call fails. Resolves 06-RESEARCH Open Question 5.
+
 ### Claude's Discretion
 - Exact richness thresholds per importance level, and attachment DTO shapes per kind (Word sections, Excel rows/columns, slides) within strict-schema limits.
 - How version chains are identified (shared title stem vs. an explicit plan link) and how much of the prior version is passed as context.

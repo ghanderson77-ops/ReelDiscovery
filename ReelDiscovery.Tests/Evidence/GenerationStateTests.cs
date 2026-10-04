@@ -247,6 +247,109 @@ public class GenerationStateTests
     }
 
     [Fact]
+    public void GenerationState_Phase5Json_LoadsPhase6CountsAsZero()
+    {
+        var draft = CaseDraft.FromJson("{\"FormatVersion\":3,\"Corpus\":{\"Generation\":{\"ThreadsTotal\":12,\"ThreadsWritten\":4,\"CostUsd\":0.5}}}");
+        draft.Normalize();
+
+        var generation = draft.Corpus!.Generation!;
+        Assert.Equal(12, generation.ThreadsTotal);
+        Assert.Equal(4, generation.ThreadsWritten);
+        Assert.Equal(0, generation.NonRelevantTotal);
+        Assert.Equal(0, generation.NonRelevantWritten);
+        Assert.Equal(0, generation.NonRelevantWithWarnings);
+        Assert.Equal(0, generation.NonRelevantFailed);
+        Assert.Equal(0, generation.AttachmentsTotal);
+        Assert.Equal(0, generation.AttachmentsWritten);
+        Assert.Equal(0, generation.AttachmentsWithWarnings);
+        Assert.Equal(0, generation.AttachmentsFailed);
+        Assert.Equal(0, generation.AttachmentsSkipped);
+        Assert.Equal(0m, generation.MediaCostUsd);
+    }
+
+    [Fact]
+    public void GenerationState_Normalize_ClampsPhase6Counts()
+    {
+        var state = new GenerationState
+        {
+            NonRelevantTotal = -1,
+            NonRelevantWritten = -2,
+            NonRelevantWithWarnings = -3,
+            NonRelevantFailed = -4,
+            AttachmentsTotal = -5,
+            AttachmentsWritten = -6,
+            AttachmentsWithWarnings = -7,
+            AttachmentsFailed = -8,
+            AttachmentsSkipped = -9,
+            MediaCostUsd = -1m
+        };
+
+        state.Normalize();
+
+        Assert.Equal(0, state.NonRelevantTotal);
+        Assert.Equal(0, state.NonRelevantWritten);
+        Assert.Equal(0, state.NonRelevantWithWarnings);
+        Assert.Equal(0, state.NonRelevantFailed);
+        Assert.Equal(0, state.AttachmentsTotal);
+        Assert.Equal(0, state.AttachmentsWritten);
+        Assert.Equal(0, state.AttachmentsWithWarnings);
+        Assert.Equal(0, state.AttachmentsFailed);
+        Assert.Equal(0, state.AttachmentsSkipped);
+        Assert.Equal(0m, state.MediaCostUsd);
+    }
+
+    [Fact]
+    public void GenerationState_Phase6Counts_RoundTrip()
+    {
+        var (draft, _) = EvidenceTestData.ApprovedCase();
+        draft.Corpus!.Generation = new GenerationState
+        {
+            NonRelevantTotal = 30,
+            NonRelevantWritten = 20,
+            AttachmentsTotal = 9,
+            AttachmentsSkipped = 2,
+            MediaCostUsd = 0.25m
+        };
+
+        var loaded = CaseDraft.FromJson(draft.ToJson());
+        loaded.Normalize();
+
+        var generation = loaded.Corpus!.Generation!;
+        Assert.Equal(30, generation.NonRelevantTotal);
+        Assert.Equal(20, generation.NonRelevantWritten);
+        Assert.Equal(9, generation.AttachmentsTotal);
+        Assert.Equal(2, generation.AttachmentsSkipped);
+        Assert.Equal(0.25m, generation.MediaCostUsd);
+    }
+
+    [Fact]
+    public void ComposedEmail_New_HasNoAttachmentsAndEmptyQuoteFragment()
+    {
+        var email = new ComposedEmail();
+
+        Assert.NotNull(email.Attachments);
+        Assert.Empty(email.Attachments);
+        Assert.Equal(string.Empty, email.QuoteFragment);
+    }
+
+    [Fact]
+    public void ComposedAttachment_Defaults_AreEmpty_AndBytesAreNotSerialized()
+    {
+        var part = new ComposedAttachment();
+        Assert.Equal(string.Empty, part.DocId);
+        Assert.Equal(string.Empty, part.FileName);
+        Assert.Equal(string.Empty, part.Title);
+        Assert.Equal(string.Empty, part.MimeType);
+        Assert.Equal(string.Empty, part.ContentId);
+        Assert.Empty(part.Bytes);
+        Assert.False(part.IsInline);
+
+        part.Bytes = new byte[] { 1, 2, 3 };
+        var json = JsonSerializer.Serialize(part);
+        Assert.DoesNotContain("Bytes", json);
+    }
+
+    [Fact]
     public void MessageTime_LocalDate_UsesSenderZone()
     {
         var message = new PlannedMessage

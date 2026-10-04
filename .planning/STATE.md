@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-08-PLAN.md
-last_updated: "2026-10-04T23:12:45.660Z"
+stopped_at: Completed 06-11-PLAN.md
+last_updated: "2026-10-04T23:31:48.058Z"
 last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 93
-  percent: 88
+  completed_plans: 94
+  percent: 89
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 13 of 25
+Plan: 14 of 25
 Status: Ready to execute
 Last activity: 2026-10-04
 
@@ -144,6 +144,7 @@ Progress: [██████████] 100%
 | Phase 6 P13 | 25min | 2 tasks | 12 files |
 | Phase 06 P15 | 25min | 2 tasks | 4 files |
 | Phase 06 P08 | 14min | 2 tasks | 4 files |
+| Phase 06 P11 | 12min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -400,6 +401,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-15: Start Over sweeps planned copies of every thread; side world and cast voices go with the journal
 - [Phase 06]: 06-08: CheckAttachment treats parent + ancestor bodies and deltas as seen (KnowledgeGate.Ancestors); V3 and V6 near-amount scan run on labelled VariantText; late repair may add no new detail
 - [Phase 06]: 06-08: Attachment ledger entries use {AttachmentDocId}-Lnn ids (cap 3), absorb into thread entries by KnownByIds only; Build places thread entries first and never absorbs across attachments of one thread
+- [Phase 06]: 06-11: Attachment text call uses one strict DTO per kind; filler DTOs have no peopleNamed/newDetails so filler can never write the ledger; Map clamps 6x8 sections, 8x60 tables, 12x8 slides, 2,000 chars and strips control chars
+- [Phase 06]: 06-11: Attachment prompts gate facts/values to MayMentionBySeq/KnownValueIdsBySeq at the parent seq, ledger to the parent local date, own-thread deltas/bodies to KnowledgeGate.Ancestors; sizing uses ctx.Rich set from AttachmentPrompts.IsRich (delegates to GenerationCostEstimator.IsRichAttachment)
+- [Phase 06]: 06-11: Image prompts are code-built from spec description + sender org Location with person/org name tokens scrubbed and the fixed no-text rule; spam images are abstract marketing graphics from the thread subject
 
 ### Pending Todos
 
@@ -421,6 +425,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T23:12:37.727Z
-Stopped at: Completed 06-08-PLAN.md
+Last session: 2026-10-04T23:31:48.052Z
+Stopped at: Completed 06-11-PLAN.md
 Resume file: None

@@ -4,18 +4,9 @@ using ReelDiscovery.Models.Evidence;
 namespace ReelDiscovery.UserControls;
 
 /// <summary>
-/// The seven Generate Corpus tiles (05-UI-SPEC S1 tiles table). Distinct from the Phase 4 <see cref="TileKind"/>.
+/// The seven Generate Corpus tiles (06-UI-SPEC S1 Row 3). Distinct from the Phase 4 <see cref="TileKind"/>.
 /// </summary>
-public enum GenerationTileKind
-{
-    Threads,
-    Emails,
-    EmlFiles,
-    Ledger,
-    Warnings,
-    Failed,
-    Cost
-}
+public enum GenerationTileKind { Relevant, NonRelevant, Attachments, Emails, Warnings, Failed, Cost }
 
 /// <summary>
 /// Dot and text color of an activity row or status line, mapped to Theme tokens by the step.
@@ -145,7 +136,7 @@ public class StoryRowInput
 }
 
 /// <summary>
-/// All Phase 5 Generate Corpus and Case Summary copy with counts, dates or conditions (05-UI-SPEC), pure and
+/// All Generate Corpus and Case Summary copy with counts, dates or conditions (05- and 06-UI-SPEC), pure and
 /// unit-tested so the generation step stays layout-only (03-06 precedent). Every string is plain text and may carry
 /// model-written subjects or violation texts; labels showing it set UseMnemonic = false (T-04-33, T-05-15).
 /// </summary>
@@ -154,100 +145,139 @@ public static class GenerationUiText
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
     private static readonly CultureInfo EnUs = CultureInfo.GetCultureInfo("en-US");
 
-    public const string StoppingText = "Stopping... finished threads are saved.";
+    public const string StoppingText = "Stopping... finished threads and attachments are saved.";
 
     // --- Notice line ---
 
     /// <summary>
-    /// Scope honesty while attachments and non-relevant email are not generated yet (U16).
+    /// What the step writes, in run order (06-UI-SPEC S1 Row 1). A zero non-relevant count drops the "then" part and a
+    /// zero attachment count drops the "with" clause.
     /// </summary>
-    public static string ScopeNotice(int relevantThreads, int nonRelevantEmails, int attachments)
+    public static string ScopeNotice(int relevantThreads, int nonRelevantThreads, int attachments)
     {
-        var lead = $"This step writes the {Plural(relevantThreads, "relevant thread", "relevant threads")} from the approved plan as email. ";
-        var rest = $"the {N(nonRelevantEmails)} non-relevant emails are not generated yet; their answer-key rows stay Planned.";
-        return attachments > 0
-            ? lead + "Attachments and " + rest
-            : lead + "T" + rest[1..];
+        var relevant = Plural(relevantThreads, "relevant thread", "relevant threads");
+        var order = nonRelevantThreads > 0
+            ? $"{relevant} first, oldest first, then {Plural(nonRelevantThreads, "non-relevant thread", "non-relevant threads")}"
+            : $"{relevant}, oldest first";
+        return $"This step writes the approved plan as email: {order}{WithAttachments(attachments)}. Each answer-key row moves from Planned to Generated as its file is saved.";
     }
 
     // --- Tiles ---
 
     /// <summary>
-    /// Tile copy; threadsVariant 1 drops the spaces around "/", 2 moves the total to the sub-line (DPI rule 19).
+    /// Tile copy (06-UI-SPEC S1 Row 3). For the Relevant, Non-relevant and Attachments tiles, variant 1 drops the spaces
+    /// around "/" and variant 2 moves the total to the sub-line (DPI rule 19, applied to each tile independently); the
+    /// other tiles ignore it. Warnings and Failed count items (threads + attachments); Skipped is never Failed.
     /// </summary>
-    public static TileContent Tile(GenerationTileKind kind, GenerationCounts c, int threadsVariant = 0)
+    public static TileContent Tile(GenerationTileKind kind, GenerationCounts c, int variant = 0)
     {
         ArgumentNullException.ThrowIfNull(c);
         switch (kind)
         {
-            case GenerationTileKind.Threads:
+            case GenerationTileKind.Relevant:
                 var waves = Plural(c.WaveCount, "wave", "waves");
-                return new TileContent
-                {
-                    Caption = "Threads",
-                    Value = threadsVariant switch
-                    {
-                        1 => $"{N(c.DoneThreads)}/{N(c.TotalThreads)}",
-                        2 => N(c.DoneThreads),
-                        _ => $"{N(c.DoneThreads)} / {N(c.TotalThreads)}"
-                    },
-                    SubLine = threadsVariant == 2 ? $"of {N(c.TotalThreads)}" : waves,
-                    Tooltip = $"{N(c.DoneThreads)} of {N(c.TotalThreads)} relevant threads written, in {waves} by date"
-                };
+                return Fraction("Relevant", c.RelevantDone, c.RelevantTotal, waves, variant,
+                    $"{N(c.RelevantDone)} of {Plural(c.RelevantTotal, "relevant thread", "relevant threads")} written, in {waves} by date. The narrative ledger holds {Plural(c.LedgerEntries, "story detail", "story details")}.");
+
+            case GenerationTileKind.NonRelevant:
+                // Zero categories are dropped; "near-miss decoys" is the plan's own term (Copywriting Contract)
+                var categories = Join(", ",
+                    c.NonRelevantDailyBusiness > 0 ? $"{N(c.NonRelevantDailyBusiness)} daily business" : "",
+                    c.NonRelevantAncillary > 0 ? $"{N(c.NonRelevantAncillary)} ancillary" : "",
+                    c.NonRelevantBulk > 0 ? $"{N(c.NonRelevantBulk)} newsletters, spam and personal" : "",
+                    c.NonRelevantDecoy > 0 ? Plural(c.NonRelevantDecoy, "near-miss decoy", "near-miss decoys") : "");
+                return Fraction("Non-relevant", c.NonRelevantDone, c.NonRelevantTotal, "threads", variant,
+                    $"{N(c.NonRelevantDone)} of {Plural(c.NonRelevantTotal, "non-relevant thread", "non-relevant threads")} written{Colon(categories)}.");
+
+            case GenerationTileKind.Attachments:
+                var kinds = Join(", ",
+                    c.AttachmentsWord > 0 ? $"{N(c.AttachmentsWord)} Word" : "",
+                    c.AttachmentsExcel > 0 ? $"{N(c.AttachmentsExcel)} Excel" : "",
+                    c.AttachmentsPowerPoint > 0 ? $"{N(c.AttachmentsPowerPoint)} PowerPoint" : "",
+                    c.AttachmentsInvite > 0 ? Plural(c.AttachmentsInvite, "invite", "invites") : "",
+                    c.AttachmentsImage > 0 ? Plural(c.AttachmentsImage, "image", "images") : "",
+                    c.AttachmentsVoicemail > 0 ? Plural(c.AttachmentsVoicemail, "voicemail", "voicemails") : "");
+                var skipped = c.AttachmentsSkipped > 0
+                    ? $" {Plural(c.AttachmentsSkipped, "item", "items")} skipped because images and voicemail were unavailable."
+                    : "";
+                var subLine = c.AttachmentsTotal == 0 ? "none planned"
+                    : c.AttachmentsSkipped > 0 ? $"{N(c.AttachmentsSkipped)} skipped"
+                    : "files and media";
+                return Fraction("Attachments", c.AttachmentsDone, c.AttachmentsTotal, subLine, variant,
+                    $"{N(c.AttachmentsDone)} of {Plural(c.AttachmentsTotal, "attachment", "attachments")} written{Colon(kinds)}.{skipped}");
+
             case GenerationTileKind.Emails:
                 return new TileContent
                 {
                     Caption = "Emails",
                     Value = N(c.EmailsWritten),
-                    SubLine = $"of {N(c.EmailsPlanned)} planned",
-                    Tooltip = "Relevant emails written so far. Each email is saved in every participant's mailbox."
+                    SubLine = Plural(c.FilesWritten, "EML file", "EML files"),
+                    Tooltip = $"{N(c.EmailsWritten)} of {N(c.EmailsPlanned)} planned emails written, saved as {Plural(c.FilesWritten, ".eml file", ".eml files")} in {Plural(c.Mailboxes, "custodian mailbox", "custodian mailboxes")} under the Mailboxes folder."
                 };
-            case GenerationTileKind.EmlFiles:
-                return new TileContent
-                {
-                    Caption = "EML files",
-                    Value = N(c.FilesWritten),
-                    SubLine = Plural(c.Mailboxes, "mailbox", "mailboxes"),
-                    Tooltip = $"{N(c.FilesWritten)} .eml files in {Plural(c.Mailboxes, "custodian mailbox", "custodian mailboxes")} under the Mailboxes folder"
-                };
-            case GenerationTileKind.Ledger:
-                return new TileContent
-                {
-                    Caption = "Ledger",
-                    Value = N(c.LedgerEntries),
-                    SubLine = "story details",
-                    Tooltip = "Commitments, figures, meetings, decisions, people and documents the written emails introduced. Later emails build on them."
-                };
+
             case GenerationTileKind.Warnings:
+                var warnings = c.WarningThreads + c.AttachmentsWarnings;
                 return new TileContent
                 {
                     Caption = "Warnings",
-                    Value = N(c.WarningThreads),
-                    SubLine = "threads kept",
-                    Tooltip = "Threads that still broke a consistency check after 3 attempts. The best attempt was kept and marked \"Generated - with warnings\" in the answer key.",
-                    Tone = c.WarningThreads > 0 ? TileTone.Warning : TileTone.Normal
+                    Value = N(warnings),
+                    SubLine = "items kept",
+                    Tooltip = $"{ItemSubject(c.WarningThreads, c.AttachmentsWarnings, "that ")}still broke a consistency check after 3 attempts. The best attempt was kept and marked \"Generated - with warnings\" in the answer key.",
+                    Tone = warnings > 0 ? TileTone.Warning : TileTone.Normal
                 };
+
             case GenerationTileKind.Failed:
+                var failed = c.FailedThreads + c.AttachmentsFailed;
                 return new TileContent
                 {
                     Caption = "Failed",
-                    Value = N(c.FailedThreads),
-                    SubLine = "threads not written",
-                    Tooltip = "Threads that could not be written. Retry them with Continue Generating or Retry Failed Threads.",
-                    Tone = c.FailedThreads > 0 ? TileTone.Danger : TileTone.Normal
+                    Value = N(failed),
+                    SubLine = "items not written",
+                    Tooltip = $"{ItemSubject(c.FailedThreads, c.AttachmentsFailed, "that ")}could not be written. An email whose attachment failed is saved without it. Retry them with Continue Generating or {RetryFailedButtonText}.",
+                    Tone = failed > 0 ? TileTone.Danger : TileTone.Normal
                 };
+
             default:
+                // CostUsd already includes the media share (06-02)
+                var media = c.MediaPlanned > 0
+                    ? $" (text ${(c.CostUsd - c.MediaCostUsd).ToString("0.00", Invariant)}, images and voicemail ${c.MediaCostUsd.ToString("0.00", Invariant)})"
+                    : "";
                 return new TileContent
                 {
                     Caption = "Cost",
                     Value = Money(c.CostUsd),
                     SubLine = c.Finished ? "this case" : $"≈{Money(c.RemainingCostUsd)} to go",
-                    Tooltip = $"Spent on generation in this case: ${c.CostUsd.ToString("0.00", Invariant)}. Estimate for the remaining threads: ≈{Money(c.RemainingCostUsd)}, ±50%. The cost ticker in the header shows the whole session."
+                    Tooltip = $"Spent on generation in this case: ${c.CostUsd.ToString("0.00", Invariant)}{media}. Estimate for the remaining items: ≈{Money(c.RemainingCostUsd)}, ±50%. The cost ticker in the header shows the whole session."
                 };
         }
     }
 
-    // --- Waves ---
+    // A "done / total" tile with the rule-19 fallback variants
+    private static TileContent Fraction(string caption, int done, int total, string subLine, int variant, string tooltip) => new()
+    {
+        Caption = caption,
+        Value = variant switch
+        {
+            1 => $"{N(done)}/{N(total)}",
+            2 => N(done),
+            _ => $"{N(done)} / {N(total)}"
+        },
+        SubLine = variant == 2 ? $"of {N(total)}" : subLine,
+        Tooltip = tooltip
+    };
+
+    // "2 threads and 3 attachments " with a zero clause dropped together with its "and"; both zero gives the generic
+    // "Threads and attachments {relative}" so the tooltip still explains the tile
+    private static string ItemSubject(int threads, int attachments, string relative)
+    {
+        if (threads == 0 && attachments == 0)
+            return "Threads and attachments " + relative;
+        return Join(" and ",
+            threads > 0 ? Plural(threads, "thread", "threads") : "",
+            attachments > 0 ? Plural(attachments, "attachment", "attachments") : "") + " ";
+    }
+
+    // --- Waves and stage rows ---
 
     /// <summary>
     /// "Mar 4 – Mar 17, 2024", "Dec 28, 2023 – Jan 10, 2024" across years, "Mar 4, 2024" for one day.
@@ -261,8 +291,39 @@ public static class GenerationUiText
         return $"{start.ToString("MMM d, yyyy", EnUs)} – {end.ToString("MMM d, yyyy", EnUs)}";
     }
 
-    public static string WaveTooltip(int threads, int emails) =>
-        $"{Plural(threads, "thread", "threads")}, {Plural(emails, "email", "emails")}";
+    /// <summary>
+    /// "{t} threads, {m} emails, {a} attachments"; the attachment clause is dropped at 0.
+    /// </summary>
+    public static string WaveTooltip(int threads, int emails, int attachments = 0) =>
+        $"{Plural(threads, "thread", "threads")}, {Plural(emails, "email", "emails")}"
+        + (attachments > 0 ? ", " + Plural(attachments, "attachment", "attachments") : "");
+
+    /// <summary>
+    /// Dates, Done and tooltip cells of a Stages-grid row (06-UI-SPEC S1 Row 4). Counting rule (review 06-23): a wave or
+    /// the Non-relevant row counts the attachments of its threads that were still pending at run start; the Attachments
+    /// for written threads row counts only repairs of threads written earlier, so its Done cell is repairs done / repairs.
+    /// The tiles count every attachment once, so a repair never appears on both a wave row and the repair row.
+    /// </summary>
+    public static (string Dates, string Done, string Tooltip) StageRowText(WaveProgress row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        switch (row.RowKind)
+        {
+            case StageRowKind.NonRelevant:
+                return ("Non-relevant mail", $"{N(row.Done)} / {N(row.Threads)}",
+                    WaveTooltip(row.Threads, row.Emails, row.Attachments) + ", across all dates");
+
+            case StageRowKind.Attachments:
+                return ("Attachments for written threads", $"{N(row.AttachmentsDone)} / {N(row.Attachments)}",
+                    $"{Plural(row.Attachments, "attachment", "attachments")} on {Plural(row.Threads, "thread", "threads")} that were written earlier. Their emails are rewritten in every mailbox.");
+
+            default:
+                var dates = WaveDates(row.Start, row.End);
+                // Full dates first: the Dates column may trim them at the minimum window size
+                return (dates, $"{N(row.Done)} / {N(row.Threads)}",
+                    dates + Environment.NewLine + WaveTooltip(row.Threads, row.Emails, row.Attachments));
+        }
+    }
 
     // --- Activity ---
 
@@ -271,17 +332,23 @@ public static class GenerationUiText
         ArgumentNullException.ThrowIfNull(e);
         var violations = e.Violations ?? new List<string>();
         var first = violations.Count > 0 ? TrimMessage(violations[0]) : "";
+        var file = (e.FileName ?? "").Trim();
+        var attachmentsClause = e.Attachments > 0 ? ", " + Plural(e.Attachments, "attachment", "attachments") : "";
+        var andAttachments = e.Attachments > 0 ? " and " + Plural(e.Attachments, "attachment", "attachments") : "";
 
         var (text, tone) = e.Kind switch
         {
             GenerationEventKind.RunStarted =>
-                ($"Started: {Plural(e.Threads, "thread", "threads")} to write in {Plural(e.WaveCount, "wave", "waves")}", ActivityTone.Accent),
+                ($"Started: {Plural(e.Threads, "thread", "threads")}{andAttachments} to write", ActivityTone.Accent),
             GenerationEventKind.RunContinued =>
-                ($"Continued: {Plural(e.Threads, "thread", "threads")} left to write", ActivityTone.Accent),
+                ($"Continued: {Plural(e.Threads, "thread", "threads")}{andAttachments} left to write", ActivityTone.Accent),
             GenerationEventKind.WaveStarted =>
                 ($"Wave {e.WaveIndex} of {e.WaveCount} started ({WaveDates(e.WaveStart, e.WaveEnd)}, {Plural(e.Threads, "thread", "threads")})", ActivityTone.Accent),
-            GenerationEventKind.ThreadWritten =>
-                ($"Written: \"{e.Subject}\", {Plural(e.Emails, "email", "emails")}, {Plural(e.Details, "new ledger detail", "new ledger details")}", ActivityTone.Success),
+            // Non-relevant threads have no ledger clause: only relevant mail feeds the narrative ledger
+            GenerationEventKind.ThreadWritten => (e.Relevant
+                    ? $"Written: \"{e.Subject}\", {Plural(e.Emails, "email", "emails")}, {Plural(e.Details, "new ledger detail", "new ledger details")}{attachmentsClause}"
+                    : $"Written: \"{e.Subject}\", {Plural(e.Emails, "email", "emails")}{attachmentsClause}",
+                ActivityTone.Success),
             GenerationEventKind.Retry =>
                 ($"Attempt {e.Attempt} of 3 failed {Plural(violations.Count, "check", "checks")}{Colon(first)}. Retrying.", ActivityTone.Warning),
             GenerationEventKind.KeptWithWarnings =>
@@ -290,9 +357,34 @@ public static class GenerationUiText
                 ($"Failed{Colon(e.Reason)}. The run continues.", ActivityTone.Danger),
             GenerationEventKind.WaveFinished =>
                 ($"Wave {e.WaveIndex} finished: {N(e.Written)} written, {N(e.Warnings)} with warnings, {N(e.Failed)} failed. Ledger now {N(e.LedgerTotal)} details.",
-                    e.Failed > 0 ? ActivityTone.Danger : e.Warnings > 0 ? ActivityTone.Warning : ActivityTone.Success),
+                    StageTone(e)),
+            GenerationEventKind.SideProjectsReady =>
+                ($"Side projects ready: {Plural(e.Projects, "project", "projects")} for {Plural(e.Organizations, "organization", "organizations")}", ActivityTone.Success),
+            GenerationEventKind.NonRelevantStarted =>
+                ($"Non-relevant mail started: {Plural(e.Threads, "thread", "threads")} to write", ActivityTone.Accent),
+            GenerationEventKind.NonRelevantFinished =>
+                ($"Non-relevant mail finished: {N(e.Written)} written, {N(e.Warnings)} with warnings, {N(e.Failed)} failed.", StageTone(e)),
+            GenerationEventKind.AttachmentRetry =>
+                ($"{file}: attempt {e.Attempt} of 3 failed {Plural(violations.Count, "check", "checks")}{Colon(first)}. Retrying.", ActivityTone.Warning),
+            GenerationEventKind.AttachmentKeptWithWarnings =>
+                ($"{file} kept with {Plural(violations.Count, "warning", "warnings")} after 3 attempts{Colon(first)}", ActivityTone.Warning),
+            GenerationEventKind.AttachmentFailed =>
+                ($"{file} failed{Colon(e.Reason)}. The email was saved without it.", ActivityTone.Danger),
+            GenerationEventKind.AttachmentSkipped =>
+                ($"{file} skipped{Colon(e.Reason)}.", ActivityTone.Warning),
+            // A media stop is Warning, not Danger: text continues and Skipped is resumable (UI-SPEC Decision 2)
+            GenerationEventKind.MediaStopped =>
+                ((TrimMessage(e.Reason).Length == 0 ? "Images and voicemail stopped" : $"Images and voicemail stopped: {TrimMessage(e.Reason)}")
+                    + $". Text generation continues; the remaining {Plural(e.MediaRemaining, "image or voicemail", "images and voicemails")} {(e.MediaRemaining == 1 ? "is" : "are")} marked Skipped.",
+                    ActivityTone.Warning),
+            GenerationEventKind.AttachmentRepairStarted =>
+                ($"Adding {Plural(e.Attachments, "missing attachment", "missing attachments")} to {Plural(e.Threads, "written thread", "written threads")}", ActivityTone.Accent),
+            GenerationEventKind.AttachmentsAdded =>
+                ($"Added {Plural(e.Attachments, "attachment", "attachments")} to \"{e.Subject}\" and rewrote {Plural(e.Files, "EML file", "EML files")}", ActivityTone.Success),
+            GenerationEventKind.AttachmentRegenerated =>
+                ($"{file} could not be reused and was created again", ActivityTone.Warning),
             GenerationEventKind.RunCancelled =>
-                ($"Cancelled. {N(e.Done)} of {N(e.Total)} threads are saved.", ActivityTone.Warning),
+                ($"Cancelled. {N(e.Done)} of {Plural(e.Total, "thread", "threads")}{AttachmentProgress(e.AttachmentsDone, e.AttachmentsTotal)} are saved.", ActivityTone.Warning),
             GenerationEventKind.RunStopped =>
                 (string.IsNullOrWhiteSpace(e.Reason) ? "Stopped" : $"Stopped: {e.Reason.Trim()}", ActivityTone.Danger),
             _ =>
@@ -306,61 +398,95 @@ public static class GenerationUiText
         return new ActivityLine { Text = text, Tooltip = tooltip, Tone = tone };
     }
 
+    // Wave and non-relevant stage finish rows: any failure Danger, else any warning Warning, else Success
+    private static ActivityTone StageTone(GenerationEvent e) =>
+        e.Failed > 0 ? ActivityTone.Danger : e.Warnings > 0 ? ActivityTone.Warning : ActivityTone.Success;
+
+    // " and {d} of {t} attachments", or "" when there are no attachments
+    private static string AttachmentProgress(int done, int total) =>
+        total > 0 ? $" and {N(done)} of {Plural(total, "attachment", "attachments")}" : "";
+
     // --- Status strip ---
 
     public static string ProgressText(GenerationView v)
     {
         ArgumentNullException.ThrowIfNull(v);
-        return v.Stage switch
+        var counts = v.Counts ?? new GenerationCounts();
+        switch (v.Stage)
         {
-            GenerationStage.Writing =>
-                $"Wave {v.StageWave} of {v.StageWaveCount} ({WaveDates(v.StageWaveStart, v.StageWaveEnd)}): writing {Plural(v.StageCount, "thread", "threads")}...",
-            GenerationStage.Merging =>
-                $"Wave {v.StageWave} of {v.StageWaveCount}: merging {Plural(v.StageCount, "new ledger detail", "new ledger details")}...",
-            GenerationStage.UpdatingKey => "Updating the answer key...",
-            GenerationStage.WritingStory => "Writing the story so far...",
-            GenerationStage.Stopping => StoppingText,
-            _ => ""
-        };
+            case GenerationStage.Writing:
+                var attachments = v.StageAttachments > 0 ? " and " + Plural(v.StageAttachments, "attachment", "attachments") : "";
+                return $"Wave {v.StageWave} of {v.StageWaveCount} ({WaveDates(v.StageWaveStart, v.StageWaveEnd)}): writing {Plural(v.StageCount, "thread", "threads")}{attachments}...";
+            case GenerationStage.Merging:
+                return $"Wave {v.StageWave} of {v.StageWaveCount}: merging {Plural(v.StageCount, "new ledger detail", "new ledger details")}...";
+            case GenerationStage.SideProjects:
+                return $"Preparing side projects for {Plural(v.StageCount, "organization", "organizations")}...";
+            case GenerationStage.NonRelevant:
+                return $"Non-relevant mail: {N(counts.NonRelevantDone)} of {Plural(counts.NonRelevantTotal, "thread", "threads")} written...";
+            case GenerationStage.Attachments:
+                // Repairs only (the Attachments for written threads row); Written, Warnings, Failed and Skipped all count as finished
+                var repair = (v.Waves ?? new List<WaveProgress>()).FirstOrDefault(w => w != null && w.RowKind == StageRowKind.Attachments);
+                var finished = repair == null ? 0 : repair.AttachmentsDone + repair.AttachmentsFailed + repair.AttachmentsSkipped;
+                var total = repair?.Attachments ?? v.StageCount;
+                return $"Adding missing attachments: {N(finished)} of {Plural(total, "attachment", "attachments")}...";
+            case GenerationStage.UpdatingKey:
+                return "Updating the answer key...";
+            case GenerationStage.WritingStory:
+                return "Writing the story so far...";
+            case GenerationStage.Stopping:
+                return StoppingText;
+            default:
+                return "";
+        }
     }
 
-    public static OutcomeLine OutcomeText(GenerationOutcome outcome, GenerationCounts c, string message)
+    /// <summary>
+    /// Outcome status line (06-UI-SPEC S1 outcome table). <paramref name="retryButtonShown"/> is false when the media
+    /// banner shows its own button, which hides the header's Retry Failed Items (one Primary rule).
+    /// </summary>
+    public static OutcomeLine OutcomeText(GenerationOutcome outcome, GenerationCounts c, string message, bool retryButtonShown = true)
     {
         ArgumentNullException.ThrowIfNull(c);
         switch (outcome)
         {
             case GenerationOutcome.Finished:
-                if (c.WarningThreads == 0 && c.FailedThreads == 0)
+                // Items: threads + attachments; Skipped media is its own clause, never a failure
+                var warnings = c.WarningThreads + c.AttachmentsWarnings;
+                var failed = c.FailedThreads + c.AttachmentsFailed;
+                var skipped = c.AttachmentsSkipped;
+                if (warnings == 0 && failed == 0 && skipped == 0)
                 {
                     return new OutcomeLine
                     {
-                        Text = $"Done: {Plural(c.DoneThreads, "relevant thread", "relevant threads")} written as {Plural(c.EmailsWritten, "email", "emails")} ({Plural(c.FilesWritten, "EML file", "EML files")} in {Plural(c.Mailboxes, "mailbox", "mailboxes")}). The answer key and story so far are updated.",
+                        Text = $"Done: {Plural(c.DoneThreads, "thread", "threads")} written as {Plural(c.EmailsWritten, "email", "emails")} ({Plural(c.FilesWritten, "EML file", "EML files")} in {Plural(c.Mailboxes, "mailbox", "mailboxes")}){WithAttachments(c.AttachmentsDone)}. The answer key and story so far are updated.",
                         Tone = ActivityTone.Success
                     };
                 }
 
-                // Zero clauses are dropped; the Retry instruction only appears when something failed
+                // Zero clauses are dropped; the Retry instruction only appears when something failed and the button shows
                 var clauses = new List<string>();
-                if (c.WarningThreads > 0)
-                    clauses.Add(Plural(c.WarningThreads, "warning", "warnings"));
-                if (c.FailedThreads > 0)
-                    clauses.Add(Plural(c.FailedThreads, "failed thread", "failed threads"));
-                var tail = c.FailedThreads > 0
-                    ? "The answer key marks them; click Retry Failed Threads to try the failed ones again."
-                    : "The answer key marks them.";
-                return new OutcomeLine { Text = $"Done with {string.Join(" and ", clauses)}. {tail}", Tone = ActivityTone.Warning };
+                if (warnings > 0)
+                    clauses.Add(Plural(warnings, "warning", "warnings"));
+                if (failed > 0)
+                    clauses.Add(Plural(failed, "failed item", "failed items"));
+                if (skipped > 0)
+                    clauses.Add(Plural(skipped, "skipped image or voicemail", "skipped images and voicemails"));
+                var tail = failed > 0 && retryButtonShown
+                    ? $"; click {RetryFailedButtonText} to try the failed ones again"
+                    : "";
+                return new OutcomeLine { Text = $"Done with {JoinClauses(clauses)}. The answer key marks them{tail}.", Tone = ActivityTone.Warning };
 
             case GenerationOutcome.Cancelled:
                 return new OutcomeLine
                 {
-                    Text = $"Cancelled. {N(c.DoneThreads)} of {N(c.TotalThreads)} threads are saved. Click Continue Generating to write the rest.",
+                    Text = $"Cancelled. {N(c.DoneThreads)} of {Plural(c.TotalThreads, "thread", "threads")}{AttachmentProgress(c.AttachmentsDone, c.AttachmentsTotal)} are saved. Click Continue Generating to write the rest.",
                     Tone = ActivityTone.Warning
                 };
 
             case GenerationOutcome.Fatal:
                 return new OutcomeLine
                 {
-                    Text = $"Generation stopped{Colon(message)}. Finished threads are saved. Fix the problem on the API Configuration step, then click Continue Generating.",
+                    Text = $"Generation stopped{Colon(message)}. Finished threads and attachments are saved. Fix the problem on the API Configuration step, then click Continue Generating.",
                     Tone = ActivityTone.Danger
                 };
 
@@ -384,7 +510,7 @@ public static class GenerationUiText
         $"Could not update {fileName}{Colon(reason)}. Your emails are saved; the file is written again when you leave this step.";
 
     public static string StartedOverText(int files) =>
-        $"Cleared the earlier run: deleted {Plural(files, "EML file", "EML files")} and the narrative ledger.";
+        $"Cleared the earlier run: deleted {Plural(files, "EML file", "EML files")}, the narrative ledger and the side projects.";
 
     public static string MissingEmlText(string docId) => $"{docId}.eml is no longer in the case folder.";
 
@@ -448,6 +574,12 @@ public static class GenerationUiText
 
     public const string BannerHeading = "The last run did not finish.";
     public const string BannerButton = "Continue Generating";
+
+    // Header button (06-UI-SPEC Row 0): shown when a finished run has failed threads or attachments and no media banner button
+    public const string RetryFailedButtonText = "Retry Failed Items";
+
+    public const string RetryFailedTooltip =
+        "Writes the failed threads and attachments again. Emails that are already saved are rewritten only when one of their attachments is added.";
 
     public static string BannerBody(int done, int total, int failed)
     {
@@ -560,6 +692,20 @@ public static class GenerationUiText
     // --- Shared formatting ---
 
     private static string Plural(int n, string singular, string plural) => CaseGuideUiText.Plural(n, singular, plural);
+
+    // ", with {a} attachments", or "" at 0
+    private static string WithAttachments(int attachments) =>
+        attachments > 0 ? ", with " + Plural(attachments, "attachment", "attachments") : "";
+
+    // Joins the non-empty parts with the separator (zero clauses are passed as "")
+    private static string Join(string separator, params string[] parts) =>
+        string.Join(separator, parts.Where(p => p.Length > 0));
+
+    // "a", "a and b", "a, b and c"
+    private static string JoinClauses(IReadOnlyList<string> clauses) =>
+        clauses.Count <= 1
+            ? string.Join("", clauses)
+            : string.Join(", ", clauses.Take(clauses.Count - 1)) + " and " + clauses[^1];
 
     /// <summary>
     /// "$12.35" under $100, "$250" from $100 up (05-UI-SPEC tile 7).

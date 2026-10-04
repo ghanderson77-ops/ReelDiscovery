@@ -33,12 +33,15 @@ public partial class StepGenerateCorpus : UserControl
     private const string WavesHint = "Oldest first. Each wave builds on the ones before.";
     private const string ActivityHint = "Newest first";
 
+    // Tiles 0-2 (Relevant, Non-relevant, Attachments) show "done / total" and pick a DPI rule-19 variant
+    private const int FractionTiles = 3;
+
     private static readonly GenerationTileKind[] TileKinds =
     {
-        GenerationTileKind.Threads,
+        GenerationTileKind.Relevant,
+        GenerationTileKind.NonRelevant,
+        GenerationTileKind.Attachments,
         GenerationTileKind.Emails,
-        GenerationTileKind.EmlFiles,
-        GenerationTileKind.Ledger,
         GenerationTileKind.Warnings,
         GenerationTileKind.Failed,
         GenerationTileKind.Cost
@@ -173,7 +176,11 @@ public partial class StepGenerateCorpus : UserControl
             SizeNotice();
             SizeBanner();
         };
-        _tiles[0].SizeChanged += (s, e) => ApplyThreadsTile();
+        for (var i = 0; i < FractionTiles; i++)
+        {
+            var index = i;
+            _tiles[index].SizeChanged += (s, e) => ApplyFractionTile(index);
+        }
         _stateCard.Resize += (s, e) => CenterStateContent();
         _stateContent.SizeChanged += (s, e) => CenterStateContent();
         _lblStatus.TextChanged += (s, e) => _toolTip.SetToolTip(_lblStatus, _lblStatus.Text);
@@ -235,7 +242,7 @@ public partial class StepGenerateCorpus : UserControl
         _btnStartOver = ButtonHelper.CreateButton("Start Over...", 0, _buttonHeight, ButtonStyle.Default);
         _btnStartOver.Margin = new Padding(0);
         _btnStartOver.Visible = false;
-        _btnRetryFailed = ButtonHelper.CreateButton("Retry Failed Threads", 0, _buttonHeight, ButtonStyle.Primary);
+        _btnRetryFailed = ButtonHelper.CreateButton(GenerationUiText.RetryFailedButtonText, 0, _buttonHeight, ButtonStyle.Primary);
         _btnRetryFailed.Margin = new Padding(smallGap, 0, 0, 0);
         _btnRetryFailed.Visible = false;
         _headerButtons.Controls.Add(_btnStartOver);
@@ -657,9 +664,10 @@ public partial class StepGenerateCorpus : UserControl
 
         var counts = view.Counts ?? new GenerationCounts();
         _lastCounts = counts.Clone();
-        for (var i = 1; i < TileKinds.Length; i++)
+        for (var i = FractionTiles; i < TileKinds.Length; i++)
             _tiles[i].SetContent(GenerationUiText.Tile(TileKinds[i], counts));
-        ApplyThreadsTile();
+        for (var i = 0; i < FractionTiles; i++)
+            ApplyFractionTile(i);
 
         ApplyWaves(view.Waves ?? new List<WaveProgress>());
         AddActivity(view.Events ?? new List<GenerationEvent>());
@@ -677,14 +685,16 @@ public partial class StepGenerateCorpus : UserControl
     }
 
     /// <summary>
-    /// Threads tile: the widest variant whose value fits the tile at TitleFont (DPI rule 19).
+    /// Relevant, Non-relevant and Attachments tiles: each takes the widest variant whose value fits it at TitleFont
+    /// (DPI rules 19 and 21, independently per tile).
     /// </summary>
-    private void ApplyThreadsTile()
+    private void ApplyFractionTile(int index)
     {
         if (_lastCounts == null)
             return;
 
-        var tile = _tiles[0];
+        var tile = _tiles[index];
+        var kind = TileKinds[index];
         // Tile card padding is 16 + 16; the value label spans the rest
         var available = tile.Width - LogicalToDeviceUnits(32);
         var variant = 0;
@@ -693,14 +703,14 @@ public partial class StepGenerateCorpus : UserControl
             using var font = Theme.TitleFont();
             while (variant < 2)
             {
-                var value = GenerationUiText.Tile(GenerationTileKind.Threads, _lastCounts, variant).Value;
+                var value = GenerationUiText.Tile(kind, _lastCounts, variant).Value;
                 if (TextRenderer.MeasureText(value, font).Width <= available)
                     break;
                 variant++;
             }
         }
 
-        var content = GenerationUiText.Tile(GenerationTileKind.Threads, _lastCounts, variant);
+        var content = GenerationUiText.Tile(kind, _lastCounts, variant);
         if (tile.ValueText != content.Value || tile.SubLineText != content.SubLine || tile.TooltipText.Length == 0)
             tile.SetContent(content);
     }
@@ -729,11 +739,10 @@ public partial class StepGenerateCorpus : UserControl
             }
 
             SetCell(row, "Wave", wave.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            SetCell(row, "Dates", GenerationUiText.WaveDates(wave.Start, wave.End));
-            // Full dates first: the Dates column may trim them at the minimum window size
-            row.Cells["Dates"].ToolTipText = GenerationUiText.WaveDates(wave.Start, wave.End) + Environment.NewLine
-                + GenerationUiText.WaveTooltip(wave.Threads, wave.Emails);
-            SetCell(row, "Threads", $"{wave.Done:N0} / {wave.Threads:N0}");
+            var (dates, done, tooltip) = GenerationUiText.StageRowText(wave);
+            SetCell(row, "Dates", dates);
+            row.Cells["Dates"].ToolTipText = tooltip;
+            SetCell(row, "Threads", done);
             SetCell(row, "Warnings", wave.Warnings > 0 ? wave.Warnings.ToString("N0") : string.Empty);
             SetCell(row, "Failed", wave.Failed > 0 ? wave.Failed.ToString("N0") : string.Empty);
         }

@@ -215,7 +215,8 @@ public class ThreadUnitOfWork
                 Details = best.NewDetails.Count,
                 Attempt = attempts,
                 Violations = record.Violations.ToList(),
-                FilePath = LastFilePath(ctx)
+                FilePath = LastFilePath(ctx),
+                Relevant = ctx.Thread.Relevance == ThreadRelevance.Relevant
             });
 
             return new ThreadOutcome
@@ -284,7 +285,8 @@ public class ThreadUnitOfWork
             WaveIndex = ctx.WaveIndex,
             Attempt = attempts,
             Reason = reason,
-            FilePath = LastFilePath(ctx)
+            FilePath = LastFilePath(ctx),
+            Relevant = ctx.Thread.Relevance == ThreadRelevance.Relevant
         });
 
         return new ThreadOutcome { Kind = ThreadOutcomeKind.Failed, Record = record, Reason = reason };

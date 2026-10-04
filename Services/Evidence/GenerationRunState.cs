@@ -153,6 +153,9 @@ public class GenerationRunState
         DoneThreads = Written + Warnings,
         WarningThreads = Warnings,
         FailedThreads = Failed,
+        // Every thread this state tracks is relevant (WavePlanner.IsGeneratable); the Relevant tile reads the split
+        RelevantTotal = TotalThreads,
+        RelevantDone = Written + Warnings,
         WaveCount = waveCount,
         EmailsPlanned = RelevantThreads(plan).Sum(t => t.Messages.Count(m => m != null)),
         EmailsWritten = EmailsWritten,

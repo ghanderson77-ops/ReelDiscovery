@@ -861,10 +861,9 @@ public partial class StepGenerateCorpus : IWizardStep
     private static string NoticeFor(CorpusPlan plan)
     {
         var relevant = RelevantThreads(plan);
-        var nonRelevantEmails = (plan.Threads ?? new List<PlannedThread>())
-            .Where(t => t != null && t.Relevance != ThreadRelevance.Relevant)
-            .Sum(t => t.Messages.Count(m => m != null));
-        return GenerationUiText.ScopeNotice(relevant.Count, nonRelevantEmails, plan.AttachmentCount);
+        var nonRelevantThreads = (plan.Threads ?? new List<PlannedThread>())
+            .Count(t => t != null && t.Relevance != ThreadRelevance.Relevant);
+        return GenerationUiText.ScopeNotice(relevant.Count, nonRelevantThreads, plan.AttachmentCount);
     }
 
     private static List<PlannedThread> RelevantThreads(CorpusPlan plan) =>

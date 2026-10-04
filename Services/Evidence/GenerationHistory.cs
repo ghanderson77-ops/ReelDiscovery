@@ -52,7 +52,8 @@ public static class GenerationHistory
                 ThreadId = record.ThreadId,
                 Subject = subject,
                 Attempt = record.Attempts,
-                FilePath = ordered.Count > 0 ? ordered[^1].FilePath ?? string.Empty : string.Empty
+                FilePath = ordered.Count > 0 ? ordered[^1].FilePath ?? string.Empty : string.Empty,
+                Relevant = thread?.Relevance == ThreadRelevance.Relevant
             };
 
             if (record.Type == JournalRecordType.ThreadDone)

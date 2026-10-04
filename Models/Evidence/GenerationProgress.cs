@@ -156,7 +156,8 @@ public class GenerationEvent
 
     public int Files { get; set; }
 
-    // NonRelevantFinished / AttachmentsAdded: whether the thread or part belongs to relevant mail
+    // ThreadWritten / NonRelevantFinished / AttachmentsAdded: whether the thread or part belongs to relevant mail
+    // (ThreadWritten shows the ledger clause only for relevant threads)
     public bool Relevant { get; set; }
 
     public int AttachmentsDone { get; set; }
@@ -180,4 +181,7 @@ public class GenerationView
     public DateOnly StageWaveStart { get; set; }
     public DateOnly StageWaveEnd { get; set; }
     public int StageCount { get; set; }
+
+    // Writing stage: attachments being written with the wave's threads (0 drops the progress clause)
+    public int StageAttachments { get; set; }
 }

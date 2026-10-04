@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Tests.Evidence.Golden;
 
 namespace ReelDiscovery.Tests.Evidence;
 
@@ -261,6 +262,22 @@ public class ComposeHtmlTests
         Assert.DoesNotContain("<strong>", html);
         Assert.DoesNotContain("**", html);
     }
+
+    // Frozen before the Phase 6 change: no inline images must reproduce Phase 5 output byte for byte
+    [Fact]
+    public void ComposeHtml_NoInlineImages_MatchesGolden()
+    {
+        var fixtures = ComposeHtmlGoldenFixtures.All().ToList();
+        Assert.Equal(5, fixtures.Count);
+
+        foreach (var (name, fragment, html) in fixtures)
+        {
+            Assert.Equal(ComposeHtmlGolden.Fragment(name), Lf(fragment));
+            Assert.Equal(ComposeHtmlGolden.Html(name), Lf(html));
+        }
+    }
+
+    private static string Lf(string text) => text.Replace("\r\n", "\n");
 
     private static string Hash(string text) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.Replace("\r\n", "\n"))));

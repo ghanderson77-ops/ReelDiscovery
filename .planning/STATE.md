@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-10-04T21:24:43.731Z"
+stopped_at: Completed 06-06-PLAN.md
+last_updated: "2026-10-04T21:36:55.154Z"
 last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 87
-  percent: 82
+  completed_plans: 88
+  percent: 83
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 7 of 25
+Plan: 8 of 25
 Status: Ready to execute
 Last activity: 2026-10-04
 
@@ -138,6 +138,7 @@ Progress: [██████████] 100%
 | Phase 06 P04 | 12min | 2 tasks | 7 files |
 | Phase 06 P07 | 45min | 2 tasks | 6 files |
 | Phase 06 P05 | 18min | 2 tasks | 8 files |
+| Phase 06 P06 | 12min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -380,6 +381,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-04: Media cost charged only on Ok results via TokenUsageTracker.RecordMediaUsage; entries labelled Image - {label} / Voicemail - {label}
 - [Phase 06]: 06-07: inline images require ContentId ^[0-9a-f]{16}@[a-z0-9.-]+$ else omitted; quoted fragments use [image: title] placeholders
 - [Phase 06]: 06-07: BulkMailFormatter.Compose sanitizes theme before WrapInTemplate; spam button label fixed list by stable hash; newsletter bold cap per section
+- [Phase 06]: 06-06: Filler length/privilege apportioned separately from relevant mail with own salts, reusing RenderAssignments shares; bulk mail banded by sender kind (Newsletter Long, else Short)
+- [Phase 06]: 06-06: DecoyScanner D1 = whole-word or same-value amount match on MustNotMention; CanonicalValueScanner parses K/M/MM/B suffixes
 
 ### Pending Todos
 
@@ -401,6 +404,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T21:24:43.724Z
-Stopped at: Completed 06-05-PLAN.md
+Last session: 2026-10-04T21:36:46.191Z
+Stopped at: Completed 06-06-PLAN.md
 Resume file: None

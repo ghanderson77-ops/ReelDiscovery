@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-11-PLAN.md
-last_updated: "2026-10-04T23:31:48.058Z"
+stopped_at: Completed 06-12-PLAN.md
+last_updated: "2026-10-04T23:44:57.797Z"
 last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 94
-  percent: 89
+  completed_plans: 95
+  percent: 90
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 14 of 25
+Plan: 15 of 25
 Status: Ready to execute
 Last activity: 2026-10-04
 
@@ -145,6 +145,7 @@ Progress: [██████████] 100%
 | Phase 06 P15 | 25min | 2 tasks | 4 files |
 | Phase 06 P08 | 14min | 2 tasks | 4 files |
 | Phase 06 P11 | 12min | 3 tasks | 7 files |
+| Phase 06 P12 | 20 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -404,6 +405,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-11: Attachment text call uses one strict DTO per kind; filler DTOs have no peopleNamed/newDetails so filler can never write the ledger; Map clamps 6x8 sections, 8x60 tables, 12x8 slides, 2,000 chars and strips control chars
 - [Phase 06]: 06-11: Attachment prompts gate facts/values to MayMentionBySeq/KnownValueIdsBySeq at the parent seq, ledger to the parent local date, own-thread deltas/bodies to KnowledgeGate.Ancestors; sizing uses ctx.Rich set from AttachmentPrompts.IsRich (delegates to GenerationCostEstimator.IsRichAttachment)
 - [Phase 06]: 06-11: Image prompts are code-built from spec description + sender org Location with person/org name tokens scrubbed and the fixed no-text rule; spam images are abstract marketing graphics from the thread subject
+- [Phase 06]: 06-12: Side world case terms = fact titles, issue titles, every canonical value and cast full names; names and topics checked whole-word both ways; StableRank-ordered validated templates fill missing orgs, top up to 2 and cover orgs past the 24 cap
+- [Phase 06]: 06-12: Cast voice set ordered by ordinal cast id; skipped or invalid people get VoiceAssignments.Fallback with FromFallback false; refusal/failure -> full fallback; fatal -> unset
 
 ### Pending Todos
 
@@ -425,6 +428,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T23:31:48.052Z
-Stopped at: Completed 06-11-PLAN.md
+Last session: 2026-10-04T23:44:57.791Z
+Stopped at: Completed 06-12-PLAN.md
 Resume file: None

@@ -1,11 +1,35 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.Services.Evidence;
+
+/// <summary>
+/// Everything V2-V7 need for one attachment (review concern 4): the accepted thread supplies the parent and ancestor
+/// bodies and its own deltas; only the parent seq and its ancestors are visible.
+/// </summary>
+public class AttachmentCheckInput
+{
+    public int ParentSeq { get; set; }
+
+    // Full extracted text: people, knowledge, ledger dates and legal wording run on it
+    public string Text { get; set; } = string.Empty;
+
+    // Labelled cells and prose only (Pitfall 5): V3 and the V6 near-amount scan run on it, so Excel line items never trip them
+    public string VariantText { get; set; } = string.Empty;
+
+    public List<string> PeopleNamed { get; set; } = new();
+    public RenderedThread? AcceptedThread { get; set; }
+    public List<LedgerDelta> NewDetails { get; set; } = new();
+
+    // True when later waves are already written (review concern 5)
+    public bool LateRepair { get; set; }
+    public List<LedgerEntry> LaterEstablished { get; set; } = new();
+}
 
 /// <summary>
 /// Deterministic consistency checks of one rendered thread (D-12, no LLM judge). The result decides whether a thread is
@@ -111,6 +135,150 @@ public static partial class RenderValidator
         Run(violations, () => CheckLegalWording(c));
         Run(violations, () => CheckLength(c));
 
+        return Distinct(violations);
+    }
+
+    /// <summary>
+    /// D-17: one relevant attachment's text checked with the relevant-email content rules (V2 people, V3 canonical
+    /// variants, V4 knowledge, V6 ledger and ledger dates, V7 legal wording) as of its parent message. Knowledge follows
+    /// ancestry: the parent body, its ancestors' bodies and their deltas count as seen, a sibling branch never does.
+    /// Skips V1/V5/V8. Empty when either input is missing; never throws.
+    /// </summary>
+    public static List<RenderViolation> CheckAttachment(AttachmentCheckInput input, ThreadRenderContext ctx)
+    {
+        var violations = new List<RenderViolation>();
+        if (input == null || ctx == null)
+            return violations;
+
+        CheckContext full;
+        CheckContext variant;
+        try
+        {
+            var thread = ctx.Thread ?? new PlannedThread();
+            var parentSeq = input.ParentSeq;
+            var visible = new HashSet<int>(KnowledgeGate.Ancestors(thread, parentSeq)) { parentSeq };
+            var parent = (thread.Messages ?? new List<PlannedMessage>()).FirstOrDefault(m => m != null && m.Seq == parentSeq);
+
+            // The attachment travels with its email (06-RESEARCH Pattern 3)
+            var seenBodies = new SortedDictionary<int, string>();
+            foreach (var message in input.AcceptedThread?.Messages ?? new List<RenderedMessage>())
+            {
+                if (message != null && visible.Contains(message.Seq) && !seenBodies.ContainsKey(message.Seq))
+                    seenBodies[message.Seq] = message.Body ?? string.Empty;
+            }
+
+            var knowers = parent == null
+                ? new List<string>()
+                : new[] { parent.FromId }.Concat(parent.ToIds ?? new List<string>()).Concat(parent.CcIds ?? new List<string>())
+                    .Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct(StringComparer.Ordinal).ToList();
+
+            // The accepted thread's own deltas at the parent and its ancestors; a sibling branch's deltas stay invisible
+            var extraLedger = new List<LedgerEntry>();
+            var ownDeltas = (input.AcceptedThread?.NewDetails ?? new List<LedgerDelta>())
+                .Where(d => d != null && visible.Contains(d.Seq))
+                .ToList();
+            for (var i = 0; i < ownDeltas.Count; i++)
+            {
+                var delta = ownDeltas[i];
+                extraLedger.Add(new LedgerEntry
+                {
+                    Id = $"{thread.Id}-own-{(i + 1).ToString(Inv)}",
+                    Kind = delta.Kind,
+                    About = delta.About ?? string.Empty,
+                    Statement = delta.Statement ?? string.Empty,
+                    Value = delta.Value ?? string.Empty,
+                    KnownByIds = new List<string>(knowers)
+                });
+            }
+
+            if (input.LateRepair)
+                extraLedger.AddRange((input.LaterEstablished ?? new List<LedgerEntry>()).Where(e => e != null));
+
+            // Copies at the parent seq, so the caller's deltas keep their own seqs
+            var details = (input.NewDetails ?? new List<LedgerDelta>())
+                .Where(d => d != null)
+                .Select(d => new LedgerDelta
+                {
+                    Seq = parentSeq,
+                    Kind = d.Kind,
+                    About = d.About ?? string.Empty,
+                    Statement = d.Statement ?? string.Empty,
+                    Value = d.Value ?? string.Empty,
+                    FactIds = new List<string>(d.FactIds ?? new List<string>()),
+                    FromAttachment = d.FromAttachment,
+                    AttachmentDocId = d.AttachmentDocId ?? string.Empty
+                })
+                .ToList();
+
+            RenderedThread Single(string? body) => new()
+            {
+                ThreadId = thread.Id ?? string.Empty,
+                Messages = new List<RenderedMessage>
+                {
+                    new()
+                    {
+                        Seq = parentSeq,
+                        Body = body ?? string.Empty,
+                        PeopleNamed = new List<string>(input.PeopleNamed ?? new List<string>())
+                    }
+                },
+                NewDetails = details
+            };
+
+            full = new CheckContext(Single(input.Text), ctx, seenBodies, extraLedger);
+            variant = new CheckContext(Single(input.VariantText), ctx, seenBodies, extraLedger);
+        }
+        catch (Exception)
+        {
+            // Without a usable snapshot no rule can run; an unchecked attachment is not a violation (Pitfall 5)
+            return violations;
+        }
+
+        Run(violations, () => CheckPeople(full));
+        Run(violations, () => CheckCanonicalVariants(variant));
+        Run(violations, () => CheckKnowledge(full));
+
+        // Near-amount scan on labelled cells only, like V3 (Pitfall 5); NewDetails contradictions are checked here too
+        Run(violations, () => CheckLedger(variant));
+        Run(violations, () => CheckLedgerDates(full));
+        Run(violations, () => CheckLegalWording(full));
+
+        // Review concern 5: a late repair may not extend a story later emails already told
+        if (input.LateRepair && (input.NewDetails?.Any(d => d != null) ?? false))
+            violations.Add(V("V6", input.ParentSeq, "adds a new detail after later emails were written"));
+
+        return Distinct(violations);
+    }
+
+    /// <summary>
+    /// Non-relevant threads: message count, order and non-empty bodies only (V1/V5). No length, people, value, knowledge
+    /// or ledger rules. Empty when either input is missing; never throws.
+    /// </summary>
+    public static List<RenderViolation> CheckFiller(RenderedThread rendered, ThreadRenderContext ctx)
+    {
+        var violations = new List<RenderViolation>();
+        if (rendered == null || ctx == null)
+            return violations;
+
+        CheckContext c;
+        try
+        {
+            c = new CheckContext(rendered, ctx);
+        }
+        catch (Exception)
+        {
+            // Without a usable snapshot no rule can run; an unchecked thread is not a violation (Pitfall 5)
+            return violations;
+        }
+
+        // D-12 strict (user, 2026-10-04): filler is checked for count/order only; length parity comes from the code-assigned band in the prompt
+        Run(violations, () => CheckStructure(c));
+        return Distinct(violations);
+    }
+
+    // Distinct (code, seq, text) in rule order
+    private static List<RenderViolation> Distinct(List<RenderViolation> violations)
+    {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         return violations.Where(v => seen.Add(v.Code + "|" + v.Seq.ToString(Inv) + "|" + v.Text)).ToList();
     }
@@ -548,6 +716,10 @@ public static partial class RenderValidator
             if (string.IsNullOrWhiteSpace(message.Body))
                 continue;
 
+            // D-28: a voicemail transcript is 20-90 spoken words, not the assigned band
+            if ((planned.Attachments ?? new List<PlannedAttachment>()).Any(a => a != null && a.Kind == AttachmentType.Voicemail))
+                continue;
+
             var band = c.Ctx.Assignment?.For(planned.Seq)?.Length ?? LengthBand.Medium;
             var spec = RenderAssignments.Spec(band);
             var words = message.Body.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
@@ -623,8 +795,16 @@ public static partial class RenderValidator
     private sealed class CheckContext
     {
         public CheckContext(RenderedThread rendered, ThreadRenderContext ctx)
+            : this(rendered, ctx, null, null)
+        {
+        }
+
+        // seenBodies replaces the rendered ancestor bodies in SeenText; extraLedger extends the visible ledger (CheckAttachment)
+        public CheckContext(RenderedThread rendered, ThreadRenderContext ctx, IReadOnlyDictionary<int, string>? seenBodies,
+            IEnumerable<LedgerEntry>? extraLedger)
         {
             Rendered = rendered;
+            _seenBodies = seenBodies;
             Ctx = ctx;
             Guide = ctx.Guide ?? new CaseGuide();
 
@@ -656,8 +836,13 @@ public static partial class RenderValidator
             }
 
             Values = (Guide.Values ?? new List<CanonicalValue>()).Where(v => v != null && !string.IsNullOrWhiteSpace(v.Value)).ToList();
-            Ledger = (ctx.LedgerView ?? new List<LedgerEntry>()).Where(e => e != null).ToList();
+            Ledger = (ctx.LedgerView ?? new List<LedgerEntry>())
+                .Concat(extraLedger ?? Array.Empty<LedgerEntry>())
+                .Where(e => e != null)
+                .ToList();
         }
+
+        private readonly IReadOnlyDictionary<int, string>? _seenBodies;
 
         public RenderedThread Rendered { get; }
         public ThreadRenderContext Ctx { get; }
@@ -706,6 +891,13 @@ public static partial class RenderValidator
         public string SeenText(int seq)
         {
             var parts = new List<string> { Ctx.Thread?.Subject ?? string.Empty };
+            if (_seenBodies != null)
+            {
+                // CheckAttachment already limited these to the parent and its KnowledgeGate.Ancestors
+                parts.AddRange(_seenBodies.OrderBy(b => b.Key).Select(b => b.Value ?? string.Empty));
+                return string.Join("\n", parts);
+            }
+
             foreach (var ancestor in KnowledgeGate.Ancestors(Ctx.Thread!, seq))
             {
                 if (RenderedBySeq.TryGetValue(ancestor, out var message))

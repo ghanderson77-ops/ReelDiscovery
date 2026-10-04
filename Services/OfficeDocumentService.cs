@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -5,11 +8,14 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Presentation;
 using A = DocumentFormat.OpenXml.Drawing;
 using P = DocumentFormat.OpenXml.Presentation;
+using S = DocumentFormat.OpenXml.Spreadsheet;
+using W = DocumentFormat.OpenXml.Wordprocessing;
 using ReelDiscovery.Models;
+using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.Services;
 
-public class OfficeDocumentService
+public partial class OfficeDocumentService
 {
     public byte[] CreateWordDocument(string title, string content, OrganizationTheme? theme = null)
     {
@@ -170,7 +176,17 @@ public class OfficeDocumentService
     {
         // Use provided theme or default colors
         var t = theme ?? OrganizationTheme.Default;
+        return BuildPresentation(title, "Generated Email Dataset", slides, false, t, null);
+    }
 
+    private static byte[] BuildPresentation(
+        string title,
+        string subtitle,
+        IEnumerable<(string slideTitle, string content)> slides,
+        bool bullets,
+        OrganizationTheme t,
+        DocumentMetadata? meta)
+    {
         using var stream = new MemoryStream();
         using (var doc = PresentationDocument.Create(stream, PresentationDocumentType.Presentation, true))
         {
@@ -223,19 +239,364 @@ public class OfficeDocumentService
             uint slideId = 256;
 
             // Create title slide (special formatting)
-            CreateTitleSlide(presentationPart, slideLayoutPart, slideIdList, slideId++, title, "Generated Email Dataset", t);
+            CreateTitleSlide(presentationPart, slideLayoutPart, slideIdList, slideId++, title, subtitle, t);
 
             // Create content slides
             foreach (var (slideTitle, content) in slides)
             {
-                CreateContentSlide(presentationPart, slideLayoutPart, slideIdList, slideId++, slideTitle, content, t);
+                CreateContentSlide(presentationPart, slideLayoutPart, slideIdList, slideId++, slideTitle, content, t, bullets);
             }
 
             presentationPart.Presentation.Save();
+
+            if (meta != null)
+                ApplyMetadata(doc, meta);
         }
 
         return stream.ToArray();
     }
+
+    /// <summary>
+    /// Branded Word attachment (D-19): organization header, title, headed sections and at most one simple table.
+    /// Validator-clean; the legacy overload keeps its pinned output.
+    /// </summary>
+    public byte[] CreateWordDocument(string title, IReadOnlyList<WordSection> sections, SimpleTable? table, OrganizationTheme theme, DocumentMetadata meta)
+    {
+        var t = theme ?? OrganizationTheme.Default;
+
+        using var stream = new MemoryStream();
+        using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document, true))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new W.Document();
+            var body = mainPart.Document.AppendChild(new W.Body());
+
+            // Organization header bar plus accent line (same visual as the legacy header)
+            if (!string.IsNullOrWhiteSpace(t.OrganizationName))
+            {
+                body.AppendChild(new W.Paragraph(
+                    new W.ParagraphProperties(
+                        new W.Shading { Val = W.ShadingPatternValues.Clear, Fill = t.PrimaryColor },
+                        new W.SpacingBetweenLines { After = "200" },
+                        new W.Indentation { Left = "-115", Right = "-115" }),
+                    new W.Run(
+                        WordRunProperties(t.HeadingFont, true, t.TextLight, "24"),
+                        new W.Text($"  {Clean(t.OrganizationName)}") { Space = SpaceProcessingModeValues.Preserve })));
+
+                body.AppendChild(new W.Paragraph(
+                    new W.ParagraphProperties(
+                        new W.Shading { Val = W.ShadingPatternValues.Clear, Fill = t.AccentColor },
+                        new W.SpacingBetweenLines { After = "400", Line = "60", LineRule = W.LineSpacingRuleValues.Exact },
+                        new W.Indentation { Left = "-115", Right = "-115" })));
+            }
+
+            // Title
+            body.AppendChild(new W.Paragraph(
+                new W.ParagraphProperties(new W.SpacingBetweenLines { After = "200" }),
+                new W.Run(WordRunProperties(t.HeadingFont, true, t.PrimaryColor, "36"), new W.Text(Clean(title)))));
+
+            // Divider
+            body.AppendChild(new W.Paragraph(
+                new W.ParagraphProperties(
+                    new W.ParagraphBorders(new W.BottomBorder { Val = W.BorderValues.Single, Size = 6, Color = t.SecondaryColor }),
+                    new W.SpacingBetweenLines { After = "300" })));
+
+            foreach (var section in sections ?? Array.Empty<WordSection>())
+            {
+                if (section == null)
+                    continue;
+
+                if (!string.IsNullOrWhiteSpace(section.Heading))
+                {
+                    body.AppendChild(new W.Paragraph(
+                        new W.ParagraphProperties(new W.KeepNext(), new W.SpacingBetweenLines { Before = "240", After = "120" }),
+                        new W.Run(WordRunProperties(t.HeadingFont, true, t.PrimaryColor, "26"), new W.Text(Clean(section.Heading)))));
+                }
+
+                foreach (var paragraph in section.Paragraphs ?? new List<string>())
+                    AppendBodyParagraph(body, paragraph, t);
+            }
+
+            if (table?.Headers.Count > 0)
+                body.AppendChild(BuildWordTable(table, t));
+
+            body.AppendChild(new W.SectionProperties(
+                new W.PageMargin { Top = 1440, Right = 1440, Bottom = 1440, Left = 1440 }));
+            mainPart.Document.Save();
+
+            ApplyMetadata(doc, meta);
+        }
+
+        return stream.ToArray();
+    }
+
+    /// <summary>
+    /// One-sheet workbook (D-19) with a bold theme-colored header row and real numeric cells.
+    /// A cell is numeric only for a "$" amount or a plain decimal without a leading zero.
+    /// </summary>
+    public byte[] CreateExcelDocument(string title, string sheetName, List<string> headers, List<List<string>> rows, OrganizationTheme theme, DocumentMetadata meta)
+    {
+        var t = theme ?? OrganizationTheme.Default;
+        headers ??= new List<string>();
+        rows ??= new List<List<string>>();
+
+        using var stream = new MemoryStream();
+        using (var doc = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook, true))
+        {
+            var workbookPart = doc.AddWorkbookPart();
+            workbookPart.Workbook = new S.Workbook();
+
+            var stylesPart = workbookPart.AddNewPart<WorkbookStylesPart>();
+            stylesPart.Stylesheet = BuildStylesheet(t);
+            stylesPart.Stylesheet.Save();
+
+            var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+            var worksheet = new S.Worksheet();
+            var columnCount = Math.Max(headers.Count, rows.Count == 0 ? 0 : rows.Max(r => r?.Count ?? 0));
+            if (columnCount > 0)
+                worksheet.AppendChild(new S.Columns(new S.Column { Min = 1, Max = (uint)columnCount, Width = 20, CustomWidth = true }));
+            var sheetData = worksheet.AppendChild(new S.SheetData());
+            worksheetPart.Worksheet = worksheet;
+
+            var sheets = workbookPart.Workbook.AppendChild(new S.Sheets());
+            sheets.Append(new S.Sheet
+            {
+                Id = workbookPart.GetIdOfPart(worksheetPart),
+                SheetId = 1,
+                Name = SafeSheetName(string.IsNullOrWhiteSpace(sheetName) ? title : sheetName)
+            });
+
+            var headerRow = new S.Row { RowIndex = 1 };
+            for (int i = 0; i < headers.Count; i++)
+            {
+                headerRow.Append(new S.Cell
+                {
+                    CellReference = $"{GetColumnName(i + 1)}1",
+                    DataType = S.CellValues.String,
+                    CellValue = new S.CellValue(Clean(headers[i])),
+                    StyleIndex = HeaderStyleIndex
+                });
+            }
+            sheetData.Append(headerRow);
+
+            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            {
+                var rowNumber = (uint)(rowIndex + 2);
+                var dataRow = new S.Row { RowIndex = rowNumber };
+                var values = rows[rowIndex] ?? new List<string>();
+                for (int colIndex = 0; colIndex < values.Count; colIndex++)
+                    dataRow.Append(CreateTypedCell($"{GetColumnName(colIndex + 1)}{rowNumber}", values[colIndex]));
+                sheetData.Append(dataRow);
+            }
+
+            worksheetPart.Worksheet.Save();
+            workbookPart.Workbook.Save();
+
+            ApplyMetadata(doc, meta);
+        }
+
+        return stream.ToArray();
+    }
+
+    /// <summary>
+    /// Branded deck (D-19): title slide with the caller's subtitle (e.g. "{Org} | {Month yyyy}"), then one bullet slide per entry.
+    /// </summary>
+    public byte[] CreatePowerPointDocument(string title, string subtitle, IReadOnlyList<SlideContent> slides, OrganizationTheme theme, DocumentMetadata meta)
+    {
+        var t = theme ?? OrganizationTheme.Default;
+        var content = (slides ?? Array.Empty<SlideContent>())
+            .Where(s => s != null)
+            .Select(s => (Clean(s.Title), string.Join("\n", (s.Bullets ?? new List<string>()).Select(b => Clean(b).Replace("\n", " ").Trim()).Where(b => b.Length > 0))))
+            .ToList();
+
+        return BuildPresentation(Clean(title), Clean(subtitle), content, true, t, meta);
+    }
+
+    /// <summary>
+    /// Excel-safe sheet name: no : \ / ? * [ ], collapsed whitespace, no leading/trailing space or apostrophe, at most 31 chars.
+    /// </summary>
+    internal static string SafeSheetName(string? name)
+    {
+        var cleaned = SheetNameForbidden().Replace(name ?? string.Empty, " ");
+        cleaned = Whitespace().Replace(cleaned, " ").Trim(' ', '\'');
+        if (cleaned.Length > 31)
+            cleaned = cleaned[..31];
+
+        // The cut can expose a trailing space or apostrophe
+        cleaned = cleaned.Trim(' ', '\'');
+        return cleaned.Length == 0 ? "Sheet1" : cleaned;
+    }
+
+    private const uint HeaderStyleIndex = 1;
+    private const uint CurrencyStyleIndex = 2;
+    private const uint CurrencyFormatId = 164;
+
+    private static S.Cell CreateTypedCell(string reference, string? raw)
+    {
+        var text = Clean(raw);
+        var trimmed = text.Trim();
+        var cell = new S.Cell { CellReference = reference };
+
+        if (trimmed.StartsWith('$') && CanonicalValueScanner.TryParseAmount(trimmed, out var amount))
+        {
+            cell.DataType = S.CellValues.Number;
+            cell.CellValue = new S.CellValue(amount);
+            cell.StyleIndex = CurrencyStyleIndex;
+        }
+        // No leading zeros: identifiers and ZIP-like codes stay text (review 06-03)
+        else if (PlainNumber().IsMatch(trimmed)
+            && decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.InvariantCulture, out var number))
+        {
+            cell.DataType = S.CellValues.Number;
+            cell.CellValue = new S.CellValue(number);
+        }
+        else
+        {
+            cell.DataType = S.CellValues.String;
+            cell.CellValue = new S.CellValue(text);
+        }
+
+        return cell;
+    }
+
+    private static S.Stylesheet BuildStylesheet(OrganizationTheme t)
+    {
+        // Schema order: numFmts, fonts, fills, borders, cellStyleXfs, cellXfs
+        return new S.Stylesheet(
+            new S.NumberingFormats(
+                new S.NumberingFormat { NumberFormatId = CurrencyFormatId, FormatCode = "\"$\"#,##0.00" }) { Count = 1 },
+            new S.Fonts(
+                new S.Font(new S.FontSize { Val = 11 }, new S.FontName { Val = "Calibri" }),
+                new S.Font(new S.Bold(), new S.FontSize { Val = 11 }, new S.Color { Rgb = "FF" + t.TextLight }, new S.FontName { Val = "Calibri" })) { Count = 2 },
+            new S.Fills(
+                new S.Fill(new S.PatternFill { PatternType = S.PatternValues.None }),
+                new S.Fill(new S.PatternFill { PatternType = S.PatternValues.Gray125 }),
+                new S.Fill(new S.PatternFill(
+                    new S.ForegroundColor { Rgb = "FF" + t.PrimaryColor },
+                    new S.BackgroundColor { Indexed = 64 }) { PatternType = S.PatternValues.Solid })) { Count = 3 },
+            new S.Borders(
+                new S.Border(new S.LeftBorder(), new S.RightBorder(), new S.TopBorder(), new S.BottomBorder(), new S.DiagonalBorder())) { Count = 1 },
+            new S.CellStyleFormats(
+                new S.CellFormat { NumberFormatId = 0, FontId = 0, FillId = 0, BorderId = 0 }) { Count = 1 },
+            new S.CellFormats(
+                new S.CellFormat { NumberFormatId = 0, FontId = 0, FillId = 0, BorderId = 0, FormatId = 0 },
+                new S.CellFormat { NumberFormatId = 0, FontId = 1, FillId = 2, BorderId = 0, FormatId = 0, ApplyFont = true, ApplyFill = true },
+                new S.CellFormat { NumberFormatId = CurrencyFormatId, FontId = 0, FillId = 0, BorderId = 0, FormatId = 0, ApplyNumberFormat = true }) { Count = 3 });
+    }
+
+    // Schema order RunFonts, Bold, Color, FontSize; the legacy path keeps its pinned order for DocumentRegressionTests
+    private static W.RunProperties WordRunProperties(string font, bool bold, string color, string size)
+    {
+        var props = new W.RunProperties(new W.RunFonts { Ascii = font, HighAnsi = font });
+        if (bold)
+            props.Append(new W.Bold());
+        props.Append(new W.Color { Val = color }, new W.FontSize { Val = size });
+        return props;
+    }
+
+    private static void AppendBodyParagraph(W.Body body, string? paragraph, OrganizationTheme t)
+    {
+        var text = Clean(paragraph).Trim();
+        if (text.Length == 0)
+            return;
+
+        var run = new W.Run(WordRunProperties(t.BodyFont, false, t.TextDark, "22"));
+        var lines = text.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            run.AppendChild(new W.Text(lines[i]) { Space = SpaceProcessingModeValues.Preserve });
+            if (i < lines.Length - 1)
+                run.AppendChild(new W.Break());
+        }
+
+        body.AppendChild(new W.Paragraph(
+            new W.ParagraphProperties(new W.SpacingBetweenLines { After = "200", Line = "276", LineRule = W.LineSpacingRuleValues.Auto }),
+            run));
+    }
+
+    private static W.Table BuildWordTable(SimpleTable table, OrganizationTheme t)
+    {
+        var columnCount = Math.Max(table.Headers.Count, table.Rows.Count == 0 ? 0 : table.Rows.Max(r => r?.Count ?? 0));
+        const int tableWidthTwips = 9360; // 6.5in text width at 1in margins
+        var columnWidth = (tableWidthTwips / columnCount).ToString(CultureInfo.InvariantCulture);
+
+        var wordTable = new W.Table(
+            new W.TableProperties(
+                new W.TableWidth { Width = "5000", Type = W.TableWidthUnitValues.Pct },
+                new W.TableBorders(
+                    new W.TopBorder { Val = W.BorderValues.Single, Size = 4, Color = t.SecondaryColor },
+                    new W.LeftBorder { Val = W.BorderValues.Single, Size = 4, Color = t.SecondaryColor },
+                    new W.BottomBorder { Val = W.BorderValues.Single, Size = 4, Color = t.SecondaryColor },
+                    new W.RightBorder { Val = W.BorderValues.Single, Size = 4, Color = t.SecondaryColor },
+                    new W.InsideHorizontalBorder { Val = W.BorderValues.Single, Size = 4, Color = t.SecondaryColor },
+                    new W.InsideVerticalBorder { Val = W.BorderValues.Single, Size = 4, Color = t.SecondaryColor })),
+            new W.TableGrid(Enumerable.Range(0, columnCount).Select(_ => new W.GridColumn { Width = columnWidth })));
+
+        wordTable.Append(BuildWordTableRow(table.Headers, columnCount, columnWidth, t, header: true));
+        foreach (var row in table.Rows)
+            wordTable.Append(BuildWordTableRow(row ?? new List<string>(), columnCount, columnWidth, t, header: false));
+
+        return wordTable;
+    }
+
+    private static W.TableRow BuildWordTableRow(List<string> values, int columnCount, string columnWidth, OrganizationTheme t, bool header)
+    {
+        var row = new W.TableRow();
+        for (int i = 0; i < columnCount; i++)
+        {
+            var value = i < values.Count ? Clean(values[i]).Replace("\n", " ").Trim() : string.Empty;
+            var cellProps = new W.TableCellProperties(new W.TableCellWidth { Width = columnWidth, Type = W.TableWidthUnitValues.Dxa });
+            if (header)
+                cellProps.Append(new W.Shading { Val = W.ShadingPatternValues.Clear, Fill = t.PrimaryColor });
+
+            row.Append(new W.TableCell(
+                cellProps,
+                new W.Paragraph(
+                    new W.ParagraphProperties(new W.SpacingBetweenLines { Before = "40", After = "40" }),
+                    new W.Run(
+                        WordRunProperties(header ? t.HeadingFont : t.BodyFont, header, header ? t.TextLight : t.TextDark, "20"),
+                        new W.Text(value) { Space = SpaceProcessingModeValues.Preserve }))));
+        }
+
+        return row;
+    }
+
+    // Sender as author, dates just before the email; no Application/Company part is ever written (T-06-09)
+    private static void ApplyMetadata(OpenXmlPackage doc, DocumentMetadata? meta)
+    {
+        if (meta == null)
+            return;
+
+        doc.PackageProperties.Creator = meta.Author ?? string.Empty;
+        doc.PackageProperties.LastModifiedBy = meta.Author ?? string.Empty;
+        doc.PackageProperties.Created = meta.Created.UtcDateTime;
+        doc.PackageProperties.Modified = meta.Modified.UtcDateTime;
+    }
+
+    // Model text is untrusted: drop control characters XML cannot carry, keep line breaks and tabs
+    private static string Clean(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return string.Empty;
+
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var sb = new StringBuilder(normalized.Length);
+        foreach (var c in normalized)
+        {
+            if (c == '\n' || c == '\t' || !char.IsControl(c))
+                sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
+    [GeneratedRegex(@"[:\\/?*\[\]]")]
+    private static partial Regex SheetNameForbidden();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Whitespace();
+
+    [GeneratedRegex(@"^-?(0|[1-9]\d{0,14})(\.\d+)?$")]
+    private static partial Regex PlainNumber();
 
     private static A.Theme CreateModernTheme(OrganizationTheme t)
     {
@@ -404,7 +765,8 @@ public class OfficeDocumentService
         uint slideId,
         string title,
         string content,
-        OrganizationTheme t)
+        OrganizationTheme t,
+        bool bullets = false)
     {
         var slidePart = presentationPart.AddNewPart<SlidePart>();
 
@@ -424,7 +786,7 @@ public class OfficeDocumentService
                     // Accent line under header
                     CreateAccentLine(4, 0, 1000000, 9144000, 40000, t.AccentColor),
                     // Content area (dark text on white background)
-                    CreateContentTextShape(5, "Content", content, 300000, 1200000, 8544000, 5400000, 1800, t.TextDark, t.BodyFont))),
+                    CreateContentTextShape(5, "Content", content, 300000, 1200000, 8544000, 5400000, 1800, t.TextDark, t.BodyFont, bullets))),
             new P.ColorMapOverride(new A.MasterColorMapping()));
 
         slidePart.AddPart(slideLayoutPart);
@@ -501,7 +863,7 @@ public class OfficeDocumentService
                     new A.EndParagraphRunProperties { Language = "en-US" })));
     }
 
-    private static P.Shape CreateContentTextShape(uint id, string name, string text, long x, long y, long width, long height, int fontSize, string textColorHex, string fontName)
+    private static P.Shape CreateContentTextShape(uint id, string name, string text, long x, long y, long width, long height, int fontSize, string textColorHex, string fontName, bool bullets = false)
     {
         var runProps = new A.RunProperties
         {
@@ -533,14 +895,27 @@ public class OfficeDocumentService
                 lineRunProps.AppendChild(new A.SolidFill(new A.RgbColorModelHex { Val = textColorHex }));
                 lineRunProps.AppendChild(new A.LatinFont { Typeface = fontName });
 
+                var paragraphProps = new A.ParagraphProperties { Alignment = A.TextAlignmentTypeValues.Left };
+                if (bullets)
+                {
+                    // Hanging-indent bullet; schema order buFont before buChar
+                    paragraphProps.LeftMargin = 285750;
+                    paragraphProps.Indent = -285750;
+                    paragraphProps.Append(new A.BulletFont { Typeface = "Arial" }, new A.CharacterBullet { Char = "\u2022" });
+                }
+
                 textBody.AppendChild(new A.Paragraph(
-                    new A.ParagraphProperties { Alignment = A.TextAlignmentTypeValues.Left },
+                    paragraphProps,
                     new A.Run(lineRunProps, new A.Text(line.Trim())),
                     new A.EndParagraphRunProperties { Language = "en-US" }));
             }
             // Add spacing between paragraphs
             textBody.AppendChild(new A.Paragraph(new A.EndParagraphRunProperties { Language = "en-US" }));
         }
+
+        // txBody needs at least one paragraph; an empty slide body would otherwise fail validation
+        if (!textBody.Elements<A.Paragraph>().Any())
+            textBody.AppendChild(new A.Paragraph(new A.EndParagraphRunProperties { Language = "en-US" }));
 
         return new P.Shape(
             new P.NonVisualShapeProperties(

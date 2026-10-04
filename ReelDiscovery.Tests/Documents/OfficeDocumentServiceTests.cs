@@ -132,7 +132,7 @@ public class OfficeDocumentServiceTests
 
         // Header row is bold-styled
         var headerStyle = (int)cells["A1"].StyleIndex!.Value;
-        var font = stylesheet.Fonts!.Elements<Font>().ElementAt((int)formats[headerStyle].FontId!.Value);
+        var font = stylesheet.Fonts!.Elements<DocumentFormat.OpenXml.Spreadsheet.Font>().ElementAt((int)formats[headerStyle].FontId!.Value);
         Assert.NotNull(font.Bold);
     }
 

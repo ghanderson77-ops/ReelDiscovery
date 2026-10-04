@@ -24,157 +24,345 @@ public class GenerationUiTextTests
             CostUsd = cost,
             RemainingCostUsd = remaining,
             Running = running,
-            Finished = finished
+            Finished = finished,
+            RelevantTotal = total,
+            RelevantDone = done
         };
+
+    // Every copy function's output, for the banned-word scan
+    private static readonly string[] BannedWords = { "evidence", "noise", "filler" };
+
+    private static void AssertNoBannedWords(string text)
+    {
+        foreach (var word in BannedWords)
+            Assert.DoesNotContain(word, text, StringComparison.OrdinalIgnoreCase);
+    }
 
     // --- Scope notice ---
 
     [Fact]
-    public void ScopeNotice_WithAttachments()
+    public void ScopeNotice_RelevantNonRelevantAndAttachments()
     {
         Assert.Equal(
-            "This step writes the 12 relevant threads from the approved plan as email. Attachments and the 300 non-relevant emails are not generated yet; their answer-key rows stay Planned.",
-            GenerationUiText.ScopeNotice(12, 300, 40));
+            "This step writes the approved plan as email: 12 relevant threads first, oldest first, then 30 non-relevant threads, with 9 attachments. Each answer-key row moves from Planned to Generated as its file is saved.",
+            GenerationUiText.ScopeNotice(12, 30, 9));
+    }
+
+    [Fact]
+    public void ScopeNotice_NoNonRelevant_DropsMiddle()
+    {
+        Assert.Equal(
+            "This step writes the approved plan as email: 12 relevant threads, oldest first. Each answer-key row moves from Planned to Generated as its file is saved.",
+            GenerationUiText.ScopeNotice(12, 0, 0));
+        Assert.Equal(
+            "This step writes the approved plan as email: 12 relevant threads, oldest first, with 1 attachment. Each answer-key row moves from Planned to Generated as its file is saved.",
+            GenerationUiText.ScopeNotice(12, 0, 1));
     }
 
     [Fact]
     public void ScopeNotice_NoAttachments_DropsAttachmentClause()
     {
         Assert.Equal(
-            "This step writes the 1 relevant thread from the approved plan as email. The 0 non-relevant emails are not generated yet; their answer-key rows stay Planned.",
-            GenerationUiText.ScopeNotice(1, 0, 0));
+            "This step writes the approved plan as email: 1 relevant thread first, oldest first, then 1 non-relevant thread. Each answer-key row moves from Planned to Generated as its file is saved.",
+            GenerationUiText.ScopeNotice(1, 1, 0));
     }
 
     [Theory]
-    [InlineData(0, "0 relevant threads", "0 non-relevant")]
-    [InlineData(1, "1 relevant thread ", "1 non-relevant")]
-    [InlineData(2, "2 relevant threads", "2 non-relevant")]
-    [InlineData(1000, "1,000 relevant threads", "1,000 non-relevant")]
-    public void ScopeNotice_Plurals(int n, string threads, string nonRelevant)
+    [InlineData(1, "1 relevant thread ", "1 non-relevant thread,", "1 attachment.")]
+    [InlineData(2, "2 relevant threads", "2 non-relevant threads", "2 attachments")]
+    [InlineData(1000, "1,000 relevant threads", "1,000 non-relevant threads", "1,000 attachments")]
+    public void ScopeNotice_Plurals(int n, string threads, string nonRelevant, string attachments)
     {
-        var text = GenerationUiText.ScopeNotice(n, n, 1);
+        var text = GenerationUiText.ScopeNotice(n, n, n);
         Assert.Contains(threads, text);
         Assert.Contains(nonRelevant, text);
+        Assert.Contains(attachments, text);
+    }
+
+    [Fact]
+    public void ScopeNotice_ZeroRelevant()
+    {
+        Assert.StartsWith("This step writes the approved plan as email: 0 relevant threads, oldest first.", GenerationUiText.ScopeNotice(0, 0, 0));
     }
 
     // --- Tiles ---
 
     [Fact]
-    public void Tile_Threads_DefaultVariant()
+    public void TileKinds_InUiSpecOrder()
     {
-        var tile = GenerationUiText.Tile(GenerationTileKind.Threads, Counts());
+        Assert.Equal(
+            new[]
+            {
+                GenerationTileKind.Relevant, GenerationTileKind.NonRelevant, GenerationTileKind.Attachments, GenerationTileKind.Emails,
+                GenerationTileKind.Warnings, GenerationTileKind.Failed, GenerationTileKind.Cost
+            },
+            Enum.GetValues<GenerationTileKind>());
+    }
 
-        Assert.Equal("Threads", tile.Caption);
-        Assert.Equal("3 / 1,000", tile.Value);
-        Assert.Equal("14 waves", tile.SubLine);
-        Assert.Equal("3 of 1,000 relevant threads written, in 14 waves by date", tile.Tooltip);
+    [Fact]
+    public void Tile_Relevant_DefaultVariant()
+    {
+        var c = Counts(total: 12, done: 3, waves: 2, ledger: 14);
+        var tile = GenerationUiText.Tile(GenerationTileKind.Relevant, c);
+
+        Assert.Equal("Relevant", tile.Caption);
+        Assert.Equal("3 / 12", tile.Value);
+        Assert.Equal("2 waves", tile.SubLine);
+        Assert.Equal("3 of 12 relevant threads written, in 2 waves by date. The narrative ledger holds 14 story details.", tile.Tooltip);
         Assert.Equal(TileTone.Normal, tile.Tone);
     }
 
     [Fact]
-    public void Tile_Threads_NarrowVariants()
+    public void Tile_Relevant_UsesRelevantSplit()
     {
-        var compact = GenerationUiText.Tile(GenerationTileKind.Threads, Counts(), 1);
-        Assert.Equal("3/1,000", compact.Value);
-        Assert.Equal("14 waves", compact.SubLine);
+        var c = Counts(total: 50, done: 20);
+        c.RelevantTotal = 12;
+        c.RelevantDone = 3;
+        Assert.Equal("3 / 12", GenerationUiText.Tile(GenerationTileKind.Relevant, c).Value);
+    }
 
-        var split = GenerationUiText.Tile(GenerationTileKind.Threads, Counts(), 2);
+    [Theory]
+    [InlineData(GenerationTileKind.Relevant)]
+    [InlineData(GenerationTileKind.NonRelevant)]
+    [InlineData(GenerationTileKind.Attachments)]
+    public void Tile_FractionTiles_NarrowVariants(GenerationTileKind kind)
+    {
+        var c = new GenerationCounts
+        {
+            RelevantTotal = 1000, RelevantDone = 3, NonRelevantTotal = 1000, NonRelevantDone = 3,
+            AttachmentsTotal = 1000, AttachmentsDone = 3, WaveCount = 14
+        };
+
+        Assert.Equal("3 / 1,000", GenerationUiText.Tile(kind, c).Value);
+        var compact = GenerationUiText.Tile(kind, c, 1);
+        Assert.Equal("3/1,000", compact.Value);
+        Assert.Equal(GenerationUiText.Tile(kind, c).SubLine, compact.SubLine);
+
+        var split = GenerationUiText.Tile(kind, c, 2);
         Assert.Equal("3", split.Value);
         Assert.Equal("of 1,000", split.SubLine);
     }
 
-    [Theory]
-    [InlineData(0, "0 waves")]
-    [InlineData(1, "1 wave")]
-    [InlineData(2, "2 waves")]
-    [InlineData(1000, "1,000 waves")]
-    public void Tile_Threads_WavePlural(int waves, string expected)
+    [Fact]
+    public void Tile_Variant_IgnoredByOtherTiles()
     {
-        Assert.Equal(expected, GenerationUiText.Tile(GenerationTileKind.Threads, Counts(waves: waves)).SubLine);
+        foreach (var kind in new[] { GenerationTileKind.Emails, GenerationTileKind.Warnings, GenerationTileKind.Failed, GenerationTileKind.Cost })
+            Assert.Equal(GenerationUiText.Tile(kind, Counts()).Value, GenerationUiText.Tile(kind, Counts(), 2).Value);
+    }
+
+    [Theory]
+    [InlineData(0, "0 waves", "0 story details")]
+    [InlineData(1, "1 wave", "1 story detail.")]
+    [InlineData(2, "2 waves", "2 story details")]
+    [InlineData(1000, "1,000 waves", "1,000 story details")]
+    public void Tile_Relevant_Plurals(int n, string subLine, string ledger)
+    {
+        var tile = GenerationUiText.Tile(GenerationTileKind.Relevant, Counts(waves: n, ledger: n));
+        Assert.Equal(subLine, tile.SubLine);
+        Assert.Contains(ledger, tile.Tooltip);
     }
 
     [Fact]
-    public void Tile_Emails()
+    public void Tile_NonRelevant_AllCategories()
     {
-        var tile = GenerationUiText.Tile(GenerationTileKind.Emails, Counts(emailsWritten: 1200, emailsPlanned: 3400));
+        var c = new GenerationCounts
+        {
+            NonRelevantTotal = 40, NonRelevantDone = 30, NonRelevantDailyBusiness = 20, NonRelevantAncillary = 8,
+            NonRelevantBulk = 10, NonRelevantDecoy = 2
+        };
+        var tile = GenerationUiText.Tile(GenerationTileKind.NonRelevant, c);
 
-        Assert.Equal("Emails", tile.Caption);
-        Assert.Equal("1,200", tile.Value);
-        Assert.Equal("of 3,400 planned", tile.SubLine);
-        Assert.Equal("Relevant emails written so far. Each email is saved in every participant's mailbox.", tile.Tooltip);
+        Assert.Equal("Non-relevant", tile.Caption);
+        Assert.Equal("30 / 40", tile.Value);
+        Assert.Equal("threads", tile.SubLine);
+        Assert.Equal(
+            "30 of 40 non-relevant threads written: 20 daily business, 8 ancillary, 10 newsletters, spam and personal, 2 near-miss decoys.",
+            tile.Tooltip);
+        Assert.Equal(TileTone.Normal, tile.Tone);
+    }
+
+    [Fact]
+    public void Tile_NonRelevant_ZeroCategoriesDropped()
+    {
+        var c = new GenerationCounts { NonRelevantTotal = 21, NonRelevantDone = 0, NonRelevantDailyBusiness = 20, NonRelevantDecoy = 1 };
+        Assert.Equal("0 of 21 non-relevant threads written: 20 daily business, 1 near-miss decoy.",
+            GenerationUiText.Tile(GenerationTileKind.NonRelevant, c).Tooltip);
+    }
+
+    [Fact]
+    public void Tile_NonRelevant_NonePlanned()
+    {
+        var tile = GenerationUiText.Tile(GenerationTileKind.NonRelevant, new GenerationCounts());
+        Assert.Equal("0 / 0", tile.Value);
+        Assert.Equal("0 of 0 non-relevant threads written.", tile.Tooltip);
+    }
+
+    [Fact]
+    public void Tile_Attachments_AllKinds_WithSkipped()
+    {
+        var c = new GenerationCounts
+        {
+            AttachmentsTotal = 18, AttachmentsDone = 13, AttachmentsSkipped = 2, AttachmentsWord = 5, AttachmentsExcel = 3,
+            AttachmentsPowerPoint = 2, AttachmentsInvite = 4, AttachmentsImage = 3, AttachmentsVoicemail = 1
+        };
+        var tile = GenerationUiText.Tile(GenerationTileKind.Attachments, c);
+
+        Assert.Equal("Attachments", tile.Caption);
+        Assert.Equal("13 / 18", tile.Value);
+        Assert.Equal("2 skipped", tile.SubLine);
+        Assert.Equal(
+            "13 of 18 attachments written: 5 Word, 3 Excel, 2 PowerPoint, 4 invites, 3 images, 1 voicemail. 2 items skipped because images and voicemail were unavailable.",
+            tile.Tooltip);
+    }
+
+    [Fact]
+    public void Tile_Attachments_NoSkipped_ZeroKindsDropped()
+    {
+        var c = new GenerationCounts { AttachmentsTotal = 6, AttachmentsDone = 6, AttachmentsWord = 5, AttachmentsInvite = 1 };
+        var tile = GenerationUiText.Tile(GenerationTileKind.Attachments, c);
+
+        Assert.Equal("files and media", tile.SubLine);
+        Assert.Equal("6 of 6 attachments written: 5 Word, 1 invite.", tile.Tooltip);
+    }
+
+    [Fact]
+    public void Tile_Attachments_NonePlanned()
+    {
+        var tile = GenerationUiText.Tile(GenerationTileKind.Attachments, new GenerationCounts());
+        Assert.Equal("0 / 0", tile.Value);
+        Assert.Equal("none planned", tile.SubLine);
     }
 
     [Theory]
-    [InlineData(0, "0 mailboxes", "in 0 custodian mailboxes")]
-    [InlineData(1, "1 mailbox", "in 1 custodian mailbox ")]
-    [InlineData(2, "2 mailboxes", "in 2 custodian mailboxes")]
-    [InlineData(1000, "1,000 mailboxes", "in 1,000 custodian mailboxes")]
-    public void Tile_EmlFiles_MailboxPlural(int mailboxes, string subLine, string tooltipPart)
+    [InlineData(1, "1 skipped", "1 item skipped")]
+    [InlineData(2, "2 skipped", "2 items skipped")]
+    [InlineData(1000, "1,000 skipped", "1,000 items skipped")]
+    public void Tile_Attachments_SkippedPlurals(int n, string subLine, string tooltipPart)
     {
-        var tile = GenerationUiText.Tile(GenerationTileKind.EmlFiles, Counts(files: 37, mailboxes: mailboxes));
-
-        Assert.Equal("EML files", tile.Caption);
-        Assert.Equal("37", tile.Value);
+        var tile = GenerationUiText.Tile(GenerationTileKind.Attachments, new GenerationCounts { AttachmentsTotal = 5000, AttachmentsSkipped = n });
         Assert.Equal(subLine, tile.SubLine);
         Assert.Contains(tooltipPart, tile.Tooltip);
     }
 
     [Fact]
-    public void Tile_EmlFiles_Tooltip()
+    public void Tile_Emails()
     {
-        var tile = GenerationUiText.Tile(GenerationTileKind.EmlFiles, Counts(files: 37, mailboxes: 6));
-        Assert.Equal("37 .eml files in 6 custodian mailboxes under the Mailboxes folder", tile.Tooltip);
-    }
+        var tile = GenerationUiText.Tile(GenerationTileKind.Emails, Counts(emailsWritten: 1200, emailsPlanned: 3400, files: 4000, mailboxes: 6));
 
-    [Fact]
-    public void Tile_Ledger()
-    {
-        var tile = GenerationUiText.Tile(GenerationTileKind.Ledger, Counts(ledger: 1045));
-
-        Assert.Equal("Ledger", tile.Caption);
-        Assert.Equal("1,045", tile.Value);
-        Assert.Equal("story details", tile.SubLine);
-        Assert.Equal("Commitments, figures, meetings, decisions, people and documents the written emails introduced. Later emails build on them.", tile.Tooltip);
+        Assert.Equal("Emails", tile.Caption);
+        Assert.Equal("1,200", tile.Value);
+        Assert.Equal("4,000 EML files", tile.SubLine);
+        Assert.Equal(
+            "1,200 of 3,400 planned emails written, saved as 4,000 .eml files in 6 custodian mailboxes under the Mailboxes folder.",
+            tile.Tooltip);
     }
 
     [Theory]
-    [InlineData(0, TileTone.Normal)]
-    [InlineData(2, TileTone.Warning)]
-    public void Tile_Warnings_ToneWhenAboveZero(int warnings, TileTone tone)
+    [InlineData(0, "0 EML files", "0 .eml files in 0 custodian mailboxes")]
+    [InlineData(1, "1 EML file", "1 .eml file in 1 custodian mailbox ")]
+    [InlineData(2, "2 EML files", "2 .eml files in 2 custodian mailboxes")]
+    [InlineData(1000, "1,000 EML files", "1,000 .eml files in 1,000 custodian mailboxes")]
+    public void Tile_Emails_Plurals(int n, string subLine, string tooltipPart)
     {
-        var tile = GenerationUiText.Tile(GenerationTileKind.Warnings, Counts(warnings: warnings));
+        var tile = GenerationUiText.Tile(GenerationTileKind.Emails, Counts(files: n, mailboxes: n));
+        Assert.Equal(subLine, tile.SubLine);
+        Assert.Contains(tooltipPart, tile.Tooltip);
+    }
+
+    [Fact]
+    public void Tile_Warnings_CountsItems()
+    {
+        var c = Counts(warnings: 2);
+        c.AttachmentsWarnings = 3;
+        var tile = GenerationUiText.Tile(GenerationTileKind.Warnings, c);
 
         Assert.Equal("Warnings", tile.Caption);
-        Assert.Equal(warnings.ToString(), tile.Value);
-        Assert.Equal("threads kept", tile.SubLine);
-        Assert.Equal(tone, tile.Tone);
-        Assert.Equal("Threads that still broke a consistency check after 3 attempts. The best attempt was kept and marked \"Generated - with warnings\" in the answer key.", tile.Tooltip);
-    }
-
-    [Theory]
-    [InlineData(0, TileTone.Normal)]
-    [InlineData(1, TileTone.Danger)]
-    public void Tile_Failed_ToneWhenAboveZero(int failed, TileTone tone)
-    {
-        var tile = GenerationUiText.Tile(GenerationTileKind.Failed, Counts(failed: failed));
-
-        Assert.Equal("Failed", tile.Caption);
-        Assert.Equal(failed.ToString(), tile.Value);
-        Assert.Equal("threads not written", tile.SubLine);
-        Assert.Equal(tone, tile.Tone);
-        Assert.Equal("Threads that could not be written. Retry them with Continue Generating or Retry Failed Threads.", tile.Tooltip);
+        Assert.Equal("5", tile.Value);
+        Assert.Equal("items kept", tile.SubLine);
+        Assert.Equal(TileTone.Warning, tile.Tone);
+        Assert.Equal(
+            "2 threads and 3 attachments still broke a consistency check after 3 attempts. The best attempt was kept and marked \"Generated - with warnings\" in the answer key.",
+            tile.Tooltip);
     }
 
     [Fact]
-    public void Tile_Cost_Running()
+    public void Tile_Warnings_ZeroClauseDroppedWithItsAnd()
+    {
+        var threadsOnly = GenerationUiText.Tile(GenerationTileKind.Warnings, Counts(warnings: 1));
+        Assert.StartsWith("1 thread still broke a consistency check", threadsOnly.Tooltip);
+
+        var c = Counts();
+        c.AttachmentsWarnings = 1;
+        Assert.StartsWith("1 attachment still broke a consistency check", GenerationUiText.Tile(GenerationTileKind.Warnings, c).Tooltip);
+
+        var none = GenerationUiText.Tile(GenerationTileKind.Warnings, Counts());
+        Assert.Equal("0", none.Value);
+        Assert.Equal(TileTone.Normal, none.Tone);
+        Assert.StartsWith("Threads and attachments that still broke a consistency check after 3 attempts.", none.Tooltip);
+    }
+
+    [Fact]
+    public void Tile_Failed_CountsItems()
+    {
+        var c = Counts(failed: 1);
+        c.AttachmentsFailed = 2;
+        var tile = GenerationUiText.Tile(GenerationTileKind.Failed, c);
+
+        Assert.Equal("Failed", tile.Caption);
+        Assert.Equal("3", tile.Value);
+        Assert.Equal("items not written", tile.SubLine);
+        Assert.Equal(TileTone.Danger, tile.Tone);
+        Assert.Equal(
+            "1 thread and 2 attachments could not be written. An email whose attachment failed is saved without it. Retry them with Continue Generating or Retry Failed Items.",
+            tile.Tooltip);
+    }
+
+    [Fact]
+    public void Tile_Failed_ZeroClauseDroppedWithItsAnd()
+    {
+        var c = Counts();
+        c.AttachmentsFailed = 1000;
+        Assert.StartsWith("1,000 attachments could not be written.", GenerationUiText.Tile(GenerationTileKind.Failed, c).Tooltip);
+        Assert.StartsWith("2 threads could not be written.", GenerationUiText.Tile(GenerationTileKind.Failed, Counts(failed: 2)).Tooltip);
+
+        var none = GenerationUiText.Tile(GenerationTileKind.Failed, Counts());
+        Assert.Equal(TileTone.Normal, none.Tone);
+        Assert.StartsWith("Threads and attachments that could not be written.", none.Tooltip);
+    }
+
+    [Fact]
+    public void Tile_SkippedIsNotFailed()
+    {
+        var c = Counts();
+        c.AttachmentsSkipped = 4;
+        Assert.Equal("0", GenerationUiText.Tile(GenerationTileKind.Failed, c).Value);
+        Assert.Equal("0", GenerationUiText.Tile(GenerationTileKind.Warnings, c).Value);
+    }
+
+    [Fact]
+    public void Tile_Cost_Running_NoMedia()
     {
         var tile = GenerationUiText.Tile(GenerationTileKind.Cost, Counts(cost: 12.345m, remaining: 40m, running: true));
 
         Assert.Equal("Cost", tile.Caption);
         Assert.Equal("$12.35", tile.Value);
         Assert.Equal("≈$40.00 to go", tile.SubLine);
-        Assert.Equal("Spent on generation in this case: $12.35. Estimate for the remaining threads: ≈$40.00, ±50%. The cost ticker in the header shows the whole session.", tile.Tooltip);
+        Assert.Equal(
+            "Spent on generation in this case: $12.35. Estimate for the remaining items: ≈$40.00, ±50%. The cost ticker in the header shows the whole session.",
+            tile.Tooltip);
         Assert.Equal(TileTone.Normal, tile.Tone);
+    }
+
+    [Fact]
+    public void Tile_Cost_WithMedia_SplitsTextAndMedia()
+    {
+        var c = Counts(cost: 5m, remaining: 1m, running: true);
+        c.MediaPlanned = 4;
+        c.MediaCostUsd = 0.4m;
+
+        Assert.Equal(
+            "Spent on generation in this case: $5.00 (text $4.60, images and voicemail $0.40). Estimate for the remaining items: ≈$1.00, ±50%. The cost ticker in the header shows the whole session.",
+            GenerationUiText.Tile(GenerationTileKind.Cost, c).Tooltip);
     }
 
     [Fact]
@@ -192,8 +380,11 @@ public class GenerationUiTextTests
     [Fact]
     public void Tile_OtherKinds_AreNormalTone()
     {
-        foreach (var kind in new[] { GenerationTileKind.Threads, GenerationTileKind.Emails, GenerationTileKind.EmlFiles, GenerationTileKind.Ledger, GenerationTileKind.Cost })
-            Assert.Equal(TileTone.Normal, GenerationUiText.Tile(kind, Counts(warnings: 5, failed: 5)).Tone);
+        var c = Counts(warnings: 5, failed: 5);
+        c.AttachmentsFailed = 3;
+        c.AttachmentsSkipped = 3;
+        foreach (var kind in new[] { GenerationTileKind.Relevant, GenerationTileKind.NonRelevant, GenerationTileKind.Attachments, GenerationTileKind.Emails, GenerationTileKind.Cost })
+            Assert.Equal(TileTone.Normal, GenerationUiText.Tile(kind, c).Tone);
     }
 
     [Fact]
@@ -202,7 +393,7 @@ public class GenerationUiTextTests
         Assert.Equal(TileTone.Normal, new TileContent().Tone);
     }
 
-    // --- Waves ---
+    // --- Waves and stage rows ---
 
     [Fact]
     public void WaveDates_SameYear()
@@ -224,12 +415,65 @@ public class GenerationUiTextTests
 
     [Theory]
     [InlineData(0, "0 threads, 0 emails")]
-    [InlineData(1, "1 thread, 1 email")]
-    [InlineData(2, "2 threads, 2 emails")]
-    [InlineData(1000, "1,000 threads, 1,000 emails")]
+    [InlineData(1, "1 thread, 1 email, 1 attachment")]
+    [InlineData(2, "2 threads, 2 emails, 2 attachments")]
+    [InlineData(1000, "1,000 threads, 1,000 emails, 1,000 attachments")]
     public void WaveTooltip_Plurals(int n, string expected)
     {
-        Assert.Equal(expected, GenerationUiText.WaveTooltip(n, n));
+        Assert.Equal(expected, GenerationUiText.WaveTooltip(n, n, n));
+    }
+
+    [Fact]
+    public void StageRow_Wave()
+    {
+        var row = new WaveProgress
+        {
+            Index = 2, Start = new DateOnly(2024, 3, 4), End = new DateOnly(2024, 3, 17), Threads = 8, Emails = 20, Done = 3, Attachments = 4
+        };
+        var (dates, done, tooltip) = GenerationUiText.StageRowText(row);
+
+        Assert.Equal("Mar 4 – Mar 17, 2024", dates);
+        Assert.Equal("3 / 8", done);
+        Assert.Equal("Mar 4 – Mar 17, 2024" + Environment.NewLine + "8 threads, 20 emails, 4 attachments", tooltip);
+
+        row.Attachments = 0;
+        Assert.EndsWith("8 threads, 20 emails", GenerationUiText.StageRowText(row).Tooltip);
+    }
+
+    [Fact]
+    public void StageRow_NonRelevant()
+    {
+        var row = new WaveProgress { RowKind = StageRowKind.NonRelevant, Index = 99, Threads = 40, Emails = 95, Done = 1000, Attachments = 6 };
+        var (dates, done, tooltip) = GenerationUiText.StageRowText(row);
+
+        Assert.Equal("Non-relevant mail", dates);
+        Assert.Equal("1,000 / 40", done);
+        Assert.Equal("40 threads, 95 emails, 6 attachments, across all dates", tooltip);
+
+        row.Attachments = 0;
+        Assert.Equal("40 threads, 95 emails, across all dates", GenerationUiText.StageRowText(row).Tooltip);
+    }
+
+    [Fact]
+    public void StageRow_Attachments_CountsRepairsOnly()
+    {
+        var row = new WaveProgress { RowKind = StageRowKind.Attachments, Threads = 3, Done = 3, Attachments = 12, AttachmentsDone = 5 };
+        var (dates, done, tooltip) = GenerationUiText.StageRowText(row);
+
+        Assert.Equal("Attachments for written threads", dates);
+        Assert.Equal("5 / 12", done);
+        Assert.Equal("12 attachments on 3 threads that were written earlier. Their emails are rewritten in every mailbox.", tooltip);
+    }
+
+    [Theory]
+    [InlineData(0, "0 attachments on 0 threads")]
+    [InlineData(1, "1 attachment on 1 thread ")]
+    [InlineData(2, "2 attachments on 2 threads")]
+    [InlineData(1000, "1,000 attachments on 1,000 threads")]
+    public void StageRow_Attachments_Plurals(int n, string expected)
+    {
+        var row = new WaveProgress { RowKind = StageRowKind.Attachments, Threads = n, Attachments = n };
+        Assert.StartsWith(expected, GenerationUiText.StageRowText(row).Tooltip);
     }
 
     // --- Activity ---
@@ -242,11 +486,15 @@ public class GenerationUiTextTests
         var e = Event(GenerationEventKind.RunStarted);
         e.Threads = 120;
         e.WaveCount = 14;
+        e.Attachments = 30;
 
         var line = GenerationUiText.ActivityText(e);
-        Assert.Equal("Started: 120 threads to write in 14 waves", line.Text);
+        Assert.Equal("Started: 120 threads and 30 attachments to write", line.Text);
         Assert.Equal(ActivityTone.Accent, line.Tone);
         Assert.Equal(line.Text, line.Tooltip);
+
+        e.Attachments = 0;
+        Assert.Equal("Started: 120 threads to write", GenerationUiText.ActivityText(e).Text);
     }
 
     [Fact]
@@ -258,6 +506,9 @@ public class GenerationUiTextTests
         var line = GenerationUiText.ActivityText(e);
         Assert.Equal("Continued: 1 thread left to write", line.Text);
         Assert.Equal(ActivityTone.Accent, line.Tone);
+
+        e.Attachments = 2;
+        Assert.Equal("Continued: 1 thread and 2 attachments left to write", GenerationUiText.ActivityText(e).Text);
     }
 
     [Fact]
@@ -276,17 +527,38 @@ public class GenerationUiTextTests
     }
 
     [Fact]
-    public void Activity_ThreadWritten()
+    public void Activity_ThreadWritten_Relevant()
     {
         var e = Event(GenerationEventKind.ThreadWritten);
         e.ThreadId = "T-0042";
         e.Subject = "Budget";
         e.Emails = 1;
         e.Details = 0;
+        e.Relevant = true;
 
         var line = GenerationUiText.ActivityText(e);
         Assert.Equal("Written: \"Budget\", 1 email, 0 new ledger details", line.Text);
         Assert.Equal(ActivityTone.Success, line.Tone);
+
+        e.Attachments = 2;
+        Assert.Equal("Written: \"Budget\", 1 email, 0 new ledger details, 2 attachments", GenerationUiText.ActivityText(e).Text);
+    }
+
+    [Fact]
+    public void Activity_ThreadWritten_NonRelevant_NoLedgerClause()
+    {
+        var e = Event(GenerationEventKind.ThreadWritten);
+        e.Subject = "Lunch order";
+        e.Emails = 3;
+        e.Details = 5;
+        e.Relevant = false;
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Written: \"Lunch order\", 3 emails", line.Text);
+        Assert.Equal(ActivityTone.Success, line.Tone);
+
+        e.Attachments = 1;
+        Assert.Equal("Written: \"Lunch order\", 3 emails, 1 attachment", GenerationUiText.ActivityText(e).Text);
     }
 
     [Fact]
@@ -347,6 +619,157 @@ public class GenerationUiTextTests
     }
 
     [Fact]
+    public void Activity_SideProjectsReady()
+    {
+        var e = Event(GenerationEventKind.SideProjectsReady);
+        e.Projects = 6;
+        e.Organizations = 1;
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Side projects ready: 6 projects for 1 organization", line.Text);
+        Assert.Equal(ActivityTone.Success, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_NonRelevantStarted()
+    {
+        var e = Event(GenerationEventKind.NonRelevantStarted);
+        e.Threads = 40;
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Non-relevant mail started: 40 threads to write", line.Text);
+        Assert.Equal(ActivityTone.Accent, line.Tone);
+    }
+
+    [Theory]
+    [InlineData(0, 0, ActivityTone.Success)]
+    [InlineData(2, 0, ActivityTone.Warning)]
+    [InlineData(0, 1, ActivityTone.Danger)]
+    public void Activity_NonRelevantFinished_Tone(int warnings, int failed, ActivityTone tone)
+    {
+        var e = Event(GenerationEventKind.NonRelevantFinished);
+        e.Written = 37;
+        e.Warnings = warnings;
+        e.Failed = failed;
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal($"Non-relevant mail finished: 37 written, {warnings} with warnings, {failed} failed.", line.Text);
+        Assert.Equal(tone, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_AttachmentRetry()
+    {
+        var e = Event(GenerationEventKind.AttachmentRetry);
+        e.FileName = "Budget Q3.xlsx";
+        e.Attempt = 1;
+        e.Violations = new() { "mentions \"Project X\", which this email must not mention", "b" };
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Budget Q3.xlsx: attempt 1 of 3 failed 2 checks: mentions \"Project X\", which this email must not mention. Retrying.", line.Text);
+        Assert.Equal(ActivityTone.Warning, line.Tone);
+        Assert.Equal(3, line.Tooltip.Split(Environment.NewLine).Length);
+    }
+
+    [Fact]
+    public void Activity_AttachmentKeptWithWarnings()
+    {
+        var e = Event(GenerationEventKind.AttachmentKeptWithWarnings);
+        e.FileName = "Kickoff.ics";
+        e.Violations = new() { "invite not tied to a known meeting" };
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Kickoff.ics kept with 1 warning after 3 attempts: invite not tied to a known meeting", line.Text);
+        Assert.Equal(ActivityTone.Warning, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_AttachmentFailed()
+    {
+        var e = Event(GenerationEventKind.AttachmentFailed);
+        e.FileName = "Site photo.png";
+        e.Reason = "the request timed out";
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Site photo.png failed: the request timed out. The email was saved without it.", line.Text);
+        Assert.Equal(ActivityTone.Danger, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_AttachmentSkipped()
+    {
+        var e = Event(GenerationEventKind.AttachmentSkipped);
+        e.FileName = "Voicemail 2024-03-04 2-15 PM.mp3";
+        e.Reason = "no tested OpenAI key this session";
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Voicemail 2024-03-04 2-15 PM.mp3 skipped: no tested OpenAI key this session.", line.Text);
+        Assert.Equal(ActivityTone.Warning, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_MediaStopped()
+    {
+        var e = Event(GenerationEventKind.MediaStopped);
+        e.Reason = "the OpenAI key was rejected";
+        e.MediaRemaining = 3;
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal(
+            "Images and voicemail stopped: the OpenAI key was rejected. Text generation continues; the remaining 3 images and voicemails are marked Skipped.",
+            line.Text);
+        Assert.Equal(ActivityTone.Warning, line.Tone);
+    }
+
+    [Theory]
+    [InlineData(0, "the remaining 0 images and voicemails are marked")]
+    [InlineData(1, "the remaining 1 image or voicemail is marked")]
+    [InlineData(2, "the remaining 2 images and voicemails are marked")]
+    [InlineData(1000, "the remaining 1,000 images and voicemails are marked")]
+    public void Activity_MediaStopped_Plurals(int n, string expected)
+    {
+        var e = Event(GenerationEventKind.MediaStopped);
+        e.MediaRemaining = n;
+        Assert.Contains(expected, GenerationUiText.ActivityText(e).Text);
+    }
+
+    [Fact]
+    public void Activity_AttachmentRepairStarted()
+    {
+        var e = Event(GenerationEventKind.AttachmentRepairStarted);
+        e.Attachments = 12;
+        e.Threads = 1;
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Adding 12 missing attachments to 1 written thread", line.Text);
+        Assert.Equal(ActivityTone.Accent, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_AttachmentsAdded()
+    {
+        var e = Event(GenerationEventKind.AttachmentsAdded);
+        e.Subject = "Budget";
+        e.Attachments = 1;
+        e.Files = 4;
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Added 1 attachment to \"Budget\" and rewrote 4 EML files", line.Text);
+        Assert.Equal(ActivityTone.Success, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_AttachmentRegenerated()
+    {
+        var e = Event(GenerationEventKind.AttachmentRegenerated);
+        e.FileName = "Scope letter.docx";
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Scope letter.docx could not be reused and was created again", line.Text);
+        Assert.Equal(ActivityTone.Warning, line.Tone);
+    }
+
+    [Fact]
     public void Activity_RunCancelled()
     {
         var e = Event(GenerationEventKind.RunCancelled);
@@ -356,6 +779,10 @@ public class GenerationUiTextTests
         var line = GenerationUiText.ActivityText(e);
         Assert.Equal("Cancelled. 4 of 1,000 threads are saved.", line.Text);
         Assert.Equal(ActivityTone.Warning, line.Tone);
+
+        e.AttachmentsDone = 3;
+        e.AttachmentsTotal = 12;
+        Assert.Equal("Cancelled. 4 of 1,000 threads and 3 of 12 attachments are saved.", GenerationUiText.ActivityText(e).Text);
     }
 
     [Fact]
@@ -378,23 +805,29 @@ public class GenerationUiTextTests
     }
 
     [Fact]
-    public void Activity_EveryKindHasText()
+    public void Activity_EveryKindHasText_NoBannedWords()
     {
         foreach (var kind in Enum.GetValues<GenerationEventKind>())
-            Assert.False(string.IsNullOrWhiteSpace(GenerationUiText.ActivityText(Event(kind)).Text), kind.ToString());
+        {
+            var text = GenerationUiText.ActivityText(Event(kind)).Text;
+            Assert.False(string.IsNullOrWhiteSpace(text), kind.ToString());
+            AssertNoBannedWords(text);
+        }
     }
 
     [Theory]
     [InlineData(0, "0 emails, 0 new ledger details")]
-    [InlineData(1, "1 email, 1 new ledger detail")]
-    [InlineData(2, "2 emails, 2 new ledger details")]
-    [InlineData(1000, "1,000 emails, 1,000 new ledger details")]
+    [InlineData(1, "1 email, 1 new ledger detail, 1 attachment")]
+    [InlineData(2, "2 emails, 2 new ledger details, 2 attachments")]
+    [InlineData(1000, "1,000 emails, 1,000 new ledger details, 1,000 attachments")]
     public void Activity_ThreadWritten_Plurals(int n, string expected)
     {
         var e = Event(GenerationEventKind.ThreadWritten);
         e.Subject = "S";
         e.Emails = n;
         e.Details = n;
+        e.Attachments = n;
+        e.Relevant = true;
         Assert.EndsWith(expected, GenerationUiText.ActivityText(e).Text);
     }
 
@@ -417,16 +850,41 @@ public class GenerationUiTextTests
     }
 
     [Theory]
-    [InlineData(0, "0 threads to write in 0 waves")]
-    [InlineData(1, "1 thread to write in 1 wave")]
-    [InlineData(2, "2 threads to write in 2 waves")]
-    [InlineData(1000, "1,000 threads to write in 1,000 waves")]
-    public void Activity_RunStarted_Plurals(int n, string expected)
+    [InlineData(0, "0 threads and 0 attachments", "0 projects for 0 organizations", "Adding 0 missing attachments to 0 written threads")]
+    [InlineData(1, "1 thread and 1 attachment", "1 project for 1 organization", "Adding 1 missing attachment to 1 written thread")]
+    [InlineData(2, "2 threads and 2 attachments", "2 projects for 2 organizations", "Adding 2 missing attachments to 2 written threads")]
+    [InlineData(1000, "1,000 threads and 1,000 attachments", "1,000 projects for 1,000 organizations", "Adding 1,000 missing attachments to 1,000 written threads")]
+    public void Activity_NewTemplatePlurals(int n, string started, string projects, string repair)
     {
-        var e = Event(GenerationEventKind.RunStarted);
-        e.Threads = n;
-        e.WaveCount = n;
-        Assert.Equal("Started: " + expected, GenerationUiText.ActivityText(e).Text);
+        var run = Event(GenerationEventKind.RunStarted);
+        run.Threads = n;
+        // A zero attachment count drops the clause, so 0 uses the continued form to check the plural
+        run.Attachments = n == 0 ? 0 : n;
+        var side = Event(GenerationEventKind.SideProjectsReady);
+        side.Projects = n;
+        side.Organizations = n;
+        var fix = Event(GenerationEventKind.AttachmentRepairStarted);
+        fix.Attachments = n;
+        fix.Threads = n;
+
+        if (n > 0)
+            Assert.Equal("Started: " + started + " to write", GenerationUiText.ActivityText(run).Text);
+        Assert.EndsWith(projects, GenerationUiText.ActivityText(side).Text);
+        Assert.Equal(repair, GenerationUiText.ActivityText(fix).Text);
+    }
+
+    [Theory]
+    [InlineData(0, "Added 0 attachments to \"S\" and rewrote 0 EML files")]
+    [InlineData(1, "Added 1 attachment to \"S\" and rewrote 1 EML file")]
+    [InlineData(2, "Added 2 attachments to \"S\" and rewrote 2 EML files")]
+    [InlineData(1000, "Added 1,000 attachments to \"S\" and rewrote 1,000 EML files")]
+    public void Activity_AttachmentsAdded_Plurals(int n, string expected)
+    {
+        var e = Event(GenerationEventKind.AttachmentsAdded);
+        e.Subject = "S";
+        e.Attachments = n;
+        e.Files = n;
+        Assert.Equal(expected, GenerationUiText.ActivityText(e).Text);
     }
 
     // --- Progress ---
@@ -448,20 +906,72 @@ public class GenerationUiTextTests
         Assert.Equal("Wave 2 of 5: merging 4 new ledger details...", GenerationUiText.ProgressText(View(GenerationStage.Merging, 4)));
         Assert.Equal("Updating the answer key...", GenerationUiText.ProgressText(View(GenerationStage.UpdatingKey, 0)));
         Assert.Equal("Writing the story so far...", GenerationUiText.ProgressText(View(GenerationStage.WritingStory, 0)));
-        Assert.Equal("Stopping... finished threads are saved.", GenerationUiText.ProgressText(View(GenerationStage.Stopping, 0)));
+        Assert.Equal("Stopping... finished threads and attachments are saved.", GenerationUiText.ProgressText(View(GenerationStage.Stopping, 0)));
         Assert.Equal(GenerationUiText.StoppingText, GenerationUiText.ProgressText(View(GenerationStage.Stopping, 0)));
         Assert.Equal("", GenerationUiText.ProgressText(View(GenerationStage.Idle, 0)));
     }
 
-    [Theory]
-    [InlineData(0, "writing 0 threads...", "merging 0 new ledger details...")]
-    [InlineData(1, "writing 1 thread...", "merging 1 new ledger detail...")]
-    [InlineData(2, "writing 2 threads...", "merging 2 new ledger details...")]
-    [InlineData(1000, "writing 1,000 threads...", "merging 1,000 new ledger details...")]
-    public void ProgressText_Plurals(int n, string writing, string merging)
+    [Fact]
+    public void ProgressText_Writing_AttachmentClause()
     {
-        Assert.EndsWith(writing, GenerationUiText.ProgressText(View(GenerationStage.Writing, n)));
+        var v = View(GenerationStage.Writing, 3);
+        v.StageAttachments = 5;
+        Assert.Equal("Wave 2 of 5 (Mar 4 – Mar 17, 2024): writing 3 threads and 5 attachments...", GenerationUiText.ProgressText(v));
+    }
+
+    [Fact]
+    public void ProgressText_SideProjects()
+    {
+        Assert.Equal("Preparing side projects for 3 organizations...", GenerationUiText.ProgressText(View(GenerationStage.SideProjects, 3)));
+    }
+
+    [Fact]
+    public void ProgressText_NonRelevant_FromCounts()
+    {
+        var v = View(GenerationStage.NonRelevant, 0);
+        v.Counts = new GenerationCounts { NonRelevantTotal = 1200, NonRelevantDone = 30 };
+        Assert.Equal("Non-relevant mail: 30 of 1,200 threads written...", GenerationUiText.ProgressText(v));
+    }
+
+    [Fact]
+    public void ProgressText_Attachments_FromRepairRow()
+    {
+        var v = View(GenerationStage.Attachments, 0);
+        v.Waves = new List<WaveProgress>
+        {
+            new() { Index = 1, Threads = 5, Attachments = 9 },
+            new() { RowKind = StageRowKind.Attachments, Index = 3, Attachments = 12, AttachmentsDone = 3, AttachmentsFailed = 1, AttachmentsSkipped = 1 }
+        };
+        Assert.Equal("Adding missing attachments: 5 of 12 attachments...", GenerationUiText.ProgressText(v));
+    }
+
+    [Theory]
+    [InlineData(0, "writing 0 threads...", "merging 0 new ledger details...", "for 0 organizations...")]
+    [InlineData(1, "writing 1 thread and 1 attachment...", "merging 1 new ledger detail...", "for 1 organization...")]
+    [InlineData(2, "writing 2 threads and 2 attachments...", "merging 2 new ledger details...", "for 2 organizations...")]
+    [InlineData(1000, "writing 1,000 threads and 1,000 attachments...", "merging 1,000 new ledger details...", "for 1,000 organizations...")]
+    public void ProgressText_Plurals(int n, string writing, string merging, string side)
+    {
+        var w = View(GenerationStage.Writing, n);
+        w.StageAttachments = n;
+        Assert.EndsWith(writing, GenerationUiText.ProgressText(w));
         Assert.EndsWith(merging, GenerationUiText.ProgressText(View(GenerationStage.Merging, n)));
+        Assert.EndsWith(side, GenerationUiText.ProgressText(View(GenerationStage.SideProjects, n)));
+    }
+
+    [Theory]
+    [InlineData(1, "0 of 1 thread written...", "0 of 1 attachment...")]
+    [InlineData(2, "0 of 2 threads written...", "0 of 2 attachments...")]
+    [InlineData(1000, "0 of 1,000 threads written...", "0 of 1,000 attachments...")]
+    public void ProgressText_StagePlurals(int n, string nonRelevant, string attachments)
+    {
+        var nr = View(GenerationStage.NonRelevant, 0);
+        nr.Counts = new GenerationCounts { NonRelevantTotal = n };
+        var at = View(GenerationStage.Attachments, 0);
+        at.Waves = new List<WaveProgress> { new() { RowKind = StageRowKind.Attachments, Attachments = n } };
+
+        Assert.EndsWith(nonRelevant, GenerationUiText.ProgressText(nr));
+        Assert.EndsWith(attachments, GenerationUiText.ProgressText(at));
     }
 
     // --- Outcomes ---
@@ -471,23 +981,36 @@ public class GenerationUiTextTests
     {
         var line = GenerationUiText.OutcomeText(GenerationOutcome.Finished, Counts(total: 10, done: 10, emailsWritten: 30, files: 37, mailboxes: 6), "");
 
-        Assert.Equal("Done: 10 relevant threads written as 30 emails (37 EML files in 6 mailboxes). The answer key and story so far are updated.", line.Text);
+        Assert.Equal("Done: 10 threads written as 30 emails (37 EML files in 6 mailboxes). The answer key and story so far are updated.", line.Text);
         Assert.Equal(ActivityTone.Success, line.Tone);
     }
 
+    [Fact]
+    public void Outcome_FinishedClean_WithAttachments()
+    {
+        var c = Counts(total: 10, done: 10, emailsWritten: 30, files: 37, mailboxes: 6);
+        c.AttachmentsTotal = 18;
+        c.AttachmentsDone = 18;
+        Assert.Equal(
+            "Done: 10 threads written as 30 emails (37 EML files in 6 mailboxes), with 18 attachments. The answer key and story so far are updated.",
+            GenerationUiText.OutcomeText(GenerationOutcome.Finished, c, "").Text);
+    }
+
     [Theory]
-    [InlineData(0, "Done: 0 relevant threads written as 0 emails (0 EML files in 0 mailboxes).")]
-    [InlineData(1, "Done: 1 relevant thread written as 1 email (1 EML file in 1 mailbox).")]
-    [InlineData(2, "Done: 2 relevant threads written as 2 emails (2 EML files in 2 mailboxes).")]
-    [InlineData(1000, "Done: 1,000 relevant threads written as 1,000 emails (1,000 EML files in 1,000 mailboxes).")]
+    [InlineData(0, "Done: 0 threads written as 0 emails (0 EML files in 0 mailboxes).")]
+    [InlineData(1, "Done: 1 thread written as 1 email (1 EML file in 1 mailbox), with 1 attachment.")]
+    [InlineData(2, "Done: 2 threads written as 2 emails (2 EML files in 2 mailboxes), with 2 attachments.")]
+    [InlineData(1000, "Done: 1,000 threads written as 1,000 emails (1,000 EML files in 1,000 mailboxes), with 1,000 attachments.")]
     public void Outcome_FinishedClean_Plurals(int n, string expectedStart)
     {
-        var line = GenerationUiText.OutcomeText(GenerationOutcome.Finished, Counts(total: n, done: n, emailsWritten: n, files: n, mailboxes: n), "");
-        Assert.StartsWith(expectedStart, line.Text);
+        var c = Counts(total: n, done: n, emailsWritten: n, files: n, mailboxes: n);
+        c.AttachmentsTotal = n;
+        c.AttachmentsDone = n;
+        Assert.StartsWith(expectedStart, GenerationUiText.OutcomeText(GenerationOutcome.Finished, c, "").Text);
     }
 
     [Fact]
-    public void Outcome_FinishedWithWarningsOnly_DropsFailedClauseAndInstruction()
+    public void Outcome_FinishedWithWarningsOnly_DropsTail()
     {
         var line = GenerationUiText.OutcomeText(GenerationOutcome.Finished, Counts(total: 10, done: 10, warnings: 2), "");
 
@@ -496,31 +1019,50 @@ public class GenerationUiTextTests
     }
 
     [Fact]
-    public void Outcome_FinishedWithWarningsAndFailures()
+    public void Outcome_FinishedWithAllProblems_JoinsWithCommaAndAnd()
     {
-        var line = GenerationUiText.OutcomeText(GenerationOutcome.Finished, Counts(total: 10, done: 9, warnings: 2, failed: 1), "");
+        var c = Counts(total: 10, done: 9, warnings: 1, failed: 1);
+        c.AttachmentsWarnings = 1;
+        c.AttachmentsFailed = 2;
+        c.AttachmentsSkipped = 4;
 
-        Assert.Equal("Done with 2 warnings and 1 failed thread. The answer key marks them; click Retry Failed Threads to try the failed ones again.", line.Text);
+        var line = GenerationUiText.OutcomeText(GenerationOutcome.Finished, c, "");
+        Assert.Equal(
+            "Done with 2 warnings, 3 failed items and 4 skipped images and voicemails. The answer key marks them; click Retry Failed Items to try the failed ones again.",
+            line.Text);
         Assert.Equal(ActivityTone.Warning, line.Tone);
     }
 
     [Fact]
-    public void Outcome_FinishedWithFailuresOnly_DropsWarningClause()
+    public void Outcome_FinishedWithFailures_TailOnlyWhenHeaderButtonShows()
     {
-        var line = GenerationUiText.OutcomeText(GenerationOutcome.Finished, Counts(total: 10, done: 8, failed: 2), "");
+        var c = Counts(total: 10, done: 8, failed: 2);
+        Assert.Equal(
+            "Done with 2 failed items. The answer key marks them; click Retry Failed Items to try the failed ones again.",
+            GenerationUiText.OutcomeText(GenerationOutcome.Finished, c, "").Text);
+        Assert.Equal(
+            "Done with 2 failed items. The answer key marks them.",
+            GenerationUiText.OutcomeText(GenerationOutcome.Finished, c, "", retryButtonShown: false).Text);
+    }
 
-        Assert.Equal("Done with 2 failed threads. The answer key marks them; click Retry Failed Threads to try the failed ones again.", line.Text);
-        Assert.Equal(ActivityTone.Warning, line.Tone);
+    [Fact]
+    public void Outcome_FinishedWithSkippedOnly()
+    {
+        var c = Counts(total: 10, done: 10);
+        c.AttachmentsSkipped = 1;
+        Assert.Equal("Done with 1 skipped image or voicemail. The answer key marks them.",
+            GenerationUiText.OutcomeText(GenerationOutcome.Finished, c, "").Text);
     }
 
     [Theory]
-    [InlineData(1, "Done with 1 warning and 1 failed thread.")]
-    [InlineData(2, "Done with 2 warnings and 2 failed threads.")]
-    [InlineData(1000, "Done with 1,000 warnings and 1,000 failed threads.")]
-    public void Outcome_WarningPlurals(int n, string expectedStart)
+    [InlineData(1, "Done with 1 warning, 1 failed item and 1 skipped image or voicemail.")]
+    [InlineData(2, "Done with 2 warnings, 2 failed items and 2 skipped images and voicemails.")]
+    [InlineData(1000, "Done with 1,000 warnings, 1,000 failed items and 1,000 skipped images and voicemails.")]
+    public void Outcome_ProblemPlurals(int n, string expectedStart)
     {
-        var line = GenerationUiText.OutcomeText(GenerationOutcome.Finished, Counts(total: 5000, done: 1000, warnings: n, failed: n), "");
-        Assert.StartsWith(expectedStart, line.Text);
+        var c = Counts(total: 5000, done: 1000, warnings: n, failed: n);
+        c.AttachmentsSkipped = n;
+        Assert.StartsWith(expectedStart, GenerationUiText.OutcomeText(GenerationOutcome.Finished, c, "").Text);
     }
 
     [Fact]
@@ -533,11 +1075,22 @@ public class GenerationUiTextTests
     }
 
     [Fact]
+    public void Outcome_Cancelled_WithAttachments()
+    {
+        var c = Counts(total: 10, done: 4);
+        c.AttachmentsTotal = 12;
+        c.AttachmentsDone = 3;
+        Assert.Equal(
+            "Cancelled. 4 of 10 threads and 3 of 12 attachments are saved. Click Continue Generating to write the rest.",
+            GenerationUiText.OutcomeText(GenerationOutcome.Cancelled, c, "").Text);
+    }
+
+    [Fact]
     public void Outcome_Fatal_PointsToApiConfiguration()
     {
         var line = GenerationUiText.OutcomeText(GenerationOutcome.Fatal, Counts(), "Invalid API key");
 
-        Assert.Equal("Generation stopped: Invalid API key. Finished threads are saved. Fix the problem on the API Configuration step, then click Continue Generating.", line.Text);
+        Assert.Equal("Generation stopped: Invalid API key. Finished threads and attachments are saved. Fix the problem on the API Configuration step, then click Continue Generating.", line.Text);
         Assert.Equal(ActivityTone.Danger, line.Tone);
     }
 
@@ -558,6 +1111,16 @@ public class GenerationUiTextTests
         Assert.StartsWith("Generation stopped: Spend limit reached. Finished", line.Text);
     }
 
+    [Fact]
+    public void Outcome_NoBannedWords()
+    {
+        var c = Counts(warnings: 1, failed: 1);
+        c.AttachmentsSkipped = 1;
+        c.AttachmentsTotal = 2;
+        foreach (var outcome in Enum.GetValues<GenerationOutcome>())
+            AssertNoBannedWords(GenerationUiText.OutcomeText(outcome, c, "m").Text);
+    }
+
     // --- File and maintenance status lines ---
 
     [Fact]
@@ -569,13 +1132,13 @@ public class GenerationUiTextTests
         Assert.Equal(
             "Could not update answer-key.csv: Access denied. Your emails are saved; the file is written again when you leave this step.",
             GenerationUiText.FileWriteFailedText("answer-key.csv", "Access denied."));
-        Assert.Equal("Cleared the earlier run: deleted 1,200 EML files and the narrative ledger.", GenerationUiText.StartedOverText(1200));
+        Assert.Equal("Cleared the earlier run: deleted 1,200 EML files, the narrative ledger and the side projects.", GenerationUiText.StartedOverText(1200));
         Assert.Equal("RD-000123.eml is no longer in the case folder.", GenerationUiText.MissingEmlText("RD-000123"));
     }
 
     [Theory]
     [InlineData(0, "deleted 0 EML files")]
-    [InlineData(1, "deleted 1 EML file ")]
+    [InlineData(1, "deleted 1 EML file,")]
     [InlineData(2, "deleted 2 EML files")]
     [InlineData(1000, "deleted 1,000 EML files")]
     public void StartedOver_Plurals(int n, string expected)

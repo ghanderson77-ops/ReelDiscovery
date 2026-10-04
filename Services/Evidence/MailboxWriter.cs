@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using MimeKit;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
 
@@ -60,7 +62,9 @@ public class MailboxWriter
 
     /// <summary>
     /// Builds the EML: plan headers (Message-ID, threading, Date with the sender's offset, DocID header) and a
-    /// multipart/alternative body with text/plain first and text/html second.
+    /// multipart/alternative body with text/plain first and text/html second. Inline images join the HTML in a
+    /// multipart/related; file attachments follow the body in plan order inside a multipart/mixed (ATT-03). Every
+    /// attachment part carries the DocID header of its answer-key row.
     /// </summary>
     public static MimeMessage BuildMime(ComposedEmail email)
     {
@@ -88,11 +92,12 @@ public class MailboxWriter
         message.Headers.Add(DocIdHeader, email.Planned.DocId);
 
         // D-16: multipart/alternative, plain text first so clients prefer the HTML part
-        var body = new BodyBuilder { TextBody = email.PlainText, HtmlBody = email.Html }.ToMessageBody();
+        var builder = new BodyBuilder { TextBody = email.PlainText, HtmlBody = email.Html };
+        AddAttachments(builder, email.Attachments ?? new List<ComposedAttachment>());
+        var body = builder.ToMessageBody();
 
-        // Boundary derived from the message identity so rewriting the same email gives byte-identical files
-        if (body is Multipart multipart)
-            multipart.Boundary = BoundaryFor(email);
+        // Boundaries derived from the message identity so rewriting the same email gives byte-identical files (D-26)
+        SetBoundaries(body, email, "0");
         message.Body = body;
 
         // Long or non-ASCII lines get a transfer encoding, keeping every line within RFC 5322 limits
@@ -142,6 +147,73 @@ public class MailboxWriter
         }
 
         return written;
+    }
+
+    private static void AddAttachments(BodyBuilder builder, IEnumerable<ComposedAttachment> attachments)
+    {
+        foreach (var attachment in attachments)
+        {
+            if (attachment == null || attachment.Bytes == null || attachment.Bytes.Length == 0)
+                continue;
+
+            // T-06-30: names may come from model titles; keep only a safe bare file name
+            var name = Path.GetFileName(attachment.FileName ?? string.Empty);
+            if (!CorpusPlan.IsSafeFileName(name))
+                continue;
+
+            if (attachment.Kind == AttachmentType.Image && attachment.IsInline && !string.IsNullOrEmpty(attachment.ContentId))
+            {
+                // Inline image: referenced from the HTML by cid:, so it sits beside the HTML in multipart/related
+                var part = builder.LinkedResources.Add(name, attachment.Bytes, new ContentType("image", "png"));
+                part.ContentId = attachment.ContentId;
+                part.Headers.Add(DocIdHeader, attachment.DocId);
+                continue;
+            }
+
+            var file = builder.Attachments.Add(name, attachment.Bytes, ContentTypeFor(attachment.Kind));
+            file.Headers.Add(DocIdHeader, attachment.DocId);
+        }
+    }
+
+    private static ContentType ContentTypeFor(AttachmentType kind)
+    {
+        switch (kind)
+        {
+            case AttachmentType.Word:
+                return new ContentType("application", "vnd.openxmlformats-officedocument.wordprocessingml.document");
+            case AttachmentType.Excel:
+                return new ContentType("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            case AttachmentType.PowerPoint:
+                return new ContentType("application", "vnd.openxmlformats-officedocument.presentationml.presentation");
+            case AttachmentType.Image:
+                return new ContentType("image", "png");
+            case AttachmentType.CalendarInvite:
+                // UI-SPEC S5: an invite, not a published calendar
+                var calendar = new ContentType("text", "calendar") { Charset = "utf-8" };
+                calendar.Parameters.Add("method", "REQUEST");
+                return calendar;
+            case AttachmentType.Voicemail:
+                return new ContentType("audio", "mpeg");
+            default:
+                return new ContentType("application", "octet-stream");
+        }
+    }
+
+    private static void SetBoundaries(MimeEntity entity, ComposedEmail email, string path)
+    {
+        if (entity is not Multipart multipart)
+            return;
+
+        // Root formula unchanged: Phase 5 EMLs without attachments stay byte-identical
+        multipart.Boundary = path == "0" ? BoundaryFor(email) : NestedBoundaryFor(email, path);
+        for (var i = 0; i < multipart.Count; i++)
+            SetBoundaries(multipart[i], email, $"{path}.{i}");
+    }
+
+    private static string NestedBoundaryFor(ComposedEmail email, string path)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{email.Planned.DocId}|{email.MessageId}|{path}"));
+        return "=-rd-" + Convert.ToHexString(hash, 0, 12).ToLowerInvariant();
     }
 
     private static string BoundaryFor(ComposedEmail email)

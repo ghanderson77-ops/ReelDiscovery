@@ -330,7 +330,7 @@ public class MailboxWriterTests : IDisposable
         Assert.Equal("PL-000044", excel.Headers[MailboxWriter.DocIdHeader]);
 
         using var decoded = new MemoryStream();
-        excel.Content.DecodeTo(decoded);
+        excel.Content!.DecodeTo(decoded);
         Assert.Equal(email.Attachments[1].Bytes, decoded.ToArray());
     }
 
@@ -408,7 +408,7 @@ public class MailboxWriterTests : IDisposable
 
         Assert.Equal(Serialize(Build()), Serialize(Build()));
 
-        var multiparts = Multiparts(MailboxWriter.BuildMime(Build()).Body).ToList();
+        var multiparts = Multiparts(MailboxWriter.BuildMime(Build()).Body!).ToList();
         Assert.Equal(3, multiparts.Count);
         var boundaries = multiparts.Select(m => m.Boundary).ToList();
         Assert.All(boundaries, b => Assert.StartsWith("=-rd-", b));

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-13-PLAN.md
-last_updated: "2026-10-04T22:41:43.426Z"
+stopped_at: Completed 06-15-PLAN.md
+last_updated: "2026-10-04T22:54:45.618Z"
 last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 91
-  percent: 86
+  completed_plans: 92
+  percent: 87
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 11 of 25
+Plan: 12 of 25
 Status: Ready to execute
 Last activity: 2026-10-04
 
@@ -142,6 +142,7 @@ Progress: [██████████] 100%
 | Phase 6 P09 | 40 min | 2 tasks | 7 files |
 | Phase 06 P10 | 35 min | 2 tasks | 5 files |
 | Phase 6 P13 | 25min | 2 tasks | 12 files |
+| Phase 06 P15 | 25min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -394,6 +395,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-13: GenerationEntryInput.LatestAttemptEnded = newest attempt ended with outcome Finished (replay.LatestAttemptEnded and LastRunEnded.Outcome == Finished); cancelled or fatal runs read The last run did not finish
 - [Phase 06]: 06-13: ThreadWritten ledger clause only when GenerationEvent.Relevant; ThreadUnitOfWork and GenerationHistory set Relevant from thread relevance
 - [Phase 06]: 06-13: Ready card EstimateLine and MediaNotice follow the body label until 06-22; attachment counts in banner, CG1 and entry stay 0 until 06-23
+- [Phase 06]: 06-15: Story tier = relevant + Decoy; Volume tier = other filler; PriceWork(PricedWork) is the single pricing path for Ready card and remaining cost
+- [Phase 06]: 06-15: Start Over sweeps planned copies of every thread; side world and cast voices go with the journal
 
 ### Pending Todos
 
@@ -415,6 +418,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T22:41:36.069Z
-Stopped at: Completed 06-13-PLAN.md
+Last session: 2026-10-04T22:54:45.612Z
+Stopped at: Completed 06-15-PLAN.md
 Resume file: None

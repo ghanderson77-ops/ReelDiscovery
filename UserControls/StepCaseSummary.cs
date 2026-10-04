@@ -850,15 +850,25 @@ public class StepCaseSummary : UserControl, IWizardStep
         {
             Generated = generation != null && HasGenerated(generation),
             EarlierPlan = generation != null && generation.RunPlanId != corpus!.PlanId,
-            Total = generation?.ThreadsTotal ?? 0,
-            Written = generation == null ? 0 : generation.ThreadsWritten + generation.ThreadsWithWarnings,
-            Warnings = generation?.ThreadsWithWarnings ?? 0,
-            Failed = generation?.ThreadsFailed ?? 0,
+            // ThreadsTotal..ThreadsFailed are the relevant threads; "Written" counts include kept-with-warnings
+            RelevantTotal = generation?.ThreadsTotal ?? 0,
+            RelevantWritten = generation == null ? 0 : generation.ThreadsWritten + generation.ThreadsWithWarnings,
+            NonRelevantTotal = generation?.NonRelevantTotal ?? 0,
+            NonRelevantWritten = generation == null ? 0 : generation.NonRelevantWritten + generation.NonRelevantWithWarnings,
+            AttachmentsTotal = generation?.AttachmentsTotal ?? 0,
+            AttachmentsWritten = generation == null ? 0 : generation.AttachmentsWritten + generation.AttachmentsWithWarnings,
+            AttachmentsSkipped = generation?.AttachmentsSkipped ?? 0,
+            ItemWarnings = generation == null ? 0
+                : generation.ThreadsWithWarnings + generation.NonRelevantWithWarnings + generation.AttachmentsWithWarnings,
+            ItemFailed = generation == null ? 0
+                : generation.ThreadsFailed + generation.NonRelevantFailed + generation.AttachmentsFailed,
             Files = generation?.FilesWritten ?? 0,
             Mailboxes = generation?.Mailboxes ?? 0,
             FolderExists = mailboxesPath != null && Directory.Exists(mailboxesPath)
         });
         ApplySummaryRow(_rowMailboxes, mailboxes);
+        // Line 3 ellipsizes; the full relevant / non-relevant / attachment breakdown is in its tooltip (06-UI-SPEC S2)
+        _toolTip.SetToolTip(_rowMailboxes.Line3!, mailboxes.Line3Tooltip);
         _btnOpenMailboxes.Visible = mailboxes.ShowPrimary;
         _btnGenerateEmails.Visible = mailboxes.ShowSecondary;
 

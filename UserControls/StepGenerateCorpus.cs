@@ -297,7 +297,7 @@ public partial class StepGenerateCorpus : UserControl
         bannerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 1: Body
         _lblBannerHeading = new Label
         {
-            Text = GenerationUiText.BannerHeading,
+            Text = GenerationUiText.BannerHeading(runEnded: false),
             AutoSize = true,
             UseMnemonic = false,
             Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(4)),
@@ -842,7 +842,9 @@ public partial class StepGenerateCorpus : UserControl
         ArgumentNullException.ThrowIfNull(content);
         _cardKind = kind;
         _lblStateHeading.Text = content.Heading;
-        _lblStateBody.Text = content.Body;
+        // The Ready card's estimate and media notice lines get their own Small labels in 06-22; until then they follow the body
+        _lblStateBody.Text = string.Join(Environment.NewLine + Environment.NewLine,
+            new[] { content.Body, content.EstimateLine, content.MediaNotice }.Where(t => t.Length > 0));
         ButtonHelper.StyleButton(_btnStateAction, content.Danger ? ButtonStyle.Danger : ButtonStyle.Primary);
         _btnStateAction.Text = content.ButtonText;
         if (_btnStateAction is ThemedButton themed)
@@ -862,12 +864,16 @@ public partial class StepGenerateCorpus : UserControl
     /// Shows the dashboard (tiles, waves, activity) after a run or on reopen: the partial-run banner when threads are
     /// left, Start Over in the header, and Retry Failed Threads when a finished run has failures (UI-SPEC Row 0 table).
     /// </summary>
-    internal void ShowDashboard(bool banner, int done, int total, int failed, bool finishedWithFailures)
+    internal void ShowDashboard(bool banner, int done, int total, int failed, bool finishedWithFailures, string? bannerHeading = null)
     {
         SetRunChrome(false);
         _bannerShown = banner;
         if (banner)
-            _lblBannerBody.Text = GenerationUiText.BannerBody(done, total, failed);
+        {
+            // Attachment counts reach the banner in 06-23; until then the body counts threads only
+            _lblBannerHeading.Text = bannerHeading ?? GenerationUiText.BannerHeading(runEnded: false);
+            _lblBannerBody.Text = GenerationUiText.BannerBody(done, total, 0, 0, failed);
+        }
         _btnStartOver.Visible = true;
         _btnRetryFailed.Visible = !banner && finishedWithFailures;
         _btnRetryFailed.Margin = new Padding(LogicalToDeviceUnits(Theme.SmallGap), 0, 0, 0);

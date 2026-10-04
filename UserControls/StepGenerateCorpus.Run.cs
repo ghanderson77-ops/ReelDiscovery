@@ -150,6 +150,9 @@ public partial class StepGenerateCorpus : IWizardStep
                 input.Total = data.State.TotalThreads;
                 input.Written = data.State.Written + data.State.Warnings;
                 input.Failed = data.State.Failed;
+                // A cancelled or stopped attempt also journals RunEnded; only a Finished one makes it "ended" (UI-SPEC Row 2)
+                input.LatestAttemptEnded = data.Replay.LatestAttemptEnded
+                    && data.Replay.LastRunEnded?.Outcome == GenerationOutcome.Finished;
             }
         }
 
@@ -179,7 +182,7 @@ public partial class StepGenerateCorpus : IWizardStep
                 ApplyView(data!.View!);
                 var counts = data.View!.Counts;
                 ShowDashboard(decision == GenerationEntry.PartialDashboard, counts.DoneThreads, counts.TotalThreads,
-                    counts.FailedThreads, counts.FailedThreads > 0);
+                    counts.FailedThreads, counts.FailedThreads > 0, GenerationUiText.EntryBannerHeading(input));
                 return;
         }
     }
@@ -571,7 +574,8 @@ public partial class StepGenerateCorpus : IWizardStep
             return;
 
         var done = _lastCounts?.DoneThreads ?? 0;
-        var (title, text) = GenerationUiText.CG1CancelGeneration(done);
+        // Attachment counts reach the confirmation in 06-23
+        var (title, text) = GenerationUiText.CG1CancelGeneration(done, 0);
         if (!Confirm(title, text, MessageBoxIcon.Question))
             return;
 
@@ -853,9 +857,17 @@ public partial class StepGenerateCorpus : IWizardStep
         var relevant = RelevantThreads(plan);
         var model = _state.StoryModelConfig;
         var cost = GenerationCostEstimator.Estimate(plan, model).RelevantCost;
-        return GenerationUiText.StateCard(GenerationStateCard.Ready, relevant.Count,
-            relevant.Sum(t => t.Messages.Count(m => m != null)), WavePlanner.Plan(plan).Count, cost,
-            model?.DisplayName ?? _state.StoryModelId, 0, string.Empty);
+        var modelName = model?.DisplayName ?? _state.StoryModelId;
+        // Today's run writes relevant threads only; 06-23 adds non-relevant threads, the Volume model and media
+        return GenerationUiText.ReadyCard(new GenerationReadyInput
+        {
+            RelevantThreads = relevant.Count,
+            Emails = relevant.Sum(t => t.Messages.Count(m => m != null)),
+            Waves = WavePlanner.Plan(plan).Count,
+            StoryCost = cost,
+            StoryModel = modelName,
+            VolumeModel = modelName
+        });
     }
 
     private static string NoticeFor(CorpusPlan plan)

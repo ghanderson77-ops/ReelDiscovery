@@ -65,6 +65,16 @@ public class GenerationEntryInput
     // Includes kept-with-warnings
     public int Written;
     public int Failed;
+
+    public int AttachmentsTotal;
+
+    // Attachments with a final record: Written + Warnings + Failed + Skipped (Skipped media alone never makes a run unfinished)
+    public int AttachmentsFinal;
+
+    // True only when the newest RunStarted has a RunEnded with outcome Finished after it (JournalReplay.LatestAttemptEnded
+    // plus the outcome): an older RunEnded never hides an interrupted Continue, and a cancelled or stopped run did not
+    // finish (06-UI-SPEC Row 2, review MEDIUM 06-13)
+    public bool LatestAttemptEnded;
 }
 
 public enum GenerationStateCard
@@ -83,6 +93,43 @@ public class GenerationCardContent
 
     // Danger button (Start Over...) instead of Primary
     public bool Danger;
+
+    // Ready card only: the Small estimate line and the Warning media notice (empty when not shown)
+    public string EstimateLine = "";
+    public string MediaNotice = "";
+}
+
+/// <summary>
+/// What the Ready card states (06-UI-SPEC S1 Row 4): plan counts and the Story / Volume / media estimate (D-29).
+/// </summary>
+public class GenerationReadyInput
+{
+    public int RelevantThreads;
+    public int NonRelevantThreads;
+    public int Emails;
+    public int Waves;
+    public int Attachments;
+    public decimal StoryCost;
+    public decimal VolumeCost;
+    public decimal MediaCost;
+    public string StoryModel = "";
+    public string VolumeModel = "";
+
+    // Image + voicemail attachments in the plan
+    public int MediaPlanned;
+
+    // A tested OpenAI key is set up this session (PROV-06)
+    public bool MediaAvailable;
+}
+
+/// <summary>
+/// Media banner copy (06-UI-SPEC S1 Row 2, Decision 2); an empty ButtonText means no button.
+/// </summary>
+public class MediaBannerContent
+{
+    public string Heading = "";
+    public string Body = "";
+    public string ButtonText = "";
 }
 
 /// <summary>
@@ -103,6 +150,9 @@ public class SummaryRowContent
     public SummaryTone Line3Tone;
     public SummaryTone DotTone;
 
+    // Full line-3 breakdown (line 3 itself ellipsizes); empty when there is none
+    public string Line3Tooltip = "";
+
     // Mailboxes: Open Mailboxes Folder / Generate Emails. Story so far: Open in Word / Export Story So Far
     public bool ShowPrimary;
     public bool ShowSecondary;
@@ -112,12 +162,21 @@ public class MailboxesRowInput
 {
     public bool Generated;
     public bool EarlierPlan;
-    public int Total;
 
-    // Includes kept-with-warnings
-    public int Written;
-    public int Warnings;
-    public int Failed;
+    // Thread "Written" counts include kept-with-warnings
+    public int RelevantTotal;
+    public int RelevantWritten;
+    public int NonRelevantTotal;
+    public int NonRelevantWritten;
+
+    // Attachments written include kept-with-warnings; Skipped is separate
+    public int AttachmentsTotal;
+    public int AttachmentsWritten;
+    public int AttachmentsSkipped;
+
+    // Item counts: threads + attachments
+    public int ItemWarnings;
+    public int ItemFailed;
     public int Files;
     public int Mailboxes;
     public bool FolderExists;
@@ -531,11 +590,17 @@ public static class GenerationUiText
         // Never auto-starts: generation spends real money (UI-SPEC rule 5, U3)
         if (!input.HasSavedRun)
             return GenerationEntry.ReadyCard;
-        return input.Written + input.Failed < input.Total
+
+        // Unfinished = any thread or attachment without a final record; Skipped counts as final (media banner instead)
+        return input.Written + input.Failed < input.Total || input.AttachmentsFinal < input.AttachmentsTotal
             ? GenerationEntry.PartialDashboard
             : GenerationEntry.FinishedDashboard;
     }
 
+    /// <summary>
+    /// Not-approved, Plan-changed and Unreadable cards; the Ready branch delegates to <see cref="ReadyCard"/> with one
+    /// model and no media.
+    /// </summary>
     public static GenerationCardContent StateCard(
         GenerationStateCard card, int threads, int emails, int waves, decimal cost, string modelName, int earlierThreads, string reason)
     {
@@ -561,18 +626,65 @@ public static class GenerationUiText
                 ButtonText = "Start Over...",
                 Danger = true
             },
-            _ => new GenerationCardContent
+            _ => ReadyCard(new GenerationReadyInput
             {
-                Heading = "Ready to write the relevant emails",
-                Body = $"Generate Emails writes the {Plural(threads, "relevant thread", "relevant threads")} ({Plural(emails, "email", "emails")}) from the approved plan, oldest first, in {Plural(waves, "wave", "waves")}. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later. Estimated cost: ≈{Money(cost)} on {modelName}, ±50%.",
-                ButtonText = "Generate Emails"
-            }
+                RelevantThreads = threads,
+                Emails = emails,
+                Waves = waves,
+                StoryCost = cost,
+                StoryModel = modelName,
+                VolumeModel = modelName
+            })
         };
     }
 
-    // --- Partial-run banner ---
+    /// <summary>
+    /// Ready card (06-UI-SPEC S1 Row 4): body in run order, the estimate line split Story / Volume / media (one model
+    /// name when both are the same), and the Warning media notice when media is planned without a tested OpenAI key.
+    /// </summary>
+    public static GenerationCardContent ReadyCard(GenerationReadyInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var relevant = Plural(input.RelevantThreads, "relevant thread", "relevant threads");
+        var waves = Plural(input.Waves, "wave", "waves");
+        var order = input.NonRelevantThreads > 0
+            ? $"{relevant} first, oldest first in {waves}, then the {Plural(input.NonRelevantThreads, "non-relevant thread", "non-relevant threads")}"
+            : $"{relevant}, oldest first in {waves}";
 
-    public const string BannerHeading = "The last run did not finish.";
+        var mediaPlanned = input.MediaPlanned > 0;
+        var mediaCost = mediaPlanned ? input.MediaCost : 0m;
+        var total = input.StoryCost + input.VolumeCost + mediaCost;
+        var mediaClause = mediaPlanned ? $" · images and voicemail ≈{Money(mediaCost)}" : "";
+        var estimate = string.Equals(input.StoryModel, input.VolumeModel, StringComparison.Ordinal)
+            ? $"Estimated cost ≈{Money(total)} on {input.StoryModel}, ±50%{mediaClause}"
+            : $"Estimated cost ≈{Money(total)}, ±50%: {input.StoryModel} ≈{Money(input.StoryCost)} · {input.VolumeModel} ≈{Money(input.VolumeCost)}{mediaClause}";
+
+        var notice = mediaPlanned && !input.MediaAvailable
+            ? $"{Plural(input.MediaPlanned, "image or voicemail", "images and voicemails")} {(input.MediaPlanned == 1 ? "is" : "are")} planned, but no tested OpenAI key is set up this session, so they will be marked Skipped. Test an OpenAI key on the API Configuration step to include them."
+            : "";
+
+        return new GenerationCardContent
+        {
+            Heading = "Ready to write the corpus",
+            Body = $"Generate Emails writes the {order}: {Plural(input.Emails, "email", "emails")} in total{WithAttachments(input.Attachments)}. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later.",
+            ButtonText = "Generate Emails",
+            EstimateLine = estimate,
+            MediaNotice = notice
+        };
+    }
+
+    // --- Partial-run and media banners ---
+
+    /// <summary>
+    /// "The last run did not finish." when the latest attempt did not end (cancelled, crashed, stopped); "Part of the
+    /// corpus is not written yet." when it ended but plan items have no record (for example a Phase 5 run).
+    /// </summary>
+    public static string BannerHeading(bool runEnded) =>
+        runEnded ? "Part of the corpus is not written yet." : "The last run did not finish.";
+
+    // Entry heading follows the latest run attempt, never an older RunEnded (review MEDIUM 06-13)
+    public static string EntryBannerHeading(GenerationEntryInput input) => BannerHeading(input.LatestAttemptEnded);
+
     public const string BannerButton = "Continue Generating";
 
     // Header button (06-UI-SPEC Row 0): shown when a finished run has failed threads or attachments and no media banner button
@@ -581,27 +693,60 @@ public static class GenerationUiText
     public const string RetryFailedTooltip =
         "Writes the failed threads and attachments again. Emails that are already saved are rewritten only when one of their attachments is added.";
 
-    public static string BannerBody(int done, int total, int failed)
+    /// <summary>
+    /// Partial-run banner body; <paramref name="failedItems"/> counts threads + attachments.
+    /// </summary>
+    public static string BannerBody(int threadsDone, int threadsTotal, int attachmentsDone, int attachmentsTotal, int failedItems)
     {
-        var failedClause = failed > 0 ? $", and tries the {Plural(failed, "failed thread", "failed threads")} again" : "";
-        return $"{N(done)} of {Plural(total, "relevant thread", "relevant threads")} are written and saved. Continue Generating writes the rest and keeps everything already saved{failedClause}.";
+        var failedClause = failedItems > 0 ? $", and tries the {Plural(failedItems, "failed item", "failed items")} again" : "";
+        return $"{N(threadsDone)} of {Plural(threadsTotal, "thread", "threads")}{AttachmentProgress(attachmentsDone, attachmentsTotal)} are written and saved. Continue Generating writes the rest and keeps everything already saved{failedClause}.";
+    }
+
+    /// <summary>
+    /// Media banner after a finished run with Skipped images or voicemails. With media available now the button is
+    /// Create Skipped Media, or Retry Failed and Skipped Items when failed items exist too; without it there is no button.
+    /// </summary>
+    public static MediaBannerContent MediaBanner(int skipped, int failedItems, bool mediaAvailable, string reason)
+    {
+        var subject = $"{Plural(skipped, "image or voicemail", "images and voicemails")} {(skipped == 1 ? "was" : "were")} not created";
+        const string saved = "Their emails are saved without them, and the answer key marks them Skipped.";
+        if (!mediaAvailable)
+        {
+            return new MediaBannerContent
+            {
+                Heading = "Some images and voicemails were skipped.",
+                Body = $"{subject} because no tested OpenAI key is set up this session. {saved} Test an OpenAI key on the API Configuration step, then come back here."
+            };
+        }
+
+        var button = failedItems > 0 ? "Retry Failed and Skipped Items" : "Create Skipped Media";
+        return new MediaBannerContent
+        {
+            Heading = "Some images and voicemails were skipped.",
+            Body = $"{subject}{Colon(reason)}. {saved} {button} creates them and rewrites the affected emails in every mailbox.",
+            ButtonText = button
+        };
     }
 
     // --- Confirmations (MessageBox, default button = the safe choice) ---
 
-    public static (string Title, string Text) CG1CancelGeneration(int done) =>
-        ("Cancel Generation",
-            $"Stop generating? The {Plural(done, "thread", "threads")} already written {(done == 1 ? "stays" : "stay")} saved. Threads in progress are discarded and can be written later with Continue Generating.");
+    public static (string Title, string Text) CG1CancelGeneration(int threads, int attachments)
+    {
+        var written = Plural(threads, "thread", "threads") + (attachments > 0 ? " and " + Plural(attachments, "attachment", "attachments") : "");
+        var verb = threads + attachments == 1 ? "stays" : "stay";
+        return ("Cancel Generation",
+            $"Stop generating? The {written} already written {verb} saved. Items in progress are discarded and can be written later with Continue Generating.");
+    }
 
     public static (string Title, string Text) CG2StartOver(int files) =>
         ("Start Over",
-            $"Delete the {Plural(files, "generated EML file", "generated EML files")} and the narrative ledger, and reset the answer key to Planned? This cannot be undone. The corpus plan and case guide are kept.");
+            $"Delete the {Plural(files, "generated EML file", "generated EML files")} (relevant and non-relevant, with their attachments), the narrative ledger and the side projects, and reset the answer key to Planned? This cannot be undone. The corpus plan and case guide are kept.");
 
     public static (string Title, string Text) CG3CloseDuringRun() =>
         ("Stop Generating?",
-            "Emails are still being written. Close and stop? Finished threads are saved; threads in progress are discarded and can be written later with Continue Generating.");
+            "Emails are still being written. Close and stop? Finished threads and attachments are saved; items in progress are discarded and can be written later with Continue Generating.");
 
-    // --- Case Summary rows (S3) ---
+    // --- Case Summary rows (S2) ---
 
     public static SummaryRowContent MailboxesRow(MailboxesRowInput input)
     {
@@ -617,29 +762,42 @@ public static class GenerationUiText
         {
             row.Line3 = "Not generated yet";
             row.Line3Tone = SummaryTone.Muted;
+            row.DotTone = row.Line3Tone;
+            return row;
         }
-        else if (input.EarlierPlan)
+
+        var threadsTotal = input.RelevantTotal + input.NonRelevantTotal;
+        var threadsWritten = input.RelevantWritten + input.NonRelevantWritten;
+        var complete = threadsWritten >= threadsTotal && input.AttachmentsWritten >= input.AttachmentsTotal
+            && input.ItemWarnings == 0 && input.ItemFailed == 0 && input.AttachmentsSkipped == 0;
+
+        if (input.EarlierPlan)
         {
             row.Line3 = "Written for an earlier plan. Start over on Generate Corpus.";
             row.Line3Tone = SummaryTone.Warning;
         }
-        else if (input.Written >= input.Total && input.Warnings == 0 && input.Failed == 0)
+        else if (complete)
         {
-            row.Line3 = $"All {Plural(input.Total, "relevant thread", "relevant threads")} written";
+            row.Line3 = $"All {Plural(threadsTotal, "thread", "threads")}{(input.AttachmentsTotal > 0 ? " and " + Plural(input.AttachmentsTotal, "attachment", "attachments") : "")} written";
             row.Line3Tone = SummaryTone.Success;
         }
         else
         {
-            // Zero clauses are dropped
-            var text = $"{N(input.Written)} of {N(input.Total)} relevant threads written";
-            if (input.Warnings > 0)
-                text += $" · {N(input.Warnings)} with warnings";
-            if (input.Failed > 0)
-                text += $" · {N(input.Failed)} failed";
+            // Zero clauses are dropped; warnings, failed and skipped are item counts (threads + attachments)
+            var text = $"{N(threadsWritten)} of {N(threadsTotal)} threads written";
+            if (input.ItemWarnings > 0)
+                text += $" · {Plural(input.ItemWarnings, "item", "items")} with warnings";
+            if (input.ItemFailed > 0)
+                text += $" · {Plural(input.ItemFailed, "failed item", "failed items")}";
+            if (input.AttachmentsSkipped > 0)
+                text += $" · {Plural(input.AttachmentsSkipped, "skipped item", "skipped items")}";
             row.Line3 = text;
             row.Line3Tone = SummaryTone.Warning;
         }
 
+        var skippedClause = input.AttachmentsSkipped > 0 ? $" ({N(input.AttachmentsSkipped)} skipped)" : "";
+        row.Line3Tooltip =
+            $"Relevant: {N(input.RelevantWritten)} of {Plural(input.RelevantTotal, "thread", "threads")}. Non-relevant: {N(input.NonRelevantWritten)} of {Plural(input.NonRelevantTotal, "thread", "threads")}. Attachments: {N(input.AttachmentsWritten)} of {N(input.AttachmentsTotal)}{skippedClause}.";
         row.DotTone = row.Line3Tone;
         return row;
     }
@@ -676,6 +834,9 @@ public static class GenerationUiText
 
     public static string AnswerKeyRunClause(DateTime writtenLocal, int generated, int planned) =>
         $"Written {DateTimeText(writtenLocal)} · {N(generated)} generated, {N(planned)} planned";
+
+    // Answer key row tooltip addition: Skipped rows count as neither generated nor planned (06-UI-SPEC S2)
+    public static string AnswerKeyRunTooltip(int skipped) => $"{N(skipped)} skipped";
 
     public static string StoryMissingText(string fileName) =>
         $"{fileName} is no longer in the case folder. Click Export Story So Far to write it again.";

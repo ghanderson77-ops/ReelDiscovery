@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 6 UI-SPEC approved
-last_updated: "2026-10-04T20:50:21.256Z"
+stopped_at: Completed 06-07-PLAN.md
+last_updated: "2026-10-04T21:04:33.548Z"
 last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 85
-  percent: 80
+  completed_plans: 86
+  percent: 81
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 5 of 25
+Plan: 6 of 25
 Status: Ready to execute
 Last activity: 2026-10-04
 
@@ -136,6 +136,7 @@ Progress: [██████████] 100%
 | Phase 06 P02 | 11min | 2 tasks | 8 files |
 | Phase 06 P03 | 16min | 2 tasks | 6 files |
 | Phase 06 P04 | 12min | 2 tasks | 7 files |
+| Phase 06 P07 | 45min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -376,6 +377,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-03: ICS DESCRIPTION keeps escaped line breaks; SUMMARY/LOCATION/CN collapse them to spaces; a blank UID falls back to SHA-256 (never random)
 - [Phase 06]: 06-04: Media seam (IMediaGenerator) never throws except on user cancel; 401/403 and quota/billing 429 -> Stopped, other 429/5xx/malformed -> Failed (retryable)
 - [Phase 06]: 06-04: Media cost charged only on Ok results via TokenUsageTracker.RecordMediaUsage; entries labelled Image - {label} / Voicemail - {label}
+- [Phase 06]: 06-07: inline images require ContentId ^[0-9a-f]{16}@[a-z0-9.-]+$ else omitted; quoted fragments use [image: title] placeholders
+- [Phase 06]: 06-07: BulkMailFormatter.Compose sanitizes theme before WrapInTemplate; spam button label fixed list by stable hash; newsletter bold cap per section
 
 ### Pending Todos
 
@@ -397,6 +400,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T20:50:14.557Z
-Stopped at: Phase 6 UI-SPEC approved
+Last session: 2026-10-04T21:04:33.541Z
+Stopped at: Completed 06-07-PLAN.md
 Resume file: None

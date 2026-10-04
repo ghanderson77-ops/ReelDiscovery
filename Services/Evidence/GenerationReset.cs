@@ -15,8 +15,9 @@ public class StartOverResult
 }
 
 /// <summary>
-/// Start Over: removes the generated relevant emails, the run journal and the story-so-far document so the next run
-/// starts clean. The plan, case.json and the answer key are left alone (the step re-projects the key).
+/// Start Over: removes the generated relevant and non-relevant emails, the run journal and the story-so-far document so the next run
+/// starts clean. The side world and cast voices live in the journal and go with it, so the next run asks for them again.
+/// The plan, case.json and the answer key are left alone (the step re-projects the key).
 /// </summary>
 public static class GenerationReset
 {
@@ -24,7 +25,7 @@ public static class GenerationReset
         "The saved run could not be read in full, so it was kept. Emails it lists may still be in Mailboxes; try Start Over again.";
 
     /// <summary>
-    /// Deletes every EML listed by the journal (any plan) and every planned relevant copy path, then the journal (only when
+    /// Deletes every EML listed by the journal (any plan) and every planned copy path of every thread (relevant and non-relevant), then the journal (only when
     /// it was read in full) and the story file. Files that cannot be deleted are reported in Errors; only OperationCanceledException escapes.
     /// </summary>
     public static async Task<StartOverResult> StartOverAsync(string caseFolder, CorpusPlan? plan, CaseGuide? guide, CancellationToken ct = default)
@@ -49,8 +50,9 @@ public static class GenerationReset
         if (plan != null && guide != null)
         {
             var folders = PlanNumbering.CustodianFolders(guide);
-            foreach (var thread in (plan.Threads ?? new List<PlannedThread>())
-                         .Where(t => t != null && t.Relevance == ThreadRelevance.Relevant))
+
+            // Pitfall 13: non-relevant threads killed before their journal line leave planned copies too
+            foreach (var thread in (plan.Threads ?? new List<PlannedThread>()).Where(t => t != null))
             {
                 foreach (var message in (thread.Messages ?? new List<PlannedMessage>()).Where(m => m != null))
                     candidates.AddRange(MailboxWriter.CopyPathsFor(message, folders));

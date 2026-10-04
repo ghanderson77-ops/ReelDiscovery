@@ -27,13 +27,32 @@ public class JournalReplay
     // Last ThreadDone / ThreadFailed record per thread of the current plan
     public Dictionary<string, JournalRecord> LastByThread { get; set; } = new(StringComparer.Ordinal);
 
+    // Last outcome per planned attachment DocId, only from records whose thread and parent own that attachment
+    public Dictionary<string, JournalRecord> LastByAttachment { get; set; } = new(StringComparer.Ordinal);
+
     public JournalRecord? LastRunEnded { get; set; }
 
+    public JournalRecord? LastSideWorld { get; set; }
+    public JournalRecord? LastCastVoices { get; set; }
+
+    // Read-order index of the newest RunStarted / RunEnded line; -1 = none
+    public int LastRunStartedLine { get; set; } = -1;
+    public int LastRunEndedLine { get; set; } = -1;
+
     /// <summary>
-    /// Spend across every ThreadDone, ThreadFailed and RunEnded record of the current plan, including attempts a later
-    /// retry replaced and calls a fatal stop left unjournaled per thread.
+    /// True only when the newest RunStarted has a RunEnded after it; an older RunEnded never hides an interrupted Continue
+    /// (review 06-13 MEDIUM).
+    /// </summary>
+    public bool LatestAttemptEnded => LastRunEnded != null && LastRunEndedLine > LastRunStartedLine;
+
+    /// <summary>
+    /// Spend across every ThreadDone, ThreadFailed, attachment, SideWorld, CastVoices and RunEnded record of the current
+    /// plan (text and media), including attempts a later retry replaced and calls a fatal stop left unjournaled per thread.
     /// </summary>
     public decimal SpentCostUsd { get; set; }
+
+    // Media share (images, speech) of SpentCostUsd, superseded attempts included (D-29)
+    public decimal MediaSpentCostUsd { get; set; }
 
     // Blank, torn or corrupt lines
     public int SkippedLines { get; set; }
@@ -120,6 +139,7 @@ public class GenerationJournal
             plan.Threads.Where(t => t != null && !string.IsNullOrEmpty(t.Id)).Select(t => t.Id),
             StringComparer.Ordinal);
         var foreignThreads = new HashSet<string>(StringComparer.Ordinal);
+        var owners = AttachmentOwners(plan);
 
         try
         {
@@ -135,8 +155,10 @@ public class GenerationJournal
                 return replay;
             }
 
+            var line = -1;
             foreach (var record in ReadRecords(path, () => replay.SkippedLines++))
             {
+                line++;
                 if (record.PlanId != plan.PlanId)
                 {
                     replay.PlanChanged = true;
@@ -150,19 +172,61 @@ public class GenerationJournal
                 {
                     case JournalRecordType.RunStarted:
                         replay.HasRunStarted = true;
+                        replay.LastRunStartedLine = line;
                         break;
                     case JournalRecordType.RunEnded:
                         replay.LastRunEnded = record;
+                        replay.LastRunEndedLine = line;
                         replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
                         break;
                     case JournalRecordType.ThreadDone:
-                    case JournalRecordType.ThreadFailed:
                         // Later lines win: a retried thread's newest outcome replaces the earlier one, but its spend stays counted
                         if (threadIds.Contains(record.ThreadId))
                         {
                             replay.LastByThread[record.ThreadId] = record;
                             replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+
+                            // A fresh ThreadDone carries the full attachment state of that render
+                            foreach (var owned in owners.Where(o => o.Value.ThreadId == record.ThreadId))
+                                replay.LastByAttachment.Remove(owned.Key);
+                            foreach (var attachment in record.Attachments)
+                                ApplyAttachment(replay, attachment, record.ThreadId, owners);
                         }
+                        break;
+                    case JournalRecordType.ThreadFailed:
+                        if (threadIds.Contains(record.ThreadId))
+                        {
+                            replay.LastByThread[record.ThreadId] = record;
+                            replay.SpentCostUsd += Math.Max(0m, record.CostUsd) + record.MediaCostUsd;
+                            replay.MediaSpentCostUsd += record.MediaCostUsd;
+                        }
+                        break;
+                    case JournalRecordType.AttachmentsRepaired:
+                        // A repair is only valid on top of a written thread
+                        var written = replay.LastByThread.TryGetValue(record.ThreadId, out var thread)
+                                      && thread.Type == JournalRecordType.ThreadDone;
+                        replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+                        foreach (var attachment in record.Attachments)
+                        {
+                            if (written)
+                                ApplyAttachment(replay, attachment, record.ThreadId, owners);
+                            else
+                                AddSpend(replay, attachment);
+                        }
+                        break;
+                    case JournalRecordType.AttachmentDone:
+                    case JournalRecordType.AttachmentFailed:
+                    case JournalRecordType.AttachmentSkipped:
+                        ApplyAttachment(replay, record, record.ThreadId, owners);
+                        break;
+                    case JournalRecordType.SideWorld:
+                        replay.LastSideWorld = record;
+                        replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+                        break;
+                    case JournalRecordType.CastVoices:
+                        // D-28: the last voice set wins; replay never re-asks for voices
+                        replay.LastCastVoices = record;
+                        replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
                         break;
                 }
             }
@@ -175,14 +239,62 @@ public class GenerationJournal
         {
             replay.Exists = true;
             replay.LastByThread.Clear();
+            replay.LastByAttachment.Clear();
+            replay.LastSideWorld = null;
+            replay.LastCastVoices = null;
+            replay.LastRunEnded = null;
+            replay.LastRunStartedLine = -1;
+            replay.LastRunEndedLine = -1;
             replay.SpentCostUsd = 0m;
+            replay.MediaSpentCostUsd = 0m;
             replay.Reason = $"The saved run could not be read: {ex.Message.Trim().TrimEnd('.')}.";
             return replay;
         }
     }
 
+    // Planned owner (thread, parent message DocId) of every attachment DocId; the first occurrence wins
+    private static Dictionary<string, (string ThreadId, string ParentDocId)> AttachmentOwners(CorpusPlan plan)
+    {
+        var owners = new Dictionary<string, (string ThreadId, string ParentDocId)>(StringComparer.Ordinal);
+        foreach (var thread in plan.Threads.Where(t => t != null && !string.IsNullOrEmpty(t.Id)))
+        {
+            foreach (var message in thread.Messages.Where(m => m != null && !string.IsNullOrEmpty(m.DocId)))
+            {
+                foreach (var attachment in message.Attachments.Where(a => a != null && !string.IsNullOrEmpty(a.DocId)))
+                    owners.TryAdd(attachment.DocId, (thread.Id, message.DocId));
+            }
+        }
+
+        return owners;
+    }
+
+    private static bool Owns(JournalRecord attachment, string threadId,
+        Dictionary<string, (string ThreadId, string ParentDocId)> owners) =>
+        owners.TryGetValue(attachment.AttachmentDocId, out var owner)
+        && owner.ThreadId == threadId
+        && owner.ParentDocId == attachment.ParentDocId;
+
+    private static void AddSpend(JournalReplay replay, JournalRecord attachment)
+    {
+        var media = Math.Max(0m, attachment.MediaCostUsd);
+        replay.SpentCostUsd += Math.Max(0m, attachment.CostUsd) + media;
+        replay.MediaSpentCostUsd += media;
+    }
+
+    private static void ApplyAttachment(JournalReplay replay, JournalRecord attachment, string threadId,
+        Dictionary<string, (string ThreadId, string ParentDocId)> owners)
+    {
+        // Spend always counts; state only from records that belong to this plan's parent and thread (review concern 2)
+        AddSpend(replay, attachment);
+        if (!Owns(attachment, threadId, owners))
+            return;
+
+        attachment.ThreadId = threadId;
+        replay.LastByAttachment[attachment.AttachmentDocId] = attachment;
+    }
+
     /// <summary>
-    /// Every safe file listed by a ThreadDone record, whatever plan it belongs to (for sweeping written mailboxes).
+    /// Every safe file listed by a ThreadDone or AttachmentsRepaired record, whatever plan it belongs to (for sweeping written mailboxes).
     /// Returns what could be read; never throws.
     /// </summary>
     public static List<string> ListAllFiles(string caseFolder)
@@ -210,7 +322,8 @@ public class GenerationJournal
 
             foreach (var record in ReadRecords(path, () => { }))
             {
-                if (record.Type != JournalRecordType.ThreadDone)
+                // AttachmentsRepaired lists the copies a repair rewrote
+                if (record.Type is not (JournalRecordType.ThreadDone or JournalRecordType.AttachmentsRepaired))
                     continue;
 
                 foreach (var file in record.Files.Where(f => CorpusPlan.IsSafeEmlPath(f) && seen.Add(f)))

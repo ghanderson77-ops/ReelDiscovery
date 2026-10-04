@@ -1,4 +1,7 @@
 using System.Text;
+using System.Text.Json;
+using ReelDiscovery.Models;
+using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Evidence;
@@ -306,5 +309,332 @@ public class GenerationJournalTests : IDisposable
 
         GenerationJournal.Delete(_folder);
         Assert.False(GenerationJournal.Exists(_folder));
+    }
+
+    // ---- Phase 6 record contracts (06-01 Task 1) ----
+
+    private static T RoundTrip<T>(T value) =>
+        JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, CaseDraft.JsonOptions), CaseDraft.JsonOptions)!;
+
+    private static JournalRecord Nested(JournalRecordType type, string docId, string parent, AttachmentType kind,
+        string threadId = "T-0003", string fileName = "") => new()
+    {
+        Type = type,
+        AttachmentDocId = docId,
+        ParentDocId = parent,
+        AttachmentKind = kind,
+        ThreadId = threadId,
+        FileName = fileName
+    };
+
+    [Fact]
+    public void ThreadDone_NestedAttachments_RoundTripWithIdentity()
+    {
+        var record = Done("T-0003");
+        record.Attachments.Add(Nested(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000001", AttachmentType.Word,
+            fileName: "Memo.docx"));
+        record.Attachments.Add(Nested(JournalRecordType.AttachmentFailed, "PL-000001.0002", "PL-000001", AttachmentType.Excel));
+        record.Attachments.Add(Nested(JournalRecordType.AttachmentSkipped, "PL-000001.0003", "PL-000001", AttachmentType.Voicemail));
+
+        var copy = RoundTrip(record);
+        copy.Normalize();
+
+        Assert.Equal(3, copy.Attachments.Count);
+        Assert.Equal(new[] { JournalRecordType.AttachmentDone, JournalRecordType.AttachmentFailed, JournalRecordType.AttachmentSkipped },
+            copy.Attachments.Select(a => a.Type));
+        Assert.Equal("PL-000001.0002", copy.Attachments[1].AttachmentDocId);
+        Assert.Equal("PL-000001", copy.Attachments[1].ParentDocId);
+        Assert.Equal(AttachmentType.Excel, copy.Attachments[1].AttachmentKind);
+        Assert.Equal("T-0003", copy.Attachments[2].ThreadId);
+        Assert.Equal(string.Empty, copy.Attachments[2].FileName);
+        Assert.Equal("Memo.docx", copy.Attachments[0].FileName);
+    }
+
+    [Fact]
+    public void Normalize_NestedAttachments_FilteredCappedFlat()
+    {
+        var record = Done("T-0003");
+        record.Attachments.Add(null!);
+        record.Attachments.Add(Nested(JournalRecordType.ThreadDone, "PL-000001.0001", "PL-000001", AttachmentType.Word));
+        record.Attachments.Add(Nested(JournalRecordType.AttachmentDone, " ", "PL-000001", AttachmentType.Word));
+        for (var i = 0; i < 40; i++)
+        {
+            var nested = Nested(JournalRecordType.AttachmentDone, $"PL-000001.{i + 1:0000}", "PL-000001", AttachmentType.Word);
+            nested.Attachments.Add(Nested(JournalRecordType.AttachmentDone, "PL-000009.0001", "PL-000009", AttachmentType.Word));
+            nested.Title = "Bad\u0007Title";
+            record.Attachments.Add(nested);
+        }
+
+        record.Normalize();
+
+        Assert.Equal(JournalRecord.MaxNestedAttachments, record.Attachments.Count);
+        Assert.All(record.Attachments, a => Assert.Equal(JournalRecordType.AttachmentDone, a.Type));
+        Assert.All(record.Attachments, a => Assert.Empty(a.Attachments));
+        Assert.All(record.Attachments, a => Assert.Equal("BadTitle", a.Title));
+        Assert.Equal("PL-000001.0001", record.Attachments[0].AttachmentDocId);
+    }
+
+    [Fact]
+    public void Normalize_AttachmentFields_Repaired()
+    {
+        var record = new JournalRecord
+        {
+            Type = JournalRecordType.AttachmentDone,
+            AttachmentDocId = "PL-000001.0001",
+            FlattenedText = new string('a', 25_000),
+            FileName = "..\\evil.docx",
+            Title = "Line\r\nTwo\tTab",
+            AttachmentKind = (AttachmentType)99,
+            MediaCostUsd = -1m,
+            InviteMeetingKey = new string('k', 200),
+            InviteStart = new DateTimeOffset(2026, 3, 2, 10, 0, 0, TimeSpan.Zero),
+            InviteEnd = new DateTimeOffset(2026, 3, 2, 9, 0, 0, TimeSpan.Zero)
+        };
+
+        record.Normalize();
+
+        Assert.Equal(JournalRecord.MaxFlattenedTextChars, record.FlattenedText.Length);
+        Assert.Equal(string.Empty, record.FileName);
+        Assert.Equal("LineTwoTab", record.Title);
+        Assert.Equal(AttachmentType.Word, record.AttachmentKind);
+        Assert.Equal(0m, record.MediaCostUsd);
+        Assert.Equal(JournalRecord.MaxMeetingKeyChars, record.InviteMeetingKey.Length);
+        Assert.Null(record.InviteStart);
+        Assert.Null(record.InviteEnd);
+    }
+
+    [Fact]
+    public void Normalize_NullStrings_Repaired()
+    {
+        var record = new JournalRecord
+        {
+            AttachmentDocId = null!, ParentDocId = null!, FileName = null!, Title = null!, FlattenedText = null!,
+            InviteMeetingKey = null!, Attachments = null!,
+            Messages = new List<JournalMessage> { new() { From = null!, AttachmentTitles = null! } }
+        };
+
+        record.Normalize();
+
+        Assert.Equal(string.Empty, record.AttachmentDocId);
+        Assert.Equal(string.Empty, record.ParentDocId);
+        Assert.Equal(string.Empty, record.FileName);
+        Assert.Equal(string.Empty, record.Title);
+        Assert.Equal(string.Empty, record.FlattenedText);
+        Assert.Equal(string.Empty, record.InviteMeetingKey);
+        Assert.Empty(record.Attachments);
+        Assert.Equal(string.Empty, record.Messages[0].From);
+        Assert.Empty(record.Messages[0].AttachmentTitles);
+    }
+
+    [Fact]
+    public void Invite_ScheduleRoundTrips()
+    {
+        var start = new DateTimeOffset(2026, 3, 9, 10, 0, 0, TimeSpan.FromHours(-5));
+        var record = new JournalRecord
+        {
+            Type = JournalRecordType.AttachmentDone,
+            AttachmentDocId = "PL-000001.0001",
+            AttachmentKind = AttachmentType.CalendarInvite,
+            InviteMeetingKey = "site walk|2026-03-09",
+            InviteStart = start,
+            InviteEnd = start.AddHours(1)
+        };
+
+        var copy = RoundTrip(record);
+        copy.Normalize();
+
+        Assert.Equal(start, copy.InviteStart);
+        Assert.Equal(start.AddHours(1), copy.InviteEnd);
+        Assert.Equal("site walk|2026-03-09", copy.InviteMeetingKey);
+    }
+
+    [Fact]
+    public void JournalMessage_FromAndTitles_DefaultsAndCaps()
+    {
+        var message = new JournalMessage();
+        Assert.Equal(string.Empty, message.From);
+        Assert.Empty(message.AttachmentTitles);
+
+        var record = new JournalRecord
+        {
+            Messages = new List<JournalMessage>
+            {
+                new()
+                {
+                    From = "Pat Lee <pat@example.com>",
+                    AttachmentTitles = Enumerable.Range(0, 12).Select(i => i == 0 ? new string('t', 300) : $"Title {i}").ToList()
+                }
+            }
+        };
+        record.Messages[0].AttachmentTitles.Insert(1, null!);
+
+        var copy = RoundTrip(record);
+        copy.Normalize();
+
+        var titles = copy.Messages[0].AttachmentTitles;
+        Assert.Equal("Pat Lee <pat@example.com>", copy.Messages[0].From);
+        Assert.Equal(JournalRecord.MaxAttachmentTitles, titles.Count);
+        Assert.Equal(JournalRecord.MaxTitleChars, titles[0].Length);
+        Assert.Equal("Title 1", titles[1]);
+    }
+
+    [Fact]
+    public void SideWorld_Normalize_Caps()
+    {
+        var world = new SideWorld
+        {
+            Organizations = Enumerable.Range(0, 30).Select(i => new SideWorldOrganization
+            {
+                OrganizationId = $"ORG-{i:000}",
+                Projects = Enumerable.Range(0, 6).Select(p => new SideProject
+                {
+                    Name = p == 0 ? new string('n', 100) : p == 1 ? "  " : $"Project {p}",
+                    Topics = Enumerable.Range(0, 6).Select(t => t == 0 ? " " : $"Topic {t}").ToList()
+                }).ToList()
+            }).ToList()
+        };
+        world.Organizations.Insert(0, null!);
+
+        world.Normalize();
+
+        Assert.Equal(24, SideWorld.MaxOrganizations);
+        Assert.Equal(SideWorld.MaxOrganizations, world.Organizations.Count);
+        var first = world.Organizations[0];
+        Assert.Equal("ORG-000", first.OrganizationId);
+        Assert.Equal(SideWorld.MaxProjects, first.Projects.Count);
+        Assert.Equal(SideWorld.MaxNameChars, first.Projects[0].Name.Length);
+        Assert.DoesNotContain(first.Projects, p => string.IsNullOrWhiteSpace(p.Name));
+        Assert.All(first.Projects, p => Assert.Equal(SideWorld.MaxTopics, p.Topics.Count));
+        Assert.All(first.Projects, p => Assert.DoesNotContain(p.Topics, string.IsNullOrWhiteSpace));
+    }
+
+    [Fact]
+    public void SideWorld_NullLists_Repaired()
+    {
+        var world = new SideWorld
+        {
+            Organizations = new List<SideWorldOrganization> { new() { OrganizationId = null!, Projects = null! } }
+        };
+
+        world.Normalize();
+
+        Assert.Single(world.Organizations);
+        Assert.Equal(string.Empty, world.Organizations[0].OrganizationId);
+        Assert.Empty(world.Organizations[0].Projects);
+    }
+
+    [Fact]
+    public void CastVoiceSet_Normalize_AllowedVoicesFirstPerPerson()
+    {
+        var set = new CastVoiceSet
+        {
+            Voices = new List<CastVoice>
+            {
+                new() { PersonId = "CH-001", Voice = "Onyx" },
+                new() { PersonId = "CH-002", Voice = "banana" },
+                new() { PersonId = " ", Voice = "nova" },
+                new() { PersonId = "CH-001", Voice = "nova" },
+                null!,
+                new() { PersonId = "CH-003", Voice = " shimmer " }
+            }
+        };
+
+        set.Normalize();
+
+        Assert.Equal(new[] { "CH-001", "CH-003" }, set.Voices.Select(v => v.PersonId));
+        Assert.Equal("onyx", set.VoiceFor("CH-001"));
+        Assert.Equal("shimmer", set.VoiceFor("CH-003"));
+        Assert.Null(set.VoiceFor("CH-002"));
+        Assert.Null(set.VoiceFor(null));
+        Assert.Equal(6, CastVoiceSet.AllowedVoices.Count);
+    }
+
+    [Fact]
+    public void CastVoiceSet_Normalize_CapsAt200()
+    {
+        var set = new CastVoiceSet
+        {
+            Voices = Enumerable.Range(0, 250).Select(i => new CastVoice { PersonId = $"CH-{i:000}", Voice = "alloy" }).ToList()
+        };
+
+        set.Normalize();
+
+        Assert.Equal(CastVoiceSet.MaxVoices, set.Voices.Count);
+    }
+
+    [Fact]
+    public void CastVoicesAndSideWorldRecords_RoundTrip()
+    {
+        var record = new JournalRecord
+        {
+            Type = JournalRecordType.CastVoices,
+            PlanId = _plan.PlanId,
+            CastVoices = new CastVoiceSet { Voices = new List<CastVoice> { new() { PersonId = "CH-001", Voice = "fable" } } }
+        };
+        var world = new JournalRecord
+        {
+            Type = JournalRecordType.SideWorld,
+            SideWorld = new SideWorld
+            {
+                FromFallback = true,
+                Organizations = new List<SideWorldOrganization>
+                {
+                    new()
+                    {
+                        OrganizationId = "ORG-001",
+                        Projects = new List<SideProject> { new() { Name = "Harbor Point", Topics = new List<string> { "permits" } } }
+                    }
+                }
+            }
+        };
+
+        var voices = RoundTrip(record);
+        voices.Normalize();
+        var side = RoundTrip(world);
+        side.Normalize();
+
+        Assert.Equal(JournalRecordType.CastVoices, voices.Type);
+        Assert.Equal("fable", voices.CastVoices!.VoiceFor("CH-001"));
+        Assert.True(side.SideWorld!.FromFallback);
+        Assert.Equal("permits", side.SideWorld.Organizations[0].Projects[0].Topics[0]);
+    }
+
+    [Fact]
+    public void LedgerDelta_AttachmentIdentity_FlagRepaired()
+    {
+        var delta = new LedgerDelta();
+        Assert.False(delta.FromAttachment);
+        Assert.Equal(string.Empty, delta.AttachmentDocId);
+
+        var record = new JournalRecord
+        {
+            LedgerDelta = new List<LedgerDelta>
+            {
+                new() { AttachmentDocId = "PL-000001.0001" },
+                new() { AttachmentDocId = null! }
+            },
+            Attachments = new List<JournalRecord>
+            {
+                new()
+                {
+                    Type = JournalRecordType.AttachmentDone,
+                    AttachmentDocId = "PL-000001.0002",
+                    LedgerDelta = new List<LedgerDelta> { new() { AttachmentDocId = "PL-000001.0002" } }
+                }
+            }
+        };
+
+        record.Normalize();
+
+        Assert.True(record.LedgerDelta[0].FromAttachment);
+        Assert.False(record.LedgerDelta[1].FromAttachment);
+        Assert.Equal(string.Empty, record.LedgerDelta[1].AttachmentDocId);
+        Assert.True(record.Attachments[0].LedgerDelta[0].FromAttachment);
+    }
+
+    [Fact]
+    public void RenderedMessage_AttachmentTitles_DefaultEmpty()
+    {
+        Assert.Empty(new RenderedMessage().AttachmentTitles);
     }
 }

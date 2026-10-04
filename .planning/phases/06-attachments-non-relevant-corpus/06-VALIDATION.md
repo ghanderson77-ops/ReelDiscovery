@@ -5,6 +5,7 @@ status: draft
 nyquist_compliant: false
 wave_0_complete: false
 created: 2026-10-04
+revised: 2026-10-04 (cross-AI review, 06-REVIEWS.md)
 ---
 
 # Phase 6 — Validation Strategy
@@ -24,7 +25,7 @@ created: 2026-10-04
 | **Render command** | `dotnet test ReelDiscovery.Tests/ReelDiscovery.Tests.csproj --filter "Category=Render"` (PNGs under `ReelDiscovery.Tests/bin/Debug/net10.0-windows/renders/`, inspect at 144 DPI) |
 | **Estimated runtime** | ~31 s quick (Evidence), ~60-90 s full non-render |
 
-Fixtures to reuse: `EvidenceTestData.ApprovedCase()`, `RenderResponder(plan, guide)`, `TempCaseFolder()`, `Fakes/FakeLlmProvider`, `Fakes/FakeHttpHandler`, `Fakes/StrictSchemaValidator`, `OpenXmlValidator`, `Render/RenderHarness` + `ClippingDetector`.
+Fixtures to reuse: `EvidenceTestData.ApprovedCase()`, `RenderResponder(plan, guide)`, `TempCaseFolder()`, `Fakes/FakeLlmProvider`, `Fakes/FakeHttpHandler`, `Fakes/StrictSchemaValidator`, `OpenXmlValidator`, `Render/RenderHarness` + `ClippingDetector`, frozen golden constants under `ReelDiscovery.Tests/Evidence/Golden/` (Base64, captured before the code they protect changes).
 
 ---
 
@@ -32,37 +33,45 @@ Fixtures to reuse: `EvidenceTestData.ApprovedCase()`, `RenderResponder(plan, gui
 
 - **After every task commit:** Run quick run command
 - **After every plan wave:** Run full suite command; UI waves also run the render command
-- **Before `/gsd-verify-work`:** Full + render suites green, PNGs inspected at 144 DPI, one live smoke run on the Office test case reviewed
+- **Before `/gsd-verify-work`:** Full + render suites green, PNGs inspected at 144 DPI, one live smoke run on the Office test case plus the recovery exercises reviewed (06-25)
 - **Max feedback latency:** 90 seconds
 
 ---
 
 ## Per-Task Verification Map
 
-Requirement → test map (task IDs filled in by the planner/executor; see 06-RESEARCH.md "Validation Architecture").
+Requirement → test map (task IDs filled in by the executor in 06-25; see 06-RESEARCH.md "Validation Architecture" and 06-REVIEWS.md for the rows marked "review").
 
 | Task ID | Requirement | Behavior | Test Type | Automated Command (filter) | File Exists | Status |
 |---------|-------------|----------|-----------|----------------------------|-------------|--------|
-| TBD | ATT-01 | Word sections/headings/table, Excel numeric cells + safe sheet name, PPT subtitle not "Generated Email Dataset", org name header; OpenXmlValidator clean | unit | `FullyQualifiedName~OfficeDocumentServiceTests\|FullyQualifiedName~DocumentRegressionTests` | ❌ W0 / ✅ extend | ⬜ pending |
-| TBD | ATT-01, D-01 | Per-kind attachment DTO schemas strict (≤16 unions) | unit | `FullyQualifiedName~CaseSchemaTests` | ✅ add types | ⬜ pending |
-| TBD | ATT-01, RUN-02 | AttachmentUnitOfWork: render → bytes; refusal/invalid → AttachmentFailed; never throws; email still written | unit | `FullyQualifiedName~AttachmentUnitOfWorkTests` | ❌ W0 | ⬜ pending |
-| TBD | ATT-02, D-20 | Invite matches Meeting delta / ledger meeting / fact date; fallback + warning; organizer/attendees from plan | unit | `FullyQualifiedName~InviteSchedulerTests` | ❌ W0 | ⬜ pending |
-| TBD | ATT-02 | .ics deterministic UID/DTSTAMP, line folding, DQUOTE CN, CRLF stripped, correct offsets | unit | `FullyQualifiedName~CalendarServiceTests` | ❌ W0 | ⬜ pending |
-| TBD | ATT-03, D-06, D-27, D-28 | Inline image multipart/related + cid; voicemail notice From/Subject/transcript; null media client → Skipped; 401 → media stopped, text continues | unit | `FullyQualifiedName~MailboxWriterTests\|FullyQualifiedName~VoicemailComposerTests\|FullyQualifiedName~MediaGeneratorTests` | ✅ extend / ❌ W0 | ⬜ pending |
-| TBD | ATT-04, D-17 | CheckAttachment runs V2/V3/V4/V6/V7 at parent-message knowledge; 2 retries then Warnings | unit | `FullyQualifiedName~AttachmentValidatorTests` | ❌ W0 | ⬜ pending |
-| TBD | ATT-04, D-18 | Attachment deltas merged at wave end, stable ids, cap respected; replay restores | unit | `FullyQualifiedName~LedgerMergerTests\|FullyQualifiedName~GenerationRunStateTests` | ✅ extend | ⬜ pending |
-| TBD | ATT-04, D-16 | Version chains: grouping, order by SentAt, suffix in name, prior text passed | unit | `FullyQualifiedName~AttachmentChainsTests\|FullyQualifiedName~AttachmentNamingTests` | ❌ W0 | ⬜ pending |
+| TBD | ATT-01 | Word sections/headings/table, Excel numeric cells (no leading-zero loss) + safe sheet name (re-trimmed after cut), PPT subtitle not "Generated Email Dataset", org name header; OpenXmlValidator clean | unit | `FullyQualifiedName~OfficeDocumentServiceTests\|FullyQualifiedName~DocumentRegressionTests` | ❌ W0 / ✅ extend | ⬜ pending |
+| TBD | ATT-01, D-01 | Per-kind attachment DTO schemas strict (≤16 unions); usable content defined per kind | unit | `FullyQualifiedName~CaseSchemaTests\|FullyQualifiedName~AttachmentRendererTests` | ✅ add types / ❌ W0 | ⬜ pending |
+| TBD | ATT-01, RUN-02 | AttachmentUnitOfWork: render → bytes; refusal/invalid → Failed; identity on every outcome (Failed/Skipped/NotRun); no status reporting inside the unit; never throws | unit | `FullyQualifiedName~AttachmentUnitOfWorkTests` | ❌ W0 | ⬜ pending |
+| TBD | ATT-02, D-20 (review 6) | Meeting date from ledger Value (not source Date); topic + participant match; two invites for one meeting get one schedule; persisted slot reused; never before a same-day parent; fallback + warning | unit | `FullyQualifiedName~InviteSchedulerTests` | ❌ W0 | ⬜ pending |
+| TBD | ATT-02 | .ics deterministic UID/DTSTAMP, 75-octet folding without splitting UTF-8/surrogates, DQUOTE CN, CRLF stripped, correct offsets | unit | `FullyQualifiedName~CalendarServiceTests` | ❌ W0 | ⬜ pending |
+| TBD | ATT-03, D-06, D-27, D-28 | Inline image multipart/related + cid; voicemail notice; null media → Skipped; 401 → media stopped; 429 insufficient_quota → Stopped, rate_limit → Failed; malformed responses → Failed; queued calls after a stop make no request | unit | `FullyQualifiedName~MailboxWriterTests\|FullyQualifiedName~VoicemailComposerTests\|FullyQualifiedName~MediaGeneratorTests\|FullyQualifiedName~AttachmentUnitOfWorkTests` | ✅ extend / ❌ W0 | ⬜ pending |
+| TBD | ATT-04, D-17 (review 4) | CheckAttachment V2/V3/V4/V6/V7 at parent knowledge with NewDetails, visible thread deltas and ancestor bodies; sibling branch invisible; V6 near-amount on labelled cells; late repair rejects new details; 2 retries then Warnings | unit | `FullyQualifiedName~AttachmentValidatorTests` | ❌ W0 | ⬜ pending |
+| TBD | ATT-04, D-18 (review 7) | Attachment ledger ids `{AttachmentDocId}-Lnn`, per-attachment cap 3, thread entries first; repairs never renumber/absorb/displace; Phase 5 ledger unchanged; replay restores | unit | `FullyQualifiedName~LedgerMergerTests\|FullyQualifiedName~GenerationRunStateTests` | ✅ extend | ⬜ pending |
+| TBD | ATT-04, D-16 (review 7) | Version chains scoped by sender organization + kind + stem; order by SentAt; suffix in name; ChainScheduler gives finish-order-independent prior text | unit | `FullyQualifiedName~AttachmentChainsTests\|FullyQualifiedName~AttachmentNamingTests\|FullyQualifiedName~ChainSchedulerTests` | ❌ W0 | ⬜ pending |
+| TBD | RUN-02, D-26 (review 1, 2) | Journal: attachment outcomes nested in ThreadDone / AttachmentsRepaired; identity-validated replay; full text + media spend; LatestAttemptEnded follows the newest RunStarted | unit | `FullyQualifiedName~GenerationJournalTests` | ✅ extend | ⬜ pending |
+| TBD | RUN-02 (review 1) | Commit boundary failure injection: cancel after one attachment keeps thread + part; second-copy write failure reports nothing written and journals all spend; ThreadDone append failure returns unjournaled spend; kill before append replays as pending | unit | `FullyQualifiedName~ThreadUnitOfWorkTests.Commit_` | ✅ extend | ⬜ pending |
+| TBD | RUN-02 (review MEDIUM) | Snapshot attachment status replaced per DocId (Failed → Written moves once; repeats count once; Done+Failed+Skipped ≤ Total); AddCost for uncommitted spend | unit | `FullyQualifiedName~GenerationSnapshotTests` | ✅ extend | ⬜ pending |
 | TBD | NOISE-01/02, D-08, D-12, D-13 | Filler on Volume tier, side-world in prompt, no ledger, structure checks V1/V5 only (no V8, no length retry: D-12 clarification 2026-10-04) | unit | `FullyQualifiedName~FillerPromptsTests\|FullyQualifiedName~ThreadUnitOfWorkTests` | ❌ W0 / ✅ extend | ⬜ pending |
-| TBD | NOISE-01, D-21 | Side-world avoids case terms; persisted and reused on Continue; code fallback | unit | `FullyQualifiedName~SideWorldTests` | ❌ W0 | ⬜ pending |
-| TBD | ATT-03, D-28 | Per-cast voice call on Volume picks a valid tts-1 voice per cast member; invalid/unknown dropped; StableRank fallback on failure; persisted as CastVoices record and reused on Continue/Retry Failed; speech uses the persisted voice | unit / integration | `FullyQualifiedName~CastVoiceTests\|FullyQualifiedName~AttachmentUnitOfWorkTests\|FullyQualifiedName~GenerationRunnerTests` | ❌ W0 | ⬜ pending |
-| TBD | RUN-02, D-26, UI-SPEC Decision 1 | Phase 5 voicemail thread repaired in Stage C keeps From/Subject/body, gains audio; key row matches EML; harvested inline cid kept; as-of-wave ledger for repairs | unit / integration | `FullyQualifiedName~AttachmentRepairTests\|FullyQualifiedName~AnswerKeyOverlayTests` | ❌ W0 / ✅ extend | ⬜ pending |
-| TBD | NOISE-03, D-22, D-24 | Newsletter masthead + unsubscribe, spam styling, personal plain; encoded; personal safety line | unit | `FullyQualifiedName~BulkMailFormatterTests\|FullyQualifiedName~FillerPromptsTests` | ❌ W0 | ⬜ pending |
-| TBD | NOISE-04, D-09, D-23 | Decoy on Story tier; must-not-mention hit → retry ×2 → kept + flagged | unit | `FullyQualifiedName~DecoyScannerTests\|FullyQualifiedName~ThreadUnitOfWorkTests` | ❌ W0 | ⬜ pending |
-| TBD | NOISE-05, D-07, D-11 | Band/CC/attachment/depth parity between relevant and non-relevant (assigned bands + prompt length tokens exact; measured lengths loose, no V8 retry on filler); privileged non-relevant markers; no "Document N" names; same composer path | unit | `FullyQualifiedName~DistributionParityTests\|FullyQualifiedName~FillerAssignmentsTests` | ❌ W0 | ⬜ pending |
-| TBD | OUT-01 | Non-relevant copies in every participating custodian mailbox; Start Over removes non-relevant paths | unit | `FullyQualifiedName~MailboxWriterTests\|FullyQualifiedName~GenerationResetTests` | ✅ extend | ⬜ pending |
+| TBD | NOISE-01, D-21 | Side-world names and topics avoid every case term; templates validated; 24-organization cap with templates beyond it; persisted and reused on Continue; code fallback; persist failure stops the run | unit / integration | `FullyQualifiedName~SideWorldTests\|FullyQualifiedName~GenerationRunnerTests` | ❌ W0 | ⬜ pending |
+| TBD | ATT-03, D-28 | Per-cast voice call on Volume picks a valid tts-1 voice; invalid/unknown dropped; StableRank fallback on failure; persisted as CastVoices and reused; persist failure stops the run; speech uses the persisted voice | unit / integration | `FullyQualifiedName~CastVoiceTests\|FullyQualifiedName~AttachmentUnitOfWorkTests\|FullyQualifiedName~GenerationRunnerTests` | ❌ W0 | ⬜ pending |
+| TBD | RUN-02, D-26 (review 3) | Harvest per parent message from any copy; multi-message repair reuses both parts; incomplete first copy falls back to another; 64 MB file / 25 MB part / 100 MB call caps | unit | `FullyQualifiedName~AttachmentHarvesterTests\|FullyQualifiedName~AttachmentRepairTests` | ❌ W0 | ⬜ pending |
+| TBD | RUN-02, D-26, UI-SPEC Decision 1 | Repair: one AttachmentsRepaired commit after all copies; partial rewrite converges; failed regeneration keeps existing copies; finished text never changes; Phase 5 voicemail keeps From/Subject/body and gains audio; harvested cid kept | unit / integration | `FullyQualifiedName~AttachmentRepairTests\|FullyQualifiedName~AnswerKeyOverlayTests` | ❌ W0 / ✅ extend | ⬜ pending |
+| TBD | RUN-02, D-25, D-26 (review 5) | Chronological repair: earlier-wave repairs commit before later-wave new work and feed its prompts; wave-ordered repairs see earlier repairs; late repair keeps finished text and ledger; max 4 concurrent repairs | integration | `FullyQualifiedName~GenerationRunnerTests` | ✅ extend | ⬜ pending |
+| TBD | NOISE-03, D-22, D-24 | Newsletter masthead + unsubscribe, spam styling, personal plain; encoded; personal safety line; quoted bulk images become [image: title] | unit | `FullyQualifiedName~BulkMailFormatterTests\|FullyQualifiedName~FillerPromptsTests\|FullyQualifiedName~EmailComposerTests` | ❌ W0 | ⬜ pending |
+| TBD | NOISE-04, D-09, D-23 | Decoy on Story tier; must-not-mention hit (incl. "$1.25M"-style amounts via the extended scanner) → retry ×2 → kept + flagged | unit | `FullyQualifiedName~DecoyScannerTests\|FullyQualifiedName~CanonicalValueScannerTests\|FullyQualifiedName~ThreadUnitOfWorkTests` | ❌ W0 / ✅ extend | ⬜ pending |
+| TBD | NOISE-05, D-07, D-11 | Code-controlled parity on a synthetic plan AND a production-planner plan: assigned bands, prompt length tokens, privilege markers, headers per message shape, MIME roots per attachment shape, no "Document N" names; fake word counts labelled plumbing-only (no V8 on filler) | unit / integration | `FullyQualifiedName~DistributionParityTests\|FullyQualifiedName~FillerAssignmentsTests` | ❌ W0 | ⬜ pending |
+| TBD | NOISE-05 (review MEDIUM) | Frozen compatibility: HTML formatter, composer and no-attachment EML output equal golden constants captured before the change | unit | `FullyQualifiedName~ComposeHtmlTests\|FullyQualifiedName~EmailComposerTests\|FullyQualifiedName~MailboxWriterTests` | ❌ W0 golden | ⬜ pending |
+| TBD | OUT-01 | Non-relevant copies in every participating custodian mailbox; Start Over removes non-relevant paths and repaired copies | unit | `FullyQualifiedName~MailboxWriterTests\|FullyQualifiedName~GenerationResetTests` | ✅ extend | ⬜ pending |
 | TBD | RUN-02, D-25, D-26 | Relevant waves then filler; failed attachment → email written + key row Failed; Continue regenerates only missing attachments and rewrites all copies; Phase-5 journals resume | integration | `FullyQualifiedName~GenerationRunnerTests\|FullyQualifiedName~GenerationJournalTests\|FullyQualifiedName~AnswerKeyOverlayTests` | ✅ extend | ⬜ pending |
-| TBD | D-29 | Estimate/ticker: Volume for filler, Story for decoys/relevant, attachments by tier, media per unit | unit | `FullyQualifiedName~GenerationCostEstimatorTests\|FullyQualifiedName~GenerationRunStateTests` | ❌ W0 / ✅ extend | ⬜ pending |
-| TBD | D-04 | Generate Corpus stages/counts, Ready card, Case Summary at 144 DPI, no clipping | render | `Category=Render&FullyQualifiedName~GenerateCorpusRenderTests\|FullyQualifiedName~CaseSummaryRenderTests` | ✅ extend | ⬜ pending |
+| TBD | D-29 (review MEDIUM) | One pricing path (PriceWork) for the Ready card and remaining cost: tiers, richness, invites, side-world and voice calls, media without QA overhead, unavailable media = 0; full media spend of every attempt | unit | `FullyQualifiedName~GenerationCostEstimatorTests\|FullyQualifiedName~GenerationRunStateTests` | ❌ W0 / ✅ extend | ⬜ pending |
+| TBD | D-29 (review LOW) | Media prices dialog: Cancel keeps session prices, Reset Defaults 0.006 / 15.00, OK normalizes, dialog edits a clone; a run keeps its start-time price clone | unit | `FullyQualifiedName~MediaPricesDialogTests\|FullyQualifiedName~GenerateCorpusStepTests` | ❌ W0 | ⬜ pending |
+| TBD | RUN-02 (review MEDIUM) | Entry banner follows the latest run attempt; progress never exceeds its maximum; repair-row counting rule identical live and on reopen | unit | `FullyQualifiedName~GenerationUiTextTests\|FullyQualifiedName~GenerateCorpusStepTests\|FullyQualifiedName~GenerationHistoryTests` | ✅ extend | ⬜ pending |
+| TBD | D-04 | Generate Corpus stages/counts, Ready card, Case Summary, media prices dialog at 144 DPI, no clipping, Primary-action count per state | render | `Category=Render&FullyQualifiedName~GenerateCorpusRenderTests\|FullyQualifiedName~CaseSummaryRenderTests\|FullyQualifiedName~DialogRenderTests` | ✅ extend | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -70,9 +79,10 @@ Requirement → test map (task IDs filled in by the planner/executor; see 06-RES
 
 ## Wave 0 Requirements
 
-- [ ] `ReelDiscovery.Tests/Evidence/AttachmentTestData.cs` — plan fixture with every attachment kind on relevant + non-relevant messages, a two-version chain, an invite root with a Meeting delta, a voicemail single-message thread, a privileged non-relevant thread and a decoy with MustNotMention
-- [ ] `ReelDiscovery.Tests/Fakes/FakeMediaGenerator.cs` — scripted bytes / null / throw-401 behind the media interface
-- [ ] `RenderResponder` extension — answers attachment and filler DTOs by schema name
+- [ ] `ReelDiscovery.Tests/Evidence/AttachmentTestData.cs` — plan fixture with every attachment kind on relevant + non-relevant messages, a two-version chain, a same-title document from another organization, a multi-message attachment thread, a sibling-branch thread, two invites for one meeting (with a Meeting ledger entry whose Date ≠ Value), a voicemail single-message thread, a privileged non-relevant thread and a decoy with MustNotMention
+- [ ] `ReelDiscovery.Tests/Fakes/FakeMediaGenerator.cs` — scripted bytes / failed / stopped behind the media interface
+- [ ] `AttachmentResponder` — answers attachment, filler and cast-voice DTOs by schema name
+- [ ] Golden constants (`Evidence/Golden/ComposeHtmlGolden.cs`, `EmailComposerGolden.cs`, `MailboxWriterGolden.cs`) captured from the unchanged code before 06-07 / 06-09 / 06-10 edit it
 - [ ] New test files listed in the map above (❌ rows)
 
 ---
@@ -83,7 +93,8 @@ Requirement → test map (task IDs filled in by the planner/executor; see 06-RES
 |----------|-------------|------------|-------------------|
 | Attachments open and read correctly | ATT-01..03 | Office/ICS/media client behavior | Live run on the Office test case; open docx/xlsx/pptx/ics/png/mp3 from EMLs in Outlook/Thunderbird |
 | Decoys read as near-misses | NOISE-04 | Semantic judgment | Spot-read several decoys; confirm they share terms but are not about the alleged conduct |
-| Non-relevant mail looks like the same corpus | NOISE-05 | Style judgment | Compare a sample of relevant vs. daily-business threads side by side |
+| Non-relevant mail looks like the same corpus; measured length parity | NOISE-05 | Style judgment; real model output | Compare relevant vs daily-business threads; record per-band median word counts (06-HUMAN-UAT Step 5) |
+| Recovery paths on real data | RUN-02 | End-to-end with real providers and files | Controlled Cancel + Continue, multi-message repair, Phase 5 journal upgrade (06-HUMAN-UAT Steps 7-9; record skipped with a reason when not possible) |
 | 144-DPI inspection | D-04 | Human visual check | Inspect render PNGs at 150% scaling |
 
 ---

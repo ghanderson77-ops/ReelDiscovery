@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-22-PLAN.md
-last_updated: "2026-10-05T00:04:14.945Z"
+stopped_at: Completed 06-14-PLAN.md
+last_updated: "2026-10-05T00:33:51.748Z"
 last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 96
-  percent: 91
+  completed_plans: 97
+  percent: 92
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 16 of 25 (15 summarized: 06-01..06-13, 06-15, 06-22; wave 3 complete; next 06-14, wave 4)
+Plan: 17 of 25 (16 summarized: 06-01..06-15, 06-22; wave 4 in progress; next 06-16, 06-17)
 Status: Ready to execute
 Last activity: 2026-10-05
 
-Progress: [██████████] 100%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -147,6 +147,7 @@ Progress: [██████████] 100%
 | Phase 06 P11 | 12min | 3 tasks | 7 files |
 | Phase 06 P12 | 20 min | 2 tasks | 4 files |
 | Phase 06 P22 | 25min | 2 tasks | 3 files |
+| Phase 6 P14 | 50min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -412,6 +413,10 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-22: Stages Done column widens past 80 to fit 9,999 / 9,999 (Time-column precedent); Dates keeps >= 120 at WizardMin
 - [Phase 06]: 06-22: running stage row auto-scrolls into view unless the user scrolled in the last 5 s (05-UI-SPEC rule now wired)
 - [Phase 06]: 06-22: ShowDashboard takes bool runEnded + attachment counts; entry passes input.LatestAttemptEnded (Finished-outcome filter kept)
+- [Phase 6]: 06-14: TotalThreads/Pending count every generation thread; GenerationState ThreadsTotal..ThreadsFailed stay relevant-only
+- [Phase 6]: 06-14: earliest planned committed invite owns a meeting key's schedule (InviteSlotsByMeeting)
+- [Phase 6]: 06-14: EstimateRemaining 6-arg overload (+ optional guide) prices pending work via GenerationCostEstimator.PriceWork
+- [Phase 6]: 06-14: interim - StepGenerateCorpus.ShowRunResult partial check uses relevant counts until 06-19 writes filler
 
 ### Pending Todos
 
@@ -433,6 +438,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T00:04:14.354Z
-Stopped at: Completed 06-22-PLAN.md
+Last session: 2026-10-05T00:33:51.742Z
+Stopped at: Completed 06-14-PLAN.md
 Resume file: None

@@ -1220,4 +1220,270 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         Assert.Equal(_volume.CalculateTotalCost(800, 300), nested.CostUsd);
         Assert.Equal(1, Assert.Single(_snapshot.Drain().Events, e => e.Kind == GenerationEventKind.ThreadWritten).Attachments);
     }
+
+    // ---------- failure injection at the commit boundary ----------
+    // Review concern 1: every write/journal boundary has a test; a successful paid part is either committed with its thread or never reported
+
+    private static AttachmentRunStatus AttachmentStatus(GenerationRunState state, string docId) =>
+        state.StatusByAttachment.TryGetValue(docId, out var status) ? status : AttachmentRunStatus.Pending;
+
+    private static ThreadRunStatus ThreadStatus(GenerationRunState state, string threadId) =>
+        state.StatusByThread.TryGetValue(threadId, out var status) ? status : ThreadRunStatus.Pending;
+
+    private static void CopyFolder(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(directory.Replace(source, target));
+        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+            File.Copy(file, file.Replace(source, target), overwrite: true);
+    }
+
+    [Fact]
+    public async Task Commit_CancelAfterFirstAttachment_KeepsThreadAndPart()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var root = thread.Messages.Single(m => m.Seq == 1);
+        var (word, excel, slides) = (root.Attachments[0].DocId, root.Attachments[1].DocId, root.Attachments[2].DocId);
+        _fake.Respond = Responder();
+        using var cts = new CancellationTokenSource();
+
+        // Call 0 renders the thread, call 1 the Word file; Cancel arrives while the Excel call is being answered
+        _fake.OnSend = index =>
+        {
+            if (index == 2)
+                cts.Cancel();
+        };
+        using var run = Run(cts);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => RunThread(FullUnit(), thread.Id, Step(Chains(), thread.Id), run));
+
+        var record = SingleRecord(thread);
+        Assert.Equal(JournalRecordType.ThreadDone, record.Type);
+        var nested = Assert.Single(record.Attachments);
+        Assert.Equal(word, nested.AttachmentDocId);
+        Assert.Equal(JournalRecordType.AttachmentDone, nested.Type);
+        Assert.DoesNotContain(_fake.Requests, r => AttachmentIdOf(r) == slides);
+
+        foreach (var copy in MailboxWriter.CopyPathsFor(root, Folders))
+        {
+            var eml = MimeKit.MimeMessage.Load(Path.Combine(_folder, copy));
+            Assert.Equal(new[] { word }, DocParts(eml).Select(p => p.Headers[MailboxWriter.DocIdHeader]));
+        }
+
+        var state = GenerationRunState.From(_plan, GenerationJournal.Replay(_folder, _plan));
+        Assert.Equal(ThreadRunStatus.Written, ThreadStatus(state, thread.Id));
+        Assert.Equal(AttachmentRunStatus.Written, AttachmentStatus(state, word));
+        Assert.Equal(AttachmentRunStatus.Pending, AttachmentStatus(state, excel));
+        Assert.Equal(AttachmentRunStatus.Pending, AttachmentStatus(state, slides));
+
+        var view = _snapshot.Drain();
+        Assert.Equal(1, view.Counts.DoneThreads);
+        Assert.Equal(1, view.Counts.AttachmentsDone);
+    }
+
+    [Fact]
+    public async Task Commit_SecondCopyWriteFails_NothingReportedWritten()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.InviteThreadId);
+        var root = thread.Messages.Single(m => m.Seq == 1);
+        var copies = MailboxWriter.CopyPathsFor(root, Folders);
+        Assert.True(copies.Count > 1);
+        var blocker = Path.Combine(_folder, copies[1]);
+        Directory.CreateDirectory(blocker);
+        _fake.Respond = Responder();
+        var media = new FakeMediaGenerator();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await RunThread(FullUnit(media), thread.Id, Step(Chains(), thread.Id), run);
+
+        // Thread 1000/400 and the invite 800/300 on Story, plus one image
+        var text = _story.CalculateTotalCost(1000, 400) + _story.CalculateTotalCost(800, 300);
+        Assert.Equal(ThreadOutcomeKind.Failed, outcome.Kind);
+        Assert.False(outcome.Unjournaled);
+        var record = SingleRecord(thread);
+        Assert.Equal(JournalRecordType.ThreadFailed, record.Type);
+        Assert.Equal(ThreadFailureKind.Write, record.FailureKind);
+        Assert.Equal(text, record.CostUsd);
+        Assert.Equal(0.006m, record.MediaCostUsd);
+        Assert.Equal(1800, record.InputTokens);
+        Assert.Equal(700, record.OutputTokens);
+        Assert.Empty(record.Attachments);
+        Assert.Equal(text + 0.006m, outcome.CostUsd);
+        Assert.Equal(1800, outcome.InputTokens);
+        Assert.Equal(700, outcome.OutputTokens);
+        Assert.Empty(outcome.AttachmentDeltas);
+        Assert.Empty(outcome.AttachmentRecords);
+        Assert.Equal(0m, outcome.NotRunCostUsd);
+        Assert.Equal(0, outcome.NotRunInputTokens);
+        Assert.Equal(0, outcome.NotRunOutputTokens);
+
+        var view = _snapshot.Drain();
+        Assert.Equal(0, view.Counts.AttachmentsDone);
+        Assert.Equal(0, view.Counts.AttachmentsFailed);
+        Assert.Equal(1, view.Counts.FailedThreads);
+        Assert.Equal(text + 0.006m, view.Counts.CostUsd);
+        Assert.Equal(0.006m, view.Counts.MediaCostUsd);
+        Assert.DoesNotContain(view.Events, e => e.Kind is GenerationEventKind.AttachmentFailed or GenerationEventKind.AttachmentSkipped
+            or GenerationEventKind.AttachmentKeptWithWarnings or GenerationEventKind.ThreadWritten);
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+        Assert.Equal(text + 0.006m, replay.SpentCostUsd);
+        var state = GenerationRunState.From(_plan, replay);
+        Assert.Equal(ThreadRunStatus.Failed, ThreadStatus(state, thread.Id));
+        Assert.All(root.Attachments, a => Assert.Equal(AttachmentRunStatus.Pending, AttachmentStatus(state, a.DocId)));
+
+        // A rerun on the same deterministic paths overwrites the partial copy and commits
+        Directory.Delete(blocker);
+        var rerun = await RunThread(FullUnit(media), thread.Id, Step(Chains(), thread.Id), run);
+
+        Assert.Equal(ThreadOutcomeKind.Written, rerun.Kind);
+        var bytes = copies.Select(c => File.ReadAllBytes(Path.Combine(_folder, c))).ToList();
+        Assert.All(bytes, b => Assert.Equal(bytes[0], b));
+        var after = GenerationRunState.From(_plan, GenerationJournal.Replay(_folder, _plan));
+        Assert.Equal(ThreadRunStatus.Written, ThreadStatus(after, thread.Id));
+        Assert.All(root.Attachments, a => Assert.Contains(AttachmentStatus(after, a.DocId),
+            new[] { AttachmentRunStatus.Written, AttachmentRunStatus.Warnings }));
+    }
+
+    [Fact]
+    public async Task Commit_ThreadDoneAppendFails_SpendReturnedUnjournaled()
+    {
+        var first = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var second = AttachmentTestData.Thread(_plan, AttachmentTestData.ChainThreadId);
+        var v2 = Spec(second, 1, AttachmentType.Excel).DocId;
+        _fake.Respond = Responder();
+
+        // A directory where the journal file should be: every append throws
+        Directory.CreateDirectory(GenerationJournal.PathFor(_folder));
+        var chains = Chains();
+        var attachments = Step(chains, first.Id, second.Id);
+        var successor = chains.PriorTextAsync(v2, CancellationToken.None);
+        Assert.False(successor.IsCompleted);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await RunThread(FullUnit(), first.Id, attachments, run);
+
+        var spend = _story.CalculateTotalCost(1000, 400) + 3 * _story.CalculateTotalCost(800, 300);
+        Assert.Equal(ThreadOutcomeKind.Failed, outcome.Kind);
+        Assert.True(outcome.Unjournaled);
+        Assert.StartsWith("Could not save the run journal", outcome.Reason);
+        Assert.Equal(spend, outcome.CostUsd);
+        Assert.Equal(1000 + 3 * 800, outcome.InputTokens);
+        Assert.Equal(400 + 3 * 300, outcome.OutputTokens);
+        Assert.Empty(outcome.AttachmentDeltas);
+        Assert.Equal(0m, outcome.NotRunCostUsd);
+        Assert.Equal(0, outcome.NotRunInputTokens);
+        Assert.Equal(0, outcome.NotRunOutputTokens);
+
+        // No successor hangs, and none sees the unjournaled text
+        Assert.Null(await successor.WaitAsync(ChainGuard));
+
+        var view = _snapshot.Drain();
+        Assert.Equal(0, view.Counts.DoneThreads);
+        Assert.Equal(0, view.Counts.FailedThreads);
+        Assert.Equal(0, view.Counts.AttachmentsDone);
+        Assert.Equal(spend, view.Counts.CostUsd);
+        Assert.DoesNotContain(view.Events, e => e.Kind is GenerationEventKind.ThreadWritten or GenerationEventKind.ThreadFailed);
+    }
+
+    [Fact]
+    public async Task Commit_KillBetweenWritesAndAppend_ReplayIsConsistent()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var root = thread.Messages.Single(m => m.Seq == 1);
+        _fake.Respond = Responder();
+        var killed = _folder + "-killed";
+        var unit = FullUnit();
+
+        // The kill: a snapshot of the case folder after every EML copy and before the ThreadDone line
+        unit.BeforeAppendHook = _ =>
+        {
+            CopyFolder(_folder, killed);
+            return Task.CompletedTask;
+        };
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+        try
+        {
+            await RunThread(unit, thread.Id, Step(Chains(), thread.Id), run);
+
+            Assert.All(MailboxWriter.CopyPathsFor(root, Folders), c => Assert.True(File.Exists(Path.Combine(killed, c)), c));
+            var state = GenerationRunState.From(_plan, GenerationJournal.Replay(killed, _plan));
+            Assert.Equal(ThreadRunStatus.Pending, ThreadStatus(state, thread.Id));
+            Assert.All(root.Attachments, a => Assert.Equal(AttachmentRunStatus.Pending, AttachmentStatus(state, a.DocId)));
+
+            // Continue on the killed folder rewrites the same paths and commits
+            var resumed = await RunThread(FullUnit(folder: killed), thread.Id, Step(Chains(), thread.Id), run);
+
+            Assert.Equal(ThreadOutcomeKind.Written, resumed.Kind);
+            var after = GenerationRunState.From(_plan, GenerationJournal.Replay(killed, _plan));
+            Assert.Equal(ThreadRunStatus.Written, ThreadStatus(after, thread.Id));
+            Assert.All(root.Attachments, a => Assert.Equal(AttachmentRunStatus.Written, AttachmentStatus(after, a.DocId)));
+            Assert.Single(File.ReadAllLines(GenerationJournal.PathFor(killed)), l => l.Length > 0);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(killed);
+        }
+    }
+
+    [Fact]
+    public async Task Commit_FatalDuringAttachments_CommitsFinishedParts()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var root = thread.Messages.Single(m => m.Seq == 1);
+        var (word, excel, slides) = (root.Attachments[0].DocId, root.Attachments[1].DocId, root.Attachments[2].DocId);
+
+        // (a) Auth failure on the second attachment call: no more calls, the first part is committed
+        _fake.Respond = Responder(r => AttachmentIdOf(r) == excel ? FakeLlmProvider.Failed(LlmFailureKind.Auth, "invalid key") : null);
+        using (var cts = new CancellationTokenSource())
+        using (var run = Run(cts))
+        {
+            var outcome = await RunThread(FullUnit(), thread.Id, Step(Chains(), thread.Id), run);
+
+            Assert.True(run.IsFatal);
+            Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+            Assert.Equal(new[] { word }, outcome.Record!.Attachments.Select(a => a.AttachmentDocId));
+            Assert.DoesNotContain(_fake.Requests, r => AttachmentIdOf(r) == slides);
+            var eml = MimeKit.MimeMessage.Load(Path.Combine(_folder, MailboxWriter.CopyPathsFor(root, Folders)[0]));
+            Assert.Equal(new[] { word }, DocParts(eml).Select(p => p.Headers[MailboxWriter.DocIdHeader]));
+            var state = GenerationRunState.From(_plan, GenerationJournal.Replay(_folder, _plan));
+            Assert.Equal(AttachmentRunStatus.Pending, AttachmentStatus(state, excel));
+            Assert.Equal(AttachmentRunStatus.Pending, AttachmentStatus(state, slides));
+        }
+
+        // (b) The second call is paid, then the run turns fatal: its spend comes back as NotRun spend
+        var paid = Path.Combine(_folder, "paid");
+        Directory.CreateDirectory(paid);
+        _snapshot.Drain();
+        var before = _snapshot.Peek().Counts.CostUsd;
+        using (var cts = new CancellationTokenSource())
+        using (var run = Run(cts))
+        {
+            var inner = Responder();
+            _fake.Respond = request =>
+            {
+                var response = inner(request);
+                if (AttachmentIdOf(request) == excel)
+                    run.SetFatal("The API key was rejected.");
+                return response;
+            };
+
+            var outcome = await RunThread(FullUnit(folder: paid), thread.Id, Step(Chains(), thread.Id), run);
+
+            var excelCost = _story.CalculateTotalCost(800, 300);
+            Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+            Assert.Equal(new[] { word }, outcome.Record!.Attachments.Select(a => a.AttachmentDocId));
+            Assert.Equal(excelCost, outcome.NotRunCostUsd);
+            Assert.Equal(800, outcome.NotRunInputTokens);
+            Assert.Equal(300, outcome.NotRunOutputTokens);
+
+            var committed = _story.CalculateTotalCost(1000, 400) + _story.CalculateTotalCost(800, 300);
+            Assert.Equal(before + committed + excelCost, _snapshot.Peek().Counts.CostUsd);
+            Assert.Equal(committed, GenerationJournal.Replay(paid, _plan).SpentCostUsd);
+        }
+    }
 }

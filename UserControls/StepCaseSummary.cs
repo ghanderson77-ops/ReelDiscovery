@@ -1408,8 +1408,8 @@ public class StepCaseSummary : UserControl, IWizardStep
     internal Label MailboxesLine3 => _rowMailboxes.Line3!;
     internal Label StoryLine3 => _rowStory.Line3!;
     internal Label AnswerKeyLine3 => _rowAnswerKey.Line3!;
-    internal string MailboxesLine3Tooltip => _toolTip.GetToolTip(_rowMailboxes.Line3!);
-    internal string AnswerKeyLine3Tooltip => _toolTip.GetToolTip(_rowAnswerKey.Line3!);
+    internal string MailboxesLine3Tooltip => _toolTip.GetToolTip(_rowMailboxes.Line3!) ?? string.Empty;
+    internal string AnswerKeyLine3Tooltip => _toolTip.GetToolTip(_rowAnswerKey.Line3!) ?? string.Empty;
     internal Color MailboxesDotColor => _rowMailboxes.DotColor;
     internal Color StoryDotColor => _rowStory.DotColor;
     internal Button OpenMailboxesButton => _btnOpenMailboxes;

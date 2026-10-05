@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
@@ -15,6 +16,11 @@ public class GenerationRunInput
     public CaseDraft Draft { get; set; } = new();
     public CorpusPlan Plan { get; set; } = new();
     public string CaseFolder { get; set; } = string.Empty;
+
+    // Images and voicemail audio; null when no OpenAI key was tested this session (every media item is Skipped)
+    public IMediaGenerator? Media { get; set; }
+
+    public MediaPrices MediaPrices { get; set; } = MediaPrices.Defaults();
 }
 
 /// <summary>
@@ -74,6 +80,12 @@ public class GenerationRunner
     // Test seam: lets tests force an exception outside a unit of work
     internal Func<int, Task>? BeforeWaveHook { get; set; }
 
+    // Test seam: runs just before the runner appends its own CastVoices or SideWorld record
+    internal Func<JournalRecord, Task>? BeforeRecordAppendHook { get; set; }
+
+    // Test seam: passed to ThreadUnitOfWork.BeforeAppendHook (runs just before each ThreadDone append)
+    internal Func<JournalRecord, Task>? BeforeThreadAppendHook { get; set; }
+
     /// <summary>
     /// Writes every relevant thread not yet journaled as done, wave by wave. Never throws: cancel, fatal provider errors
     /// and unexpected exceptions all end with a final checkpoint and a RunEnded record.
@@ -99,49 +111,69 @@ public class GenerationRunner
 
         var state = GenerationRunState.From(plan, replay);
         var guide = input.Draft.Guide ?? new CaseGuide();
+        var mediaAvailable = input.Media != null;
 
         // Whole plan, never the remaining threads: Continue sees the same waves and ledger visibility (Pitfall 3)
         var waves = WavePlanner.Plan(input.Plan);
+        var fillerRow = waves.Count + 1;
+        var repairRow = waves.Count + 2;
         var folders = PlanNumbering.CustodianFolders(guide);
         var journal = new GenerationJournal(folder);
+        var chains = AttachmentChains.Compute(plan, guide);
         var ctx = new RunContext
         {
             Input = input,
             Guide = guide,
             Waves = waves,
             WaveOf = WavePlanner.WaveIndexByThread(waves),
-            Assignments = RenderAssignments.Compute(plan),
+            Assignments = GenerationRunState.AllAssignments(plan),
             People = PeopleDirectory.Create(guide, plan),
             Journal = journal,
             Snapshot = snapshot,
             Persist = persist,
             StoryModel = _llm.ResolveModel(LlmTier.Story),
+            VolumeModel = _llm.ResolveModel(LlmTier.Volume),
+            Chains = chains,
+            // D-16 + checker 06-18: one committed store for the run, seeded from the journal; waits only on lower-ranked threads
+            ChainScheduler = new ChainScheduler(chains, CommittedTexts(state), ChainScheduler.ThreadOfAttachment(plan),
+                ChainScheduler.RankThreads(plan)),
+            MediaGate = new MediaRunGate(),
             LastProjectionUtc = DateTime.UtcNow
         };
-        var uow = new ThreadUnitOfWork(_llm, journal, new MailboxWriter(folder, folders), snapshot, ctx.StoryModel);
+
+        // D-20 + review concern 6: persisted schedules first, so a later invite for a known meeting reuses its slot
+        foreach (var (key, slot) in state.InviteSlotsByMeeting)
+            ctx.InviteSlots.TryAdd(key, slot);
+
         var threads = (plan.Threads ?? new List<PlannedThread>())
             .Where(t => t != null && !string.IsNullOrEmpty(t.Id))
             .GroupBy(t => t.Id, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        // Media items this run will attempt: those of threads not yet written (MediaStopped reports what is left)
+        ctx.MediaGate.SetRemaining(threads.Values
+            .Where(t => !state.IsDone(t.Id))
+            .SelectMany(PlannedAttachments)
+            .Count(a => a.Kind is AttachmentType.Image or AttachmentType.Voicemail));
+
+        var attachmentsUow = new AttachmentUnitOfWork(_llm, snapshot, input.Media, ctx.MediaGate, ctx.StoryModel, ctx.VolumeModel);
+        var uow = new ThreadUnitOfWork(_llm, journal, new MailboxWriter(folder, folders), snapshot, ctx.StoryModel, attachmentsUow)
+        {
+            BeforeAppendHook = BeforeThreadAppendHook
+        };
         var deltas = new Dictionary<string, List<LedgerDelta>>(state.DeltasByThread, StringComparer.Ordinal);
 
         var startLedger = LedgerMerger.Build(plan, guide, ctx.WaveOf, deltas);
         ctx.LastGoodState = state;
         ctx.LastGoodLedger = startLedger;
+
+        // Same row rules and mediaAvailable as RepairGroups and GenerationHistory.Waves (checker 06-23)
+        var seeds = state.AttachmentSeeds(plan, ctx.WaveOf, fillerRow, repairRow, mediaAvailable: mediaAvailable);
         snapshot.Reset(
             state.ToCounts(plan, waves.Count, startLedger.Entries.Count,
-                GenerationRunState.EstimateRemaining(plan, state, ctx.StoryModel), running: true, finished: false),
-            waves.Select(w => new WaveProgress
-            {
-                Index = w.Index,
-                Start = w.Start,
-                End = w.End,
-                Threads = w.ThreadIds.Count,
-                Emails = w.MessageCount,
-                Done = w.ThreadIds.Count(state.IsDone),
-                Warnings = w.ThreadIds.Count(id => Status(state, id) == ThreadRunStatus.Warnings),
-                Failed = w.ThreadIds.Count(id => Status(state, id) == ThreadRunStatus.Failed)
-            }));
+                EstimateRemaining(ctx, state), running: true, finished: false),
+            StageRows(plan, waves, state, seeds, threads, fillerRow),
+            seeds);
 
         var pendingTotal = state.TotalThreads - state.Written - state.Warnings;
         snapshot.AddEvent(new GenerationEvent
@@ -167,7 +199,56 @@ public class GenerationRunner
                 PlanId = plan.PlanId
             }, CancellationToken.None).ConfigureAwait(false);
 
-            for (var i = 0; i < waves.Count; i++)
+            // D-28: one voice set for every voicemail of every stage, chosen before the first one is spoken
+            var proceed = true;
+            if (mediaAvailable && VoicemailPending(threads.Values, state))
+            {
+                var voices = CastVoiceBuilder.FromRecord(replay.LastCastVoices, guide);
+                if (voices == null)
+                {
+                    var vo = await CastVoiceBuilder.BuildAsync(_llm, input.Draft, guide, run).ConfigureAwait(false);
+                    var voiceCost = ModelCost(ctx.VolumeModel, vo.InputTokens, vo.OutputTokens);
+                    snapshot.AddCost(voiceCost);
+                    if (run.IsFatal && vo.Voices == null)
+                    {
+                        ctx.AddUnjournaledSpend(vo.InputTokens, vo.OutputTokens, voiceCost);
+                        outcome = GenerationOutcome.Fatal;
+                        message = run.FatalError;
+                        proceed = false;
+                    }
+                    else
+                    {
+                        voices ??= vo.Voices;
+                        var record = new JournalRecord
+                        {
+                            Type = JournalRecordType.CastVoices,
+                            Utc = DateTime.UtcNow,
+                            PlanId = plan.PlanId,
+                            CastVoices = voices,
+                            InputTokens = vo.InputTokens,
+                            OutputTokens = vo.OutputTokens,
+                            CostUsd = voiceCost
+                        };
+                        try
+                        {
+                            await AppendOwnRecordAsync(journal, record).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            // Review 06-19: Continue promises the same voices; never use a choice the journal does not hold
+                            ctx.AddUnjournaledSpend(vo.InputTokens, vo.OutputTokens, voiceCost);
+                            outcome = GenerationOutcome.InternalError;
+                            message = $"Could not save the voicemail voices: {ex.Message}";
+                            proceed = false;
+                        }
+                    }
+                }
+
+                if (proceed)
+                    attachmentsUow.CastVoices = voices;
+            }
+
+            for (var i = 0; proceed && i < waves.Count; i++)
             {
                 if (BeforeWaveHook != null)
                     await BeforeWaveHook(i).ConfigureAwait(false);
@@ -196,6 +277,9 @@ public class GenerationRunner
 
                 // Earlier waves only: LedgerSelector filters by wave, and this wave's deltas are not merged yet
                 var ledger = LedgerMerger.Build(plan, guide, ctx.WaveOf, deltas);
+                ctx.ChainScheduler.BeginStep(pending);
+                var step = StepContext(ctx, wave.Index);
+                var relevantProfile = RenderProfile.Relevant(_llm);
                 var tasks = pending
                     .Select(id =>
                     {
@@ -203,16 +287,18 @@ public class GenerationRunner
                             ctx.Assignments.TryGetValue(id, out var a) ? a : new ThreadAssignment { ThreadId = id },
                             ctx.People, ledger.Entries, wave.Index);
                         render.PreviousStatus = Status(state, id);
-                        return RunThreadAsync(ctx, uow, render, run);
+                        return RunThreadAsync(ctx, uow, render, relevantProfile, step, run);
                     })
                     .ToList();
                 var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+                KeepSlots(ctx, step);
 
                 // Merged after the wave completes: same-wave threads never see each other's details (D-11)
                 foreach (var result in results)
                 {
+                    // D-18 + review concern 1: only details whose line is durable reach later waves
                     if (result.Kind is ThreadOutcomeKind.Written or ThreadOutcomeKind.Warnings && result.Record != null)
-                        deltas[result.Record.ThreadId] = result.Record.LedgerDelta.ToList();
+                        deltas[result.Record.ThreadId] = result.Record.LedgerDelta.Concat(result.AttachmentDeltas).ToList();
                 }
 
                 snapshot.SetWaveRunning(wave.Index, false);
@@ -294,14 +380,54 @@ public class GenerationRunner
     }
 
     private static async Task<ThreadOutcome> RunThreadAsync(RunContext ctx, ThreadUnitOfWork uow, ThreadRenderContext render,
-        PlanCallRun run)
+        RenderProfile profile, ThreadAttachmentContext attachments, PlanCallRun run)
     {
-        var outcome = await uow.RunAsync(render, run).ConfigureAwait(false);
+        var threadId = render.Thread.Id;
+        ThreadOutcome outcome;
+        try
+        {
+            // A registered thread must always complete, or same-step successors wait forever
+            if (run.IsFatal)
+            {
+                ctx.ChainScheduler.Complete(threadId, EmptyTexts);
+                return new ThreadOutcome { Kind = ThreadOutcomeKind.NotRun, Reason = run.FatalError };
+            }
+
+            if (run.UserToken.IsCancellationRequested)
+            {
+                ctx.ChainScheduler.Complete(threadId, EmptyTexts);
+                run.UserToken.ThrowIfCancellationRequested();
+            }
+
+            outcome = await uow.RunAsync(render, profile, run, attachments).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The unit completes in its own finally; this covers anything thrown before it started (idempotent)
+            ctx.ChainScheduler.Complete(threadId, EmptyTexts);
+            throw;
+        }
+
         if (outcome.Kind != ThreadOutcomeKind.NotRun)
             await MaybeProjectAsync(ctx).ConfigureAwait(false);
         else
             ctx.AddUnjournaledSpend(outcome.InputTokens, outcome.OutputTokens, outcome.CostUsd);
+
+        AddUnjournaled(ctx, outcome);
         return outcome;
+    }
+
+    // D-29 + review concern 1: every token and dollar with no journal line of its own reaches RunEnded exactly once
+    private static void AddUnjournaled(RunContext ctx, ThreadOutcome result)
+    {
+        // A NotRun thread has no attachments and Unjournaled false (counted above); a Failed thread's line already carries its spend
+        if (result.Unjournaled)
+            ctx.AddUnjournaledSpend(result.InputTokens, result.OutputTokens, result.CostUsd);
+        else if (result.NotRunCostUsd > 0 || result.NotRunInputTokens > 0 || result.NotRunOutputTokens > 0)
+        {
+            // Checker 06-19: NotRun attachments have no record; the Unjournaled totals already include them
+            ctx.AddUnjournaledSpend(result.NotRunInputTokens, result.NotRunOutputTokens, result.NotRunCostUsd);
+        }
     }
 
     /// <summary>
@@ -406,7 +532,7 @@ public class GenerationRunner
         try
         {
             checkpoint.KeyResult = await GenerationOutputs.WriteAnswerKeyAsync(input.CaseFolder, ctx.Guide, plan,
-                state.BuildOverlay(plan, ctx.Assignments), null, CancellationToken.None).ConfigureAwait(false);
+                state.BuildOverlay(plan, ctx.Assignments, ctx.Chains), null, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -450,9 +576,14 @@ public class GenerationRunner
         }
 
         ctx.Snapshot.SetLedgerEntries(ledger.Entries.Count);
-        ctx.Snapshot.SetRemainingCost(GenerationRunState.EstimateRemaining(plan, state, ctx.StoryModel));
+        ctx.Snapshot.SetRemainingCost(EstimateRemaining(ctx, state));
         return checkpoint;
     }
+
+    // D-29: Story, Volume and media with the shared pricing, same mediaAvailable as the seeds and repairs
+    private static decimal EstimateRemaining(RunContext ctx, GenerationRunState state) =>
+        GenerationRunState.EstimateRemaining(ctx.Input.Plan, state, ctx.StoryModel, ctx.VolumeModel, ctx.Input.MediaPrices,
+            ctx.Input.Media != null, ctx.Guide);
 
     /// <summary>
     /// The journal could not be projected (unreadable, foreign plan or a projection bug). Keeps the last good projection:
@@ -514,6 +645,8 @@ public class GenerationRunner
                 break;
             case GenerationOutcome.Cancelled:
                 e.Kind = GenerationEventKind.RunCancelled;
+                e.AttachmentsDone = state.AttachmentsWritten + state.AttachmentsWarnings;
+                e.AttachmentsTotal = state.AttachmentsTotal;
                 break;
             default:
                 e.Kind = GenerationEventKind.RunStopped;
@@ -528,6 +661,133 @@ public class GenerationRunner
 
     private static ThreadRunStatus Status(GenerationRunState state, string id) =>
         state.StatusByThread.TryGetValue(id, out var status) ? status : ThreadRunStatus.Pending;
+
+    private static readonly IReadOnlyDictionary<string, string> EmptyTexts = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    private static bool IsCommitted(AttachmentRunStatus status) =>
+        status is AttachmentRunStatus.Written or AttachmentRunStatus.Warnings;
+
+    // Flattened text of every committed attachment in the journal: the chain predecessors of this run's successors
+    private static Dictionary<string, string> CommittedTexts(GenerationRunState state)
+    {
+        var texts = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (docId, record) in state.AttachmentRecords)
+        {
+            if (record != null && state.StatusByAttachment.TryGetValue(docId, out var status) && IsCommitted(status))
+                texts[docId] = record.FlattenedText ?? string.Empty;
+        }
+
+        return texts;
+    }
+
+    private static IEnumerable<PlannedAttachment> PlannedAttachments(PlannedThread thread) =>
+        (thread.Messages ?? new List<PlannedMessage>())
+        .Where(m => m != null)
+        .SelectMany(m => m.Attachments ?? new List<PlannedAttachment>())
+        .Where(a => a != null && !string.IsNullOrEmpty(a.DocId));
+
+    // A planned voicemail with no committed outcome yet (pending thread, or Failed/Skipped on a written one)
+    private static bool VoicemailPending(IEnumerable<PlannedThread> threads, GenerationRunState state) =>
+        threads.SelectMany(PlannedAttachments)
+            .Where(a => a.Kind == AttachmentType.Voicemail)
+            .Any(a => !state.StatusByAttachment.TryGetValue(a.DocId, out var status) || !IsCommitted(status));
+
+    private static decimal ModelCost(AIModelConfig? model, int inputTokens, int outputTokens) =>
+        model?.CalculateTotalCost(inputTokens, outputTokens) ?? 0m;
+
+    // CastVoices and SideWorld must be durable before anything uses them; the caller decides what a failure means
+    private async Task AppendOwnRecordAsync(GenerationJournal journal, JournalRecord record)
+    {
+        if (BeforeRecordAppendHook != null)
+            await BeforeRecordAppendHook(record).ConfigureAwait(false);
+        await journal.AppendAsync(record, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    // One attachment context per run step: the run's chain scheduler and a copy of the known invite slots
+    private static ThreadAttachmentContext StepContext(RunContext ctx, int rowIndex)
+    {
+        var step = new ThreadAttachmentContext { Chains = ctx.ChainScheduler, RowIndex = rowIndex };
+        foreach (var (key, slot) in ctx.InviteSlots)
+            step.InviteSlots.TryAdd(key, slot);
+        return step;
+    }
+
+    // Slots registered by committed invites of the step stay known to later steps (D-20: the first one wins)
+    private static void KeepSlots(RunContext ctx, ThreadAttachmentContext step)
+    {
+        foreach (var (key, slot) in step.InviteSlots)
+            ctx.InviteSlots.TryAdd(key, slot);
+    }
+
+    /// <summary>
+    /// Wave rows plus the Non-relevant mail row (when the plan has non-relevant threads), with thread and attachment
+    /// counts from the replayed state and the attachment seeds so live counters start where the journal left off.
+    /// </summary>
+    private static List<WaveProgress> StageRows(CorpusPlan plan, List<GenerationWave> waves, GenerationRunState state,
+        IReadOnlyDictionary<string, AttachmentSeed> seeds, IReadOnlyDictionary<string, PlannedThread> threads, int fillerRow)
+    {
+        var rows = waves.Select(w => new WaveProgress
+        {
+            Index = w.Index,
+            Start = w.Start,
+            End = w.End,
+            Threads = w.ThreadIds.Count,
+            Emails = w.MessageCount,
+            Done = w.ThreadIds.Count(state.IsDone),
+            Warnings = w.ThreadIds.Count(id => Status(state, id) == ThreadRunStatus.Warnings),
+            Failed = w.ThreadIds.Count(id => Status(state, id) == ThreadRunStatus.Failed)
+        }).ToList();
+
+        var filler = NonRelevantThreads(threads.Values).ToList();
+        if (filler.Count > 0)
+        {
+            var first = filler.Min(MessageTime.FirstLocalDate);
+            var last = filler.SelectMany(t => t.Messages.Where(m => m != null)).Select(MessageTime.LocalDate).Max();
+            rows.Add(new WaveProgress
+            {
+                Index = fillerRow,
+                RowKind = StageRowKind.NonRelevant,
+                Start = first,
+                End = last,
+                Threads = filler.Count,
+                Emails = filler.Sum(t => t.Messages.Count(m => m != null)),
+                Done = filler.Count(t => state.IsDone(t.Id)),
+                Warnings = filler.Count(t => Status(state, t.Id) == ThreadRunStatus.Warnings),
+                Failed = filler.Count(t => Status(state, t.Id) == ThreadRunStatus.Failed)
+            });
+        }
+
+        foreach (var seed in seeds.Values)
+        {
+            var row = rows.FirstOrDefault(r => r.Index == seed.RowIndex);
+            if (row == null)
+                continue;
+
+            row.Attachments++;
+            switch (seed.Status)
+            {
+                case AttachmentRunStatus.Written:
+                    row.AttachmentsDone++;
+                    break;
+                case AttachmentRunStatus.Warnings:
+                    row.AttachmentsDone++;
+                    row.AttachmentWarnings++;
+                    break;
+                case AttachmentRunStatus.Failed:
+                    row.AttachmentsFailed++;
+                    break;
+                case AttachmentRunStatus.Skipped:
+                    row.AttachmentsSkipped++;
+                    break;
+            }
+        }
+
+        return rows;
+    }
+
+    // Non-relevant generation threads (same rule as GenerationRunState): an id and at least one message
+    private static IEnumerable<PlannedThread> NonRelevantThreads(IEnumerable<PlannedThread> threads) =>
+        threads.Where(t => t.Relevance != ThreadRelevance.Relevant && t.Messages != null && t.Messages.Any(m => m != null));
 
     // Per-run shared values; one instance per RunAsync call
     private sealed class RunContext
@@ -548,6 +808,18 @@ public class GenerationRunner
         public GenerationSnapshot Snapshot { get; init; } = null!;
         public GenerationPersist? Persist { get; init; }
         public AIModelConfig? StoryModel { get; init; }
+        public AIModelConfig? VolumeModel { get; init; }
+
+        // D-16: chain links of the whole plan and the run-wide predecessor scheduler
+        public Dictionary<string, AttachmentChainLink> Chains { get; init; } = new(StringComparer.Ordinal);
+        public ChainScheduler ChainScheduler { get; init; } = null!;
+
+        // D-20: canonical meeting key -> schedule, seeded from the journal and grown by committed invites
+        public ConcurrentDictionary<string, InviteSlot> InviteSlots { get; } = new(StringComparer.Ordinal);
+
+        // One per run: a media stop ends only media (UI-SPEC Decision 2)
+        public MediaRunGate MediaGate { get; init; } = null!;
+
         public SemaphoreSlim ProjectionGate { get; } = new(1, 1);
 
         // Last projection that came from a readable journal; read and written only under ProjectionGate

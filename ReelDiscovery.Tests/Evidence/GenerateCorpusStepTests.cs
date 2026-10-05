@@ -1,5 +1,6 @@
 using System.Text;
 using ReelDiscovery.Helpers;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
@@ -25,9 +26,9 @@ public class GenerateCorpusStepTests
 
     private sealed class Harness : IDisposable
     {
-        public Harness(bool approved = true)
+        public Harness(bool approved = true, bool mixed = false)
         {
-            Fixture = new GenerateCorpusRenderTests.StepFixture(approved);
+            Fixture = new GenerateCorpusRenderTests.StepFixture(approved, mixed);
             (Gateway, Fake) = CorpusTestData.CreateGateway();
             // Thread renders, attachments and filler (06-19: the run writes all three)
             Fake.Respond = AttachmentResponder.Create(Fixture.Plan, Fixture.Draft.Guide!);
@@ -49,6 +50,12 @@ public class GenerateCorpusStepTests
             step.BindState(Fixture.State);
             step.GatewayFactory = () => Gateway;
             step.Confirm = (title, text, icon) => true;
+            // The fixture has a tested OpenAI key; a test run never reaches OpenAI (tests may replace this hook)
+            step.RunInputCreated = input =>
+            {
+                if (input.Media != null)
+                    input.Media = new FakeMediaGenerator();
+            };
             return step;
         }
 
@@ -513,6 +520,382 @@ public class GenerateCorpusStepTests
             foreach (var message in h.Relevant.SelectMany(t => t.Messages))
                 Assert.Equal("Generated", key[message.DocId]);
         });
+    }
+
+    // ----- 06-23: run input, entry banners, Ready card, progress units, confirmations -----
+
+    [Fact]
+    public void RunInput_WithTestedKey_CarriesMediaAndAClonedPrices()
+    {
+        using var h = new Harness();
+        Assert.True(h.Fixture.State.IsMediaAvailable);
+        var start = h.Fixture.State.MediaPrices.ImagePerUnit;
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var inputs = new List<GenerationRunInput>();
+            var mediaTypes = new List<Type?>();
+            step.RunInputCreated = input =>
+            {
+                inputs.Add(input);
+                mediaTypes.Add(input.Media?.GetType());
+                // Never a real OpenAI call from a test
+                input.Media = new FakeMediaGenerator();
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            var captured = Assert.Single(inputs);
+            Assert.Equal(typeof(OpenAIMediaGenerator), mediaTypes[0]);
+            Assert.NotSame(h.Fixture.State.MediaPrices, captured.MediaPrices);
+
+            // Editing prices after the start never changes that run's prices (review LOW 06-24)
+            h.Fixture.State.MediaPrices.ImagePerUnit = 0.5m;
+            Assert.Equal(start, captured.MediaPrices.ImagePerUnit);
+        });
+    }
+
+    [Fact]
+    public void RunInput_WithoutTestedKey_HasNoMedia()
+    {
+        using var h = new Harness();
+        h.Fixture.State.OpenAIKeyTested = false;
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            GenerationRunInput? captured = null;
+            step.RunInputCreated = input => captured = input;
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            Assert.NotNull(captured);
+            Assert.Null(captured!.Media);
+        });
+    }
+
+    [Fact]
+    public void BannerAndHeaderButtons_StartOneRunPerClick_WithoutConfirmation()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var runs = 0;
+            var confirms = 0;
+            step.RunInputCreated = input =>
+            {
+                runs++;
+                input.Media = null;
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+            Assert.Equal(1, runs);
+
+            step.Confirm = (title, text, icon) =>
+            {
+                confirms++;
+                return true;
+            };
+            Pump(step.ClickBannerButtonAsync());
+            Assert.Equal(2, runs);
+            Pump(step.ClickRetryFailedAsync());
+            Assert.Equal(3, runs);
+            Pump(step.ClickContinueAsync());
+            Assert.Equal(4, runs);
+            Assert.Equal(0, confirms);
+        });
+    }
+
+    [Fact]
+    public void Entry_ThreadsDoneAttachmentsMissing_LastRunFinished_PartOfCorpusHeading()
+    {
+        using var h = new Harness(mixed: true);
+        var ids = GenerationIds(h.Plan);
+        WriteJournal(h, ids.Select(id => GenerationRunStateTests.Done(h.Plan, ThreadOf(h, id), ThreadWriteStatus.Written, 0.01m))
+            .Append(RunEnded(h, GenerationOutcome.Finished)));
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+
+            var state = GenerationRunState.From(h.Plan, GenerationJournal.Replay(h.Folder, h.Plan));
+            Assert.True(state.AttachmentsTotal > 0);
+            Assert.Equal(GenerateCorpusBanner.PartialRun, step.BannerKind);
+            Assert.Equal("Part of the corpus is not written yet.", step.BannerHeadingText);
+            Assert.Equal(GenerationUiText.BannerBody(ids.Count, ids.Count, 0, state.AttachmentsTotal, 0), step.BannerBodyText);
+            Assert.Equal(GenerationUiText.BannerButton, step.BannerButton.Text);
+        });
+    }
+
+    [Fact]
+    public void Entry_NoRunEnded_LastRunDidNotFinish()
+    {
+        using var h = new Harness(mixed: true);
+        var ids = GenerationIds(h.Plan);
+        WriteJournal(h, ids.Take(2).Select(id => GenerationRunStateTests.Done(h.Plan, ThreadOf(h, id), ThreadWriteStatus.Written, 0.01m)));
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Assert.Equal(GenerateCorpusBanner.PartialRun, step.BannerKind);
+            Assert.Equal("The last run did not finish.", step.BannerHeadingText);
+        });
+    }
+
+    [Fact]
+    public void Entry_InterruptedContinueAfterFinishedRun_LastRunDidNotFinish()
+    {
+        using var h = new Harness(mixed: true);
+        var ids = GenerationIds(h.Plan);
+        var records = ids.Select(id => GenerationRunStateTests.Done(h.Plan, ThreadOf(h, id), ThreadWriteStatus.Written, 0.01m)).ToList();
+        records.Add(RunEnded(h, GenerationOutcome.Finished));
+        // A later Continue started and never ended (crash): an older RunEnded never counts (review MEDIUM 06-23)
+        records.Add(new JournalRecord { Type = JournalRecordType.RunStarted, PlanId = h.Plan.PlanId, Utc = DateTime.UtcNow });
+        WriteJournal(h, records);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Assert.Equal(GenerateCorpusBanner.PartialRun, step.BannerKind);
+            Assert.Equal("The last run did not finish.", step.BannerHeadingText);
+        });
+    }
+
+    [Fact]
+    public void Entry_OnlySkippedMediaLeft_MediaAvailable_CreateSkippedMedia()
+    {
+        using var h = new Harness(mixed: true);
+        WriteCompleteJournal(h, failOne: false);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+
+            var state = GenerationRunState.From(h.Plan, GenerationJournal.Replay(h.Folder, h.Plan));
+            Assert.True(state.AttachmentsSkipped >= 3);
+            var expected = GenerationUiText.MediaBanner(state.AttachmentsSkipped, 0, true, MostReason);
+            Assert.Equal(GenerateCorpusBanner.Media, step.BannerKind);
+            Assert.Equal("Create Skipped Media", step.BannerButton.Text);
+            Assert.Equal(expected.Heading, step.BannerHeadingText);
+            // The reason clause is the most frequent AttachmentSkipped reason in the journal
+            Assert.Equal(expected.Body, step.BannerBodyText);
+            Assert.Contains(MostReason, step.BannerBodyText);
+            Assert.DoesNotContain(OtherReason, step.BannerBodyText);
+            Assert.False(step.RetryFailedButton.Visible);
+        });
+    }
+
+    [Fact]
+    public void Entry_SkippedMediaAndFailedItem_RetryFailedAndSkippedItems()
+    {
+        using var h = new Harness(mixed: true);
+        WriteCompleteJournal(h, failOne: true);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Assert.Equal(GenerateCorpusBanner.Media, step.BannerKind);
+            Assert.Equal("Retry Failed and Skipped Items", step.BannerButton.Text);
+            Assert.False(step.RetryFailedButton.Visible);
+        });
+    }
+
+    [Fact]
+    public void Entry_SkippedMedia_MediaUnavailable_BannerWithoutButton()
+    {
+        using var h = new Harness(mixed: true);
+        h.Fixture.State.OpenAIKeyTested = false;
+        WriteCompleteJournal(h, failOne: false);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+
+            var state = GenerationRunState.From(h.Plan, GenerationJournal.Replay(h.Folder, h.Plan));
+            var expected = GenerationUiText.MediaBanner(state.AttachmentsSkipped, 0, false, MostReason);
+            Assert.Equal(string.Empty, expected.ButtonText);
+            Assert.Equal(GenerateCorpusBanner.Media, step.BannerKind);
+            Assert.Equal(expected.Body, step.BannerBodyText);
+            Assert.False(step.BannerButton.Visible);
+        });
+    }
+
+    [Fact]
+    public void ReadyCard_MixedCase_TieredEstimateAndMediaNotice()
+    {
+        using var h = new Harness(mixed: true);
+        h.Fixture.State.OpenAIKeyTested = false;
+        var state = h.Fixture.State;
+        Assert.NotNull(state.StoryModelConfig);
+        Assert.NotNull(state.VolumeModelConfig);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
+            Assert.Contains(state.StoryModelConfig!.DisplayName, step.EstimateLabel.Text);
+            Assert.Contains(state.VolumeModelConfig!.DisplayName, step.EstimateLabel.Text);
+            Assert.Contains("images and voicemail", step.EstimateLabel.Text);
+            Assert.NotEqual(string.Empty, step.MediaNoticeLabel.Text);
+            // The body names the non-relevant threads and the attachments (run order)
+            Assert.Contains("non-relevant thread", step.StateBody);
+            Assert.Contains("attachment", step.StateBody);
+
+            // With a tested key there is no notice
+            state.OpenAIKeyTested = true;
+            Pump(step.OnEnterStepAsync());
+            Assert.Equal(string.Empty, step.MediaNoticeLabel.Text);
+        });
+    }
+
+    [Fact]
+    public void ProgressUnits_ThreadsAndAttachmentsAreEqualUnits()
+    {
+        var counts = new GenerationCounts
+        {
+            TotalThreads = 10,
+            DoneThreads = 3,
+            FailedThreads = 1,
+            AttachmentsTotal = 5,
+            AttachmentsDone = 1,
+            AttachmentsFailed = 1,
+            AttachmentsSkipped = 1
+        };
+        Assert.Equal((15, 7), StepGenerateCorpus.ProgressUnits(counts));
+
+        // Never above the maximum
+        counts.DoneThreads = 40;
+        var (maximum, value) = StepGenerateCorpus.ProgressUnits(counts);
+        Assert.Equal(15, maximum);
+        Assert.Equal(15, value);
+
+        // Empty plan: a non-zero maximum
+        Assert.Equal((1, 0), StepGenerateCorpus.ProgressUnits(new GenerationCounts()));
+    }
+
+    [Fact]
+    public void ProgressBar_RetriedFailedAttachment_IsNotCountedTwice()
+    {
+        RunSta(() =>
+        {
+            using var step = new StepGenerateCorpus();
+            var snapshot = new GenerationSnapshot();
+            snapshot.Reset(new GenerationCounts
+            {
+                TotalThreads = 4,
+                DoneThreads = 2,
+                AttachmentsTotal = 3,
+                AttachmentsDone = 1,
+                AttachmentsFailed = 1,
+                Running = true
+            }, new List<WaveProgress> { new() { Index = 1, Threads = 4, Attachments = 3 } },
+                new Dictionary<string, AttachmentSeed>
+                {
+                    ["ATT-1"] = new() { RowIndex = 1, Status = AttachmentRunStatus.Written },
+                    ["ATT-2"] = new() { RowIndex = 1, Status = AttachmentRunStatus.Failed },
+                    ["ATT-3"] = new() { RowIndex = 1, Status = AttachmentRunStatus.Pending }
+                });
+            step.ApplyView(snapshot.Drain());
+            Assert.Equal(7, step.ProgressBar.Maximum);
+            Assert.Equal(4, step.ProgressBar.Value);
+
+            // The replayed Failed attachment written in this run moves from Failed to Done
+            snapshot.RecordAttachment("ATT-2", 1, AttachmentRunStatus.Written, 0.01m);
+            step.ApplyView(snapshot.Drain());
+            Assert.Equal(7, step.ProgressBar.Maximum);
+            Assert.Equal(4, step.ProgressBar.Value);
+
+            // A pending one skipped counts as finished
+            snapshot.RecordAttachment("ATT-3", 1, AttachmentRunStatus.Skipped, 0m);
+            step.ApplyView(snapshot.Drain());
+            Assert.Equal(5, step.ProgressBar.Value);
+            Assert.True(step.ProgressBar.Value <= step.ProgressBar.Maximum);
+        });
+    }
+
+    [Fact]
+    public void CancelConfirmation_CarriesTheAttachmentClause()
+    {
+        var counts = new GenerationCounts { DoneThreads = 4, AttachmentsDone = 3 };
+        Assert.Equal(GenerationUiText.CG1CancelGeneration(4, 3), StepGenerateCorpus.CancelConfirmation(counts));
+        Assert.Contains("3 attachments", StepGenerateCorpus.CancelConfirmation(counts).Text);
+        Assert.Equal(GenerationUiText.CG1CancelGeneration(0, 0), StepGenerateCorpus.CancelConfirmation(null));
+    }
+
+    [Fact]
+    public void MostFrequentSkippedReason_PicksTheCommonestReason()
+    {
+        using var h = new Harness(mixed: true);
+        WriteCompleteJournal(h, failOne: false);
+        var state = GenerationRunState.From(h.Plan, GenerationJournal.Replay(h.Folder, h.Plan));
+        Assert.Equal(MostReason, StepGenerateCorpus.MostFrequentSkippedReason(state));
+        Assert.Equal(string.Empty, StepGenerateCorpus.MostFrequentSkippedReason(new GenerationRunState()));
+    }
+
+    private const string MostReason = "the OpenAI quota is used up";
+    private const string OtherReason = "the image was refused";
+
+    private static List<string> GenerationIds(CorpusPlan plan) =>
+        GenerationRunState.From(plan, new JournalReplay()).StatusByThread.Keys.OrderBy(id => id, StringComparer.Ordinal).ToList();
+
+    private static PlannedThread ThreadOf(Harness h, string id) => h.Plan.Threads.First(t => t.Id == id);
+
+    private static JournalRecord RunEnded(Harness h, GenerationOutcome outcome) =>
+        new() { Type = JournalRecordType.RunEnded, PlanId = h.Plan.PlanId, Utc = DateTime.UtcNow, Outcome = outcome };
+
+    // Every thread written with every attachment final: Office parts written, media Skipped (the first media item with
+    // OtherReason, the rest with MostReason), and with failOne the first Office attachment Failed
+    private static void WriteCompleteJournal(Harness h, bool failOne)
+    {
+        var records = new List<JournalRecord>();
+        var media = 0;
+        var failed = false;
+        foreach (var id in GenerationIds(h.Plan))
+        {
+            var thread = ThreadOf(h, id);
+            var attachments = thread.Messages.SelectMany(m => m.Attachments).Where(a => !string.IsNullOrEmpty(a.DocId))
+                .GroupBy(a => a.DocId).Select(g => g.First())
+                .Select(a =>
+                {
+                    if (a.Kind is AttachmentType.Image or AttachmentType.Voicemail)
+                        return GenerationRunStateTests.Attachment(h.Plan, a, JournalRecordType.AttachmentSkipped,
+                            reason: media++ == 0 ? OtherReason : MostReason);
+                    if (failOne && !failed)
+                    {
+                        failed = true;
+                        return GenerationRunStateTests.Attachment(h.Plan, a, JournalRecordType.AttachmentFailed,
+                            ThreadWriteStatus.Written, "The provider returned an error");
+                    }
+
+                    return GenerationRunStateTests.Attachment(h.Plan, a, JournalRecordType.AttachmentDone);
+                })
+                .ToArray();
+            records.Add(GenerationRunStateTests.DoneWith(h.Plan, thread, attachments));
+        }
+
+        records.Add(RunEnded(h, GenerationOutcome.Finished));
+        WriteJournal(h, records);
+    }
+
+    // Same line format as GenerationJournal.AppendAsync, after a RunStarted record
+    private static void WriteJournal(Harness h, IEnumerable<JournalRecord> records)
+    {
+        var options = new System.Text.Json.JsonSerializerOptions(CaseDraft.JsonOptions) { WriteIndented = false };
+        var lines = new[] { new JournalRecord { Type = JournalRecordType.RunStarted, PlanId = h.Plan.PlanId, Utc = DateTime.UtcNow } }
+            .Concat(records)
+            .Select(r => System.Text.Json.JsonSerializer.Serialize(r, options));
+        File.WriteAllLines(GenerationJournal.PathFor(h.Folder), lines);
     }
 
     // ----- Helpers -----

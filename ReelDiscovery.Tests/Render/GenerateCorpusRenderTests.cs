@@ -988,11 +988,12 @@ public class GenerateCorpusRenderTests
     {
         private readonly string _root;
 
-        public StepFixture(bool approved = true)
+        // mixed: AttachmentTestData.MixedCase (attachments, media and non-relevant mail) instead of ApprovedCase
+        public StepFixture(bool approved = true, bool mixed = false)
         {
             _root = Path.Combine(Path.GetTempPath(), "rd-generate-corpus-" + Guid.NewGuid().ToString("N"));
             var store = new CaseStore(Path.Combine(_root, "Cases"), Path.Combine(_root, "AppData"));
-            var (draft, plan) = EvidenceTestData.ApprovedCase();
+            var (draft, plan) = mixed ? AttachmentTestData.MixedCase() : EvidenceTestData.ApprovedCase();
             if (!approved)
                 draft.Corpus!.Approved = false;
             draft.AdvanceStage(CaseStage.ReviewPlan);

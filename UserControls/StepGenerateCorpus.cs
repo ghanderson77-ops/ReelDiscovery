@@ -735,12 +735,27 @@ public partial class StepGenerateCorpus : UserControl
         {
             SetRunChrome(true);
             _progress.Marquee = false;
-            _progress.Maximum = Math.Max(1, counts.TotalThreads);
-            _progress.Value = Math.Min(_progress.Maximum, counts.DoneThreads + counts.FailedThreads);
+            var (maximum, value) = ProgressUnits(counts);
+            _progress.Maximum = maximum;
+            _progress.Value = value;
             var text = GenerationUiText.ProgressText(view);
             if (text.Length > 0)
                 SetStatus(text, Theme.Accent);
         }
+    }
+
+    /// <summary>
+    /// Progress bar units (U22): relevant threads, non-relevant threads and attachments count equally; Written, Warnings,
+    /// Failed and Skipped are finished. The counts move per item status (06-02), so a retried item is never counted twice;
+    /// the value is clamped to the maximum.
+    /// </summary>
+    internal static (int Maximum, int Value) ProgressUnits(GenerationCounts counts)
+    {
+        ArgumentNullException.ThrowIfNull(counts);
+        var maximum = Math.Max(1, counts.TotalThreads + counts.AttachmentsTotal);
+        var finished = counts.DoneThreads + counts.FailedThreads
+                       + counts.AttachmentsDone + counts.AttachmentsFailed + counts.AttachmentsSkipped;
+        return (maximum, Math.Clamp(finished, 0, maximum));
     }
 
     /// <summary>

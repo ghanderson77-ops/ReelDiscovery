@@ -50,6 +50,14 @@ public partial class StepGenerateCorpus : IWizardStep
     // Test seam: called after each checkpoint is applied to the draft
     internal Action? CheckpointApplied;
 
+    /// <summary>
+    /// Called with each run's input before the runner starts; tests read it or swap Media for a fake. Test seam.
+    /// </summary>
+    internal Action<GenerationRunInput>? RunInputCreated;
+
+    // Whether the last run had media (input.Media != null): its Stages rows use the same rule as the runner (checker 06-23)
+    private bool _runMediaAvailable;
+
     private CaseDraft Draft => _state.Case;
 
     /// <summary>
@@ -119,12 +127,19 @@ public partial class StepGenerateCorpus : IWizardStep
             if (folder.Length > 0)
             {
                 var guide = Draft.Guide ?? new CaseGuide();
-                var model = _state.StoryModelConfig;
+                // What the next Continue would use: the session's models, prices and media availability
+                var pricing = new EntryPricing
+                {
+                    Story = _state.StoryModelConfig,
+                    Volume = _state.VolumeModelConfig,
+                    Prices = _state.MediaPrices.Clone(),
+                    MediaAvailable = _state.IsMediaAvailable
+                };
                 var cached = corpus!.Generation;
                 var cachedPlanId = cached?.RunPlanId;
                 var cachedProjected = cached?.ProjectedUtc;
                 // Replay and projections run off the UI thread (200 MB cap in the journal, T-05-45); never a provider call (T-05-51)
-                data = await Task.Run(() => ReadEntryAsync(folder, plan, guide, model, cachedPlanId, cachedProjected));
+                data = await Task.Run(() => ReadEntryAsync(folder, plan, guide, pricing, cachedPlanId, cachedProjected));
                 if (IsDisposed || _isGenerating)
                     return;
 
@@ -150,8 +165,11 @@ public partial class StepGenerateCorpus : IWizardStep
                 input.Total = data.State.TotalThreads;
                 input.Written = data.State.Written + data.State.Warnings;
                 input.Failed = data.State.Failed;
-                // A cancelled or stopped attempt also journals RunEnded; only a Finished one makes it "ended" (UI-SPEC Row 2)
-                input.LatestAttemptEnded = data.Replay.LatestAttemptEnded
+                input.AttachmentsTotal = data.State.AttachmentsTotal;
+                input.AttachmentsFinal = AttachmentsFinal(data.State);
+                // The newest attempt only (an older RunEnded never counts); a cancelled or stopped attempt also journals
+                // RunEnded, so only a Finished one makes it "ended" (UI-SPEC Row 2, review MEDIUM 06-13/06-23)
+                input.LatestAttemptEnded = data.State.LatestAttemptEnded
                     && data.Replay.LastRunEnded?.Outcome == GenerationOutcome.Finished;
             }
         }
@@ -180,9 +198,8 @@ public partial class StepGenerateCorpus : IWizardStep
             default:
                 ClearActivity();
                 ApplyView(data!.View!);
-                var counts = data.View!.Counts;
-                ShowDashboard(decision == GenerationEntry.PartialDashboard, counts.DoneThreads, counts.TotalThreads,
-                    counts.FailedThreads, counts.FailedThreads > 0, input.LatestAttemptEnded);
+                ShowResultDashboard(decision == GenerationEntry.PartialDashboard, input.LatestAttemptEnded, data.State,
+                    _state.IsMediaAvailable);
                 return;
         }
     }
@@ -227,8 +244,9 @@ public partial class StepGenerateCorpus : IWizardStep
             MessageBoxDefaultButton.Button2) == DialogResult.Yes;
         _refreshTimer.Tick += (s, e) => DrainSnapshot();
         _btnStateAction.Click += async (s, e) => await ClickStateActionAsync();
-        _btnContinue.Click += async (s, e) => await StartRunAsync();
-        _btnRetryFailed.Click += async (s, e) => await StartRunAsync();
+        // Continue Generating, Create Skipped Media and Retry Failed and Skipped Items are this one banner button
+        _btnContinue.Click += async (s, e) => await ClickBannerButtonAsync();
+        _btnRetryFailed.Click += async (s, e) => await ClickRetryFailedAsync();
         _btnCancel.Click += (s, e) => RequestCancel();
         _btnStartOver.Click += async (s, e) => await StartOverAsync();
         _gridActivity.CellDoubleClick += (s, e) => OpenEml(ActivityEventAt(e.RowIndex));
@@ -267,8 +285,19 @@ public partial class StepGenerateCorpus : IWizardStep
     /// </summary>
     internal Task ClickContinueAsync() => StartRunAsync();
 
-    // Generate Emails, Continue Generating and Retry Failed Threads are one run: it writes every thread the journal does
-    // not list as done (UI-SPEC U5, no confirmation)
+    /// <summary>
+    /// The banner button: Continue Generating, Create Skipped Media or Retry Failed and Skipped Items (D-25).
+    /// </summary>
+    internal Task ClickBannerButtonAsync() => StartRunAsync();
+
+    /// <summary>
+    /// Header Retry Failed Items (D-26): the same run, which repairs the failed items of written threads.
+    /// </summary>
+    internal Task ClickRetryFailedAsync() => StartRunAsync();
+
+    // Generate Emails, Continue Generating, Retry Failed Items, Create Skipped Media and Retry Failed and Skipped Items are
+    // one run: it writes every thread and attachment the journal does not list as final, plus skipped media when media is
+    // available (UI-SPEC U5, no confirmation). RunCoreAsync's _isGenerating guard prevents a second run (T-06-69)
     private Task StartRunAsync() => TrackRun(RunCoreAsync());
 
     private Task TrackRun(Task run)
@@ -354,7 +383,18 @@ public partial class StepGenerateCorpus : IWizardStep
         try
         {
             var runner = new GenerationRunner(gateway);
-            var input = new GenerationRunInput { Draft = Draft, Plan = plan, CaseFolder = folder };
+            // PROV-06: media only with a tested OpenAI key this session; a media stop never ends the run (UI-SPEC Decision 2).
+            // The run keeps its own copy of the prices, so editing them mid-run never changes its estimate or ticker
+            var input = new GenerationRunInput
+            {
+                Draft = Draft,
+                Plan = plan,
+                CaseFolder = folder,
+                Media = _state.CreateMediaGenerator(),
+                MediaPrices = _state.MediaPrices.Clone()
+            };
+            RunInputCreated?.Invoke(input);
+            _runMediaAvailable = input.Media != null;
             var token = cts.Token;
             // Engine runs on the pool; workers only write the snapshot (RUN-07, Pitfall 7)
             result = await Task.Run(() => runner.RunAsync(input, snapshot, PersistOnUiThreadAsync, token));
@@ -403,8 +443,9 @@ public partial class StepGenerateCorpus : IWizardStep
     }
 
     /// <summary>
-    /// After a run: the dashboard with the banner when threads are left (or Retry Failed Threads when the run finished
-    /// with failures) and the outcome line; a key or story file that could not be written takes the status line.
+    /// After a run: the dashboard with the partial-run banner when threads or attachments are left, the media banner when
+    /// only skipped media is left, or Retry Failed Items when the run finished with failed items; then the outcome line.
+    /// A key or story file that could not be written takes the status line.
     /// </summary>
     private void ShowRunResult(CorpusPlan plan, GenerationRunResult result)
     {
@@ -416,14 +457,16 @@ public partial class StepGenerateCorpus : IWizardStep
             return;
         }
 
+        // Whole corpus: the runner writes relevant threads, non-relevant threads and attachments (06-19)
         var state = result.State;
+        var partial = IsPartial(state);
+        // The remaining cost is what the next run would spend: the session's models, prices and media availability
         var counts = state.ToCounts(plan, WavePlanner.Plan(plan).Count, result.Ledger.Entries.Count,
-            GenerationRunState.EstimateRemaining(plan, state, _state.StoryModelConfig), running: false,
-            finished: state.RelevantWritten + state.RelevantWarnings + state.RelevantFailed == state.RelevantTotal);
+            GenerationRunState.EstimateRemaining(plan, state, _state.StoryModelConfig, _state.VolumeModelConfig,
+                _state.MediaPrices, _state.IsMediaAvailable, Draft.Guide),
+            running: false, finished: !partial);
         ApplyView(new GenerationView { Counts = counts, Waves = GenerationHistory.Waves(plan, state) });
-        // Interim until 06-19 writes filler: the runner schedules relevant threads only, so only they can be left over
-        var partial = state.RelevantWritten + state.RelevantWarnings + state.RelevantFailed < state.RelevantTotal;
-        ShowDashboard(partial, counts.DoneThreads, counts.TotalThreads, counts.FailedThreads, counts.FailedThreads > 0);
+        var retryShown = ShowResultDashboard(partial, result.Outcome == GenerationOutcome.Finished, state, _state.IsMediaAvailable);
 
         var generation = Draft.Corpus?.Generation;
         var fileError = result.Outcome is GenerationOutcome.Finished or GenerationOutcome.Cancelled
@@ -431,10 +474,10 @@ public partial class StepGenerateCorpus : IWizardStep
         if (fileError && _fileErrorStatus != null)
             SetStatus(_fileErrorStatus.Value.Text, _fileErrorStatus.Value.Color);
         else
-            ShowOutcome(result.Outcome, counts, result.Message);
+            ShowOutcome(result.Outcome, counts, result.Message, retryShown);
     }
 
-    // After an unexpected exception: the counts the last checkpoint stored
+    // After an unexpected exception: the whole-corpus counts the last checkpoint stored (relevant + non-relevant threads)
     private void ShowDashboardFromDraft()
     {
         var g = Draft.Corpus?.Generation;
@@ -444,9 +487,67 @@ public partial class StepGenerateCorpus : IWizardStep
             return;
         }
 
-        var done = g.ThreadsWritten + g.ThreadsWithWarnings;
-        ShowDashboard(done + g.ThreadsFailed < g.ThreadsTotal, done, g.ThreadsTotal, g.ThreadsFailed, g.ThreadsFailed > 0);
+        var threadsDone = g.ThreadsWritten + g.ThreadsWithWarnings + g.NonRelevantWritten + g.NonRelevantWithWarnings;
+        var threadsFailed = g.ThreadsFailed + g.NonRelevantFailed;
+        var threadsTotal = g.ThreadsTotal + g.NonRelevantTotal;
+        var attachmentsDone = g.AttachmentsWritten + g.AttachmentsWithWarnings;
+        var attachmentsFinal = attachmentsDone + g.AttachmentsFailed + g.AttachmentsSkipped;
+        var partial = threadsDone + threadsFailed < threadsTotal || attachmentsFinal < g.AttachmentsTotal;
+        ShowResultDashboard(partial, g.LastOutcome == GenerationOutcome.Finished, threadsDone, threadsTotal, attachmentsDone,
+            g.AttachmentsTotal, threadsFailed + g.AttachmentsFailed, g.AttachmentsSkipped, _state.IsMediaAvailable, string.Empty);
     }
+
+    // Attachments with a final record: Written + Warnings + Failed + Skipped
+    private static int AttachmentsFinal(GenerationRunState state) =>
+        state.AttachmentsWritten + state.AttachmentsWarnings + state.AttachmentsFailed + state.AttachmentsSkipped;
+
+    // Unfinished = any thread or attachment without a final record (the GenerationUiText.EntryDecision rule)
+    private static bool IsPartial(GenerationRunState state) =>
+        state.Pending > 0 || AttachmentsFinal(state) < state.AttachmentsTotal;
+
+    private bool ShowResultDashboard(bool partial, bool runEnded, GenerationRunState state, bool mediaAvailable) =>
+        ShowResultDashboard(partial, runEnded, state.Written + state.Warnings, state.TotalThreads,
+            state.AttachmentsWritten + state.AttachmentsWarnings, state.AttachmentsTotal, state.Failed + state.AttachmentsFailed,
+            state.AttachmentsSkipped, mediaAvailable, MostFrequentSkippedReason(state));
+
+    /// <summary>
+    /// UI-SPEC S1 Row 0/2 rules: the partial-run banner when items are left (it outranks the media banner), otherwise the
+    /// media banner when media was skipped, otherwise Retry Failed Items when items failed. Returns whether the header's
+    /// Retry Failed Items shows, because the outcome line names it only then.
+    /// </summary>
+    private bool ShowResultDashboard(bool partial, bool runEnded, int threadsDone, int threadsTotal, int attachmentsDone,
+        int attachmentsTotal, int failedItems, int skipped, bool mediaAvailable, string skippedReason)
+    {
+        ShowDashboard(false, threadsDone, threadsTotal, failedItems, !partial && failedItems > 0, runEnded, attachmentsDone,
+            attachmentsTotal);
+        if (partial)
+        {
+            ShowPartialBanner(runEnded, threadsDone, threadsTotal, attachmentsDone, attachmentsTotal, failedItems);
+            return false;
+        }
+
+        if (skipped > 0)
+        {
+            var media = GenerationUiText.MediaBanner(skipped, failedItems, mediaAvailable, skippedReason);
+            ShowMediaBanner(media);
+            return failedItems > 0 && media.ButtonText.Length == 0;
+        }
+
+        return failedItems > 0;
+    }
+
+    /// <summary>
+    /// The most frequent reason among the journal's AttachmentSkipped records (ties in ordinal order); empty when none.
+    /// Reasons are plain-words strings written by the runner and never carry a key (T-06-70).
+    /// </summary>
+    internal static string MostFrequentSkippedReason(GenerationRunState state) =>
+        state.AttachmentRecords.Values
+            .Where(r => r != null && r.Type == JournalRecordType.AttachmentSkipped && !string.IsNullOrWhiteSpace(r.Reason))
+            .GroupBy(r => r.Reason.Trim(), StringComparer.Ordinal)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => g.Key)
+            .FirstOrDefault() ?? string.Empty;
 
     private async Task ReenterAsync(string message)
     {
@@ -575,9 +676,7 @@ public partial class StepGenerateCorpus : IWizardStep
         if (!_isGenerating || _cts == null || !_btnCancel.Enabled)
             return;
 
-        var done = _lastCounts?.DoneThreads ?? 0;
-        // Attachment counts reach the confirmation in 06-23
-        var (title, text) = GenerationUiText.CG1CancelGeneration(done, 0);
+        var (title, text) = CancelConfirmation(_lastCounts);
         if (!Confirm(title, text, MessageBoxIcon.Question))
             return;
 
@@ -596,6 +695,10 @@ public partial class StepGenerateCorpus : IWizardStep
             // The run finished while the confirmation was open; nothing left to cancel
         }
     }
+
+    // C-G1 with the threads and attachments written so far in this view
+    internal static (string Title, string Text) CancelConfirmation(GenerationCounts? counts) =>
+        GenerationUiText.CG1CancelGeneration(counts?.DoneThreads ?? 0, counts?.AttachmentsDone ?? 0);
 
     private static string ErrorText(Exception ex) =>
         ex.InnerException != null ? $"{ex.Message} ({ex.InnerException.Message})" : ex.Message;
@@ -812,7 +915,16 @@ public partial class StepGenerateCorpus : IWizardStep
 
     // ----- Entry helpers -----
 
-    private static async Task<EntryData> ReadEntryAsync(string folder, CorpusPlan plan, CaseGuide guide, AIModelConfig? model,
+    // Models, prices (a clone) and media availability for the entry estimate, read on the UI thread
+    private sealed class EntryPricing
+    {
+        public AIModelConfig? Story;
+        public AIModelConfig? Volume;
+        public MediaPrices Prices = MediaPrices.Defaults();
+        public bool MediaAvailable;
+    }
+
+    private static async Task<EntryData> ReadEntryAsync(string folder, CorpusPlan plan, CaseGuide guide, EntryPricing pricing,
         Guid? cachedPlanId, DateTime? cachedProjectedUtc)
     {
         var replay = GenerationJournal.Replay(folder, plan);
@@ -821,7 +933,7 @@ public partial class StepGenerateCorpus : IWizardStep
         if (!state.HasRun || !replay.Readable || replay.PlanChanged)
             return data;
 
-        data.View = HistoryView(plan, guide, replay, state, model);
+        data.View = HistoryView(plan, guide, replay, state, pricing.Story, pricing.Volume, pricing.Prices, pricing.MediaAvailable);
 
         // case.json is behind the journal (killed mid-run, or never projected): rebuild the ledger and the key from it
         if (NeedsProjection(plan, replay, cachedPlanId, cachedProjectedUtc))
@@ -841,36 +953,61 @@ public partial class StepGenerateCorpus : IWizardStep
     /// Dashboard of a saved run rebuilt from the journal: counts, ledger size, waves and activity (reopen, RUN-06).
     /// </summary>
     internal static GenerationView HistoryView(CorpusPlan plan, CaseGuide guide, JournalReplay replay, GenerationRunState state,
-        AIModelConfig? model)
+        AIModelConfig? story, AIModelConfig? volume, MediaPrices prices, bool mediaAvailable)
     {
         var waves = WavePlanner.Plan(plan);
         var ledger = LedgerMerger.Build(plan, guide, WavePlanner.WaveIndexByThread(waves), state.DeltasByThread);
         return new GenerationView
         {
+            // Same pricing path as the Ready card and the runner (06-15)
             Counts = state.ToCounts(plan, waves.Count, ledger.Entries.Count,
-                GenerationRunState.EstimateRemaining(plan, state, model), running: false, finished: state.Pending == 0),
+                GenerationRunState.EstimateRemaining(plan, state, story, volume, prices, mediaAvailable, guide), running: false,
+                finished: !IsPartial(state)),
             Waves = GenerationHistory.Waves(plan, state),
             Events = GenerationHistory.Events(plan, replay, RenderAssignments.Compute(plan))
         };
     }
 
+    /// <summary>
+    /// Ready card (UI-SPEC S1 Row 4): the whole run in order with the D-29 estimate split Story / Volume / media, and the
+    /// media notice when media is planned without a tested OpenAI key.
+    /// </summary>
     private GenerationCardContent ReadyCard(CorpusPlan plan)
     {
         var relevant = RelevantThreads(plan);
-        var model = _state.StoryModelConfig;
-        var cost = GenerationCostEstimator.Estimate(plan, model).RelevantCost;
-        var modelName = model?.DisplayName ?? _state.StoryModelId;
-        // Today's run writes relevant threads only; 06-23 adds non-relevant threads, the Volume model and media
+        var nonRelevant = NonRelevantThreads(plan);
+        // Same pricing path as EstimateRemaining (06-15)
+        var est = GenerationCostEstimator.Estimate(plan, _state.StoryModelConfig, _state.VolumeModelConfig, _state.MediaPrices,
+            _state.IsMediaAvailable, Draft?.Guide);
+        var media = relevant.Concat(nonRelevant)
+            .SelectMany(t => t.Messages.Where(m => m != null))
+            .SelectMany(m => (m.Attachments ?? new List<PlannedAttachment>()).Where(a => a != null))
+            .Count(a => a.Kind is AttachmentType.Image or AttachmentType.Voicemail);
         return GenerationUiText.ReadyCard(new GenerationReadyInput
         {
             RelevantThreads = relevant.Count,
-            Emails = relevant.Sum(t => t.Messages.Count(m => m != null)),
+            NonRelevantThreads = nonRelevant.Count,
+            Emails = plan.EmailCount,
             Waves = WavePlanner.Plan(plan).Count,
-            StoryCost = cost,
-            StoryModel = modelName,
-            VolumeModel = modelName
+            Attachments = plan.AttachmentCount,
+            StoryCost = est.StoryCost,
+            VolumeCost = est.VolumeCost,
+            MediaCost = est.MediaCost,
+            StoryModel = est.ModelName.Length > 0 ? est.ModelName : _state.StoryModelId,
+            VolumeModel = est.VolumeModelName.Length > 0 ? est.VolumeModelName : _state.VolumeModelId,
+            MediaPlanned = media,
+            MediaAvailable = _state.IsMediaAvailable
         });
     }
+
+    // Non-relevant threads the run writes (an id and at least one message, as GenerationRunState counts them)
+    private static List<PlannedThread> NonRelevantThreads(CorpusPlan plan) =>
+        (plan.Threads ?? new List<PlannedThread>())
+        .Where(t => t != null && t.Relevance == ThreadRelevance.NotRelevant && !string.IsNullOrEmpty(t.Id)
+                    && t.Messages?.Any(m => m != null) == true)
+        .GroupBy(t => t.Id, StringComparer.Ordinal)
+        .Select(g => g.First())
+        .ToList();
 
     private static string NoticeFor(CorpusPlan plan)
     {

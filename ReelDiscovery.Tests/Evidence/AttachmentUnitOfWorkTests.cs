@@ -486,4 +486,293 @@ public class AttachmentUnitOfWorkTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Unit().RunAsync(ctx, run));
         AssertNothingReported();
     }
+
+    // ---------- images, voicemail and the run media gate (D-06, D-27, D-28, UI-SPEC Decision 2) ----------
+
+    private static AttachmentRenderContext Image(string threadId = AttachmentTestData.InviteThreadId) => Ctx(threadId, AttachmentType.Image);
+
+    [Fact]
+    public async Task InlineImage_Ok_IsWritten_WithContentId_AndMediaCost()
+    {
+        var ctx = Image();
+        Assert.True(ctx.Spec.IsInline);
+        var media = new FakeMediaGenerator();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit(media).RunAsync(ctx, run);
+
+        Assert.Equal(AttachmentOutcomeKind.Written, outcome.Kind);
+        Assert.Empty(_fake.Requests);
+        var part = outcome.Part!;
+        Assert.True(part.IsInline);
+        Assert.Equal("image/png", part.MimeType);
+        Assert.Equal(ctx.FileName, part.FileName);
+        var sender = ctx.Thread.People.Find(ctx.Parent.FromId)!;
+        Assert.Equal(AttachmentNaming.ContentIdFor(ctx.Spec.DocId, sender.Domain), part.ContentId);
+        Assert.Equal(0.006m, outcome.MediaCostUsd);
+        Assert.Equal(0m, outcome.CostUsd);
+
+        var request = Assert.Single(media.Requests);
+        Assert.Equal("image", request.Kind);
+        Assert.Contains(AttachmentPrompts.NoTextRule, request.Input);
+        foreach (var person in ctx.Thread.People.All.Where(p => !string.IsNullOrWhiteSpace(p.FullName)))
+            Assert.DoesNotContain(person.FullName, request.Input);
+
+        var record = outcome.ToRecord(ctx.Thread.Plan.PlanId)!;
+        Assert.Equal(JournalRecordType.AttachmentDone, record.Type);
+        Assert.Equal(0.006m, record.MediaCostUsd);
+        AssertNothingReported();
+    }
+
+    [Fact]
+    public async Task NoMediaGenerator_IsSkipped_WithIdentity()
+    {
+        var ctx = Image();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit(media: null).RunAsync(ctx, run);
+
+        Assert.Equal(AttachmentOutcomeKind.Skipped, outcome.Kind);
+        Assert.Equal("no tested OpenAI key this session", outcome.Reason);
+        var record = outcome.ToRecord(ctx.Thread.Plan.PlanId)!;
+        Assert.Equal(JournalRecordType.AttachmentSkipped, record.Type);
+        Assert.Equal(ctx.Spec.DocId, record.AttachmentDocId);
+        Assert.Equal(ctx.Parent.DocId, record.ParentDocId);
+        Assert.Equal(ctx.FileName, record.FileName);
+        Assert.Equal(AttachmentType.Image, record.AttachmentKind);
+        AssertNothingReported();
+    }
+
+    [Fact]
+    public async Task MediaFailed_IsFailed_GateNotStopped()
+    {
+        const string busy = "the OpenAI media service is busy (rate limited)";
+        var media = new FakeMediaGenerator { Respond = (_, _) => FakeMediaGenerator.Failed(busy) };
+        var gate = new MediaRunGate();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit(media, gate).RunAsync(Image(), run);
+
+        Assert.Equal(AttachmentOutcomeKind.Failed, outcome.Kind);
+        Assert.Equal(busy, outcome.Reason);
+        Assert.Null(outcome.Part);
+        Assert.False(gate.Stopped);
+        Assert.False(run.IsFatal);
+        Assert.Equal(JournalRecordType.AttachmentFailed, outcome.ToRecord(Guid.Empty)!.Type);
+    }
+
+    [Fact]
+    public async Task MediaStopped_StopsRemainingMediaOnce_TextRunContinues()
+    {
+        var media = new FakeMediaGenerator { StopAfter = 1 };
+        var gate = new MediaRunGate();
+        gate.SetRemaining(3);
+        var unit = Unit(media, gate);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var first = await unit.RunAsync(Image(), run);
+        var second = await unit.RunAsync(Image(AttachmentTestData.NewsletterThreadId), run);
+        var third = await unit.RunAsync(Image(AttachmentTestData.SpamThreadId), run);
+
+        Assert.Equal(AttachmentOutcomeKind.Written, first.Kind);
+        Assert.Equal(AttachmentOutcomeKind.Skipped, second.Kind);
+        Assert.Equal(AttachmentOutcomeKind.Skipped, third.Kind);
+        Assert.Equal("the OpenAI key was rejected", second.Reason);
+        Assert.Equal("the OpenAI key was rejected", third.Reason);
+        Assert.Equal(2, media.Requests.Count);
+        Assert.True(gate.Stopped);
+        Assert.False(run.IsFatal);
+
+        var stopped = Assert.Single(_snapshot.Peek().Events, e => e.Kind == GenerationEventKind.MediaStopped);
+        Assert.Equal("the OpenAI key was rejected", stopped.Reason);
+        Assert.Equal(2, stopped.MediaRemaining);
+        AssertNothingReported();
+    }
+
+    [Fact]
+    public async Task Media_QueuedAfterStop_MakesNoCall()
+    {
+        var media = new ScriptedMedia();
+        var gate = new MediaRunGate();
+        var unit = Unit(media, gate);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        // Units 3 and 4 pass the first Stopped check and queue behind the two in-flight calls
+        var tasks = Enumerable.Range(0, 4).Select(_ => unit.RunAsync(Image(), run)).ToList();
+        await media.BothEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, gate.Slots.CurrentCount);
+
+        media.Release(0, FakeMediaGenerator.Stopped());
+        media.Release(1, FakeMediaGenerator.Stopped());
+        var outcomes = await Task.WhenAll(tasks);
+
+        Assert.Equal(2, media.Calls);
+        Assert.All(outcomes, o => Assert.Equal(AttachmentOutcomeKind.Skipped, o.Kind));
+        Assert.All(outcomes, o => Assert.Equal("the OpenAI key was rejected", o.Reason));
+        Assert.Single(_snapshot.Peek().Events, e => e.Kind == GenerationEventKind.MediaStopped);
+        Assert.Equal(2, gate.Slots.CurrentCount);
+    }
+
+    [Fact]
+    public async Task Voicemail_SpeaksTranscript_InThePersistedCastVoice()
+    {
+        var ctx = Ctx(AttachmentTestData.RelevantVoicemailThreadId, AttachmentType.Voicemail);
+        ctx.ParentBody = "Hi, it is Raymond calling about the invoice. Call me back.";
+        var chosen = CastVoiceSet.AllowedVoices.OrderBy(v => v, StringComparer.Ordinal)
+            .First(v => v != VoiceAssignments.Fallback(ctx.Parent.FromId));
+        var media = new FakeMediaGenerator();
+        var unit = Unit(media);
+        unit.CastVoices = new CastVoiceSet { Voices = new List<CastVoice> { new() { PersonId = ctx.Parent.FromId, Voice = chosen } } };
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await unit.RunAsync(ctx, run);
+
+        Assert.Equal(AttachmentOutcomeKind.Written, outcome.Kind);
+        var request = Assert.Single(media.Requests);
+        Assert.Equal("speech", request.Kind);
+        Assert.Equal(ctx.ParentBody, request.Input);
+        Assert.Equal(chosen, request.Voice);
+        Assert.Equal("audio/mpeg", outcome.Part!.MimeType);
+        Assert.Equal(ctx.FileName, outcome.Part.FileName);
+        Assert.False(outcome.Part.IsInline);
+        Assert.Equal(0.001m, outcome.MediaCostUsd);
+    }
+
+    [Fact]
+    public async Task Voicemail_WithoutVoiceForCaller_UsesFallback()
+    {
+        var ctx = Ctx(AttachmentTestData.RelevantVoicemailThreadId, AttachmentType.Voicemail);
+        var media = new FakeMediaGenerator();
+        var unit = Unit(media);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        await unit.RunAsync(ctx, run);
+        unit.CastVoices = new CastVoiceSet { Voices = new List<CastVoice> { new() { PersonId = "CH-999", Voice = "nova" } } };
+        await unit.RunAsync(ctx, run);
+
+        Assert.Equal(2, media.Requests.Count);
+        Assert.All(media.Requests, r => Assert.Equal(VoiceAssignments.Fallback(ctx.Parent.FromId), r.Voice));
+    }
+
+    [Fact]
+    public async Task AtMostTwoMediaCalls_RunConcurrently()
+    {
+        var media = new ConcurrencyMedia();
+        var unit = Unit(media);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcomes = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => Task.Run(() => unit.RunAsync(Image(), run))));
+
+        Assert.All(outcomes, o => Assert.Equal(AttachmentOutcomeKind.Written, o.Kind));
+        Assert.Equal(6, media.Calls);
+        Assert.Equal(2, media.MaxConcurrent);
+    }
+
+    [Fact]
+    public async Task UserCancel_DuringMediaCall_Propagates_AndReleasesTheSlot()
+    {
+        var media = new ScriptedMedia();
+        var gate = new MediaRunGate();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var task = Unit(media, gate).RunAsync(Image(), run);
+        await media.FirstEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        Assert.Equal(2, gate.Slots.CurrentCount);
+        Assert.False(gate.Stopped);
+    }
+
+    [Fact]
+    public async Task UserCancel_WhileWaitingForASlot_Propagates_AndLeavesSlotsBalanced()
+    {
+        var media = new FakeMediaGenerator();
+        var gate = new MediaRunGate();
+        await gate.Slots.WaitAsync();
+        await gate.Slots.WaitAsync();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var task = Unit(media, gate).RunAsync(Image(), run);
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        Assert.Empty(media.Requests);
+        gate.Slots.Release(2);
+        Assert.Equal(2, gate.Slots.CurrentCount);
+    }
+
+    /// <summary>
+    /// Media seam whose calls wait until the test releases them by index; cancellation ends a waiting call.
+    /// </summary>
+    private sealed class ScriptedMedia : IMediaGenerator
+    {
+        private readonly TaskCompletionSource<MediaResult>[] _results = Enumerable.Range(0, 8)
+            .Select(_ => new TaskCompletionSource<MediaResult>(TaskCreationOptions.RunContinuationsAsynchronously))
+            .ToArray();
+
+        private int _calls;
+
+        public TaskCompletionSource FirstEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource BothEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Calls => Volatile.Read(ref _calls);
+
+        public void Release(int index, MediaResult result) => _results[index].TrySetResult(result);
+
+        public Task<MediaResult> GenerateImageAsync(string prompt, string label, CancellationToken ct = default) => Handle(ct);
+
+        public Task<MediaResult> GenerateSpeechAsync(string text, string voice, string label, CancellationToken ct = default) => Handle(ct);
+
+        private Task<MediaResult> Handle(CancellationToken ct)
+        {
+            var index = Interlocked.Increment(ref _calls) - 1;
+            if (index == 0)
+                FirstEntered.TrySetResult();
+            if (index == 1)
+                BothEntered.TrySetResult();
+            return _results[index].Task.WaitAsync(ct);
+        }
+    }
+
+    /// <summary>
+    /// Media seam that records the highest number of calls in flight at once.
+    /// </summary>
+    private sealed class ConcurrencyMedia : IMediaGenerator
+    {
+        private int _current;
+        private int _max;
+        private int _calls;
+
+        public int MaxConcurrent => Volatile.Read(ref _max);
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task<MediaResult> GenerateImageAsync(string prompt, string label, CancellationToken ct = default) => Handle(ct);
+
+        public Task<MediaResult> GenerateSpeechAsync(string text, string voice, string label, CancellationToken ct = default) => Handle(ct);
+
+        private async Task<MediaResult> Handle(CancellationToken ct)
+        {
+            Interlocked.Increment(ref _calls);
+            var now = Interlocked.Increment(ref _current);
+            int seen;
+            while ((seen = Volatile.Read(ref _max)) < now && Interlocked.CompareExchange(ref _max, now, seen) != seen)
+            {
+                // Retry until the recorded maximum is at least the current count
+            }
+
+            await Task.Delay(40, ct);
+            Interlocked.Decrement(ref _current);
+            return new MediaResult { Kind = MediaResultKind.Ok, Bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47 }, CostUsd = 0.006m };
+        }
+    }
 }

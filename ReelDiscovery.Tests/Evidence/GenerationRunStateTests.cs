@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
@@ -588,11 +589,12 @@ public class GenerationRunStateTests
         var folder = EvidenceTestData.TempCaseFolder();
         try
         {
-            var journal = new GenerationJournal(folder);
-            journal.AppendAsync(new JournalRecord { Type = JournalRecordType.RunStarted, Utc = Now, PlanId = plan.PlanId })
-                .GetAwaiter().GetResult();
-            foreach (var record in records)
-                journal.AppendAsync(record).GetAwaiter().GetResult();
+            // Same line format as GenerationJournal.AppendAsync, written synchronously
+            var options = new JsonSerializerOptions(CaseDraft.JsonOptions) { WriteIndented = false };
+            var lines = new[] { new JournalRecord { Type = JournalRecordType.RunStarted, Utc = Now, PlanId = plan.PlanId } }
+                .Concat(records)
+                .Select(r => JsonSerializer.Serialize(r, options));
+            File.WriteAllLines(GenerationJournal.PathFor(folder), lines);
             return GenerationJournal.Replay(folder, plan);
         }
         finally

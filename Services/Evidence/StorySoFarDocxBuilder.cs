@@ -59,7 +59,8 @@ public static class StorySoFarDocxBuilder
         }
         else
         {
-            var threads = state.Written + state.Warnings;
+            // The ledger is built from relevant threads only (D-13)
+            var threads = state.RelevantWritten + state.RelevantWarnings;
             var first = entries[0].ParsedDate!.Value;
             var last = entries[^1].ParsedDate!.Value;
             word.Paragraph($"Internal narrative ledger written by ReelDiscovery from {Plural(threads, "generated thread")}, " +

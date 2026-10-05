@@ -418,9 +418,11 @@ public partial class StepGenerateCorpus : IWizardStep
 
         var state = result.State;
         var counts = state.ToCounts(plan, WavePlanner.Plan(plan).Count, result.Ledger.Entries.Count,
-            GenerationRunState.EstimateRemaining(plan, state, _state.StoryModelConfig), running: false, finished: state.Pending == 0);
+            GenerationRunState.EstimateRemaining(plan, state, _state.StoryModelConfig), running: false,
+            finished: state.RelevantWritten + state.RelevantWarnings + state.RelevantFailed == state.RelevantTotal);
         ApplyView(new GenerationView { Counts = counts, Waves = GenerationHistory.Waves(plan, state) });
-        var partial = counts.DoneThreads + counts.FailedThreads < counts.TotalThreads;
+        // Interim until 06-19 writes filler: the runner schedules relevant threads only, so only they can be left over
+        var partial = state.RelevantWritten + state.RelevantWarnings + state.RelevantFailed < state.RelevantTotal;
         ShowDashboard(partial, counts.DoneThreads, counts.TotalThreads, counts.FailedThreads, counts.FailedThreads > 0);
 
         var generation = Draft.Corpus?.Generation;

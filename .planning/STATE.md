@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-12-PLAN.md
-last_updated: "2026-10-04T23:44:57.797Z"
-last_activity: 2026-10-04
+stopped_at: Completed 06-22-PLAN.md
+last_updated: "2026-10-05T00:04:14.945Z"
+last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 95
-  percent: 90
+  completed_plans: 96
+  percent: 91
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 15 of 25
+Plan: 16 of 25 (15 summarized: 06-01..06-13, 06-15, 06-22; wave 3 complete; next 06-14, wave 4)
 Status: Ready to execute
-Last activity: 2026-10-04
+Last activity: 2026-10-05
 
 Progress: [██████████] 100%
 
@@ -146,6 +146,7 @@ Progress: [██████████] 100%
 | Phase 06 P08 | 14min | 2 tasks | 4 files |
 | Phase 06 P11 | 12min | 3 tasks | 7 files |
 | Phase 06 P12 | 20 min | 2 tasks | 4 files |
+| Phase 06 P22 | 25min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -407,6 +408,10 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-11: Image prompts are code-built from spec description + sender org Location with person/org name tokens scrubbed and the fixed no-text rule; spam images are abstract marketing graphics from the thread subject
 - [Phase 06]: 06-12: Side world case terms = fact titles, issue titles, every canonical value and cast full names; names and topics checked whole-word both ways; StableRank-ordered validated templates fill missing orgs, top up to 2 and cover orgs past the 24 cap
 - [Phase 06]: 06-12: Cast voice set ordered by ordinal cast id; skipped or invalid people get VoiceAssignments.Fallback with FromFallback false; refusal/failure -> full fallback; fatal -> unset
+- [Phase 06]: 06-22: all banner buttons reuse one control (_btnContinue) so every Primary starts the same run; no MediaBannerButtonClicked event
+- [Phase 06]: 06-22: Stages Done column widens past 80 to fit 9,999 / 9,999 (Time-column precedent); Dates keeps >= 120 at WizardMin
+- [Phase 06]: 06-22: running stage row auto-scrolls into view unless the user scrolled in the last 5 s (05-UI-SPEC rule now wired)
+- [Phase 06]: 06-22: ShowDashboard takes bool runEnded + attachment counts; entry passes input.LatestAttemptEnded (Finished-outcome filter kept)
 
 ### Pending Todos
 
@@ -428,6 +433,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-04T23:44:57.791Z
-Stopped at: Completed 06-12-PLAN.md
+Last session: 2026-10-05T00:04:14.354Z
+Stopped at: Completed 06-22-PLAN.md
 Resume file: None

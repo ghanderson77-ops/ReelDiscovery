@@ -17,7 +17,8 @@ namespace ReelDiscovery.Tests.Evidence;
 /// <summary>
 /// Fake responder for attachment text calls, keyed by the request's SchemaName (one of AttachmentRenderer.SchemaTypes)
 /// and the prompt's "Attachment id: {DocId}" line; every other request goes to EvidenceTestData.RenderResponder, so one
-/// responder answers thread renders and attachments together. Later plans (06-16) extend it for filler thread DTOs.
+/// responder answers thread renders and attachments together. Filler thread requests (FillerThreadDto, by the "Thread id:
+/// T-xxxx" line) and the cast voice request (CastVoiceDto) are answered here too (06-16).
 /// </summary>
 internal static partial class AttachmentResponder
 {
@@ -25,6 +26,15 @@ internal static partial class AttachmentResponder
 
     [GeneratedRegex(@"Attachment id: (\S+)")]
     private static partial Regex AttachmentIdLine();
+
+    [GeneratedRegex(@"Thread id: (T-\d{4})")]
+    private static partial Regex ThreadIdLine();
+
+    [GeneratedRegex(@"^(CH-\d+) \|", RegexOptions.Multiline)]
+    private static partial Regex CastLine();
+
+    // Same order as VoiceAssignments (ordinal)
+    private static readonly string[] OrderedVoices = CastVoiceSet.AllowedVoices.OrderBy(v => v, StringComparer.Ordinal).ToArray();
 
     /// <summary>
     /// <paramref name="overrideJson"/> gets (docId, attempt) and may return replacement JSON (null = default). Attempts
@@ -36,9 +46,35 @@ internal static partial class AttachmentResponder
         var bySchema = AttachmentRenderer.SchemaTypes.ToDictionary(JsonSchemaRegistry.GetSchemaName, t => t, StringComparer.Ordinal);
         var attempts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
         var render = EvidenceTestData.RenderResponder(plan, guide);
+        var fillerSchema = JsonSchemaRegistry.GetSchemaName(typeof(FillerRenderer.FillerThreadDto));
+        var voiceSchema = JsonSchemaRegistry.GetSchemaName(typeof(CastVoiceBuilder.CastVoiceDto));
+        var fillerAssignments = FillerAssignments.Compute(plan);
+        var threads = plan.Threads
+            .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id))
+            .GroupBy(t => t.Id, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var threadAttempts = new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
 
         return request =>
         {
+            if (string.Equals(request.SchemaName, voiceSchema, StringComparison.Ordinal))
+                return FakeLlmProvider.Ok(JsonSerializer.Serialize(VoicesFor(request.UserPrompt), JsonOptions), 600, 200);
+
+            if (string.Equals(request.SchemaName, fillerSchema, StringComparison.Ordinal))
+            {
+                var threadMatch = ThreadIdLine().Match(request.UserPrompt ?? string.Empty);
+                if (!threadMatch.Success || !threads.TryGetValue(threadMatch.Groups[1].Value, out var thread))
+                    return FakeLlmProvider.Failed(LlmFailureKind.Transient, "unknown thread");
+
+                var threadAttempt = threadAttempts.AddOrUpdate(thread.Id, 1, (_, n) => n + 1);
+                var threadCustom = overrideJson?.Invoke(thread.Id, threadAttempt);
+                if (threadCustom != null)
+                    return FakeLlmProvider.Ok(threadCustom, 1000, 400);
+
+                fillerAssignments.TryGetValue(thread.Id, out var assignment);
+                return FakeLlmProvider.Ok(JsonSerializer.Serialize(FillerDto(thread, assignment), JsonOptions), 1000, 400);
+            }
+
             if (!bySchema.TryGetValue(request.SchemaName ?? string.Empty, out var type))
                 return render(request);
 
@@ -54,6 +90,44 @@ internal static partial class AttachmentResponder
 
             return FakeLlmProvider.Ok(JsonSerializer.Serialize(DefaultDto(type), type, JsonOptions), 800, 300);
         };
+    }
+
+    /// <summary>
+    /// One message per planned seq with a neutral body at the FillerAssignments band midpoint, sign-off "Thanks,", and one
+    /// title "{Kind} notes {seq}" per planned attachment.
+    /// </summary>
+    public static FillerRenderer.FillerThreadDto FillerDto(PlannedThread thread, ThreadAssignment? assignment)
+    {
+        var dto = new FillerRenderer.FillerThreadDto();
+        foreach (var message in thread.Messages.Where(m => m != null).OrderBy(m => m.Seq))
+        {
+            var spec = RenderAssignments.Spec(assignment?.For(message.Seq)?.Length ?? LengthBand.Medium);
+            dto.Messages.Add(new FillerRenderer.FillerMessageDto
+            {
+                Seq = message.Seq,
+                Body = EvidenceTestData.Filler((spec.MinWords + spec.MaxWords) / 2),
+                SignOff = "Thanks,",
+                AttachmentTitles = (message.Attachments ?? new List<PlannedAttachment>())
+                    .Where(a => a != null)
+                    .Select(a => string.Format(CultureInfo.InvariantCulture, "{0} notes {1}", a.Kind, message.Seq))
+                    .ToList()
+            });
+        }
+
+        return dto;
+    }
+
+    /// <summary>
+    /// One voice per cast id listed in the prompt ("CH-001 | ..." lines): the i-th person gets the ordinal-sorted allowed
+    /// voice (i + 2) % 6, so runner tests can tell it from VoiceAssignments.Fallback.
+    /// </summary>
+    public static CastVoiceBuilder.CastVoiceDto VoicesFor(string? prompt)
+    {
+        var dto = new CastVoiceBuilder.CastVoiceDto();
+        var ids = CastLine().Matches(prompt ?? string.Empty).Select(m => m.Groups[1].Value).Distinct(StringComparer.Ordinal).ToList();
+        for (var i = 0; i < ids.Count; i++)
+            dto.Voices.Add(new CastVoiceBuilder.CastVoiceItemDto { PersonId = ids[i], Voice = OrderedVoices[(i + 2) % OrderedVoices.Length] });
+        return dto;
     }
 
     /// <summary>
@@ -156,6 +230,56 @@ public class AttachmentResponderTests
         Assert.Equal("Project Meeting", second.GetValueOrThrow().Title);
         Assert.Equal(new[] { (ctx.Spec.DocId, 1), (ctx.Spec.DocId, 2) }, seen);
         Assert.Equal(ctx.Thread.Thread.Messages.Count, thread.GetValueOrThrow().Messages.Count);
+    }
+
+    [Fact]
+    public async Task FillerRequest_OneMessagePerSeq_TitlesPerAttachment_OverridePerThread()
+    {
+        var (draft, plan) = AttachmentTestData.MixedCase();
+        var thread = AttachmentTestData.Thread(plan, AttachmentTestData.DailyBusinessThreadId);
+        var assignment = FillerAssignments.Compute(plan)[thread.Id];
+        var ctx = ThreadRenderContext.Create(draft, plan, thread, assignment, PeopleDirectory.Create(draft.Guide!, plan),
+            new List<LedgerEntry>(), 1);
+        var (gateway, fake) = CorpusTestData.CreateGateway();
+        var seen = new List<(string ThreadId, int Attempt)>();
+        fake.Respond = AttachmentResponder.Create(plan, draft.Guide!, (threadId, attempt) =>
+        {
+            seen.Add((threadId, attempt));
+            return attempt == 2 ? "{\"messages\":[]}" : null;
+        });
+
+        var first = (await gateway.GenerateAsync<FillerRenderer.FillerThreadDto>(
+            FillerRenderer.BuildRequest(ctx, null, LlmTier.Volume, 1, null))).GetValueOrThrow();
+        var second = (await gateway.GenerateAsync<FillerRenderer.FillerThreadDto>(
+            FillerRenderer.BuildRequest(ctx, null, LlmTier.Volume, 2, null))).GetValueOrThrow();
+
+        Assert.Equal(thread.Messages.OrderBy(m => m.Seq).Select(m => m.Seq), first.Messages.Select(m => m.Seq));
+        Assert.All(first.Messages, m => Assert.Equal("Thanks,", m.SignOff));
+        Assert.Equal(new[] { "Word notes 1" }, first.Messages[0].AttachmentTitles);
+        Assert.Empty(first.Messages[1].AttachmentTitles);
+        var band = RenderAssignments.Spec(assignment.For(1)!.Length);
+        var words = first.Messages[0].Body.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        Assert.Equal((band.MinWords + band.MaxWords) / 2, words);
+        Assert.Empty(second.Messages);
+        Assert.Equal(new[] { (thread.Id, 1), (thread.Id, 2) }, seen);
+        Assert.Single(FillerRenderer.ToRendered(first, ctx).Messages[0].AttachmentTitles);
+    }
+
+    [Fact]
+    public async Task CastVoiceRequest_OneVoicePerCastId_Deterministic()
+    {
+        var (draft, _) = AttachmentTestData.MixedCase();
+        var guide = draft.Guide!;
+        var (gateway, fake) = CorpusTestData.CreateGateway();
+        fake.Respond = AttachmentResponder.Create(new CorpusPlan(), guide);
+
+        var dto = (await gateway.GenerateAsync<CastVoiceBuilder.CastVoiceDto>(CastVoiceBuilder.BuildRequest(draft, guide))).GetValueOrThrow();
+
+        var cast = CastVoiceBuilder.OrderedCast(guide).Select(c => c.Id.Trim()).ToList();
+        var ordered = CastVoiceSet.AllowedVoices.OrderBy(v => v, StringComparer.Ordinal).ToArray();
+        Assert.Equal(cast, dto.Voices.Select(v => v.PersonId));
+        Assert.Equal(cast.Select((_, i) => ordered[(i + 2) % 6]), dto.Voices.Select(v => v.Voice));
+        Assert.Contains(dto.Voices, v => v.Voice != VoiceAssignments.Fallback(v.PersonId));
     }
 
     [Fact]

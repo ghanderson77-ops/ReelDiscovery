@@ -90,7 +90,8 @@ internal static partial class EvidenceTestData
         };
     }
 
-    private static string Filler(int words)
+    // Shared with AttachmentResponder filler answers
+    internal static string Filler(int words)
     {
         var text = string.Join(" ", Enumerable.Range(0, Math.Max(1, words)).Select(i => FillerWords[i % FillerWords.Length]));
         return char.ToUpperInvariant(text[0]) + text[1..] + ".";

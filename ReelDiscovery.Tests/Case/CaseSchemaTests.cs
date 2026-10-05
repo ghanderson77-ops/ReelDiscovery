@@ -21,6 +21,14 @@ public class CaseSchemaTests
             data.Add(nameof(CorpusPlanner), type);
         foreach (var type in ThreadRenderer.SchemaTypes)
             data.Add(nameof(ThreadRenderer), type);
+        foreach (var type in AttachmentRenderer.SchemaTypes)
+            data.Add(nameof(AttachmentRenderer), type);
+        foreach (var type in SideWorldBuilder.SchemaTypes)
+            data.Add(nameof(SideWorldBuilder), type);
+        foreach (var type in CastVoiceBuilder.SchemaTypes)
+            data.Add(nameof(CastVoiceBuilder), type);
+        foreach (var type in FillerRenderer.SchemaTypes)
+            data.Add(nameof(FillerRenderer), type);
         return data;
     }
 

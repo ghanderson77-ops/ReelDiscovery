@@ -29,7 +29,8 @@ public class GenerateCorpusStepTests
         {
             Fixture = new GenerateCorpusRenderTests.StepFixture(approved);
             (Gateway, Fake) = CorpusTestData.CreateGateway();
-            Fake.Respond = EvidenceTestData.RenderResponder(Fixture.Plan, Fixture.Draft.Guide!);
+            // Thread renders, attachments and filler (06-19: the run writes all three)
+            Fake.Respond = AttachmentResponder.Create(Fixture.Plan, Fixture.Draft.Guide!);
         }
 
         public GenerateCorpusRenderTests.StepFixture Fixture { get; }
@@ -109,7 +110,9 @@ public class GenerateCorpusStepTests
             Assert.Equal(CaseStage.Generation, h.Draft.Stage);
             Assert.NotEmpty(generation!.Ledger.Entries);
             var state = GenerationRunState.From(h.Plan, GenerationJournal.Replay(h.Folder, h.Plan));
-            Assert.Equal(state.Written + state.Warnings, generation.ThreadsWritten + generation.ThreadsWithWarnings);
+            // ThreadsWritten.. stay relevant counts; since 06-19 the same run also writes the non-relevant mail
+            Assert.Equal(state.RelevantWritten + state.RelevantWarnings, generation.ThreadsWritten + generation.ThreadsWithWarnings);
+            Assert.Equal(state.NonRelevantTotal, generation.NonRelevantWritten + generation.NonRelevantWithWarnings);
             Assert.Equal(h.Relevant.Count, generation.ThreadsWritten + generation.ThreadsWithWarnings);
             Assert.Equal(GenerationOutcome.Finished, generation.LastOutcome);
             Assert.Equal(string.Empty, generation.KeyError);
@@ -123,7 +126,8 @@ public class GenerateCorpusStepTests
             var json = File.ReadAllText(Path.Combine(h.Folder, CaseStore.CaseFileName));
             Assert.Contains("Generation", json);
 
-            var counts = ToCounts(h, generation);
+            // The whole corpus as the step shows it after the run (06-19: relevant and non-relevant threads)
+            var counts = state.ToCounts(h.Plan, WavePlanner.Plan(h.Plan).Count, generation.Ledger.Entries.Count, 0m, running: false, finished: true);
             Assert.Equal(GenerationUiText.OutcomeText(GenerationOutcome.Finished, counts, string.Empty).Text, step.StatusLabel.Text);
             Assert.Equal(Theme.Success, step.StatusLabel.ForeColor);
             Assert.False(step.CancelButton.Visible);
@@ -180,7 +184,9 @@ public class GenerateCorpusStepTests
             Pump(step.ClickContinueAsync());
             Assert.False(step.BannerShown);
             Assert.Equal(GenerationOutcome.Finished, h.Draft.Corpus.Generation!.LastOutcome);
-            Assert.Equal(h.Relevant.Count, GenerationJournal.Replay(h.Folder, h.Plan).LastByThread.Count);
+            // Relevant and non-relevant threads (06-19: one run writes both)
+            Assert.Equal(GenerationRunState.From(h.Plan, GenerationJournal.Replay(h.Folder, h.Plan)).TotalThreads,
+                GenerationJournal.Replay(h.Folder, h.Plan).LastByThread.Count);
             Assert.Equal(Theme.Success, step.StatusLabel.ForeColor);
         });
     }
@@ -511,17 +517,6 @@ public class GenerateCorpusStepTests
 
     // ----- Helpers -----
 
-
-    private static GenerationCounts ToCounts(Harness h, GenerationState generation) => new()
-    {
-        TotalThreads = generation.ThreadsTotal,
-        DoneThreads = generation.ThreadsWritten + generation.ThreadsWithWarnings,
-        WarningThreads = generation.ThreadsWithWarnings,
-        FailedThreads = generation.ThreadsFailed,
-        EmailsWritten = generation.EmailsWritten,
-        FilesWritten = generation.FilesWritten,
-        Mailboxes = generation.Mailboxes
-    };
 
     private static void WaitForSave(Harness h)
     {

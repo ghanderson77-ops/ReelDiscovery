@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-14-PLAN.md
-last_updated: "2026-10-05T00:33:51.748Z"
+stopped_at: Completed 06-16-PLAN.md
+last_updated: "2026-10-05T00:48:22.532Z"
 last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 97
+  completed_plans: 98
   percent: 92
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 17 of 25 (16 summarized: 06-01..06-15, 06-22; wave 4 in progress; next 06-16, 06-17)
+Plan: 18 of 25 (17 summarized: 06-01..06-16, 06-22; wave 4 in progress; next 06-17)
 Status: Ready to execute
 Last activity: 2026-10-05
 
@@ -148,6 +148,7 @@ Progress: [█████████░] 92%
 | Phase 06 P12 | 20 min | 2 tasks | 4 files |
 | Phase 06 P22 | 25min | 2 tasks | 3 files |
 | Phase 6 P14 | 50min | 2 tasks | 6 files |
+| Phase 06 P16 | 13min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -417,6 +418,8 @@ Recent decisions affecting current work:
 - [Phase 6]: 06-14: earliest planned committed invite owns a meeting key's schedule (InviteSlotsByMeeting)
 - [Phase 6]: 06-14: EstimateRemaining 6-arg overload (+ optional guide) prices pending work via GenerationCostEstimator.PriceWork
 - [Phase 6]: 06-14: interim - StepGenerateCorpus.ShowRunResult partial check uses relevant counts until 06-19 writes filler
+- [Phase 06]: 06-16: filler ToRendered fills blank/missing attachment titles with AttachmentNaming.TitleFor so title-to-attachment pairing survives journal CleanStrings
+- [Phase 06]: 06-16: bulk-mail style follows the first external participant's ExternalKind; decoy shared names = participant org names + ProjectName values minus must-not-mention overlaps
 
 ### Pending Todos
 
@@ -438,6 +441,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T00:33:51.742Z
+Last session: 2026-10-05T00:48:22.523Z
 Stopped at: Completed 06-14-PLAN.md
 Resume file: None

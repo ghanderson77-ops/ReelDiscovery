@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-17-PLAN.md
-last_updated: "2026-10-05T01:00:57.425Z"
+stopped_at: Completed 06-18-PLAN.md
+last_updated: "2026-10-05T01:35:21.283Z"
 last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 99
-  percent: 93
+  completed_plans: 100
+  percent: 94
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 19 of 25 (18 summarized: 06-01..06-17, 06-22; wave 4 in progress; next 06-18)
+Plan: 20 of 25 (19 summarized: 06-01..06-18, 06-22; wave 5 in progress; next 06-19)
 Status: Ready to execute
 Last activity: 2026-10-05
 
@@ -150,6 +150,7 @@ Progress: [█████████░] 93%
 | Phase 6 P14 | 50min | 2 tasks | 6 files |
 | Phase 06 P16 | 13min | 2 tasks | 7 files |
 | Phase 06 P17 | 16min | 2 tasks | 3 files |
+| Phase 06 P18 | 45min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -424,6 +425,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-17: AttachmentUnitOfWork never reports completion; ToRecord leaves Utc/Files to the caller (06-18/06-20 nest it in the durable line)
 - [Phase 06]: 06-17: MediaRunGate.Consume only on Ok/Failed media results, so MediaRemaining includes the item that hit the stop; post-stop Skipped items take the gate's first reason
 - [Phase 06]: 06-17: missing InviteSlot falls back to next day at the email's time with the not-tied warning; invite UID = SHA-256(DocId)[..32]@sender domain
+- [Phase 06]: 06-18: thread + attachments commit as one ThreadDone line; status/events/chain text/invite slots applied only after the append; Unjournaled spend returned to the runner
+- [Phase 06]: 06-18: ChainScheduler waits only on strictly lower-ranked in-step threads (first SentAt, then Id); higher-ranked predecessors give step-start text
+- [Phase 06]: 06-18: 06-08 absorbed meeting entry edge documented: later invite sees another key but the content seed gives the same schedule
 
 ### Pending Todos
 
@@ -445,6 +449,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T01:00:57.418Z
-Stopped at: Completed 06-17-PLAN.md
+Last session: 2026-10-05T01:35:21.277Z
+Stopped at: Completed 06-18-PLAN.md
 Resume file: None

@@ -7,3 +7,7 @@
 ## From 06-12
 
 - `GenerationResetTests.StartOver_LockedFile_IsReported_RestStillDeleted` failed once in the full suite (3170/3171) and passed on an isolated rerun (12/12 GenerationResetTests). Looks timing/file-lock flaky under full-suite load; unrelated to 06-12 files.
+
+## From 06-21
+
+- Privilege incidence (not the marking mix) differs between populations on a production-planner plan at 250 emails: 1 relevant thread is privileged, 0 non-relevant threads are. `NonRelevantSkeletonBuilder.AssignDailyPrivilege` privileges about 2% of daily-business threads and guarantees one only when there are 50 or more of them, so small corpora can have privilege banners on relevant mail only. FillerAssignments applies the same 85% / 40% mix to whatever is privileged, so `DistributionParityTests.Parity_PrivilegeMarkers` passes. The remaining signal is planner-level (Phase 4). Hand to the Phase 7 leakage audit: compare privileged-thread share per population at 250 / 1000 / 5000 emails.

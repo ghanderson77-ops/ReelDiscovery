@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-20-PLAN.md
-last_updated: "2026-10-05T03:13:26.505Z"
+stopped_at: Completed 06-21-PLAN.md
+last_updated: "2026-10-05T03:34:20.512Z"
 last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 103
-  percent: 97
+  completed_plans: 104
+  percent: 98
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 23 of 25 (22 summarized: 06-01..06-20, 06-22, 06-24; wave 7 in progress; next 06-21)
+Plan: 24 of 25 (23 summarized: 06-01..06-22, 06-24; wave 8 in progress; next 06-23)
 Status: Ready to execute
 Last activity: 2026-10-05
 
-Progress: [██████████] 97%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -154,6 +154,7 @@ Progress: [██████████] 97%
 | Phase 06 P24 | 17min | 3 tasks | 6 files |
 | Phase 06 P19 | 30min | 2 tasks | 2 files |
 | Phase 06 P20 | 35min | 2 tasks | 4 files |
+| Phase 06 P21 | 25min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -440,6 +441,7 @@ Recent decisions affecting current work:
 - [Phase 6]: 06-19: Phase 5 GenerationRunnerTests run on a relevant-only, attachment-free ApprovedCase; the mixed corpus is GenerationRunnerMixedTests
 - [Phase 06]: 06-20: a repair is late only when a later wave holds a thread finished before the run with no repair pending; earlier-wave repair details reach later waves
 - [Phase 06]: 06-20: repairs await chain predecessors before a repair slot (max 4); one AttachmentsRepaired line per thread; a message whose committed part cannot be reused or recreated is left untouched
+- [Phase 06]: 06-21: parity suite compares header sets per shape without Cc (Cc checked against the plan in the structure fact); privilege incidence gap on small production plans (planner 2% daily privilege) deferred to Phase 7 leakage audit
 
 ### Pending Todos
 
@@ -461,6 +463,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T03:13:26.499Z
-Stopped at: Completed 06-19-PLAN.md
+Last session: 2026-10-05T03:34:20.505Z
+Stopped at: Completed 06-21-PLAN.md
 Resume file: None

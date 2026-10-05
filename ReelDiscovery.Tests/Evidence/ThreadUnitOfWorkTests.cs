@@ -12,7 +12,7 @@ using ReelDiscovery.Tests.Fakes;
 
 namespace ReelDiscovery.Tests.Evidence;
 
-public class ThreadUnitOfWorkTests : IDisposable
+public partial class ThreadUnitOfWorkTests : IDisposable
 {
     private const string RetryHint = "Click Continue Generating.";
     private const string FeedbackHeader = "Problems in the previous attempt";
@@ -595,5 +595,629 @@ public class ThreadUnitOfWorkTests : IDisposable
         Assert.Equal(LlmTier.Story, profile.Tier);
         Assert.True(profile.UsesLedger);
         Assert.Same(_story, profile.Model);
+    }
+
+    // ---------- attachment step and commit boundary (D-14, D-16, D-20, D-26, review concerns 1, 4, 6, 7) ----------
+
+    private static readonly TimeSpan ChainGuard = TimeSpan.FromSeconds(10);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"Attachment id: (\S+)")]
+    private static partial System.Text.RegularExpressions.Regex AttachmentIdLine();
+
+    private static string? AttachmentIdOf(LlmProviderRequest request)
+    {
+        var match = AttachmentIdLine().Match(request.UserPrompt ?? string.Empty);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private AttachmentUnitOfWork AttachmentUnit(IMediaGenerator? media) =>
+        new(_gateway, _snapshot, media, new MediaRunGate(), _story, _volume);
+
+    private ThreadUnitOfWork FullUnit(IMediaGenerator? media = null, string? folder = null)
+    {
+        var target = folder ?? _folder;
+        var journal = target == _folder ? _journal : new GenerationJournal(target);
+        return new ThreadUnitOfWork(_gateway, journal, new MailboxWriter(target, Folders), _snapshot, _story, AttachmentUnit(media));
+    }
+
+    private ChainScheduler Chains(IReadOnlyDictionary<string, AttachmentChainLink>? links = null,
+        IReadOnlyDictionary<string, string>? committed = null) =>
+        new(links ?? AttachmentChains.Compute(_plan, _draft.Guide), committed ?? new Dictionary<string, string>(),
+            ChainScheduler.ThreadOfAttachment(_plan), ChainScheduler.RankThreads(_plan));
+
+    private static ThreadAttachmentContext Step(ChainScheduler chains, params string[] threadIds)
+    {
+        chains.BeginStep(threadIds);
+        return new ThreadAttachmentContext { Chains = chains, RowIndex = 1 };
+    }
+
+    private Task<ThreadOutcome> RunThread(ThreadUnitOfWork unit, string threadId, ThreadAttachmentContext attachments, PlanCallRun run,
+        ThreadRenderContext? ctx = null)
+    {
+        var render = ctx ?? ThreadCtx(threadId);
+        return unit.RunAsync(render, RenderProfile.For(render.Thread, _gateway, null), run, attachments);
+    }
+
+    /// <summary>
+    /// The attachment-aware clean responder; <paramref name="intercept"/> may answer a request first (null = default).
+    /// </summary>
+    private Func<LlmProviderRequest, LlmProviderResponse> Responder(Func<LlmProviderRequest, LlmProviderResponse?>? intercept = null,
+        Func<string, int, string?>? overrideJson = null)
+    {
+        var inner = AttachmentResponder.Create(_plan, _draft.Guide!, overrideJson);
+        return request => intercept?.Invoke(request) ?? inner(request);
+    }
+
+    private static Func<LlmProviderRequest, LlmProviderResponse?> RefuseAttachment(string docId) =>
+        request => AttachmentIdOf(request) == docId ? FakeLlmProvider.Refused("cannot write that document") : null;
+
+    private string PromptFor(string docId) => _fake.Requests.Last(r => AttachmentIdOf(r) == docId).UserPrompt!;
+
+    private static List<MimeKit.MimeEntity> DocParts(MimeKit.MimeMessage message) =>
+        message.BodyParts.Where(p => p.Headers.Contains(MailboxWriter.DocIdHeader)).ToList();
+
+    private static PlannedAttachment Spec(PlannedThread thread, int seq, AttachmentType kind) =>
+        thread.Messages.Single(m => m.Seq == seq).Attachments.First(a => a.Kind == kind);
+
+    private static Dictionary<string, AttachmentChainLink> ManualChain(params (string Chain, string[] DocIds)[] chains)
+    {
+        var links = new Dictionary<string, AttachmentChainLink>(StringComparer.Ordinal);
+        foreach (var (chain, docIds) in chains)
+        {
+            for (var i = 0; i < docIds.Length; i++)
+            {
+                links[docIds[i]] = new AttachmentChainLink
+                {
+                    ChainId = chain,
+                    Version = i + 1,
+                    Count = docIds.Length,
+                    PreviousDocId = i > 0 ? docIds[i - 1] : string.Empty,
+                    OrganizationKey = "test",
+                    BaseTitle = chain
+                };
+            }
+        }
+
+        return links;
+    }
+
+    [Fact]
+    public async Task Attachments_WordExcelPowerPoint_OneThreadDoneLine_ByteIdenticalCopies()
+    {
+        _fake.Respond = Responder();
+        var ctx = ThreadCtx(AttachmentTestData.RelevantDocThreadId);
+        var chains = Chains();
+        var attachments = Step(chains, ctx.Thread.Id);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await FullUnit().RunAsync(ctx, RenderProfile.For(ctx.Thread, _gateway, null), run, attachments);
+
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        var root = ctx.Thread.Messages.Single(m => m.Seq == 1);
+        var names = AttachmentNaming.NamesFor(root, null, chains.Links);
+        var copies = MailboxWriter.CopyPathsFor(root, Folders);
+        Assert.True(copies.Count > 1);
+        var bytes = copies.Select(c => File.ReadAllBytes(Path.Combine(_folder, c))).ToList();
+        Assert.All(bytes, b => Assert.Equal(bytes[0], b));
+
+        var eml = MimeKit.MimeMessage.Load(Path.Combine(_folder, copies[0]));
+        var parts = DocParts(eml);
+        Assert.Equal(root.Attachments.Select(a => a.DocId), parts.Select(p => p.Headers[MailboxWriter.DocIdHeader]));
+        Assert.Equal(root.Attachments.Select(a => names[a.DocId]), parts.Select(p => ((MimeKit.MimePart)p).FileName));
+
+        // Exactly one journal line: the ThreadDone with every attachment nested in plan order
+        var record = SingleRecord(ctx.Thread);
+        Assert.Equal(JournalRecordType.ThreadDone, record.Type);
+        Assert.Equal(root.Attachments.Select(a => a.DocId), record.Attachments.Select(a => a.AttachmentDocId));
+        Assert.All(record.Attachments, a =>
+        {
+            Assert.Equal(JournalRecordType.AttachmentDone, a.Type);
+            Assert.Equal(root.DocId, a.ParentDocId);
+            Assert.Equal(record.Utc, a.Utc);
+            Assert.Equal(copies.OrderBy(c => c), a.Files.OrderBy(c => c));
+        });
+        Assert.Equal(record.Attachments.Count, outcome.AttachmentRecords.Count);
+
+        // Relevant attachment deltas come back for the ledger, marked with their source
+        Assert.NotEmpty(outcome.AttachmentDeltas);
+        Assert.All(outcome.AttachmentDeltas, d =>
+        {
+            Assert.True(d.FromAttachment);
+            Assert.Contains(d.AttachmentDocId, root.Attachments.Select(a => a.DocId));
+        });
+
+        var view = _snapshot.Drain();
+        Assert.Equal(3, view.Counts.AttachmentsDone);
+        Assert.Equal(3, Assert.Single(view.Events, e => e.Kind == GenerationEventKind.ThreadWritten).Attachments);
+        Assert.Equal(0m, outcome.NotRunCostUsd);
+    }
+
+    [Fact]
+    public async Task Attachments_SnapshotAndEvents_OnlyAfterTheAppend()
+    {
+        var root = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId).Messages.Single(m => m.Seq == 1);
+        var excel = root.Attachments.Single(a => a.Kind == AttachmentType.Excel).DocId;
+        _fake.Respond = Responder(RefuseAttachment(excel));
+        var ctx = ThreadCtx(AttachmentTestData.RelevantDocThreadId);
+        var attachments = Step(Chains(), ctx.Thread.Id);
+        var unit = FullUnit();
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        unit.BeforeAppendHook = async _ =>
+        {
+            reached.TrySetResult();
+            await release.Task;
+        };
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var task = Task.Run(() => unit.RunAsync(ctx, RenderProfile.For(ctx.Thread, _gateway, null), run, attachments));
+        await reached.Task.WaitAsync(ChainGuard);
+
+        // Every copy is on disk, but nothing is reported before the line is flushed
+        Assert.True(File.Exists(Path.Combine(_folder, MailboxWriter.CopyPathsFor(root, Folders)[0])));
+        var pending = _snapshot.Peek();
+        Assert.Equal(0, pending.Counts.AttachmentsDone);
+        Assert.Equal(0, pending.Counts.AttachmentsFailed);
+        Assert.DoesNotContain(pending.Events, e => e.Kind is GenerationEventKind.AttachmentFailed
+            or GenerationEventKind.AttachmentKeptWithWarnings or GenerationEventKind.AttachmentSkipped or GenerationEventKind.ThreadWritten);
+        Assert.Empty(JournalLines());
+
+        release.SetResult();
+        var outcome = await task.WaitAsync(ChainGuard);
+
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        var view = _snapshot.Drain();
+        Assert.Equal(2, view.Counts.AttachmentsDone);
+        Assert.Equal(1, view.Counts.AttachmentsFailed);
+        var failed = Assert.Single(view.Events, e => e.Kind == GenerationEventKind.AttachmentFailed);
+        Assert.Equal(AttachmentUnitOfWork.RefusedReason, failed.Reason);
+        Assert.EndsWith(".xlsx", failed.FileName);
+    }
+
+    [Fact]
+    public async Task Attachments_RefusedExcel_EmailWrittenWithoutIt_FailedNestedInThreadDone()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var root = thread.Messages.Single(m => m.Seq == 1);
+        var excel = root.Attachments.Single(a => a.Kind == AttachmentType.Excel).DocId;
+
+        // Reference run without the failure in its own folder
+        var clean = Path.Combine(_folder, "clean");
+        Directory.CreateDirectory(clean);
+        _fake.Respond = Responder();
+        using (var cleanCts = new CancellationTokenSource())
+        using (var cleanRun = Run(cleanCts))
+            await RunThread(FullUnit(folder: clean), thread.Id, Step(Chains(), thread.Id), cleanRun);
+        var cleanRecord = GenerationJournal.Replay(clean, _plan).LastByThread[thread.Id];
+
+        _fake.Respond = Responder(RefuseAttachment(excel));
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await RunThread(FullUnit(), thread.Id, Step(Chains(), thread.Id), run);
+
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        var eml = MimeKit.MimeMessage.Load(Path.Combine(_folder, MailboxWriter.CopyPathsFor(root, Folders)[0]));
+        Assert.Equal(root.Attachments.Where(a => a.DocId != excel).Select(a => a.DocId),
+            DocParts(eml).Select(p => p.Headers[MailboxWriter.DocIdHeader]));
+
+        var record = SingleRecord(thread);
+        Assert.Equal(new[] { JournalRecordType.AttachmentDone, JournalRecordType.AttachmentFailed, JournalRecordType.AttachmentDone },
+            record.Attachments.Select(a => a.Type));
+        var failed = record.Attachments.Single(a => a.Type == JournalRecordType.AttachmentFailed);
+        Assert.Equal(excel, failed.AttachmentDocId);
+        Assert.Equal(AttachmentType.Excel, failed.AttachmentKind);
+        Assert.Equal(root.DocId, failed.ParentDocId);
+        Assert.Equal(ThreadFailureKind.Refused, failed.FailureKind);
+        Assert.Empty(failed.Files);
+
+        // D-26: the bodies are exactly what the run without the failure wrote
+        Assert.Equal(cleanRecord.Messages.Select(m => m.BodyPlain), record.Messages.Select(m => m.BodyPlain));
+    }
+
+    [Fact]
+    public async Task Attachments_InlineImage_MediaOk_HasCid_NoMedia_Skipped()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.InviteThreadId);
+        var root = thread.Messages.Single(m => m.Seq == 1);
+        var image = root.Attachments.Single(a => a.Kind == AttachmentType.Image);
+        _fake.Respond = Responder();
+        var media = new FakeMediaGenerator();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var withMedia = await RunThread(FullUnit(media), thread.Id, Step(Chains(), thread.Id), run);
+
+        Assert.Equal(ThreadOutcomeKind.Written, withMedia.Kind);
+        var eml = MimeKit.MimeMessage.Load(Path.Combine(_folder, MailboxWriter.CopyPathsFor(root, Folders)[0]));
+        var sender = ThreadCtx(thread.Id).People.Find(root.FromId)!;
+        var cid = AttachmentNaming.ContentIdFor(image.DocId, sender.Domain);
+        Assert.Contains("cid:" + cid, eml.HtmlBody);
+        Assert.Contains(DocParts(eml), p => p.Headers[MailboxWriter.DocIdHeader] == image.DocId);
+
+        var bare = Path.Combine(_folder, "bare");
+        Directory.CreateDirectory(bare);
+        var withoutMedia = await RunThread(FullUnit(folder: bare), thread.Id, Step(Chains(), thread.Id), run);
+
+        Assert.Equal(ThreadOutcomeKind.Written, withoutMedia.Kind);
+        var skipped = withoutMedia.Record!.Attachments.Single(a => a.AttachmentDocId == image.DocId);
+        Assert.Equal(JournalRecordType.AttachmentSkipped, skipped.Type);
+        Assert.Equal(AttachmentUnitOfWork.NoMediaKeyReason, skipped.Reason);
+        var bareEml = MimeKit.MimeMessage.Load(Path.Combine(bare, MailboxWriter.CopyPathsFor(root, Folders)[0]));
+        Assert.DoesNotContain(DocParts(bareEml), p => p.Headers[MailboxWriter.DocIdHeader] == image.DocId);
+        Assert.DoesNotContain("cid:", bareEml.HtmlBody);
+    }
+
+    [Fact]
+    public async Task Chain_SameStep_LowerRankedPredecessor_PromptHasItsText_EveryRun()
+    {
+        var first = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var second = AttachmentTestData.Thread(_plan, AttachmentTestData.ChainThreadId);
+        var v1 = Spec(first, 1, AttachmentType.Excel).DocId;
+        var v2 = Spec(second, 1, AttachmentType.Excel).DocId;
+        var probe = Chains();
+        Assert.Equal(v1, probe.Links[v2].PreviousDocId);
+        Assert.True(probe.Compare(first.Id, second.Id) < 0);
+        _fake.OnSend = _ => Thread.Sleep(Random.Shared.Next(0, 4));
+
+        for (var i = 0; i < 20; i++)
+        {
+            var folder = Path.Combine(_folder, $"run{i}");
+            Directory.CreateDirectory(folder);
+            _fake.Requests.Clear();
+            _fake.Respond = Responder();
+            var unit = FullUnit(folder: folder);
+            var attachments = Step(Chains(), first.Id, second.Id);
+            using var cts = new CancellationTokenSource();
+            using var run = new PlanCallRun(cts.Token, 2, RetryHint);
+
+            var launch = i % 2 == 0 ? new[] { second.Id, first.Id } : new[] { first.Id, second.Id };
+            var tasks = launch.Select(id => Task.Run(() => RunThread(unit, id, attachments, run))).ToList();
+            await Task.WhenAll(tasks).WaitAsync(ChainGuard);
+
+            var v1Text = GenerationJournal.Replay(folder, _plan).LastByAttachment[v1].FlattenedText;
+            Assert.NotEmpty(v1Text);
+            Assert.Contains(v1Text.Trim(), PromptFor(v2));
+        }
+
+        // v1 failed: the successor is told the earlier draft is not available
+        var failedFolder = Path.Combine(_folder, "failed");
+        Directory.CreateDirectory(failedFolder);
+        _fake.Requests.Clear();
+        _fake.Respond = Responder(RefuseAttachment(v1));
+        var failUnit = FullUnit(folder: failedFolder);
+        var step = Step(Chains(), first.Id, second.Id);
+        using (var cts = new CancellationTokenSource())
+        using (var run = new PlanCallRun(cts.Token, 2, RetryHint))
+            await Task.WhenAll(RunThread(failUnit, second.Id, step, run), RunThread(failUnit, first.Id, step, run)).WaitAsync(ChainGuard);
+        Assert.Contains(AttachmentPrompts.EarlierDraftNotAvailable, PromptFor(v2));
+    }
+
+    private async Task<string> RunTwoThreadChain(string a, string b, Dictionary<string, AttachmentChainLink> links,
+        IReadOnlyDictionary<string, string>? committed, bool aFirst, int iteration, IEnumerable<string> promptDocIds)
+    {
+        var folder = Path.Combine(_folder, $"{(aFirst ? "a" : "b")}{iteration}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        _fake.Requests.Clear();
+        _fake.Respond = Responder();
+        var unit = FullUnit(folder: folder);
+        var attachments = Step(Chains(links, committed), a, b);
+
+        // One provider slot shared by both threads: a chain wait made while holding it would deadlock
+        using var cts = new CancellationTokenSource();
+        using var run = new PlanCallRun(cts.Token, 1, RetryHint);
+        var order = aFirst ? new[] { a, b } : new[] { b, a };
+        var tasks = order.Select(id => Task.Run(() => RunThread(unit, id, attachments, run))).ToList();
+        var outcomes = await Task.WhenAll(tasks).WaitAsync(ChainGuard);
+
+        Assert.All(outcomes, o => Assert.Equal(ThreadOutcomeKind.Written, o.Kind));
+        var replay = GenerationJournal.Replay(folder, _plan);
+        Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread[a].Type);
+        Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread[b].Type);
+        return string.Join("\n----\n", promptDocIds.Select(PromptFor));
+    }
+
+    [Fact]
+    public async Task Chain_InterleavedAcrossTwoThreads_NoDeadlock()
+    {
+        // A = T-0901 (rank lower): v1 Word and v3 Excel; B = T-0904: v2 Word
+        var a = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var b = AttachmentTestData.Thread(_plan, AttachmentTestData.MultiMessageThreadId);
+        var v1 = Spec(a, 1, AttachmentType.Word).DocId;
+        var v2 = Spec(b, 1, AttachmentType.Word).DocId;
+        var v3 = Spec(a, 1, AttachmentType.Excel).DocId;
+        var links = ManualChain(("Interleaved Notes", new[] { v1, v2, v3 }));
+        Assert.True(Chains(links).Compare(a.Id, b.Id) < 0);
+        _fake.OnSend = _ => Thread.Sleep(Random.Shared.Next(0, 4));
+
+        string? expected = null;
+        for (var i = 0; i < 20; i++)
+        {
+            var prompts = await RunTwoThreadChain(a.Id, b.Id, links, null, aFirst: i % 2 == 0, i, new[] { v2, v3 });
+            expected ??= prompts;
+            Assert.Equal(expected, prompts);
+        }
+
+        var v1Text = GenerationJournal.Replay(Directory.GetDirectories(_folder)[0], _plan).LastByAttachment[v1].FlattenedText;
+        var v2Prompt = expected!.Split("\n----\n")[0];
+        var v3Prompt = expected.Split("\n----\n")[1];
+        Assert.Contains(v1Text.Trim(), v2Prompt);
+        Assert.Contains(AttachmentPrompts.EarlierDraftNotAvailable, v3Prompt);
+    }
+
+    [Fact]
+    public async Task Chain_CrossingChainsTwoThreads_NoDeadlock()
+    {
+        // Chain X: x1 (A Word) -> x2 (B Word); chain Y: y1 (B Excel) -> y2 (A Excel); rank(A) < rank(B)
+        var a = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var b = AttachmentTestData.Thread(_plan, AttachmentTestData.MultiMessageThreadId);
+        var x1 = Spec(a, 1, AttachmentType.Word).DocId;
+        var x2 = Spec(b, 1, AttachmentType.Word).DocId;
+        var y1 = Spec(b, 2, AttachmentType.Excel).DocId;
+        var y2 = Spec(a, 1, AttachmentType.Excel).DocId;
+        var links = ManualChain(("Chain X", new[] { x1, x2 }), ("Chain Y", new[] { y1, y2 }));
+        _fake.OnSend = _ => Thread.Sleep(Random.Shared.Next(0, 4));
+
+        foreach (var seeded in new[] { true, false })
+        {
+            var committed = seeded
+                ? new Dictionary<string, string> { [y1] = "Seeded y1 sheet from an earlier run" }
+                : null;
+            string? expected = null;
+            for (var i = 0; i < 20; i++)
+            {
+                var prompts = await RunTwoThreadChain(a.Id, b.Id, links, committed, aFirst: i % 2 == 0, i, new[] { x2, y2 });
+                expected ??= prompts;
+                Assert.Equal(expected, prompts);
+            }
+
+            var x2Prompt = expected!.Split("\n----\n")[0];
+            var y2Prompt = expected.Split("\n----\n")[1];
+            Assert.Contains("The earlier version (revise it;", x2Prompt);
+            Assert.DoesNotContain(AttachmentPrompts.EarlierDraftNotAvailable, x2Prompt);
+            if (seeded)
+                Assert.Contains("Seeded y1 sheet from an earlier run", y2Prompt);
+            else
+                Assert.Contains(AttachmentPrompts.EarlierDraftNotAvailable, y2Prompt);
+        }
+    }
+
+    [Fact]
+    public async Task Chain_InOneThread_UsesOwnEarlierText_NoSelfWait()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.MultiMessageThreadId);
+        var v1 = Spec(thread, 1, AttachmentType.Word).DocId;
+        var v2 = Spec(thread, 2, AttachmentType.Excel).DocId;
+        _fake.Respond = Responder();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await RunThread(FullUnit(), thread.Id, Step(Chains(ManualChain(("Visit Notes", new[] { v1, v2 }))), thread.Id), run)
+            .WaitAsync(ChainGuard);
+
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        var record = SingleRecord(thread);
+        Assert.Equal(new[] { v1, v2 }, record.Attachments.Select(a => a.AttachmentDocId));
+        Assert.Contains(record.Attachments[0].FlattenedText.Trim(), PromptFor(v2));
+    }
+
+    // A Meeting delta on the invite's root: the site walk five days after the email
+    private string RenderWithMeeting(string threadId, int attempt)
+    {
+        var inner = EvidenceTestData.RenderResponder(_plan, _draft.Guide!);
+        var thread = AttachmentTestData.Thread(_plan, threadId);
+        var request = new LlmProviderRequest { UserPrompt = $"Thread id: {threadId}" };
+        var dto = JsonSerializer.Deserialize<ThreadRenderer.ThreadRenderDto>(inner(request).Text!, DtoOptions)!;
+        var meetingDay = DateOnly.FromDateTime(AttachmentTestData.Thread(_plan, AttachmentTestData.InviteThreadId).Messages[0].SentAt.DateTime)
+            .AddDays(5);
+        dto.NewDetails = new List<ThreadRenderer.LedgerDeltaDto>
+        {
+            new()
+            {
+                Seq = 1,
+                Kind = LedgerKind.Meeting,
+                About = "site walk",
+                Statement = "The teams will walk the upper floors together.",
+                Value = meetingDay.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                FactIds = new List<string>(thread.Messages[0].FactIds)
+            }
+        };
+        return JsonSerializer.Serialize(dto, DtoOptions);
+    }
+
+    private Func<LlmProviderRequest, LlmProviderResponse> MeetingResponder(params string[] threadIds)
+    {
+        var inner = Responder();
+        var renderSchema = JsonSchemaRegistry.GetSchemaName(typeof(ThreadRenderer.ThreadRenderDto));
+        return request =>
+        {
+            var id = threadIds.FirstOrDefault(t => (request.UserPrompt ?? string.Empty).Contains($"Thread id: {t}", StringComparison.Ordinal));
+            return id != null && request.SchemaName == renderSchema ? FakeLlmProvider.Ok(RenderWithMeeting(id, 1), 1000, 400) : inner(request);
+        };
+    }
+
+    [Fact]
+    public async Task Invite_OwnDeltaThenLedger_ReusesRegisteredSlot()
+    {
+        var a = AttachmentTestData.Thread(_plan, AttachmentTestData.InviteThreadId);
+        var b = AttachmentTestData.Thread(_plan, AttachmentTestData.SecondInviteThreadId);
+        _fake.Respond = MeetingResponder(a.Id);
+        var chains = Chains();
+        var attachments = Step(chains, a.Id);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var first = await RunThread(FullUnit(new FakeMediaGenerator()), a.Id, attachments, run);
+
+        var inviteA = first.Record!.Attachments.Single(r => r.AttachmentKind == AttachmentType.CalendarInvite);
+        Assert.Equal(JournalRecordType.AttachmentDone, inviteA.Type);
+        Assert.NotEmpty(inviteA.InviteMeetingKey);
+        var registered = Assert.Single(attachments.InviteSlots);
+        Assert.Equal(inviteA.InviteMeetingKey, registered.Key);
+        Assert.Equal(inviteA.InviteStart, registered.Value.Start);
+
+        // B runs in a later wave and sees A's meeting through the ledger
+        var waves = new Dictionary<string, int> { [a.Id] = 1, [b.Id] = 2 };
+        var ledger = LedgerMerger.Build(_plan, _draft.Guide!, waves,
+            new Dictionary<string, List<LedgerDelta>> { [a.Id] = first.Record.LedgerDelta.ToList() });
+        Assert.Contains(ledger.Entries, e => e.Kind == LedgerKind.Meeting);
+        var next = new ThreadAttachmentContext { Chains = chains, RowIndex = 2 };
+        foreach (var (key, slot) in attachments.InviteSlots)
+            next.InviteSlots.TryAdd(key, slot);
+        chains.BeginStep(new[] { b.Id });
+        _fake.Respond = Responder();
+
+        var second = await RunThread(FullUnit(), b.Id, next, run, ThreadCtx(b.Id, 2, ledger.Entries));
+
+        var inviteB = second.Record!.Attachments.Single(r => r.AttachmentKind == AttachmentType.CalendarInvite);
+        Assert.Equal(inviteA.InviteMeetingKey, inviteB.InviteMeetingKey);
+        Assert.Equal(inviteA.InviteStart, inviteB.InviteStart);
+        Assert.Equal(inviteA.InviteEnd, inviteB.InviteEnd);
+    }
+
+    [Fact]
+    public async Task Invite_MeetingAbsorbedIntoEarlierThreadEntry_SameSchedule()
+    {
+        // 06-08 edge: an earlier-ranked thread C of the same wave states the same meeting, so LedgerMerger.Build keeps
+        // C's entry and absorbs A's; B (a later wave) then sees C's entry, not the key A registered under
+        var a = AttachmentTestData.Thread(_plan, AttachmentTestData.InviteThreadId);
+        var b = AttachmentTestData.Thread(_plan, AttachmentTestData.SecondInviteThreadId);
+        var c = AttachmentTestData.Thread(_plan, AttachmentTestData.MultiMessageThreadId);
+        _fake.Respond = MeetingResponder(a.Id);
+        var chains = Chains();
+        var attachments = Step(chains, a.Id);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var first = await RunThread(FullUnit(new FakeMediaGenerator()), a.Id, attachments, run);
+        var inviteA = first.Record!.Attachments.Single(r => r.AttachmentKind == AttachmentType.CalendarInvite);
+
+        var cDelta = first.Record.LedgerDelta.Select(d => new LedgerDelta
+        {
+            Seq = 1,
+            Kind = d.Kind,
+            About = d.About,
+            Statement = d.Statement,
+            Value = d.Value,
+            FactIds = d.FactIds.ToList()
+        }).ToList();
+        var waves = new Dictionary<string, int> { [c.Id] = 1, [a.Id] = 1, [b.Id] = 2 };
+        var ledger = LedgerMerger.Build(_plan, _draft.Guide!, waves,
+            new Dictionary<string, List<LedgerDelta>> { [a.Id] = first.Record.LedgerDelta.ToList(), [c.Id] = cDelta });
+        var meeting = Assert.Single(ledger.Entries, e => e.Kind == LedgerKind.Meeting);
+        Assert.Equal(c.Id, meeting.SourceThreadId);
+
+        var next = new ThreadAttachmentContext { Chains = chains, RowIndex = 2 };
+        foreach (var (key, slot) in attachments.InviteSlots)
+            next.InviteSlots.TryAdd(key, slot);
+        chains.BeginStep(new[] { b.Id });
+        _fake.Respond = Responder();
+
+        var second = await RunThread(FullUnit(), b.Id, next, run, ThreadCtx(b.Id, 2, ledger.Entries));
+
+        // The content seed gives the same schedule even when the ledger exposes the other thread's key
+        var inviteB = second.Record!.Attachments.Single(r => r.AttachmentKind == AttachmentType.CalendarInvite);
+        Assert.Equal(inviteA.InviteStart, inviteB.InviteStart);
+        Assert.Equal(inviteA.InviteEnd, inviteB.InviteEnd);
+        Assert.NotEmpty(inviteB.InviteMeetingKey);
+        // Documented edge (06-08): the key B sees is C's canonical key, not the one A registered; the schedule still matches
+        Assert.StartsWith($"mtg:{a.Id}:", inviteA.InviteMeetingKey);
+        Assert.StartsWith($"mtg:{c.Id}:", inviteB.InviteMeetingKey);
+        Assert.True(attachments.InviteSlots.ContainsKey(inviteA.InviteMeetingKey));
+    }
+
+    [Fact]
+    public void Invite_NonRelevant_UsesPlanSlot_WithoutMeetingKey()
+    {
+        // The invite thread's shape run as filler: the slot comes from the plan only and has no meeting key
+        var fillerThread = PlanFixtures.Clone(_plan).Threads.Single(t => t.Id == AttachmentTestData.InviteThreadId);
+        fillerThread.Relevance = ThreadRelevance.NotRelevant;
+        fillerThread.Category = NonRelevantCategory.DailyBusiness;
+        var ctx = ThreadCtx(AttachmentTestData.InviteThreadId);
+        ctx.Thread = fillerThread;
+        var parent = fillerThread.Messages.Single(m => m.Seq == 1);
+        var invite = parent.Attachments.Single(a => a.Kind == AttachmentType.CalendarInvite);
+        var accepted = new RenderedThread
+        {
+            ThreadId = fillerThread.Id,
+            Messages = fillerThread.Messages.Select(m => new RenderedMessage { Seq = m.Seq, Body = "Agenda attached." }).ToList()
+        };
+
+        var actx = ThreadUnitOfWork.CreateAttachmentContext(ctx, RenderProfile.For(fillerThread, _gateway, null), parent, invite,
+            accepted, new List<LedgerDelta>(), Step(Chains(), fillerThread.Id), null, null);
+
+        var expected = InviteScheduler.ForNonRelevant(parent, invite);
+        Assert.NotNull(actx.Slot);
+        Assert.Equal(expected.Start, actx.Slot!.Start);
+        Assert.Equal(expected.End, actx.Slot.End);
+        Assert.Empty(actx.Slot.MeetingKey);
+        Assert.Equal(LlmTier.Volume, actx.Tier);
+        Assert.False(actx.Relevant);
+    }
+
+    [Fact]
+    public void CreateAttachmentContext_AcceptedThread_AndAncestorDeltasOnly()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.SiblingBranchThreadId);
+        var ctx = ThreadCtx(thread.Id);
+        var parent = thread.Messages.Single(m => m.Seq == 2);
+        var spec = parent.Attachments.Single();
+        var accepted = new RenderedThread
+        {
+            ThreadId = thread.Id,
+            Messages = thread.Messages.Select(m => new RenderedMessage { Seq = m.Seq, Body = $"Body of message {m.Seq}." }).ToList()
+        };
+        var deltas = new List<LedgerDelta>
+        {
+            new() { Seq = 1, Kind = LedgerKind.Figure, About = "root detail", Value = "$1,000" },
+            new() { Seq = 2, Kind = LedgerKind.Figure, About = "parent detail", Value = "$2,000" },
+            new() { Seq = 3, Kind = LedgerKind.Figure, About = "sibling detail", Value = "$3,000" }
+        };
+        var attachments = Step(Chains(), thread.Id);
+
+        var actx = ThreadUnitOfWork.CreateAttachmentContext(ctx, RenderProfile.Relevant(_gateway), parent, spec, accepted, deltas,
+            attachments, "earlier text", null);
+
+        Assert.Same(accepted, actx.AcceptedThread);
+        Assert.Equal("Body of message 2.", actx.ParentBody);
+        Assert.Equal(new[] { "root detail", "parent detail" }, actx.VisibleThreadDeltas.Select(d => d.About));
+        Assert.Equal("earlier text", actx.PriorVersionText);
+        Assert.Equal(AttachmentNaming.NamesFor(parent, null, attachments.Chains.Links)[spec.DocId], actx.FileName);
+        Assert.Equal(LlmTier.Story, actx.Tier);
+        Assert.True(actx.Relevant);
+
+        // D-13: filler attachments see no thread deltas
+        var filler = ThreadUnitOfWork.CreateAttachmentContext(ctx, RenderProfile.For(
+            AttachmentTestData.Thread(_plan, AttachmentTestData.DailyBusinessThreadId), _gateway, null), parent, spec, accepted, deltas,
+            attachments, null, null);
+        Assert.Empty(filler.VisibleThreadDeltas);
+        Assert.Equal(string.Empty, filler.PriorVersionText);
+    }
+
+    [Fact]
+    public async Task Attachments_NonRelevant_NoDeltas_FillerTitlesName()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.DailyBusinessThreadId);
+        _fake.Respond = Responder();
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await RunThread(FullUnit(), thread.Id, Step(Chains(), thread.Id), run);
+
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        Assert.Empty(outcome.AttachmentDeltas);
+        var record = SingleRecord(thread);
+        Assert.Empty(record.LedgerDelta);
+        var nested = Assert.Single(record.Attachments);
+        Assert.Equal(JournalRecordType.AttachmentDone, nested.Type);
+        Assert.Empty(nested.LedgerDelta);
+        Assert.Equal("Word notes 1", nested.Title);
+        var root = thread.Messages.Single(m => m.Seq == 1);
+        Assert.Equal(AttachmentNaming.NamesFor(root, new[] { "Word notes 1" }, Chains().Links)[root.Attachments[0].DocId], nested.FileName);
+        Assert.StartsWith("Word_notes_1", nested.FileName);
+        Assert.Equal(_volume.CalculateTotalCost(800, 300), nested.CostUsd);
+        Assert.Equal(1, Assert.Single(_snapshot.Drain().Events, e => e.Kind == GenerationEventKind.ThreadWritten).Attachments);
     }
 }

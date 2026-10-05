@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-24-PLAN.md
-last_updated: "2026-10-05T01:53:55.752Z"
-last_activity: 2026-10-04
+stopped_at: Completed 06-19-PLAN.md
+last_updated: "2026-10-05T02:16:48.098Z"
+last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 101
-  percent: 95
+  completed_plans: 102
+  percent: 96
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 21 of 25 (20 summarized: 06-01..06-18, 06-22, 06-24; wave 5 in progress; next 06-19)
+Plan: 22 of 25 (21 summarized: 06-01..06-19, 06-22, 06-24; wave 6 in progress; next 06-20)
 Status: Ready to execute
-Last activity: 2026-10-04
+Last activity: 2026-10-05
 
-Progress: [██████████] 95%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -152,6 +152,7 @@ Progress: [██████████] 95%
 | Phase 06 P17 | 16min | 2 tasks | 3 files |
 | Phase 06 P18 | 45min | 3 tasks | 5 files |
 | Phase 06 P24 | 17min | 3 tasks | 6 files |
+| Phase 06 P19 | 30min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -432,6 +433,10 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-24: Answer key run clause counts email rows of all threads plus attachment rows; planned = rows - generated - failed - skipped; skipped only in the line-3 tooltip
 - [Phase 06]: 06-24: ModelConfigurationDialog made DPI-aware (AutoSize header/button rows, AutoSize grid-button column, LogicalToDeviceUnits widths); grid horizontal scroll at 820 px is allowed by design
 - [Phase 06]: 06-24: Media prices dialog result applied via StepApiConfiguration.ApplyDialogResult (OK -> normalized clone, else current) so it is testable without ShowDialog
+- [Phase 6]: 06-19: Unjournaled and NotRun spend is accounted once per thread in GenerationRunner.RunThreadAsync (shared by waves and filler chunks), never in the post-WhenAll loop
+- [Phase 6]: 06-19: Voices (CastVoices) and side projects (SideWorld) are journaled before first use; a fatal call or a failed append ends the run (Fatal / InternalError) before any work that would use the choice
+- [Phase 6]: 06-19: Run-wide invite slots are copied into each step's ThreadAttachmentContext and committed slots copied back after the step (InviteSlots is get-only)
+- [Phase 6]: 06-19: Phase 5 GenerationRunnerTests run on a relevant-only, attachment-free ApprovedCase; the mixed corpus is GenerationRunnerMixedTests
 
 ### Pending Todos
 
@@ -453,6 +458,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T01:53:55.745Z
-Stopped at: Completed 06-24-PLAN.md
+Last session: 2026-10-05T02:16:48.091Z
+Stopped at: Completed 06-19-PLAN.md
 Resume file: None

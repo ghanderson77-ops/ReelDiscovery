@@ -91,7 +91,7 @@ public class AttachmentUnitOfWorkTests
     {
         using var stream = new MemoryStream(bytes);
         using var doc = WordprocessingDocument.Open(stream, false);
-        return doc.MainDocumentPart!.Document.Body!.InnerText;
+        return doc.MainDocumentPart!.Document!.Body!.InnerText;
     }
 
     private static string Utc(DateTimeOffset value) => value.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
@@ -382,7 +382,7 @@ public class AttachmentUnitOfWorkTests
         var expected = $"{sender.OrganizationName} | {MessageTime.Local(ctx.Parent).ToString("MMMM yyyy", CultureInfo.InvariantCulture)}";
         using var stream = new MemoryStream(outcome.Part!.Bytes);
         using var deck = PresentationDocument.Open(stream, false);
-        var text = string.Join("\n", deck.PresentationPart!.SlideParts.Select(s => s.Slide.InnerText));
+        var text = string.Join("\n", deck.PresentationPart!.SlideParts.Select(s => s.Slide!.InnerText));
         Assert.Contains(expected, text);
     }
 
@@ -449,7 +449,7 @@ public class AttachmentUnitOfWorkTests
         Assert.Equal(AttachmentOutcomeKind.Warnings, outcome.Kind);
         Assert.Contains(outcome.Violations, v => v.Contains("invite not tied to a known meeting"));
         Assert.NotNull(outcome.Part);
-        Assert.Empty(_snapshot.Peek().Events.Where(e => e.Kind == GenerationEventKind.AttachmentRetry));
+        Assert.DoesNotContain(_snapshot.Peek().Events, e => e.Kind == GenerationEventKind.AttachmentRetry);
     }
 
     // ---------- failures that never escape ----------

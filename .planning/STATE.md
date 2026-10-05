@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-19-PLAN.md
-last_updated: "2026-10-05T02:16:48.098Z"
+stopped_at: Completed 06-20-PLAN.md
+last_updated: "2026-10-05T03:13:26.505Z"
 last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 102
-  percent: 96
+  completed_plans: 103
+  percent: 97
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 22 of 25 (21 summarized: 06-01..06-19, 06-22, 06-24; wave 6 in progress; next 06-20)
+Plan: 23 of 25 (22 summarized: 06-01..06-20, 06-22, 06-24; wave 7 in progress; next 06-21)
 Status: Ready to execute
 Last activity: 2026-10-05
 
-Progress: [██████████] 96%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -153,6 +153,7 @@ Progress: [██████████] 96%
 | Phase 06 P18 | 45min | 3 tasks | 5 files |
 | Phase 06 P24 | 17min | 3 tasks | 6 files |
 | Phase 06 P19 | 30min | 2 tasks | 2 files |
+| Phase 06 P20 | 35min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -437,6 +438,8 @@ Recent decisions affecting current work:
 - [Phase 6]: 06-19: Voices (CastVoices) and side projects (SideWorld) are journaled before first use; a fatal call or a failed append ends the run (Fatal / InternalError) before any work that would use the choice
 - [Phase 6]: 06-19: Run-wide invite slots are copied into each step's ThreadAttachmentContext and committed slots copied back after the step (InviteSlots is get-only)
 - [Phase 6]: 06-19: Phase 5 GenerationRunnerTests run on a relevant-only, attachment-free ApprovedCase; the mixed corpus is GenerationRunnerMixedTests
+- [Phase 06]: 06-20: a repair is late only when a later wave holds a thread finished before the run with no repair pending; earlier-wave repair details reach later waves
+- [Phase 06]: 06-20: repairs await chain predecessors before a repair slot (max 4); one AttachmentsRepaired line per thread; a message whose committed part cannot be reused or recreated is left untouched
 
 ### Pending Todos
 
@@ -458,6 +461,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T02:16:48.091Z
+Last session: 2026-10-05T03:13:26.499Z
 Stopped at: Completed 06-19-PLAN.md
 Resume file: None

@@ -24,8 +24,15 @@ public static class AttachmentHarvester
     public const long MaxPartBytes = 25L * 1024 * 1024;
     public const long MaxHarvestBytes = 100L * 1024 * 1024;
 
-    // Tests only: 0 means use the constant
-    internal static long EmlCapOverride, PartCapOverride, TotalCapOverride;
+    // Tests only: 0 means use the constant. AsyncLocal so a cap set by one test never reaches a test running
+    // in parallel (a leaked cap made AttachmentRepair skip committed parts and regenerate them)
+    private static readonly AsyncLocal<long> _emlCapOverride = new();
+    private static readonly AsyncLocal<long> _partCapOverride = new();
+    private static readonly AsyncLocal<long> _totalCapOverride = new();
+
+    internal static long EmlCapOverride { get => _emlCapOverride.Value; set => _emlCapOverride.Value = value; }
+    internal static long PartCapOverride { get => _partCapOverride.Value; set => _partCapOverride.Value = value; }
+    internal static long TotalCapOverride { get => _totalCapOverride.Value; set => _totalCapOverride.Value = value; }
 
     private static long EmlCap => EmlCapOverride > 0 ? EmlCapOverride : MaxEmlBytes;
     private static long PartCap => PartCapOverride > 0 ? PartCapOverride : MaxPartBytes;

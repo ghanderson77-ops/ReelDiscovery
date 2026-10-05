@@ -33,8 +33,10 @@ public static class CorpusPlanStore
 {
     public const long MaxPlanFileBytes = 100L * 1024 * 1024;
 
-    // Tests only: 0 = use MaxPlanFileBytes
-    internal static long SizeCapOverride;
+    // Tests only: 0 = use MaxPlanFileBytes. AsyncLocal so a cap set by one test never reaches a parallel test
+    private static readonly AsyncLocal<long> _sizeCapOverride = new();
+
+    internal static long SizeCapOverride { get => _sizeCapOverride.Value; set => _sizeCapOverride.Value = value; }
 
     private static readonly JsonSerializerOptions PlanJsonOptions = new(CaseDraft.JsonOptions) { WriteIndented = false };
 

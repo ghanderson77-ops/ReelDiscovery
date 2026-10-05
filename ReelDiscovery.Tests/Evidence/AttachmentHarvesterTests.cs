@@ -223,6 +223,27 @@ public class AttachmentHarvesterTests : IDisposable
         }
     }
 
+    // A cap set by one test must not reach tests running in parallel: a leaked cap made AttachmentRepairTests
+    // re-create a committed Word part, so cancel and fatal landed on the wrong attachment
+    [Fact]
+    public async Task CapOverrides_SetInAnotherFlow_NotVisibleHere()
+    {
+        await Task.Run(() =>
+        {
+            AttachmentHarvester.EmlCapOverride = 100;
+            AttachmentHarvester.PartCapOverride = 100;
+            AttachmentHarvester.TotalCapOverride = 100;
+            GenerationJournal.SizeCapOverride = 100;
+            Services.Corpus.CorpusPlanStore.SizeCapOverride = 100;
+        });
+
+        Assert.Equal(0, AttachmentHarvester.EmlCapOverride);
+        Assert.Equal(0, AttachmentHarvester.PartCapOverride);
+        Assert.Equal(0, AttachmentHarvester.TotalCapOverride);
+        Assert.Equal(0, GenerationJournal.SizeCapOverride);
+        Assert.Equal(0, Services.Corpus.CorpusPlanStore.SizeCapOverride);
+    }
+
     [Fact]
     public async Task Harvest_OversizedEml_SkippedBeforeLoad()
     {

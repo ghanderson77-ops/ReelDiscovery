@@ -73,8 +73,10 @@ public class GenerationJournal
 {
     public const long MaxJournalBytes = 200L * 1024 * 1024;
 
-    // Tests only: 0 = use MaxJournalBytes
-    internal static long SizeCapOverride;
+    // Tests only: 0 = use MaxJournalBytes. AsyncLocal so a cap set by one test never reaches a parallel test
+    private static readonly AsyncLocal<long> _sizeCapOverride = new();
+
+    internal static long SizeCapOverride { get => _sizeCapOverride.Value; set => _sizeCapOverride.Value = value; }
 
     private static readonly JsonSerializerOptions LineOptions = new(CaseDraft.JsonOptions) { WriteIndented = false };
 

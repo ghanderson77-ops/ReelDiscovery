@@ -1,5 +1,6 @@
 using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Tests.Case;
@@ -220,6 +221,63 @@ public class DialogRenderTests
     {
         RenderHarness.RunSta(() =>
             Assert.Throws<ArgumentException>(() => new RegenerateTabDialog(GuidePart.Issues, 0)));
+    }
+
+    // Render check 9 (06-UI-SPEC S4, DPI rule 25): media prices row at the dialog's 820 x 360 minimum
+    [Fact]
+    public void ModelDialog_MediaPricesRow_MinimumSize()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var clientArea = Rectangle.Empty;
+            var imageBounds = Rectangle.Empty;
+            var ttsBounds = Rectangle.Empty;
+            var labelBounds = new List<Rectangle>();
+            var gridLeft = 0;
+            var rowLeft = 0;
+            var displayedRows = 0;
+            var size = Size.Empty;
+            var minimum = Size.Empty;
+            var prices = new MediaPrices { ImagePerUnit = 0.006m, TtsPerMillionChars = 15.00m };
+            var result = RenderHarness.RenderForm(
+                () => new ModelConfigurationDialog(AIModelConfig.GetDefaultModels(), prices),
+                "dialog-model-config-media-prices-min",
+                form =>
+                {
+                    var dialog = (ModelConfigurationDialog)form;
+                    form.Size = form.MinimumSize;
+                    form.PerformLayout();
+                    Application.DoEvents();
+
+                    size = form.Size;
+                    minimum = form.MinimumSize;
+                    clientArea = form.RectangleToScreen(form.ClientRectangle);
+                    imageBounds = dialog.ImagePriceInput.RectangleToScreen(dialog.ImagePriceInput.ClientRectangle);
+                    ttsBounds = dialog.TtsPriceInput.RectangleToScreen(dialog.TtsPriceInput.ClientRectangle);
+                    var mediaRow = dialog.ImagePriceInput.Parent!;
+                    labelBounds = mediaRow.Controls.OfType<Label>()
+                        .Select(l => l.RectangleToScreen(l.ClientRectangle)).ToList();
+                    // Outer edges: the grid's 3D border sits inside its bounds
+                    rowLeft = mediaRow.Parent!.RectangleToScreen(mediaRow.Bounds).Left;
+                    gridLeft = dialog.ModelsGrid.Parent!.RectangleToScreen(dialog.ModelsGrid.Bounds).Left;
+                    displayedRows = dialog.ModelsGrid.DisplayedRowCount(includePartialRow: false);
+                    Assert.Contains(Descendants(form).OfType<Label>(), l => l.Text == "Image ($ per image):");
+                    Assert.Contains(Descendants(form).OfType<Label>(), l => l.Text == "Voicemail audio ($ per 1M characters):");
+                },
+                // Eight fixed-width columns scroll sideways at the 820 px minimum by design; everything else must fit
+                new ClippingOptions { AllowGridHorizontalScroll = true });
+
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
+            Assert.True(File.Exists(result.PngPath));
+            Assert.Empty(result.Clipping);
+            Assert.Equal(minimum, size);
+            Assert.True(clientArea.Contains(imageBounds), $"Image price {imageBounds} outside client {clientArea}");
+            Assert.True(clientArea.Contains(ttsBounds), $"Voicemail price {ttsBounds} outside client {clientArea}");
+            Assert.Equal(2, labelBounds.Count);
+            Assert.All(labelBounds, b => Assert.True(clientArea.Contains(b), $"Label {b} outside client {clientArea}"));
+            Assert.True(displayedRows >= 3, $"Only {displayedRows} grid rows visible");
+            Assert.True(Math.Abs(rowLeft - gridLeft) <= 1, $"Media row left {rowLeft} vs grid left {gridLeft}");
+        });
     }
 
     private static void AssertRendered(RenderResult result, int clientHeight, int workingHeight)

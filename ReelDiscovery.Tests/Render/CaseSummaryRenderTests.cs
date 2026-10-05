@@ -295,6 +295,105 @@ public class CaseSummaryRenderTests
         });
     }
 
+    // ----- Render check 8 (06-UI-SPEC S2): Mailboxes row over the full corpus, line 3 ellipsizes, tooltip has the breakdown -----
+
+    [Fact]
+    public void MailboxesRow_CompleteClean()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                using var fixture = new SummaryFixture(CorpusTestData.RichDraft());
+                var plan = SeedApprovedCorpus(fixture);
+                SeedFullCorpusRun(fixture, plan, partial: false);
+
+                var (line, tooltip, color, keyLine, keyTooltip) = (string.Empty, string.Empty, default(Color), string.Empty, string.Empty);
+                var result = Render(fixture, "case-summary-mailboxes-complete", size, control =>
+                {
+                    var step = (StepCaseSummary)control;
+                    RowsHost(control).ScrollControlIntoView(step.StoryLine3.Parent!);
+                    line = step.MailboxesLine3.Text;
+                    tooltip = step.MailboxesLine3Tooltip;
+                    color = step.MailboxesLine3.ForeColor;
+                    keyLine = step.AnswerKeyLine3.Text;
+                    keyTooltip = step.AnswerKeyLine3Tooltip;
+                });
+
+                AssertRendered(result);
+                Assert.Equal("All 40 threads and 12 attachments written", line);
+                Assert.Equal(Helpers.Theme.Success, color);
+                Assert.Equal("Relevant: 10 of 10 threads. Non-relevant: 30 of 30 threads. Attachments: 12 of 12.", tooltip);
+                // Generated counts email rows of every thread plus attachment rows
+                Assert.EndsWith($" · 92 generated, {Math.Max(0, plan.EmailCount + plan.AttachmentCount - 92):N0} planned", keyLine);
+                Assert.Equal(string.Empty, keyTooltip);
+            }
+        });
+    }
+
+    [Fact]
+    public void MailboxesRow_PartialAllClauses()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                using var fixture = new SummaryFixture(CorpusTestData.RichDraft());
+                var plan = SeedApprovedCorpus(fixture);
+                SeedFullCorpusRun(fixture, plan, partial: true);
+
+                var (line, tooltip, color, keyLine, keyTooltip) = (string.Empty, string.Empty, default(Color), string.Empty, string.Empty);
+                var result = Render(fixture, "case-summary-mailboxes-partial", size, control =>
+                {
+                    var step = (StepCaseSummary)control;
+                    RowsHost(control).ScrollControlIntoView(step.StoryLine3.Parent!);
+                    line = step.MailboxesLine3.Text;
+                    tooltip = step.MailboxesLine3Tooltip;
+                    color = step.MailboxesLine3.ForeColor;
+                    keyLine = step.AnswerKeyLine3.Text;
+                    keyTooltip = step.AnswerKeyLine3Tooltip;
+                });
+
+                // Line 3 may ellipsize (AutoEllipsis); the detector accepts that, the full text stays in Text and the tooltip
+                AssertRendered(result);
+                Assert.Equal("34 of 40 threads written · 4 items with warnings · 4 failed items · 2 skipped items", line);
+                Assert.Equal(Helpers.Theme.Warning, color);
+                Assert.Equal("Relevant: 7 of 10 threads. Non-relevant: 27 of 30 threads. Attachments: 8 of 12 (2 skipped).", tooltip);
+                // 60 emails + 8 attachments generated; 6 + 1 failed and 2 skipped count as neither generated nor planned
+                Assert.EndsWith($" · 68 generated, {Math.Max(0, plan.EmailCount + plan.AttachmentCount - 68 - 7 - 2):N0} planned", keyLine);
+                Assert.Equal("2 skipped", keyTooltip);
+            }
+        });
+    }
+
+    // Phase 6 run over relevant + non-relevant threads and attachments (cached counts as GenerationStateApplier writes them)
+    private static void SeedFullCorpusRun(SummaryFixture fixture, CorpusPlan plan, bool partial)
+    {
+        var draft = fixture.State.Case;
+        Directory.CreateDirectory(Path.Combine(draft.FolderPath, PlanNumbering.MailboxesFolder));
+        draft.Corpus!.Generation = new GenerationState
+        {
+            RunPlanId = plan.PlanId,
+            ThreadsTotal = 10,
+            ThreadsWritten = partial ? 6 : 10,
+            ThreadsWithWarnings = partial ? 1 : 0,
+            ThreadsFailed = partial ? 2 : 0,
+            NonRelevantTotal = 30,
+            NonRelevantWritten = partial ? 25 : 30,
+            NonRelevantWithWarnings = partial ? 2 : 0,
+            NonRelevantFailed = partial ? 1 : 0,
+            AttachmentsTotal = 12,
+            AttachmentsWritten = partial ? 7 : 12,
+            AttachmentsWithWarnings = partial ? 1 : 0,
+            AttachmentsFailed = partial ? 1 : 0,
+            AttachmentsSkipped = partial ? 2 : 0,
+            EmailsWritten = partial ? 60 : 80,
+            EmailsFailed = partial ? 6 : 0,
+            FilesWritten = partial ? 210 : 280,
+            Mailboxes = 9
+        };
+    }
+
     private static void SeedRun(SummaryFixture fixture, CorpusPlan plan, RunSeed seed)
     {
         if (seed == RunSeed.NotGenerated)

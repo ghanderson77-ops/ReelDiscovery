@@ -814,11 +814,20 @@ public class StepCaseSummary : UserControl, IWizardStep
         var generation = corpus?.Generation;
         var runCurrent = plan != null && generation != null && generation.RunPlanId == plan.PlanId && corpus!.PlanId == plan.PlanId;
         var keyWritten = WrittenLocal(corpus, CorpusFileKind.AnswerKeyCsv, CorpusFileKind.AnswerKeyXlsx);
+        var keyTooltip = string.Empty;
         if (runCurrent && HasGenerated(generation!) && keyStatus == CorpusFileStatus.Written && keyWritten.HasValue)
         {
-            var planned = Math.Max(0, plan!.EmailCount + plan.AttachmentCount - generation!.EmailsWritten - generation.EmailsFailed);
-            _rowAnswerKey.Line3.Text = GenerationUiText.AnswerKeyRunClause(keyWritten.Value, generation.EmailsWritten, planned);
+            // Email rows cover relevant and non-relevant threads; attachment rows add theirs. Skipped rows count as neither
+            // generated nor planned and appear in the tooltip only (06-UI-SPEC S2)
+            var generated = generation!.EmailsWritten + generation.AttachmentsWritten + generation.AttachmentsWithWarnings;
+            var failed = generation.EmailsFailed + generation.AttachmentsFailed;
+            var skipped = generation.AttachmentsSkipped;
+            var planned = Math.Max(0, plan!.EmailCount + plan.AttachmentCount - generated - failed - skipped);
+            _rowAnswerKey.Line3.Text = GenerationUiText.AnswerKeyRunClause(keyWritten.Value, generated, planned);
+            if (skipped > 0)
+                keyTooltip = GenerationUiText.AnswerKeyRunTooltip(skipped);
         }
+        _toolTip.SetToolTip(_rowAnswerKey.Line3, keyTooltip);
         _btnOpenCsv.Visible = csvExists;
         _btnOpenXlsx.Visible = xlsxExists;
 
@@ -838,7 +847,9 @@ public class StepCaseSummary : UserControl, IWizardStep
     }
 
     private static bool HasGenerated(GenerationState generation) =>
-        generation.ThreadsWritten + generation.ThreadsWithWarnings + generation.ThreadsFailed > 0 || generation.FilesWritten > 0;
+        generation.ThreadsWritten + generation.ThreadsWithWarnings + generation.ThreadsFailed > 0
+        || generation.NonRelevantWritten + generation.NonRelevantWithWarnings + generation.NonRelevantFailed > 0
+        || generation.FilesWritten > 0;
 
     /// <summary>
     /// Mailboxes and Story so far rows (05-UI-SPEC S3) from the cached run counts and the ledger in case.json.
@@ -1397,6 +1408,8 @@ public class StepCaseSummary : UserControl, IWizardStep
     internal Label MailboxesLine3 => _rowMailboxes.Line3!;
     internal Label StoryLine3 => _rowStory.Line3!;
     internal Label AnswerKeyLine3 => _rowAnswerKey.Line3!;
+    internal string MailboxesLine3Tooltip => _toolTip.GetToolTip(_rowMailboxes.Line3!);
+    internal string AnswerKeyLine3Tooltip => _toolTip.GetToolTip(_rowAnswerKey.Line3!);
     internal Color MailboxesDotColor => _rowMailboxes.DotColor;
     internal Color StoryDotColor => _rowStory.DotColor;
     internal Button OpenMailboxesButton => _btnOpenMailboxes;

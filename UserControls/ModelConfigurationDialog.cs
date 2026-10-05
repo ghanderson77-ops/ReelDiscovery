@@ -13,11 +13,27 @@ public class ModelConfigurationDialog : Form
     private Button _btnCancel = null!;
     private Button _btnResetDefaults = null!;
     private BindingSource _bindingSource = null!;
+    private NumericUpDown _numImagePrice = null!;
+    private NumericUpDown _numTtsPrice = null!;
 
     public List<AIModelConfig> Models { get; private set; }
 
+    /// <summary>Media per-unit prices (D-29); a copy of the prices passed in, normalized on OK.</summary>
+    public MediaPrices MediaPrices { get; private set; }
+
     public ModelConfigurationDialog(List<AIModelConfig> models)
+        : this(models, MediaPrices.Defaults())
     {
+    }
+
+    public ModelConfigurationDialog(List<AIModelConfig> models, MediaPrices prices)
+    {
+        ArgumentNullException.ThrowIfNull(prices);
+
+        // Edit a copy so nothing changes before OK (review 06-24)
+        MediaPrices = prices.Clone();
+        MediaPrices.Normalize();
+
         // Clone the models to avoid modifying the original until OK is clicked
         Models = models.Select(m => new AIModelConfig
         {
@@ -49,17 +65,18 @@ public class ModelConfigurationDialog : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Padding = new Padding(10)
         };
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));   // 0: Header
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // 1: Grid
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 2: Media prices
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));   // 3: Buttons
 
         // Header label
         var lblHeader = new Label
         {
-            Text = "Configure models per provider: one Story and one Volume default each, optional Effort, output ceiling and pricing (per million tokens).",
+            Text = "Configure models per provider: one Story and one Volume default each, optional Effort, output ceiling and pricing (per million tokens). Images and voicemail are priced per unit below.",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleLeft
         };
@@ -183,6 +200,44 @@ public class ModelConfigurationDialog : Form
         gridPanel.Controls.Add(gridButtonPanel);
         mainLayout.Controls.Add(gridPanel, 0, 1);
 
+        // Media prices row (06-UI-SPEC S4): top margin only, so its left edge lines up with the grid; may wrap
+        var mediaRow = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, LogicalToDeviceUnits(16), 0, 0),
+            Padding = Padding.Empty
+        };
+
+        _numImagePrice = new NumericUpDown
+        {
+            DecimalPlaces = 3,
+            Minimum = 0,
+            Maximum = 10,
+            Increment = 0.001m,
+            Width = LogicalToDeviceUnits(80),
+            Margin = new Padding(0, 0, LogicalToDeviceUnits(16), 0)
+        };
+        _numTtsPrice = new NumericUpDown
+        {
+            DecimalPlaces = 2,
+            Minimum = 0,
+            Maximum = 1000,
+            Increment = 0.5m,
+            Width = LogicalToDeviceUnits(80),
+            Margin = Padding.Empty
+        };
+        SetPriceInputs(MediaPrices);
+
+        mediaRow.Controls.Add(CreatePriceLabel("Image ($ per image):"));
+        mediaRow.Controls.Add(_numImagePrice);
+        mediaRow.Controls.Add(CreatePriceLabel("Voicemail audio ($ per 1M characters):"));
+        mediaRow.Controls.Add(_numTtsPrice);
+        mainLayout.Controls.Add(mediaRow, 0, 2);
+
         // Bottom button panel
         var bottomPanel = new FlowLayoutPanel
         {
@@ -200,11 +255,27 @@ public class ModelConfigurationDialog : Form
         _btnOk.Click += BtnOk_Click;
         bottomPanel.Controls.Add(_btnOk);
 
-        mainLayout.Controls.Add(bottomPanel, 0, 2);
+        mainLayout.Controls.Add(bottomPanel, 0, 3);
 
         this.Controls.Add(mainLayout);
         this.AcceptButton = _btnOk;
         this.CancelButton = _btnCancel;
+    }
+
+    private Label CreatePriceLabel(string text) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        UseMnemonic = false,
+        Anchor = AnchorStyles.Left,
+        // Label-to-field gap 8; top inset centers the text on the NumericUpDown line
+        Margin = new Padding(0, LogicalToDeviceUnits(3), LogicalToDeviceUnits(8), 0)
+    };
+
+    private void SetPriceInputs(MediaPrices prices)
+    {
+        _numImagePrice.Value = Math.Clamp(prices.ImagePerUnit, _numImagePrice.Minimum, _numImagePrice.Maximum);
+        _numTtsPrice.Value = Math.Clamp(prices.TtsPerMillionChars, _numTtsPrice.Minimum, _numTtsPrice.Maximum);
     }
 
     private void GridModels_CurrentCellDirtyStateChanged(object? sender, EventArgs e)
@@ -270,10 +341,17 @@ public class ModelConfigurationDialog : Form
         if (MessageBox.Show("Reset all models to default configuration?", "Reset Defaults",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
         {
-            Models = AIModelConfig.GetDefaultModels();
-            _bindingSource.DataSource = Models;
-            _bindingSource.ResetBindings(false);
+            ResetDefaults();
         }
+    }
+
+    // Reset Defaults without the confirmation prompt: models and media prices (0.006 / 15.00)
+    private void ResetDefaults()
+    {
+        Models = AIModelConfig.GetDefaultModels();
+        _bindingSource.DataSource = Models;
+        _bindingSource.ResetBindings(false);
+        SetPriceInputs(MediaPrices.Defaults());
     }
 
     private void BtnOk_Click(object? sender, EventArgs e)
@@ -319,7 +397,27 @@ public class ModelConfigurationDialog : Form
             }
         }
 
+        CommitMediaPrices();
+
         this.DialogResult = DialogResult.OK;
         this.Close();
     }
+
+    private void CommitMediaPrices()
+    {
+        var prices = new MediaPrices
+        {
+            ImagePerUnit = _numImagePrice.Value,
+            TtsPerMillionChars = _numTtsPrice.Value
+        };
+        prices.Normalize();
+        MediaPrices = prices;
+    }
+
+    // Test accessors (the dialog is never shown modally in tests)
+    internal NumericUpDown ImagePriceInput => _numImagePrice;
+    internal NumericUpDown TtsPriceInput => _numTtsPrice;
+    internal DataGridView ModelsGrid => _gridModels;
+    internal void ResetDefaultsForTest() => ResetDefaults();
+    internal void CommitMediaPricesForTest() => CommitMediaPrices();
 }

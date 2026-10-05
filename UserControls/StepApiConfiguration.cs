@@ -567,8 +567,10 @@ public class StepApiConfiguration : UserControl, IWizardStep
 
     private void BtnConfigureModels_Click(object? sender, EventArgs e)
     {
-        using var dialog = new ModelConfigurationDialog(_state.AvailableModelConfigs);
-        if (dialog.ShowDialog() == DialogResult.OK)
+        using var dialog = new ModelConfigurationDialog(_state.AvailableModelConfigs, _state.MediaPrices.Clone());
+        var result = dialog.ShowDialog();
+        _state.MediaPrices = ApplyDialogResult(result, _state.MediaPrices, dialog.MediaPrices);
+        if (result == DialogResult.OK)
         {
             _state.AvailableModelConfigs = dialog.Models;
 
@@ -587,6 +589,22 @@ public class StepApiConfiguration : UserControl, IWizardStep
             UpdatePricingLabel();
             StateChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    /// <summary>
+    /// Media prices after the model dialog closes: OK stores a normalized copy of the edited prices, anything else keeps
+    /// the current instance untouched.
+    /// </summary>
+    // Testable without showing the modal dialog (review 06-24)
+    internal static MediaPrices ApplyDialogResult(DialogResult result, MediaPrices current, MediaPrices edited)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        if (result != DialogResult.OK || edited == null)
+            return current;
+
+        var stored = edited.Clone();
+        stored.Normalize();
+        return stored;
     }
 
     public void BindState(WizardState state)

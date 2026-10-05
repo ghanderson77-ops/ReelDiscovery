@@ -119,7 +119,8 @@ public class GenerationHistoryTests
         var (_, plan, state, threads) = GenerationRunStateTests.Mixed();
         var planned = WavePlanner.Plan(plan);
 
-        var waves = GenerationHistory.Waves(plan, state);
+        // Wave rows only; the fixture's non-relevant threads add the Non-relevant mail row after them (06-23)
+        var waves = GenerationHistory.Waves(plan, state).Where(w => w.RowKind == StageRowKind.Wave).ToList();
 
         Assert.Equal(planned.Count, waves.Count);
         Assert.Equal(planned.Select(w => w.Index), waves.Select(w => w.Index));
@@ -135,4 +136,154 @@ public class GenerationHistoryTests
         var failedWave = planned.Single(w => w.ThreadIds.Contains(threads[2].Id)).Index;
         Assert.Equal(1, waves.Single(w => w.Index == failedWave).Failed);
     }
+
+    // ----- 06-23: Non-relevant mail and Attachments for written threads rows -----
+
+    private static List<PlannedAttachment> AttachmentsOf(PlannedThread thread) =>
+        thread.Messages.SelectMany(m => m.Attachments).Where(a => !string.IsNullOrEmpty(a.DocId)).ToList();
+
+    private static List<PlannedThread> NonRelevant(CorpusPlan plan) =>
+        plan.Threads.Where(t => t.Relevance != ThreadRelevance.Relevant && t.Messages.Count > 0).ToList();
+
+    // Every attachment of the thread written, except images and voicemails, which are Skipped
+    private static JournalRecord DoneSkippingMedia(CorpusPlan plan, PlannedThread thread) =>
+        GenerationRunStateTests.DoneWith(plan, thread, AttachmentsOf(thread)
+            .Select(a => GenerationRunStateTests.Attachment(plan, a,
+                a.Kind is ReelDiscovery.Models.AttachmentType.Image or ReelDiscovery.Models.AttachmentType.Voicemail
+                    ? JournalRecordType.AttachmentSkipped
+                    : JournalRecordType.AttachmentDone,
+                reason: "no tested OpenAI key this session"))
+            .ToArray());
+
+    [Fact]
+    public void Waves_MixedCase_WaveRowsWithAttachmentsThenNonRelevantRow()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var daily = AttachmentTestData.Thread(plan, AttachmentTestData.DailyBusinessThreadId);
+        var spam = AttachmentTestData.Thread(plan, AttachmentTestData.SpamThreadId);
+        var newsletter = AttachmentTestData.Thread(plan, AttachmentTestData.NewsletterThreadId);
+        var replay = GenerationRunStateTests.Journal(plan,
+            DoneSkippingMedia(plan, daily),
+            GenerationRunStateTests.Done(plan, spam, ThreadWriteStatus.Warnings, 0.01m),
+            GenerationRunStateTests.Failed(plan, newsletter, 0.01m));
+        var state = GenerationRunState.From(plan, replay);
+        var planned = WavePlanner.Plan(plan);
+
+        var rows = GenerationHistory.Waves(plan, state);
+
+        // Wave rows in plan order, each counting the attachments of its relevant threads (none done yet)
+        var waveRows = rows.Where(r => r.RowKind == StageRowKind.Wave).ToList();
+        Assert.Equal(planned.Select(w => w.Index), waveRows.Select(r => r.Index));
+        var waveOf = WavePlanner.WaveIndexByThread(planned);
+        foreach (var row in waveRows)
+        {
+            var expected = plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant && waveOf.TryGetValue(t.Id, out var w) && w == row.Index)
+                .Sum(t => AttachmentsOf(t).Count);
+            Assert.Equal(expected, row.Attachments);
+            Assert.Equal(0, row.AttachmentsDone);
+        }
+
+        // Then the Non-relevant mail row with the non-relevant threads and their emails
+        var filler = NonRelevant(plan);
+        var stage = rows.Single(r => r.RowKind == StageRowKind.NonRelevant);
+        Assert.Equal(planned.Count + 1, stage.Index);
+        Assert.Same(stage, rows[waveRows.Count]);
+        Assert.Equal(filler.Count, stage.Threads);
+        Assert.Equal(filler.Sum(t => t.Messages.Count), stage.Emails);
+        Assert.Equal(2, stage.Done);
+        Assert.Equal(1, stage.Warnings);
+        Assert.Equal(1, stage.Failed);
+        Assert.Equal(AttachmentsOf(daily).Count, stage.AttachmentsDone);
+        Assert.False(stage.Running);
+
+        // The spam thread was written without its banner (no record, as after a Phase 5 run): a repair, so it counts on the
+        // Attachments for written threads row only, never also on the Non-relevant row
+        var repair = rows.Single(r => r.RowKind == StageRowKind.Attachments);
+        Assert.Same(repair, rows[^1]);
+        Assert.Equal(planned.Count + 2, repair.Index);
+        Assert.Equal(1, repair.Threads);
+        Assert.Equal(AttachmentsOf(spam).Count, repair.Attachments);
+        Assert.Equal(filler.Sum(t => AttachmentsOf(t).Count) - AttachmentsOf(spam).Count, stage.Attachments);
+        Assert.Equal(AttachmentsOf(plan.Threads.First(t => t.Id == spam.Id)).Count + stage.Attachments + waveRows.Sum(r => r.Attachments),
+            rows.Sum(r => r.Attachments));
+    }
+
+    [Fact]
+    public void Waves_NoRepairs_NoAttachmentsRow()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var daily = AttachmentTestData.Thread(plan, AttachmentTestData.DailyBusinessThreadId);
+        var state = GenerationRunState.From(plan, GenerationRunStateTests.Journal(plan, DoneSkippingMedia(plan, daily)));
+
+        var rows = GenerationHistory.Waves(plan, state, mediaAvailable: true);
+
+        Assert.DoesNotContain(rows, r => r.RowKind == StageRowKind.Attachments);
+        Assert.Equal(AttachmentsOf(daily).Count, rows.Single(r => r.RowKind == StageRowKind.NonRelevant).AttachmentsDone);
+    }
+
+    [Fact]
+    public void Waves_MediaAvailableMatchesSeeds()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var invite = AttachmentTestData.Thread(plan, AttachmentTestData.InviteThreadId);
+        var image = AttachmentsOf(invite).Single(a => a.Kind == ReelDiscovery.Models.AttachmentType.Image);
+        // A done thread with a Skipped image and its invite written
+        var state = GenerationRunState.From(plan, GenerationRunStateTests.Journal(plan, DoneSkippingMedia(plan, invite)));
+        var planned = WavePlanner.Plan(plan);
+        var waveOf = WavePlanner.WaveIndexByThread(planned);
+        var inviteWave = waveOf[invite.Id];
+
+        // Media available: the skipped image is a repair item, on the Attachments row and not on its wave row
+        var withMedia = GenerationHistory.Waves(plan, state, mediaAvailable: true);
+        var repair = withMedia.Single(r => r.RowKind == StageRowKind.Attachments);
+        Assert.Equal(1, repair.Threads);
+        Assert.Equal(1, repair.Attachments);
+        Assert.Equal(1, repair.AttachmentsSkipped);
+        var wave = withMedia.Single(r => r.RowKind == StageRowKind.Wave && r.Index == inviteWave);
+        Assert.Equal(AttachmentsOf(invite).Count - 1, wave.Attachments - OtherAttachmentsInWave(plan, waveOf, inviteWave, invite.Id));
+        Assert.Equal(0, wave.AttachmentsSkipped);
+
+        // Media unavailable: no Attachments row, the wave row counts the image as Skipped
+        var withoutMedia = GenerationHistory.Waves(plan, state, mediaAvailable: false);
+        Assert.DoesNotContain(withoutMedia, r => r.RowKind == StageRowKind.Attachments);
+        wave = withoutMedia.Single(r => r.RowKind == StageRowKind.Wave && r.Index == inviteWave);
+        Assert.Equal(AttachmentsOf(invite).Count, wave.Attachments - OtherAttachmentsInWave(plan, waveOf, inviteWave, invite.Id));
+        Assert.Equal(1, wave.AttachmentsSkipped);
+
+        // For both values every attachment sits on the row of its seed (the runner's rule)
+        foreach (var media in new[] { true, false })
+        {
+            var rows = GenerationHistory.Waves(plan, state, media);
+            var seeds = state.AttachmentSeeds(plan, waveOf, planned.Count + 1, planned.Count + 2, media);
+            Assert.Equal(seeds[image.DocId].RowIndex, media ? planned.Count + 2 : inviteWave);
+            foreach (var row in rows)
+            {
+                var onRow = seeds.Values.Where(s => s.RowIndex == row.Index).ToList();
+                Assert.Equal(onRow.Count, row.Attachments);
+                Assert.Equal(onRow.Count(s => s.Status == AttachmentRunStatus.Skipped), row.AttachmentsSkipped);
+                Assert.Equal(onRow.Count(s => s.Status is AttachmentRunStatus.Written or AttachmentRunStatus.Warnings), row.AttachmentsDone);
+            }
+
+            Assert.Equal(seeds.Count, rows.Sum(r => r.Attachments));
+        }
+    }
+
+    [Fact]
+    public void Waves_NoNonRelevantThreads_NoNonRelevantRow()
+    {
+        var (_, plan) = EvidenceTestData.ApprovedCase();
+        plan.Threads.RemoveAll(t => t.Relevance != ThreadRelevance.Relevant);
+        var state = GenerationRunState.From(plan, GenerationRunStateTests.Replay());
+
+        var rows = GenerationHistory.Waves(plan, state);
+
+        Assert.Equal(WavePlanner.Plan(plan).Count, rows.Count);
+        Assert.All(rows, r => Assert.Equal(StageRowKind.Wave, r.RowKind));
+    }
+
+    // Attachments of the other relevant threads in the same wave
+    private static int OtherAttachmentsInWave(CorpusPlan plan, IReadOnlyDictionary<string, int> waveOf, int wave, string threadId) =>
+        plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant && t.Id != threadId
+                                && waveOf.TryGetValue(t.Id, out var w) && w == wave)
+            .Sum(t => AttachmentsOf(t).Count);
 }

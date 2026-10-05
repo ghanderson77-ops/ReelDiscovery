@@ -1075,8 +1075,11 @@ public class GenerateCorpusEntryTests
             // Threads tile: 1 written (the variant depends on the unshown tile width)
             Assert.StartsWith("1", step.Tiles[0].ValueText);
             Assert.Equal("1", step.Tiles[5].ValueText);
-            Assert.Equal(WavePlanner.Plan(fixture.Plan).Count, step.WavesGrid.Rows.Count);
-            Assert.Equal(threads.Count, step.WavesGrid.Rows.Cast<DataGridViewRow>()
+            // Wave rows, then the Non-relevant mail row rebuilt from the journal (06-23)
+            var waves = WavePlanner.Plan(fixture.Plan).Count;
+            Assert.Equal(waves + 1, step.WavesGrid.Rows.Count);
+            Assert.Equal("Non-relevant mail", step.WavesGrid.Rows[waves].Cells["Dates"].Value);
+            Assert.Equal(threads.Count, step.WavesGrid.Rows.Cast<DataGridViewRow>().Take(waves)
                 .Sum(r => int.Parse(((string)r.Cells["Done"].Value!).Split('/')[1].Trim())));
             // Failed, written, cancelled: newest first
             Assert.Equal(3, step.ActivityGrid.Rows.Count);

@@ -628,6 +628,12 @@ public class GenerateCorpusStepTests
             Assert.Equal("Part of the corpus is not written yet.", step.BannerHeadingText);
             Assert.Equal(GenerationUiText.BannerBody(ids.Count, ids.Count, 0, state.AttachmentsTotal, 0), step.BannerBodyText);
             Assert.Equal(GenerationUiText.BannerButton, step.BannerButton.Text);
+
+            // Reopen rebuilds the Stages rows from the journal: waves, Non-relevant mail, Attachments for written threads
+            var waves = WavePlanner.Plan(h.Plan).Count;
+            Assert.Equal(waves + 2, step.WavesGrid.Rows.Count);
+            Assert.Equal("Non-relevant mail", step.WavesGrid.Rows[waves].Cells["Dates"].Value);
+            Assert.Equal("Attachments for written threads", step.WavesGrid.Rows[waves + 1].Cells["Dates"].Value);
         });
     }
 

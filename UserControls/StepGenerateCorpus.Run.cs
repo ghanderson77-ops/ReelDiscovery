@@ -465,7 +465,8 @@ public partial class StepGenerateCorpus : IWizardStep
             GenerationRunState.EstimateRemaining(plan, state, _state.StoryModelConfig, _state.VolumeModelConfig,
                 _state.MediaPrices, _state.IsMediaAvailable, Draft.Guide),
             running: false, finished: !partial);
-        ApplyView(new GenerationView { Counts = counts, Waves = GenerationHistory.Waves(plan, state) });
+        // Stages rows with the mediaAvailable the run used (input.Media != null), so they match the live rows it showed
+        ApplyView(new GenerationView { Counts = counts, Waves = GenerationHistory.Waves(plan, state, _runMediaAvailable) });
         var retryShown = ShowResultDashboard(partial, result.Outcome == GenerationOutcome.Finished, state, _state.IsMediaAvailable);
 
         var generation = Draft.Corpus?.Generation;
@@ -963,7 +964,8 @@ public partial class StepGenerateCorpus : IWizardStep
             Counts = state.ToCounts(plan, waves.Count, ledger.Entries.Count,
                 GenerationRunState.EstimateRemaining(plan, state, story, volume, prices, mediaAvailable, guide), running: false,
                 finished: !IsPartial(state)),
-            Waves = GenerationHistory.Waves(plan, state),
+            // What the next Continue will use (_state.IsMediaAvailable), the same value its runner seeds with
+            Waves = GenerationHistory.Waves(plan, state, mediaAvailable),
             Events = GenerationHistory.Events(plan, replay, RenderAssignments.Compute(plan))
         };
     }

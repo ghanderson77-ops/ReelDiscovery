@@ -213,9 +213,9 @@ public class GenerationRunStateTests
         Assert.Equal("Generated - with warnings", overlay.ByDocId[threads[1].Messages[0].DocId].Status);
         Assert.Equal("Failed", overlay.ByDocId[threads[2].Messages[0].DocId].Status);
 
-        // Non-relevant emails are not overlaid
+        // Pending non-relevant emails are overlaid as Planned (06-14: the overlay covers the whole corpus)
         foreach (var message in plan.Threads.Where(t => t.Relevance != ThreadRelevance.Relevant).SelectMany(t => t.Messages))
-            Assert.False(overlay.ByDocId.ContainsKey(message.DocId));
+            Assert.Equal(AnswerKeyBuilder.StatusPlanned, overlay.ByDocId[message.DocId].Status);
 
         var baseline = AnswerKeyBuilder.Build(plan, draft.Guide!);
         var rows = AnswerKeyBuilder.Build(plan, draft.Guide!, overlay);

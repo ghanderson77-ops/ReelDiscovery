@@ -87,8 +87,8 @@ public class GenerationRunStateTests
 
         Assert.DoesNotContain(WavePlanner.Plan(plan), w => w.ThreadIds.Contains("T-0999"));
         Assert.False(RenderAssignments.Compute(plan).ContainsKey("T-0999"));
-        Assert.Equal(written.Count, state.TotalThreads);
-        Assert.Equal(0, state.Pending);
+        Assert.Equal(written.Count, state.RelevantTotal);
+        Assert.Equal(state.RelevantTotal, state.RelevantWritten);
         Assert.False(state.StatusByThread.ContainsKey("T-0999"));
     }
 
@@ -99,7 +99,8 @@ public class GenerationRunStateTests
         var relevant = Relevant(plan);
 
         Assert.True(relevant.Count > 3);
-        Assert.Equal(relevant.Count, state.TotalThreads);
+        Assert.Equal(relevant.Count, state.RelevantTotal);
+        Assert.Equal(relevant.Count + state.NonRelevantTotal, state.TotalThreads);
         Assert.Equal(ThreadRunStatus.Written, state.StatusByThread[threads[0].Id]);
         Assert.Equal(ThreadRunStatus.Warnings, state.StatusByThread[threads[1].Id]);
         Assert.Equal(ThreadRunStatus.Failed, state.StatusByThread[threads[2].Id]);
@@ -109,7 +110,7 @@ public class GenerationRunStateTests
         Assert.Equal(1, state.Written);
         Assert.Equal(1, state.Warnings);
         Assert.Equal(1, state.Failed);
-        Assert.Equal(relevant.Count - 3, state.Pending);
+        Assert.Equal(relevant.Count - 3 + state.NonRelevantTotal, state.Pending);
         Assert.Equal(threads[0].Messages.Count + threads[1].Messages.Count, state.EmailsWritten);
         Assert.Equal(threads[2].Messages.Count, state.EmailsFailed);
         Assert.Equal(2 * (threads[0].Messages.Count + threads[1].Messages.Count), state.FilesWritten);
@@ -249,7 +250,7 @@ public class GenerationRunStateTests
         Assert.Equal(1, counts.WarningThreads);
         Assert.Equal(1, counts.FailedThreads);
         Assert.Equal(4, counts.WaveCount);
-        Assert.Equal(Relevant(plan).Sum(t => t.Messages.Count), counts.EmailsPlanned);
+        Assert.Equal(GenerationThreads(plan).Sum(t => t.Messages.Count), counts.EmailsPlanned);
         Assert.Equal(state.EmailsWritten, counts.EmailsWritten);
         Assert.Equal(state.FilesWritten, counts.FilesWritten);
         Assert.Equal(3, counts.Mailboxes);
@@ -306,7 +307,7 @@ public class GenerationRunStateTests
         Assert.NotNull(generation);
         Assert.Equal(plan.PlanId, generation!.RunPlanId);
         Assert.Same(ledger, generation.Ledger);
-        Assert.Equal(state.TotalThreads, generation.ThreadsTotal);
+        Assert.Equal(state.RelevantTotal, generation.ThreadsTotal);
         Assert.Equal(1, generation.ThreadsWritten);
         Assert.Equal(1, generation.ThreadsWithWarnings);
         Assert.Equal(1, generation.ThreadsFailed);
@@ -528,5 +529,459 @@ public class GenerationRunStateTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GenerationOutputs.WriteStorySoFarAsync(
             @"C:\Cases\Brightline v Harmon", draft, plan, Ledger("T-0001-L01"), state, people, Writer));
+    }
+
+    // ---- 06-14: whole corpus, attachments, repairs, shared estimate ----
+
+    private const string NoKeyReason = "no tested OpenAI key this session";
+
+    internal static IEnumerable<PlannedThread> GenerationThreads(CorpusPlan plan) =>
+        plan.Threads.Where(t => !string.IsNullOrEmpty(t.Id) && t.Messages.Count > 0)
+            .GroupBy(t => t.Id, StringComparer.Ordinal)
+            .Select(g => g.First());
+
+    internal static PlannedMessage ParentOf(CorpusPlan plan, string attachmentDocId) =>
+        plan.Threads.SelectMany(t => t.Messages).First(m => m.Attachments.Any(a => a.DocId == attachmentDocId));
+
+    internal static JournalRecord Attachment(CorpusPlan plan, PlannedAttachment attachment, JournalRecordType type,
+        ThreadWriteStatus status = ThreadWriteStatus.Written, string reason = "", string fileName = "", decimal media = 0m,
+        bool lateRepair = false, string delta = "")
+    {
+        var record = new JournalRecord
+        {
+            Type = type,
+            Utc = Now,
+            PlanId = plan.PlanId,
+            AttachmentDocId = attachment.DocId,
+            ParentDocId = ParentOf(plan, attachment.DocId).DocId,
+            AttachmentKind = attachment.Kind,
+            Status = status,
+            Reason = reason,
+            FileName = fileName,
+            MediaCostUsd = media,
+            LateRepair = lateRepair
+        };
+        if (delta.Length > 0)
+            record.LedgerDelta.Add(new LedgerDelta { Seq = 1, Kind = LedgerKind.Figure, About = delta, Statement = $"{delta} stated." });
+        return record;
+    }
+
+    internal static JournalRecord Repaired(CorpusPlan plan, PlannedThread thread, params JournalRecord[] attachments) => new()
+    {
+        Type = JournalRecordType.AttachmentsRepaired,
+        Utc = Now,
+        PlanId = plan.PlanId,
+        ThreadId = thread.Id,
+        Attachments = attachments.ToList()
+    };
+
+    internal static JournalRecord DoneWith(CorpusPlan plan, PlannedThread thread, params JournalRecord[] attachments)
+    {
+        var record = Done(plan, thread, ThreadWriteStatus.Written, 0.01m);
+        record.Attachments = attachments.ToList();
+        return record;
+    }
+
+    // Real journal file and replay, so ownership validation (06-01) applies
+    internal static JournalReplay Journal(CorpusPlan plan, params JournalRecord[] records)
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var journal = new GenerationJournal(folder);
+            journal.AppendAsync(new JournalRecord { Type = JournalRecordType.RunStarted, Utc = Now, PlanId = plan.PlanId })
+                .GetAwaiter().GetResult();
+            foreach (var record in records)
+                journal.AppendAsync(record).GetAwaiter().GetResult();
+            return GenerationJournal.Replay(folder, plan);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    private static PlannedThread T(CorpusPlan plan, string id) => AttachmentTestData.Thread(plan, id);
+
+    private static List<PlannedAttachment> A(CorpusPlan plan, string id) => AttachmentTestData.AttachmentsOf(plan, id).ToList();
+
+    [Fact]
+    public void Mixed_EmptyJournal_CountsWholeCorpus()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+
+        var state = GenerationRunState.From(plan, new JournalReplay());
+
+        var threads = GenerationThreads(plan).ToList();
+        var relevant = threads.Count(t => t.Relevance == ThreadRelevance.Relevant);
+        var nonRelevant = threads.Count(t => t.Relevance == ThreadRelevance.NotRelevant);
+        Assert.True(nonRelevant > 0);
+        Assert.Equal(relevant + nonRelevant, state.TotalThreads);
+        Assert.Equal(relevant, state.RelevantTotal);
+        Assert.Equal(nonRelevant, state.NonRelevantTotal);
+        Assert.Equal(state.TotalThreads, state.Pending);
+        Assert.Equal(plan.AttachmentCount, state.AttachmentsTotal);
+        Assert.Equal(plan.AttachmentCount, state.StatusByAttachment.Count);
+        Assert.All(state.StatusByAttachment.Values, s => Assert.Equal(AttachmentRunStatus.Pending, s));
+        Assert.Empty(state.AttachmentRecords);
+    }
+
+    [Fact]
+    public void NonRelevantThreadDone_CountsFilesButNoLedgerDeltas()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var daily = T(plan, AttachmentTestData.DailyBusinessThreadId);
+
+        var state = GenerationRunState.From(plan, Journal(plan, Done(plan, daily, ThreadWriteStatus.Written, 0.01m, "dana.cho")));
+
+        Assert.Equal(1, state.NonRelevantWritten);
+        Assert.Equal(0, state.RelevantWritten);
+        Assert.Equal(1, state.Written);
+        Assert.Equal(daily.Messages.Count, state.EmailsWritten);
+        Assert.Equal(2 * daily.Messages.Count, state.FilesWritten);
+        Assert.Equal(2, state.Mailboxes);
+        Assert.False(state.DeltasByThread.ContainsKey(daily.Id));
+    }
+
+    [Fact]
+    public void RelevantThreadDone_AttachmentDeltasFollowInPlanOrder_LateRepairExcluded()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var thread = T(plan, AttachmentTestData.RelevantDocThreadId);
+        var parts = A(plan, thread.Id);
+        var done = DoneWith(plan, thread,
+            Attachment(plan, parts[2], JournalRecordType.AttachmentDone, delta: "slides"),
+            Attachment(plan, parts[0], JournalRecordType.AttachmentDone, delta: "memo"));
+
+        var state = GenerationRunState.From(plan, Journal(plan, done,
+            Repaired(plan, thread, Attachment(plan, parts[1], JournalRecordType.AttachmentDone, lateRepair: true, delta: "backup"))));
+
+        var deltas = state.DeltasByThread[thread.Id];
+        Assert.Equal(new[] { "site walk", "memo", "slides" }, deltas.Select(d => d.About));
+        Assert.False(deltas[0].FromAttachment);
+        Assert.True(deltas[1].FromAttachment);
+        Assert.Equal(parts[0].DocId, deltas[1].AttachmentDocId);
+        Assert.Equal(parts[2].DocId, deltas[2].AttachmentDocId);
+        Assert.Equal(AttachmentRunStatus.Written, state.StatusByAttachment[parts[1].DocId]);
+        Assert.Equal(3, state.AttachmentsWritten);
+    }
+
+    [Fact]
+    public void NestedSkipped_IsSkippedNotFailed()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var thread = T(plan, AttachmentTestData.InviteThreadId);
+        var image = A(plan, thread.Id).Single(a => a.Kind == AttachmentType.Image);
+
+        var state = GenerationRunState.From(plan, Journal(plan,
+            DoneWith(plan, thread, Attachment(plan, image, JournalRecordType.AttachmentSkipped, reason: NoKeyReason))));
+
+        Assert.Equal(AttachmentRunStatus.Skipped, state.StatusByAttachment[image.DocId]);
+        Assert.Equal(1, state.AttachmentsSkipped);
+        Assert.Equal(0, state.AttachmentsFailed);
+        Assert.Equal(NoKeyReason, state.AttachmentRecords[image.DocId].Reason);
+    }
+
+    [Fact]
+    public void AttachmentRecord_OfNotDoneThread_IsIgnored()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var thread = T(plan, AttachmentTestData.RelevantDocThreadId);
+        var part = A(plan, thread.Id)[0];
+        var standalone = Attachment(plan, part, JournalRecordType.AttachmentDone);
+        standalone.ThreadId = thread.Id;
+        var replay = Journal(plan, Failed(plan, thread, 0.01m), standalone);
+        Assert.True(replay.LastByAttachment.ContainsKey(part.DocId));
+
+        var state = GenerationRunState.From(plan, replay);
+
+        Assert.Equal(AttachmentRunStatus.Pending, state.StatusByAttachment[part.DocId]);
+        Assert.Empty(state.AttachmentRecords);
+    }
+
+    [Fact]
+    public void AttachmentSeeds_RowsFollowRepairGroupsAndMediaAvailability()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var invite = T(plan, AttachmentTestData.InviteThreadId);
+        var parts = A(plan, invite.Id);
+        var ics = parts.Single(a => a.Kind == AttachmentType.CalendarInvite);
+        var image = parts.Single(a => a.Kind == AttachmentType.Image);
+        var state = GenerationRunState.From(plan, Journal(plan, DoneWith(plan, invite,
+            Attachment(plan, ics, JournalRecordType.AttachmentDone),
+            Attachment(plan, image, JournalRecordType.AttachmentSkipped, reason: NoKeyReason))));
+        var waves = WavePlanner.Plan(plan);
+        var waveOf = WavePlanner.WaveIndexByThread(waves);
+        int filler = waves.Count + 1, repair = waves.Count + 2;
+
+        var withMedia = state.AttachmentSeeds(plan, waveOf, filler, repair, mediaAvailable: true);
+        var withoutMedia = state.AttachmentSeeds(plan, waveOf, filler, repair, mediaAvailable: false);
+
+        Assert.Equal(plan.AttachmentCount, withMedia.Count);
+        Assert.Equal(repair, withMedia[image.DocId].RowIndex);
+        Assert.Equal(AttachmentRunStatus.Skipped, withMedia[image.DocId].Status);
+        Assert.Equal(waveOf[invite.Id], withoutMedia[image.DocId].RowIndex);
+        Assert.Equal(AttachmentRunStatus.Skipped, withoutMedia[image.DocId].Status);
+        Assert.Equal(waveOf[invite.Id], withMedia[ics.DocId].RowIndex);
+        Assert.Equal(AttachmentRunStatus.Written, withMedia[ics.DocId].Status);
+
+        // Pending threads: relevant on their wave, filler on the Non-relevant row
+        var pendingRelevant = A(plan, AttachmentTestData.RelevantDocThreadId)[0];
+        Assert.Equal(waveOf[AttachmentTestData.RelevantDocThreadId], withMedia[pendingRelevant.DocId].RowIndex);
+        Assert.Equal(AttachmentRunStatus.Pending, withMedia[pendingRelevant.DocId].Status);
+        var pendingFiller = A(plan, AttachmentTestData.AncillaryThreadId)[0];
+        Assert.Equal(filler, withMedia[pendingFiller.DocId].RowIndex);
+
+        // Same set the runner repairs
+        var repairIds = state.RepairGroups(plan, mediaAvailable: true).SelectMany(g => g.AttachmentDocIds).ToHashSet();
+        Assert.All(withMedia, p => Assert.Equal(repairIds.Contains(p.Key), p.Value.RowIndex == repair));
+    }
+
+    [Fact]
+    public void RepairGroups_DoneThreadsOnly_GroupedAndOrderedByWave()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var docThread = T(plan, AttachmentTestData.RelevantDocThreadId);
+        var docParts = A(plan, docThread.Id);
+        var invite = T(plan, AttachmentTestData.InviteThreadId);
+        var inviteParts = A(plan, invite.Id);
+        var ics = inviteParts.Single(a => a.Kind == AttachmentType.CalendarInvite);
+        var image = inviteParts.Single(a => a.Kind == AttachmentType.Image);
+        var daily = T(plan, AttachmentTestData.DailyBusinessThreadId);
+        var multi = T(plan, AttachmentTestData.MultiMessageThreadId);
+
+        var state = GenerationRunState.From(plan, Journal(plan,
+            DoneWith(plan, docThread,
+                Attachment(plan, docParts[0], JournalRecordType.AttachmentDone),
+                Attachment(plan, docParts[1], JournalRecordType.AttachmentFailed, reason: "provider error")),
+            DoneWith(plan, invite,
+                Attachment(plan, ics, JournalRecordType.AttachmentDone),
+                Attachment(plan, image, JournalRecordType.AttachmentSkipped, reason: NoKeyReason)),
+            DoneWith(plan, daily),
+            Failed(plan, multi, 0.01m)));
+
+        var noMedia = state.RepairGroups(plan, mediaAvailable: false);
+        var media = state.RepairGroups(plan, mediaAvailable: true);
+
+        var waveOf = WavePlanner.WaveIndexByThread(WavePlanner.Plan(plan));
+        Assert.Equal(new[] { docThread.Id, daily.Id }, noMedia.Select(g => g.ThreadId));
+        var docGroup = noMedia[0];
+        Assert.True(docGroup.Relevant);
+        Assert.Equal(waveOf[docThread.Id], docGroup.WaveIndex);
+        Assert.Equal(new[] { docParts[1].DocId, docParts[2].DocId }, docGroup.AttachmentDocIds);
+        Assert.Equal(new[] { ParentOf(plan, docParts[1].DocId).DocId }, docGroup.ParentDocIds);
+        Assert.False(noMedia[1].Relevant);
+        Assert.Equal(A(plan, daily.Id).Select(a => a.DocId), noMedia[1].AttachmentDocIds);
+
+        // Skipped media joins only when media is available; relevant groups come in wave order, filler last
+        Assert.Equal(new[] { docThread.Id, invite.Id, daily.Id }, media.Select(g => g.ThreadId));
+        Assert.Equal(new[] { image.DocId }, media[1].AttachmentDocIds);
+        Assert.True(media[0].WaveIndex <= media[1].WaveIndex);
+
+        // Failed and pending threads are never repaired
+        Assert.DoesNotContain(media, g => g.ThreadId == multi.Id);
+        Assert.Equal(media.SelectMany(g => g.AttachmentDocIds), state.AttachmentsToRepair(plan, mediaAvailable: true));
+    }
+
+    [Fact]
+    public void RepairGroups_Phase5Journal_RepairsEveryAttachmentOfDoneThreads()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var relevant = GenerationThreads(plan).Where(t => t.Relevance == ThreadRelevance.Relevant).ToList();
+
+        var state = GenerationRunState.From(plan, Journal(plan, relevant.Select(t => Done(plan, t, ThreadWriteStatus.Written, 0.01m)).ToArray()));
+
+        var expected = relevant.SelectMany(t => t.Messages.SelectMany(m => m.Attachments)).Select(a => a.DocId).OrderBy(d => d, StringComparer.Ordinal);
+        var groups = state.RepairGroups(plan, mediaAvailable: false);
+        Assert.NotEmpty(groups);
+        Assert.All(groups, g => Assert.True(g.Relevant));
+        Assert.Equal(expected, groups.SelectMany(g => g.AttachmentDocIds).OrderBy(d => d, StringComparer.Ordinal));
+        var waves = groups.Select(g => g.WaveIndex).ToList();
+        Assert.Equal(waves.OrderBy(w => w), waves);
+    }
+
+    [Fact]
+    public void InviteSlotsByMeeting_FirstCommittedPerKeyWins()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var first = T(plan, AttachmentTestData.InviteThreadId);
+        var second = T(plan, AttachmentTestData.SecondInviteThreadId);
+        var firstIcs = A(plan, first.Id).Single(a => a.Kind == AttachmentType.CalendarInvite);
+        var secondIcs = A(plan, second.Id).Single();
+        var start = new DateTimeOffset(2024, 5, 13, 9, 0, 0, TimeSpan.FromHours(-4));
+        var a = Attachment(plan, firstIcs, JournalRecordType.AttachmentDone);
+        a.InviteMeetingKey = "fact:F-004";
+        a.InviteStart = start;
+        a.InviteEnd = start.AddHours(1);
+        var b = Attachment(plan, secondIcs, JournalRecordType.AttachmentDone);
+        b.InviteMeetingKey = "fact:F-004";
+        b.InviteStart = start.AddDays(1);
+        b.InviteEnd = start.AddDays(1).AddHours(2);
+
+        var state = GenerationRunState.From(plan, Journal(plan, DoneWith(plan, first, a), DoneWith(plan, second, b)));
+
+        var slot = Assert.Single(state.InviteSlotsByMeeting).Value;
+        Assert.Equal(start, slot.Start);
+        Assert.Equal(start.AddHours(1), slot.End);
+        Assert.Equal("fact:F-004", slot.MeetingKey);
+    }
+
+    [Fact]
+    public void Spend_CountsEveryMediaAttempt()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var thread = T(plan, AttachmentTestData.InviteThreadId);
+        var image = A(plan, thread.Id).Single(a => a.Kind == AttachmentType.Image);
+
+        var replay = Journal(plan,
+            DoneWith(plan, thread, Attachment(plan, image, JournalRecordType.AttachmentFailed, media: 0.04m)),
+            Repaired(plan, thread, Attachment(plan, image, JournalRecordType.AttachmentFailed, media: 0.04m)),
+            Repaired(plan, thread, Attachment(plan, image, JournalRecordType.AttachmentDone, media: 0.04m)));
+        var state = GenerationRunState.From(plan, replay);
+
+        Assert.Equal(0.12m, state.MediaCostUsd);
+        Assert.Equal(replay.SpentCostUsd, state.CostUsd);
+        Assert.Equal(0.13m, state.CostUsd);
+        Assert.Equal(AttachmentRunStatus.Written, state.StatusByAttachment[image.DocId]);
+    }
+
+    [Fact]
+    public void FlagsAndFillerTitles_FromReplay()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var daily = T(plan, AttachmentTestData.DailyBusinessThreadId);
+        var done = Done(plan, daily, ThreadWriteStatus.Written, 0.01m);
+        done.Messages[0].AttachmentTitles = new List<string> { "Insurance Certificate 2024" };
+
+        var state = GenerationRunState.From(plan, Journal(plan, done,
+            new JournalRecord { Type = JournalRecordType.SideWorld, PlanId = plan.PlanId, Utc = Now, SideWorld = new SideWorld() }));
+
+        Assert.Equal(new[] { "Insurance Certificate 2024" }, state.FillerTitlesByDocId[daily.Messages[0].DocId]);
+        Assert.True(state.HasSideWorld);
+        Assert.False(state.HasCastVoices);
+        Assert.False(state.LatestAttemptEnded);
+    }
+
+    [Fact]
+    public void ToCounts_FillsCorpusAndAttachmentFields()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var invite = T(plan, AttachmentTestData.InviteThreadId);
+        var daily = T(plan, AttachmentTestData.DailyBusinessThreadId);
+        var image = A(plan, invite.Id).Single(a => a.Kind == AttachmentType.Image);
+        var ics = A(plan, invite.Id).Single(a => a.Kind == AttachmentType.CalendarInvite);
+        var state = GenerationRunState.From(plan, Journal(plan,
+            DoneWith(plan, invite,
+                Attachment(plan, ics, JournalRecordType.AttachmentDone, status: ThreadWriteStatus.Warnings),
+                Attachment(plan, image, JournalRecordType.AttachmentSkipped, reason: NoKeyReason)),
+            DoneWith(plan, daily, Attachment(plan, A(plan, daily.Id)[0], JournalRecordType.AttachmentFailed))));
+
+        var counts = state.ToCounts(plan, 3, 0, 0m, running: false, finished: false);
+
+        var threads = GenerationThreads(plan).ToList();
+        var attachments = threads.SelectMany(t => t.Messages.SelectMany(m => m.Attachments)).ToList();
+        var nonRelevant = threads.Where(t => t.Relevance == ThreadRelevance.NotRelevant).ToList();
+        Assert.Equal(threads.Count, counts.TotalThreads);
+        Assert.Equal(2, counts.DoneThreads);
+        Assert.Equal(state.RelevantTotal, counts.RelevantTotal);
+        Assert.Equal(1, counts.RelevantDone);
+        Assert.Equal(nonRelevant.Count, counts.NonRelevantTotal);
+        Assert.Equal(1, counts.NonRelevantDone);
+        Assert.Equal(nonRelevant.Count(t => t.Category == NonRelevantCategory.DailyBusiness), counts.NonRelevantDailyBusiness);
+        Assert.Equal(nonRelevant.Count(t => t.Category == NonRelevantCategory.Ancillary), counts.NonRelevantAncillary);
+        Assert.Equal(nonRelevant.Count(t => t.Category == NonRelevantCategory.NewsletterSpamPersonal), counts.NonRelevantBulk);
+        Assert.Equal(nonRelevant.Count(t => t.Category == NonRelevantCategory.Decoy), counts.NonRelevantDecoy);
+        Assert.Equal(threads.Sum(t => t.Messages.Count), counts.EmailsPlanned);
+        Assert.Equal(plan.AttachmentCount, counts.AttachmentsTotal);
+        Assert.Equal(1, counts.AttachmentsDone);
+        Assert.Equal(1, counts.AttachmentsWarnings);
+        Assert.Equal(1, counts.AttachmentsFailed);
+        Assert.Equal(1, counts.AttachmentsSkipped);
+        Assert.Equal(attachments.Count(a => a.Kind == AttachmentType.Word), counts.AttachmentsWord);
+        Assert.Equal(attachments.Count(a => a.Kind == AttachmentType.Excel), counts.AttachmentsExcel);
+        Assert.Equal(attachments.Count(a => a.Kind == AttachmentType.PowerPoint), counts.AttachmentsPowerPoint);
+        Assert.Equal(attachments.Count(a => a.Kind == AttachmentType.CalendarInvite), counts.AttachmentsInvite);
+        Assert.Equal(attachments.Count(a => a.Kind == AttachmentType.Image), counts.AttachmentsImage);
+        Assert.Equal(attachments.Count(a => a.Kind == AttachmentType.Voicemail), counts.AttachmentsVoicemail);
+        Assert.Equal(counts.AttachmentsImage + counts.AttachmentsVoicemail, counts.MediaPlanned);
+        Assert.Equal(state.MediaCostUsd, counts.MediaCostUsd);
+    }
+
+    private static AIModelConfig Story() => new() { DisplayName = "Story", InputTokenPricePerMillion = 4m, OutputTokenPricePerMillion = 20m };
+
+    private static AIModelConfig Volume() => new() { DisplayName = "Volume", InputTokenPricePerMillion = 0.5m, OutputTokenPricePerMillion = 2m };
+
+    [Fact]
+    public void EstimateRemaining_EmptyJournal_EqualsReadyCardEstimate()
+    {
+        var (draft, plan) = AttachmentTestData.MixedCase();
+        var state = GenerationRunState.From(plan, new JournalReplay());
+        var prices = MediaPrices.Defaults();
+
+        Assert.Equal(GenerationCostEstimator.Estimate(plan, Story(), Volume(), prices).Total,
+            GenerationRunState.EstimateRemaining(plan, state, Story(), Volume(), prices, mediaAvailable: true));
+        Assert.Equal(GenerationCostEstimator.Estimate(plan, Story(), Volume(), prices, true, draft.Guide).Total,
+            GenerationRunState.EstimateRemaining(plan, state, Story(), Volume(), prices, true, draft.Guide));
+        Assert.Equal(GenerationCostEstimator.Estimate(plan, Story(), Volume(), prices, mediaAvailable: false).Total,
+            GenerationRunState.EstimateRemaining(plan, state, Story(), Volume(), prices, mediaAvailable: false));
+    }
+
+    [Fact]
+    public void EstimateRemaining_PricesPendingAndRepairWork()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var docThread = T(plan, AttachmentTestData.RelevantDocThreadId);
+        var docParts = A(plan, docThread.Id);
+        var voicemail = T(plan, AttachmentTestData.RelevantVoicemailThreadId);
+        var state = GenerationRunState.From(plan, Journal(plan,
+            DoneWith(plan, docThread,
+                Attachment(plan, docParts[0], JournalRecordType.AttachmentDone),
+                Attachment(plan, docParts[1], JournalRecordType.AttachmentDone)),
+            new JournalRecord { Type = JournalRecordType.SideWorld, PlanId = plan.PlanId, Utc = Now, SideWorld = new SideWorld() }));
+        var prices = MediaPrices.Defaults();
+
+        var work = new PricedWork { IncludeSideWorld = false, IncludeVoiceCast = true };
+        foreach (var thread in GenerationThreads(plan).Where(t => t.Id != docThread.Id))
+        {
+            foreach (var message in thread.Messages)
+            {
+                work.Messages.Add((thread, message));
+                foreach (var attachment in message.Attachments)
+                    work.Attachments.Add((thread, message, attachment));
+            }
+        }
+
+        work.Attachments.Add((docThread, ParentOf(plan, docParts[2].DocId), docParts[2]));
+        Assert.Contains(work.Attachments, a => a.Thread == voicemail);
+
+        var expected = GenerationCostEstimator.PriceWork(work, Story(), Volume(), prices, mediaAvailable: true).Total;
+        Assert.Equal(expected, GenerationRunState.EstimateRemaining(plan, state, Story(), Volume(), prices, mediaAvailable: true));
+        Assert.True(expected > 0m);
+    }
+
+    [Fact]
+    public void Apply_CopiesPhase6CachedCounts_RelevantThreadCountsStayRelevant()
+    {
+        var (draft, plan) = AttachmentTestData.MixedCase();
+        var invite = T(plan, AttachmentTestData.InviteThreadId);
+        var daily = T(plan, AttachmentTestData.DailyBusinessThreadId);
+        var image = A(plan, invite.Id).Single(a => a.Kind == AttachmentType.Image);
+        var state = GenerationRunState.From(plan, Journal(plan,
+            DoneWith(plan, invite, Attachment(plan, image, JournalRecordType.AttachmentSkipped, reason: NoKeyReason, media: 0.02m)),
+            Done(plan, daily, ThreadWriteStatus.Warnings, 0.01m)));
+
+        GenerationStateApplier.Apply(draft, plan, state, new NarrativeLedger(), new List<WrittenCorpusFile>(),
+            GenerationOutcome.Finished, string.Empty, Now, final: false);
+
+        var g = draft.Corpus!.Generation!;
+        Assert.Equal(state.RelevantTotal, g.ThreadsTotal);
+        Assert.Equal(1, g.ThreadsWritten);
+        Assert.Equal(0, g.ThreadsWithWarnings);
+        Assert.Equal(state.NonRelevantTotal, g.NonRelevantTotal);
+        Assert.Equal(0, g.NonRelevantWritten);
+        Assert.Equal(1, g.NonRelevantWithWarnings);
+        Assert.Equal(plan.AttachmentCount, g.AttachmentsTotal);
+        Assert.Equal(1, g.AttachmentsSkipped);
+        Assert.Equal(0.02m, g.MediaCostUsd);
     }
 }

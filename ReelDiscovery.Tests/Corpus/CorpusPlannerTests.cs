@@ -51,7 +51,8 @@ public partial class CorpusPlannerTests
 
     // ----- Fixtures -----
 
-    private static CaseDraft Draft(int total = 250, int percent = 20)
+    // Shared with DistributionParityTests' production-planner fixture (06-21)
+    internal static CaseDraft Draft(int total = 250, int percent = 20)
     {
         var draft = CorpusTestData.RichDraft();
         draft.Corpus = new CorpusState { Settings = new CorpusSettings { TotalEmails = total, RelevantPercent = percent } };
@@ -116,7 +117,8 @@ public partial class CorpusPlannerTests
     /// <summary>
     /// Schema-aware responder: echoes thread ids and slots, writes protocol prose and the given guidance weights.
     /// </summary>
-    private static Func<LlmProviderRequest, LlmProviderResponse> Responder(string? weightsJson = null,
+    // Shared with DistributionParityTests' production-planner fixture (06-21)
+    internal static Func<LlmProviderRequest, LlmProviderResponse> Responder(string? weightsJson = null,
         Func<LlmProviderRequest, LlmProviderResponse?>? overrideFn = null) => request =>
     {
         var custom = overrideFn?.Invoke(request);
@@ -133,7 +135,8 @@ public partial class CorpusPlannerTests
         throw new InvalidOperationException($"Unexpected schema {request.SchemaName}");
     };
 
-    private static (CorpusPlanner Planner, FakeLlmProvider Fake) Planner(int seed = 42)
+    // Shared with DistributionParityTests' production-planner fixture (06-21)
+    internal static (CorpusPlanner Planner, FakeLlmProvider Fake) Planner(int seed = 42)
     {
         var (gateway, fake) = CorpusTestData.CreateGateway();
         return (new CorpusPlanner(gateway, new Random(seed)), fake);

@@ -20,11 +20,13 @@ public static class EvidencePrompts
 
     public const string HotSuffix = " This is a key document: state the key point plainly.";
 
-    private const string CounselText = "This is a confidential exchange with counsel: counsel gives legal advice in plain words; the client asks and answers plainly.";
+    // Shared with FillerPrompts; text unchanged so EvidencePromptsTests stay green
+    internal const string CounselText = "This is a confidential exchange with counsel: counsel gives legal advice in plain words; the client asks and answers plainly.";
 
     private const string TaskText = "Write every message above in order. For each message return its seq, the body, and the signOff (a closing word or phrase such as 'Thanks,', or empty), and list every person the message names in peopleNamed. Then list newDetails: specific new commitments, figures, meetings, decisions, people or documents this thread introduces that later emails may refer back to, each tied to the seq that introduced it.";
 
-    private const string FeedbackHeader = "Problems in the previous attempt (fix all of them and rewrite the whole thread):";
+    // Shared with FillerPrompts; text unchanged so EvidencePromptsTests stay green
+    internal const string FeedbackHeader = "Problems in the previous attempt (fix all of them and rewrite the whole thread):";
 
     /// <summary>
     /// The render request for one thread. Retry feedback goes last so everything before it stays byte-identical across

@@ -137,6 +137,7 @@ public class AttachmentUnitOfWork
     public const string UnusableReason = "the model returned no usable content";
     public const string BuildFailedPrefix = "the document could not be built";
     public const string EmptyDocumentText = "the document was empty";
+    public const string NoMediaKeyReason = "no tested OpenAI key this session";
 
     private const string TimeoutPrefix = "The request timed out";
 
@@ -160,6 +161,9 @@ public class AttachmentUnitOfWork
         _volumeModel = volumeModel;
     }
 
+    // D-28: set by the runner from the CastVoices journal record before any voicemail is spoken
+    public CastVoiceSet? CastVoices { get; set; }
+
     // Test seam: runs just before bytes are built, so a test can simulate a builder failure
     internal Action<AttachmentContent>? BeforeBuild { get; set; }
 
@@ -171,9 +175,97 @@ public class AttachmentUnitOfWork
     {
         var outcome = AttachmentOutcome.For(ctx);
         if (ctx.Spec.Kind is AttachmentType.Image or AttachmentType.Voicemail)
-            return Skip(outcome, "no tested OpenAI key this session");
+            return await RunMediaAsync(ctx, run, outcome).ConfigureAwait(false);
 
         return await RunTextAsync(ctx, run, outcome).ConfigureAwait(false);
+    }
+
+    // Images and voicemail audio (D-06, D-27, D-28): a media stop ends only media, never the text run (UI-SPEC Decision 2)
+    private async Task<AttachmentOutcome> RunMediaAsync(AttachmentRenderContext ctx, PlanCallRun run, AttachmentOutcome outcome)
+    {
+        if (_media == null)
+            return Skip(outcome, NoMediaKeyReason);
+        if (_gate.Stopped)
+            return Skip(outcome, _gate.Reason);
+
+        await _gate.Slots.WaitAsync(run.UserToken).ConfigureAwait(false);
+        try
+        {
+            // Review MEDIUM: callers queued before a stop must not call after it
+            if (_gate.Stopped)
+                return Skip(outcome, _gate.Reason);
+
+            var isImage = ctx.Spec.Kind == AttachmentType.Image;
+            var result = isImage
+                ? await _media.GenerateImageAsync(AttachmentPrompts.ImagePrompt(ctx), ctx.FileName, run.UserToken).ConfigureAwait(false)
+                : await _media.GenerateSpeechAsync(ctx.ParentBody, VoiceAssignments.For(ctx.Parent.FromId, CastVoices), ctx.FileName,
+                    run.UserToken).ConfigureAwait(false);
+            outcome.Attempts = 1;
+            outcome.MediaCostUsd = result?.CostUsd ?? 0m;
+
+            if (result?.Kind == MediaResultKind.Stopped)
+            {
+                var reason = string.IsNullOrWhiteSpace(result.Reason) ? "the OpenAI media service stopped" : result.Reason.Trim();
+                if (_gate.TryStop(reason))
+                {
+                    _snapshot.AddEvent(new GenerationEvent
+                    {
+                        Kind = GenerationEventKind.MediaStopped,
+                        LocalTime = DateTime.Now,
+                        ThreadId = outcome.ThreadId,
+                        Subject = ctx.Thread.Thread.Subject ?? string.Empty,
+                        WaveIndex = ctx.Thread.WaveIndex,
+                        Reason = _gate.Reason,
+                        FileName = ctx.FileName,
+                        MediaRemaining = _gate.Remaining
+                    });
+                }
+
+                // Every item after the first stop takes the gate's reason, so the run log reads one cause
+                return Skip(outcome, _gate.Reason);
+            }
+
+            // Ok or Failed: the item was attempted, so it no longer counts as remaining
+            _gate.Consume();
+
+            if (result == null || result.Kind == MediaResultKind.Failed)
+            {
+                var reason = string.IsNullOrWhiteSpace(result?.Reason) ? UnusableReason : result!.Reason.Trim();
+                return Fail(ctx, outcome, ThreadFailureKind.Provider, reason);
+            }
+
+            if (result.Bytes == null || result.Bytes.Length == 0)
+                return Fail(ctx, outcome, ThreadFailureKind.Provider, UnusableReason);
+
+            var inline = isImage && ctx.Spec.IsInline;
+            var sender = ctx.Thread.People?.Find(ctx.Parent.FromId);
+            outcome.Part = new ComposedAttachment
+            {
+                DocId = outcome.DocId,
+                Kind = ctx.Spec.Kind,
+                FileName = outcome.FileName,
+                Title = outcome.Title,
+                MimeType = MimeTypeFor(ctx.Spec.Kind),
+                Bytes = result.Bytes,
+                IsInline = inline,
+                ContentId = inline ? AttachmentNaming.ContentIdFor(outcome.DocId, sender?.Domain) : string.Empty
+            };
+            outcome.Kind = AttachmentOutcomeKind.Written;
+            return outcome;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // RUN-02: an attachment failure never escapes into the thread's Task.WhenAll
+            return Fail(ctx, outcome, ThreadFailureKind.Provider, $"the media could not be created: {ex.Message}");
+        }
+        finally
+        {
+            _gate.Slots.Release();
+        }
     }
 
     private async Task<AttachmentOutcome> RunTextAsync(AttachmentRenderContext ctx, PlanCallRun run, AttachmentOutcome outcome)

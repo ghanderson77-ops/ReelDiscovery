@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-16-PLAN.md
-last_updated: "2026-10-05T00:48:22.532Z"
+stopped_at: Completed 06-17-PLAN.md
+last_updated: "2026-10-05T01:00:57.425Z"
 last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 98
-  percent: 92
+  completed_plans: 99
+  percent: 93
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 18 of 25 (17 summarized: 06-01..06-16, 06-22; wave 4 in progress; next 06-17)
+Plan: 19 of 25 (18 summarized: 06-01..06-17, 06-22; wave 4 in progress; next 06-18)
 Status: Ready to execute
 Last activity: 2026-10-05
 
-Progress: [█████████░] 92%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -149,6 +149,7 @@ Progress: [█████████░] 92%
 | Phase 06 P22 | 25min | 2 tasks | 3 files |
 | Phase 6 P14 | 50min | 2 tasks | 6 files |
 | Phase 06 P16 | 13min | 2 tasks | 7 files |
+| Phase 06 P17 | 16min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -420,6 +421,9 @@ Recent decisions affecting current work:
 - [Phase 6]: 06-14: interim - StepGenerateCorpus.ShowRunResult partial check uses relevant counts until 06-19 writes filler
 - [Phase 06]: 06-16: filler ToRendered fills blank/missing attachment titles with AttachmentNaming.TitleFor so title-to-attachment pairing survives journal CleanStrings
 - [Phase 06]: 06-16: bulk-mail style follows the first external participant's ExternalKind; decoy shared names = participant org names + ProjectName values minus must-not-mention overlaps
+- [Phase 06]: 06-17: AttachmentUnitOfWork never reports completion; ToRecord leaves Utc/Files to the caller (06-18/06-20 nest it in the durable line)
+- [Phase 06]: 06-17: MediaRunGate.Consume only on Ok/Failed media results, so MediaRemaining includes the item that hit the stop; post-stop Skipped items take the gate's first reason
+- [Phase 06]: 06-17: missing InviteSlot falls back to next day at the email's time with the not-tied warning; invite UID = SHA-256(DocId)[..32]@sender domain
 
 ### Pending Todos
 
@@ -441,6 +445,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T00:48:22.523Z
-Stopped at: Completed 06-14-PLAN.md
+Last session: 2026-10-05T01:00:57.418Z
+Stopped at: Completed 06-17-PLAN.md
 Resume file: None

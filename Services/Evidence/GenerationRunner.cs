@@ -50,10 +50,11 @@ public class GenerationRunResult
 }
 
 /// <summary>
-/// Runs relevant-evidence generation: chronological waves, parallel units of work inside a wave, the ledger merged after
-/// each wave, debounced key re-projection and checkpoints, and a clean end on finish, cancel, fatal stop or a bug
-/// (D-05, D-06, D-11, RUN-01, RUN-02, RUN-06). Generate, Continue and Retry Failed Threads are all this one run: it
-/// writes every thread the journal does not list as done.
+/// Runs corpus generation (D-25): relevant threads with their attachments in chronological waves (parallel units of work
+/// inside a wave, committed details merged into the ledger after each wave), then the side world and every non-relevant
+/// thread with its attachments, with debounced key re-projection and checkpoints and a clean end on finish, cancel,
+/// fatal stop or a bug (D-05, D-06, D-11, RUN-01, RUN-02, RUN-06). Generate, Continue and Retry Failed Threads are all
+/// this one run: it writes every thread the journal does not list as done.
 /// </summary>
 public class GenerationRunner
 {
@@ -61,6 +62,9 @@ public class GenerationRunner
     public const int MaxParallelThreads = 3;
 
     public const string RetryHint = "Click Continue Generating.";
+
+    // Non-relevant threads per run step: bounds memory and sets the checkpoint cadence of Stage B (T-06-58)
+    public const int FillerChunkSize = 50;
 
     // Debounced so a burst of finishing threads writes the key at most every 2 s; wave and run end always write it
     public static readonly TimeSpan KeyProjectionInterval = TimeSpan.FromSeconds(2);
@@ -87,8 +91,9 @@ public class GenerationRunner
     internal Func<JournalRecord, Task>? BeforeThreadAppendHook { get; set; }
 
     /// <summary>
-    /// Writes every relevant thread not yet journaled as done, wave by wave. Never throws: cancel, fatal provider errors
-    /// and unexpected exceptions all end with a final checkpoint and a RunEnded record.
+    /// Writes every thread not yet journaled as done: relevant waves first, then non-relevant mail. Never throws: cancel,
+    /// fatal text-provider errors and unexpected exceptions all end with a final checkpoint and a RunEnded record; a media
+    /// stop only marks the remaining images and voicemails Skipped.
     /// </summary>
     public async Task<GenerationRunResult> RunAsync(GenerationRunInput input, GenerationSnapshot snapshot, GenerationPersist? persist = null, CancellationToken ct = default)
     {
@@ -329,6 +334,20 @@ public class GenerationRunner
 
                 await CheckpointAsync(ctx, final: false, outcome, message).ConfigureAwait(false);
             }
+
+            // D-25: non-relevant mail only after the last relevant wave, in the same run and progress stream
+            if (proceed && outcome == GenerationOutcome.Finished)
+            {
+                ct.ThrowIfCancellationRequested();
+                var pendingFiller = NonRelevantThreads(threads.Values)
+                    .Where(t => !state.IsDone(t.Id))
+                    .OrderBy(t => t.Messages.Where(m => m != null).Min(m => m.SentAt.UtcDateTime))
+                    .ThenBy(t => t.Id, StringComparer.Ordinal)
+                    .ToList();
+                if (pendingFiller.Count > 0)
+                    (outcome, message) = await RunNonRelevantAsync(ctx, uow, state, replay, pendingFiller, fillerRow, run, ct)
+                        .ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -377,6 +396,127 @@ public class GenerationRunner
             State = final?.State ?? state,
             Ledger = final?.Ledger ?? startLedger
         };
+    }
+
+    /// <summary>
+    /// Stage B (D-25, NOISE-01..05): the side world from the journal or one Volume call, journaled before use, then every
+    /// pending non-relevant thread in chunks with its filler assignment and category profile. Returns the run outcome:
+    /// Finished, Fatal (text provider) or InternalError (side projects not saved). Throws only when the user cancels.
+    /// </summary>
+    private async Task<(GenerationOutcome Outcome, string Message)> RunNonRelevantAsync(RunContext ctx, ThreadUnitOfWork uow,
+        GenerationRunState state, JournalReplay replay, List<PlannedThread> pending, int fillerRow, PlanCallRun run,
+        CancellationToken ct)
+    {
+        var input = ctx.Input;
+        var plan = input.Plan;
+        var snapshot = ctx.Snapshot;
+
+        // D-21: one side world per case, replayed on Continue so filler keeps talking about the same projects
+        var sideWorld = SideWorldBuilder.FromRecord(replay.LastSideWorld, ctx.Guide);
+        if (sideWorld == null)
+        {
+            snapshot.SetStage(GenerationStage.SideProjects, count: SideWorldBuilder.CoveredOrganizations(ctx.Guide).Count);
+            var so = await SideWorldBuilder.BuildAsync(_llm, input.Draft, ctx.Guide, run).ConfigureAwait(false);
+            var cost = ModelCost(ctx.VolumeModel, so.InputTokens, so.OutputTokens);
+            snapshot.AddCost(cost);
+            if (run.IsFatal && so.World == null)
+            {
+                ctx.AddUnjournaledSpend(so.InputTokens, so.OutputTokens, cost);
+                return (GenerationOutcome.Fatal, run.FatalError);
+            }
+
+            sideWorld = so.World!;
+            try
+            {
+                await AppendOwnRecordAsync(ctx.Journal, new JournalRecord
+                {
+                    Type = JournalRecordType.SideWorld,
+                    Utc = DateTime.UtcNow,
+                    PlanId = plan.PlanId,
+                    SideWorld = sideWorld,
+                    InputTokens = so.InputTokens,
+                    OutputTokens = so.OutputTokens,
+                    CostUsd = cost
+                }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Review 06-19: Continue promises the same side projects; never use a choice the journal does not hold
+                ctx.AddUnjournaledSpend(so.InputTokens, so.OutputTokens, cost);
+                return (GenerationOutcome.InternalError, $"Could not save the side projects: {ex.Message}");
+            }
+
+            snapshot.AddEvent(new GenerationEvent
+            {
+                Kind = GenerationEventKind.SideProjectsReady,
+                LocalTime = DateTime.Now,
+                Projects = sideWorld.Organizations.Sum(o => o.Projects.Count),
+                Organizations = sideWorld.Organizations.Count
+            });
+        }
+
+        snapshot.SetStage(GenerationStage.NonRelevant, count: pending.Count);
+        snapshot.SetWaveRunning(fillerRow, true);
+        snapshot.AddEvent(new GenerationEvent
+        {
+            Kind = GenerationEventKind.NonRelevantStarted,
+            LocalTime = DateTime.Now,
+            Threads = pending.Count,
+            Emails = pending.Sum(t => t.Messages.Count(m => m != null))
+        });
+
+        var written = 0;
+        var warnings = 0;
+        var failed = 0;
+        try
+        {
+            // Filler has no ledger dependency: chunks only bound memory and checkpoint cadence (D-25)
+            foreach (var chunk in pending.Chunk(FillerChunkSize))
+            {
+                ct.ThrowIfCancellationRequested();
+                snapshot.SetStage(GenerationStage.NonRelevant, count: pending.Count);
+                ctx.ChainScheduler.BeginStep(chunk.Select(t => t.Id));
+                var step = StepContext(ctx, fillerRow);
+                var tasks = chunk
+                    .Select(thread =>
+                    {
+                        // D-08, D-09, D-13: filler assignments and the category profile; never the ledger
+                        var render = ThreadRenderContext.Create(input.Draft, plan, thread,
+                            ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
+                            ctx.People, new List<LedgerEntry>(), fillerRow);
+                        render.PreviousStatus = Status(state, thread.Id);
+                        return RunThreadAsync(ctx, uow, render, RenderProfile.For(thread, _llm, sideWorld), step, run);
+                    })
+                    .ToList();
+                var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+                written += results.Count(r => r.Kind == ThreadOutcomeKind.Written);
+                warnings += results.Count(r => r.Kind == ThreadOutcomeKind.Warnings);
+                failed += results.Count(r => r.Kind == ThreadOutcomeKind.Failed);
+
+                if (run.IsFatal)
+                    return (GenerationOutcome.Fatal, run.FatalError);
+
+                ct.ThrowIfCancellationRequested();
+                await CheckpointAsync(ctx, final: false, GenerationOutcome.Finished, string.Empty).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            snapshot.SetWaveRunning(fillerRow, false);
+        }
+
+        snapshot.AddEvent(new GenerationEvent
+        {
+            Kind = GenerationEventKind.NonRelevantFinished,
+            LocalTime = DateTime.Now,
+            Written = written,
+            Warnings = warnings,
+            Failed = failed,
+            Relevant = false
+        });
+
+        return (GenerationOutcome.Finished, string.Empty);
     }
 
     private static async Task<ThreadOutcome> RunThreadAsync(RunContext ctx, ThreadUnitOfWork uow, ThreadRenderContext render,

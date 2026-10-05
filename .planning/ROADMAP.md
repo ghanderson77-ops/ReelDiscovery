@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
  (completed 2026-10-02)
 - [x] **Phase 4: Corpus Plan & Answer Key** - Code-owned manifest of every thread/message with a validator, a plan review screen, the answer key and the review protocol derived from it (completed 2026-10-03)
 - [x] **Phase 5: Relevant Evidence Generation & Narrative Ledger** - Knowledge-gated, chronologically waved rendering of relevant threads with a running narrative ledger, saved incrementally as per-custodian EMLs (completed 2026-10-03)
-- [ ] **Phase 6: Attachments & Non-Relevant Corpus** - Case-driven attachments plus daily business, ancillary, newsletter/spam/personal and near-miss decoy traffic through the same pipeline
+- [x] **Phase 6: Attachments & Non-Relevant Corpus** - Case-driven attachments plus daily business, ancillary, newsletter/spam/personal and near-miss decoy traffic through the same pipeline (completed 2026-10-05)
 - [ ] **Phase 7: Scale, Cost, QA & Cutover** - Batch APIs, prompt caching, cost accounting, blind-review and leakage QA, 5K-scale runs, and removal of the old wizard flow
 - [ ] **Phase 8: Ancillary Discovery Documents** - Optional depositions, RFPs, RFAs and interrogatories grounded in the case guide and exported as .docx
 
@@ -216,7 +216,7 @@ Plans:
 - [x] 06-22-PLAN.md — Generate Corpus layout (tiles, Stages, banners, Ready card) + 144-DPI renders (Wave 3)
 - [x] 06-23-PLAN.md — Generate Corpus run wiring (media, entry/banners, estimate, progress, reopen rows) (Wave 8)
 - [x] 06-24-PLAN.md — Case Summary counts + media prices dialog row + 144-DPI renders (Wave 5)
-- [ ] 06-25-PLAN.md — Phase gate: full/render suites + 144-DPI inspection, live run, controlled failure/Continue, multi-message repair and Phase 5 upgrade exercises (Wave 9)
+- [x] 06-25-PLAN.md — Phase gate: full/render suites + 144-DPI inspection, live run, controlled failure/Continue, multi-message repair and Phase 5 upgrade exercises (Wave 9)
 
 ### Phase 7: Scale, Cost, QA & Cutover
 **Goal**: The user can run a full 5,000-email case affordably and verify its quality, and the case-driven flow is the only flow in the app.
@@ -254,6 +254,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
 | 4. Corpus Plan & Answer Key | 22/22 | Complete    | 2026-10-03 |
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
-| 6. Attachments & Non-Relevant Corpus | 24/25 | In Progress|  |
+| 6. Attachments & Non-Relevant Corpus | 25/25 | Complete   | 2026-10-05 |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |
 | 8. Ancillary Discovery Documents | 0/TBD | Not started | - |

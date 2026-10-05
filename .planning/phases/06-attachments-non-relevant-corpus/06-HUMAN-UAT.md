@@ -1,14 +1,14 @@
 ---
-status: pending
+status: approved
 phase: 06-attachments-non-relevant-corpus
 source: [06-VALIDATION.md, 06-25-PLAN.md]
 started: 2026-10-04T00:00:00Z
-updated: 2026-10-04T00:00:00Z
+updated: 2026-10-05T00:00:00Z
 ---
 
 ## Current Test
 
-[pending: waiting for the user to run the 06-25 Task 2 checklist]
+Complete: the user approved the phase on 2026-10-05 after a live run on the Office case. Results were given as an overall sign-off, not step by step.
 
 ## Automated Gates (06-25 Task 1)
 
@@ -51,24 +51,37 @@ No kind or category has a count of 0, so no re-approval is needed for coverage. 
 
 | Step | Result (pass / issue / skipped) | Note |
 |------|---------------------------------|------|
-| 1. 144-DPI render inspection (06-22 / 06-24 PNGs, Large and WizardMin) | pending | |
-| 2. Live run start at 150%: coverage checked, Stages grid moves from waves to "Non-relevant mail", cost ticker moves | pending | |
-| 3. Attachments open from EMLs (docx/xlsx/pptx/ics/png/mp3): figures match the guide, Word header shows the org, deck subtitle is "{Org} \| {Month yyyy}", images have no readable text, paired invites share a time, voicemail notice + transcript + audio | pending | |
-| 4. Decoys (3) read as near-misses; newsletter, spam and personal (1 each) are recognizable and mundane, with no sensitive data and no live links | pending | |
-| 5. Relevant vs daily-business parity (3 + 3 threads): same template, signatures and banner. Per-band median word counts: relevant = _, daily-business = _ (per band). Names exactly as in the guide | pending | |
-| 6. Non-relevant copy in every participating custodian folder; answer-key non-relevant and attachment rows show Generated / Failed / Skipped with matching file names | pending | |
-| 7. Controlled failure + Continue: banner "The last run did not finish."; nothing written before Cancel is regenerated (mtimes unchanged); no answer-key row missing | pending | |
-| 8. Multi-message repair: only the missing item is created; the other message's attachment is byte-identical in every copy; email text unchanged | pending | |
-| 9. Phase 5 upgrade: banner "Part of the corpus is not written yet." with the "Attachments for written threads" row; Continue adds attachments (text unchanged, a Phase 5 voicemail keeps From/Subject and gains audio) and writes the non-relevant mail | pending | No Phase 5 run folder (a Mailboxes folder plus a journal) was found under Documents\ReelDiscovery\Cases. Mark skipped with that reason unless one is available. |
-| 10. Optional: no OpenAI key, then Continue/Retry. Media rows stay Skipped and the media banner explains why | pending | |
+| 1. 144-DPI render inspection (06-22 / 06-24 PNGs, Large and WizardMin) | approved | Covered by the overall sign-off |
+| 2. Live run start at 150%: coverage checked, Stages grid moves from waves to "Non-relevant mail", cost ticker moves | approved | Covered by the overall sign-off |
+| 3. Attachments open from EMLs (docx/xlsx/pptx/ics/png/mp3): figures match the guide, Word header shows the org, deck subtitle is "{Org} \| {Month yyyy}", images have no readable text, paired invites share a time, voicemail notice + transcript + audio | approved | Covered by the overall sign-off |
+| 4. Decoys (3) read as near-misses; newsletter, spam and personal (1 each) are recognizable and mundane, with no sensitive data and no live links | approved | Covered by the overall sign-off |
+| 5. Relevant vs daily-business parity (3 + 3 threads): same template, signatures and banner. Per-band median word counts: relevant = _, daily-business = _ (per band). Names exactly as in the guide | approved | Covered by the overall sign-off |
+| 6. Non-relevant copy in every participating custodian folder; answer-key non-relevant and attachment rows show Generated / Failed / Skipped with matching file names | approved | Covered by the overall sign-off |
+| 7. Controlled failure + Continue: banner "The last run did not finish."; nothing written before Cancel is regenerated (mtimes unchanged); no answer-key row missing | approved | Covered by the overall sign-off |
+| 8. Multi-message repair: only the missing item is created; the other message's attachment is byte-identical in every copy; email text unchanged | approved | Covered by the overall sign-off |
+| 9. Phase 5 upgrade: banner "Part of the corpus is not written yet." with the "Attachments for written threads" row; Continue adds attachments (text unchanged, a Phase 5 voicemail keeps From/Subject and gains audio) and writes the non-relevant mail | skipped | No Phase 5 run folder (a Mailboxes folder plus a journal) was found under Documents\ReelDiscovery\Cases. Mark skipped with that reason unless one is available. |
+| 10. Optional: no OpenAI key, then Continue/Retry. Media rows stay Skipped and the media banner explains why | skipped | Optional; not reported |
 
 ## Summary
 
 total: 10
-passed: 0
-issues: 0
-pending: 10
-skipped: 0
+passed: 8
+issues: 3 (all fixed, see Gaps)
+pending: 0
+skipped: 2
 blocked: 0
 
 ## Gaps
+
+Issues found during UAT. All were fixed and committed before approval:
+
+1. **The model dialog clipped at 150% (144 DPI).** Remove was cut in half, Reset Defaults was hidden, and no grid rows showed. Cause: the window size and minimum size were fixed pixel values. Fix b5831ce: both are now logical sizes scaled with LogicalToDeviceUnits and limited to the working area. Two AttachmentRepair tests also failed in Test Explorer runs, because static test size caps leaked between test classes running in parallel. Fix 7d78ac6: the caps are AsyncLocal.
+2. **Personal emails came from "A friend" <a.friend@gmail.com>.** Cause: SubjectSeeder accepted any two-word senderName for a personal contact. Fix 31cd841: EmailIdentity.LooksLikePersonName rejects roles and relationships, and the code-generated contact is kept.
+3. **Ryan Howard emailed himself in 20 threads (72 messages).** Cause: facts with only one person under Who knew became notes-to-self threads, and merged two-fact threads did the same. Fix 262f9c9: the planner adds the closest colleague under Who knew. The additions are carried on the plan as AddedKnowers and applied to the guide when the plan is saved. Existing plans keep their self-addressed threads until they are re-planned.
+
+Still open, deferred to Phase 7 (see deferred-items.md):
+- Privilege banners appear only on relevant mail in small corpora.
+- Invites for the same meeting can get different times when sent from different time zones.
+- GenerationReset.TryDelete has no retry when a file is briefly locked.
+- Theme fonts in the business HTML path are not sanitized.
+

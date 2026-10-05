@@ -1543,4 +1543,285 @@ public partial class GenerationRunnerMixedTests : IDisposable
         Assert.Equal(_story.CalculateTotalCost(800, 300), ended.CostUsd);
         Assert.Equal(replay.SpentCostUsd, snapshot.Peek().Counts.CostUsd);
     }
+
+    // ---------- non-relevant stage (D-21, D-25, NOISE-01..05, OUT-01) ----------
+
+    [GeneratedRegex(@"^(Document|Spreadsheet|Presentation) \d+\.")]
+    private static partial Regex CodeDefaultName();
+
+    private int SideWorldRecords(string? folder = null) => JournalRecords(folder).Count(r => r.Type == JournalRecordType.SideWorld);
+
+    private List<string> JournaledProjectNames() =>
+        JournalRecords().Last(r => r.Type == JournalRecordType.SideWorld).SideWorld!.Organizations
+            .SelectMany(o => o.Projects).Select(p => p.Name).ToList();
+
+    [Fact]
+    public async Task FullRun_EveryFillerCallAfterEveryRelevantRender()
+    {
+        _fake.Respond = Responder();
+
+        var result = await Run(new GenerationRunner(_gateway), Input(new FakeMediaGenerator()));
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        var requests = Requests();
+        var renders = requests.Select((r, i) => (r, i)).Where(x => x.r.SchemaName == RenderSchema).Select(x => x.i).ToList();
+        var filler = requests.Select((r, i) => (r, i)).Where(x => x.r.SchemaName == FillerSchema).Select(x => x.i).ToList();
+        Assert.NotEmpty(renders);
+        Assert.Equal(NonRelevant.Count, filler.Count);
+        Assert.True(renders.Max() < filler.Min(), "a filler call started before the last relevant wave ended");
+
+        var replay = Replay();
+        Assert.All(_plan.Threads.Where(t => t.Messages.Count > 0),
+            t => Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread[t.Id].Type));
+    }
+
+    [Fact]
+    public async Task SideWorld_OneCallBeforeFiller_Journaled_StageEventsAndRow()
+    {
+        _fake.Respond = Responder();
+        var snapshot = new GenerationSnapshot();
+        var waves = WavePlanner.Plan(_plan);
+
+        var result = await Run(new GenerationRunner(_gateway), Input(), snapshot);
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        var requests = Requests();
+        var sideIndex = Assert.Single(requests.Select((r, i) => (r, i)), x => x.r.SchemaName == SideWorldSchema).i;
+        Assert.True(sideIndex < requests.FindIndex(r => r.SchemaName == FillerSchema));
+        var record = Assert.Single(JournalRecords(), r => r.Type == JournalRecordType.SideWorld);
+        Assert.False(record.SideWorld!.FromFallback);
+        Assert.Equal(_volume.CalculateTotalCost(700, 500), record.CostUsd);
+
+        var view = snapshot.Peek();
+        var ready = Assert.Single(view.Events, e => e.Kind == GenerationEventKind.SideProjectsReady);
+        Assert.Equal(SideWorldBuilder.CoveredOrganizations(Guide).Count, ready.Organizations);
+        Assert.Equal(2 * ready.Organizations, ready.Projects);
+        var started = Assert.Single(view.Events, e => e.Kind == GenerationEventKind.NonRelevantStarted);
+        Assert.Equal(NonRelevant.Count, started.Threads);
+        var finished = Assert.Single(view.Events, e => e.Kind == GenerationEventKind.NonRelevantFinished);
+        Assert.Equal(NonRelevant.Count, finished.Written + finished.Warnings);
+        Assert.Equal(0, finished.Failed);
+        Assert.True(view.Events.IndexOf(ready) < view.Events.IndexOf(started));
+
+        var row = Assert.Single(view.Waves, w => w.RowKind == StageRowKind.NonRelevant);
+        Assert.Equal(waves.Count + 1, row.Index);
+        Assert.Equal(NonRelevant.Count, row.Done);
+        Assert.False(row.Running);
+        Assert.Equal(NonRelevant.Count, view.Counts.NonRelevantDone);
+    }
+
+    [Fact]
+    public async Task DailyBusinessPrompts_NameTheJournaledSideProjects()
+    {
+        _fake.Respond = Responder();
+
+        await Run(new GenerationRunner(_gateway), Input());
+
+        var names = JournaledProjectNames();
+        Assert.Contains(names, n => n.StartsWith("Lakeview Clinic Account", StringComparison.Ordinal));
+        var daily = NonRelevant.Where(t => t.Category == NonRelevantCategory.DailyBusiness).Select(t => t.Id).ToHashSet();
+        var prompts = Requests().Where(r => r.SchemaName == FillerSchema && daily.Contains(ThreadOf(r))).ToList();
+        Assert.Equal(daily.Count, prompts.Count);
+        Assert.All(prompts, p => Assert.Contains(names, n => p.UserPrompt!.Contains(n, StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task NonRelevant_EveryCopyOnDisk_ExternalSendersInboxOnly()
+    {
+        _fake.Respond = Responder();
+
+        await Run(new GenerationRunner(_gateway), Input(new FakeMediaGenerator()));
+
+        var external = _plan.Externals.Select(e => e.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var message in NonRelevant.SelectMany(t => t.Messages))
+        {
+            var paths = MailboxWriter.CopyPathsFor(message, Folders);
+            Assert.NotEmpty(paths);
+            foreach (var relative in paths)
+            {
+                var full = Path.Combine(_folder, relative);
+                Assert.True(File.Exists(full), relative);
+                using var mime = MimeMessage.Load(full);
+                Assert.Equal(message.DocId, mime.Headers[MailboxWriter.DocIdHeader]);
+            }
+
+            // Every participating custodian mailbox gets its copy (OUT-01)
+            foreach (var custodian in message.CustodianIds)
+                Assert.Contains(paths, p => p.Contains($"/{Folders[custodian]}/", StringComparison.Ordinal));
+
+            if (external.Contains(message.FromId))
+                Assert.All(paths, p => Assert.Contains($"/{PlanNumbering.InboxFolder}/", p));
+        }
+    }
+
+    [Fact]
+    public async Task SecondRun_OnFinishedFolder_MakesNoRequests()
+    {
+        _fake.Respond = Responder();
+        var media = new FakeMediaGenerator();
+        var first = await Run(new GenerationRunner(_gateway), Input(media));
+        Assert.Equal(GenerationOutcome.Finished, first.Outcome);
+        var before = Requests().Count;
+        var mediaBefore = media.Requests.Count;
+
+        var second = await Run(new GenerationRunner(_gateway), Input(media));
+
+        Assert.Equal(GenerationOutcome.Finished, second.Outcome);
+        Assert.Equal(before, Requests().Count);
+        Assert.Equal(mediaBefore, media.Requests.Count);
+        Assert.Equal(1, SideWorldRecords());
+    }
+
+    [Fact]
+    public async Task CancelDuringNonRelevant_ContinueReplaysSideWorld_WritesOnlyTheRest()
+    {
+        using var cts = new CancellationTokenSource();
+        var inner = Responder();
+        var fillerCalls = 0;
+        _fake.Respond = request =>
+        {
+            if (request.SchemaName == FillerSchema && Interlocked.Increment(ref fillerCalls) == 3)
+                cts.Cancel();
+            return inner(request);
+        };
+
+        var first = await Run(new GenerationRunner(_gateway, 1), Input(), ct: cts.Token);
+
+        Assert.Equal(GenerationOutcome.Cancelled, first.Outcome);
+        Assert.Equal(1, SideWorldRecords());
+        var replay = Replay();
+        Assert.All(Relevant, t => Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread[t.Id].Type));
+        var doneFiller = NonRelevant.Where(t => replay.LastByThread.ContainsKey(t.Id)).Select(t => t.Id).ToList();
+        Assert.NotEmpty(doneFiller);
+        Assert.True(doneFiller.Count < NonRelevant.Count);
+
+        _fake.Respond = Responder();
+        var before = Requests().Count;
+        var second = await Run(new GenerationRunner(_gateway, 1), Input());
+
+        Assert.Equal(GenerationOutcome.Finished, second.Outcome);
+        var resent = Requests().Skip(before).ToList();
+        Assert.DoesNotContain(resent, r => r.SchemaName == SideWorldSchema || r.SchemaName == RenderSchema);
+        Assert.Equal(NonRelevant.Select(t => t.Id).Except(doneFiller).OrderBy(i => i),
+            resent.Where(r => r.SchemaName == FillerSchema).Select(ThreadOf).OrderBy(i => i));
+        Assert.Equal(1, SideWorldRecords());
+        Assert.All(NonRelevant, t => Assert.Equal(JournalRecordType.ThreadDone, Replay().LastByThread[t.Id].Type));
+    }
+
+    [Fact]
+    public async Task FillerAuthFailure_Fatal_KeepsDoneThreads_NoFurtherFillerCalls()
+    {
+        var inner = Responder();
+        var fillerCalls = 0;
+        _fake.Respond = request => request.SchemaName == FillerSchema && Interlocked.Increment(ref fillerCalls) == 2
+            ? Fatal()
+            : inner(request);
+        var snapshot = new GenerationSnapshot();
+
+        var result = await Run(new GenerationRunner(_gateway, 1), Input(), snapshot);
+
+        Assert.Equal(GenerationOutcome.Fatal, result.Outcome);
+        Assert.Contains("invalid key", result.Message);
+        Assert.Equal(2, Requests().Count(r => r.SchemaName == FillerSchema));
+        var replay = Replay();
+        Assert.All(Relevant, t => Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread[t.Id].Type));
+        var first = Requests().First(r => r.SchemaName == FillerSchema);
+        Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread[ThreadOf(first)].Type);
+        Assert.Single(NonRelevant, t => replay.LastByThread.ContainsKey(t.Id));
+        Assert.DoesNotContain(snapshot.Peek().Events, e => e.Kind == GenerationEventKind.NonRelevantFinished);
+        Assert.False(snapshot.Peek().Waves.Single(w => w.RowKind == StageRowKind.NonRelevant).Running);
+    }
+
+    [Fact]
+    public async Task SideWorldFatal_NoFillerAttempted()
+    {
+        _fake.Respond = Responder(r => r.SchemaName == SideWorldSchema ? Fatal() : null);
+
+        var result = await Run(new GenerationRunner(_gateway), Input());
+
+        Assert.Equal(GenerationOutcome.Fatal, result.Outcome);
+        Assert.DoesNotContain(Requests(), r => r.SchemaName == FillerSchema);
+        Assert.Equal(0, SideWorldRecords());
+        var replay = Replay();
+        Assert.All(Relevant, t => Assert.Equal(JournalRecordType.ThreadDone, replay.LastByThread[t.Id].Type));
+    }
+
+    [Fact]
+    public async Task SideWorldNotSaved_InternalError_NoFillerAttempted()
+    {
+        _fake.Respond = Responder();
+        var runner = new GenerationRunner(_gateway)
+        {
+            BeforeRecordAppendHook = record => record.Type == JournalRecordType.SideWorld
+                ? Task.FromException(new IOException("disk full"))
+                : Task.CompletedTask
+        };
+
+        var result = await Run(runner, Input());
+
+        Assert.Equal(GenerationOutcome.InternalError, result.Outcome);
+        Assert.Equal("Could not save the side projects: disk full", result.Message);
+        Assert.DoesNotContain(Requests(), r => r.SchemaName == FillerSchema);
+        Assert.Equal(0, SideWorldRecords());
+
+        // The side-world call has no record of its own, so RunEnded carries it
+        var ended = JournalRecords().Last();
+        Assert.Equal(JournalRecordType.RunEnded, ended.Type);
+        Assert.Equal(700, ended.InputTokens);
+        Assert.Equal(500, ended.OutputTokens);
+    }
+
+    [Fact]
+    public async Task Filler_WritesNoLedgerDeltas_LedgerEqualsRelevantOnlyRun()
+    {
+        _fake.Respond = Responder();
+
+        var mixed = await Run(new GenerationRunner(_gateway), Input());
+
+        Assert.Equal(GenerationOutcome.Finished, mixed.Outcome);
+        var replay = Replay();
+        foreach (var thread in NonRelevant)
+        {
+            var record = replay.LastByThread[thread.Id];
+            Assert.Equal(JournalRecordType.ThreadDone, record.Type);
+            Assert.Empty(record.LedgerDelta);
+            Assert.All(record.Attachments, a => Assert.Empty(a.LedgerDelta));
+        }
+
+        // D-13: filler prompts never carry the ledger
+        Assert.All(Requests().Where(r => r.SchemaName == FillerSchema),
+            r => Assert.DoesNotContain("Earlier details from previous emails", r.UserPrompt));
+
+        var relevantOnly = PlanFixtures.Clone(_plan);
+        relevantOnly.Threads.RemoveAll(t => t.Relevance != ThreadRelevance.Relevant);
+        var folder = NewFolder();
+        var alone = await Run(new GenerationRunner(_gateway),
+            new GenerationRunInput { Draft = _draft, Plan = relevantOnly, CaseFolder = folder });
+
+        Assert.Equal(GenerationOutcome.Finished, alone.Outcome);
+        Assert.NotEmpty(alone.Ledger.Entries);
+        Assert.Equal(JsonSerializer.Serialize(alone.Ledger.Entries, DtoOptions), JsonSerializer.Serialize(mixed.Ledger.Entries, DtoOptions));
+    }
+
+    [Fact]
+    public async Task AnswerKey_NonRelevantRowsGenerated_NoCodeDefaultNames()
+    {
+        _fake.Respond = Responder();
+
+        await Run(new GenerationRunner(_gateway), Input(new FakeMediaGenerator()));
+
+        var key = KeyRows();
+        foreach (var message in NonRelevant.SelectMany(t => t.Messages))
+        {
+            Assert.Equal(AnswerKeyBuilder.StatusGenerated, key[message.DocId].Status);
+            foreach (var attachment in message.Attachments)
+            {
+                Assert.Equal(AnswerKeyBuilder.StatusGenerated, key[attachment.DocId].Status);
+                Assert.DoesNotMatch(CodeDefaultName(), key[attachment.DocId].FileName);
+            }
+        }
+
+        var daily = AttachmentTestData.Thread(_plan, AttachmentTestData.DailyBusinessThreadId);
+        Assert.Equal("Word_notes_1.docx", key[daily.Messages[0].Attachments[0].DocId].FileName);
+    }
 }

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-18-PLAN.md
-last_updated: "2026-10-05T01:35:21.283Z"
-last_activity: 2026-10-05
+stopped_at: Completed 06-24-PLAN.md
+last_updated: "2026-10-05T01:53:55.752Z"
+last_activity: 2026-10-04
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 100
-  percent: 94
+  completed_plans: 101
+  percent: 95
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 20 of 25 (19 summarized: 06-01..06-18, 06-22; wave 5 in progress; next 06-19)
+Plan: 21 of 25 (20 summarized: 06-01..06-18, 06-22, 06-24; wave 5 in progress; next 06-19)
 Status: Ready to execute
-Last activity: 2026-10-05
+Last activity: 2026-10-04
 
-Progress: [█████████░] 93%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -151,6 +151,7 @@ Progress: [█████████░] 93%
 | Phase 06 P16 | 13min | 2 tasks | 7 files |
 | Phase 06 P17 | 16min | 2 tasks | 3 files |
 | Phase 06 P18 | 45min | 3 tasks | 5 files |
+| Phase 06 P24 | 17min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -428,6 +429,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-18: thread + attachments commit as one ThreadDone line; status/events/chain text/invite slots applied only after the append; Unjournaled spend returned to the runner
 - [Phase 06]: 06-18: ChainScheduler waits only on strictly lower-ranked in-step threads (first SentAt, then Id); higher-ranked predecessors give step-start text
 - [Phase 06]: 06-18: 06-08 absorbed meeting entry edge documented: later invite sees another key but the content seed gives the same schedule
+- [Phase 06]: 06-24: Answer key run clause counts email rows of all threads plus attachment rows; planned = rows - generated - failed - skipped; skipped only in the line-3 tooltip
+- [Phase 06]: 06-24: ModelConfigurationDialog made DPI-aware (AutoSize header/button rows, AutoSize grid-button column, LogicalToDeviceUnits widths); grid horizontal scroll at 820 px is allowed by design
+- [Phase 06]: 06-24: Media prices dialog result applied via StepApiConfiguration.ApplyDialogResult (OK -> normalized clone, else current) so it is testable without ShowDialog
 
 ### Pending Todos
 
@@ -449,6 +453,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T01:35:21.277Z
-Stopped at: Completed 06-18-PLAN.md
+Last session: 2026-10-05T01:53:55.745Z
+Stopped at: Completed 06-24-PLAN.md
 Resume file: None

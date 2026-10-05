@@ -215,7 +215,7 @@ Plans:
 - [ ] 06-21-PLAN.md — End-to-end parity suite on synthetic and production-planner plans, honest about what fake output proves (Wave 8)
 - [x] 06-22-PLAN.md — Generate Corpus layout (tiles, Stages, banners, Ready card) + 144-DPI renders (Wave 3)
 - [ ] 06-23-PLAN.md — Generate Corpus run wiring (media, entry/banners, estimate, progress, reopen rows) (Wave 8)
-- [ ] 06-24-PLAN.md — Case Summary counts + media prices dialog row + 144-DPI renders (Wave 5)
+- [x] 06-24-PLAN.md — Case Summary counts + media prices dialog row + 144-DPI renders (Wave 5)
 - [ ] 06-25-PLAN.md — Phase gate: full/render suites + 144-DPI inspection, live run, controlled failure/Continue, multi-message repair and Phase 5 upgrade exercises (Wave 9)
 
 ### Phase 7: Scale, Cost, QA & Cutover
@@ -254,6 +254,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
 | 4. Corpus Plan & Answer Key | 22/22 | Complete    | 2026-10-03 |
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
-| 6. Attachments & Non-Relevant Corpus | 19/25 | In Progress|  |
+| 6. Attachments & Non-Relevant Corpus | 20/25 | In Progress|  |
 | 7. Scale, Cost, QA & Cutover | 0/TBD | Not started | - |
 | 8. Ancillary Discovery Documents | 0/TBD | Not started | - |

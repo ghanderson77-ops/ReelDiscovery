@@ -31,13 +31,23 @@ public class ThreadUnitOfWorkTests : IDisposable
     private readonly GenerationJournal _journal;
     private readonly GenerationSnapshot _snapshot;
     private readonly AIModelConfig _story;
+    private readonly AIModelConfig _volume;
 
     public ThreadUnitOfWorkTests()
     {
         _folder = EvidenceTestData.TempCaseFolder();
-        (_draft, _plan) = EvidenceTestData.ApprovedCase();
+
+        // ApprovedCase plus the Phase 6 attachment and non-relevant threads (T-0901..T-0915)
+        (_draft, _plan) = AttachmentTestData.MixedCase();
         (_gateway, _fake) = CorpusTestData.CreateGateway();
         _story = _gateway.ResolveModel(LlmTier.Story);
+        _volume = _gateway.ResolveModel(LlmTier.Volume);
+
+        // Priced so Story and Volume spend can be told apart (D-29)
+        _story.InputTokenPricePerMillion = 3m;
+        _story.OutputTokenPricePerMillion = 15m;
+        _volume.InputTokenPricePerMillion = 1m;
+        _volume.OutputTokenPricePerMillion = 5m;
         _journal = new GenerationJournal(_folder);
         _snapshot = new GenerationSnapshot();
         _snapshot.Reset(new GenerationCounts { TotalThreads = 8, WaveCount = 1 },
@@ -421,5 +431,169 @@ public class ThreadUnitOfWorkTests : IDisposable
         Assert.StartsWith("Could not build thread", record.Reason);
         AssertFailedCost(record, 1000, 400);
         Assert.Equal(1, _snapshot.Drain().Counts.FailedThreads);
+    }
+
+    // ---------- render profiles (NOISE-05, D-12 strict, D-13, D-23, D-29) ----------
+
+    private ThreadRenderContext ThreadCtx(string threadId, int wave = 1, IReadOnlyList<LedgerEntry>? ledger = null)
+    {
+        var thread = AttachmentTestData.Thread(_plan, threadId);
+        var people = PeopleDirectory.Create(_draft.Guide!, _plan);
+        var assignment = thread.Relevance == ThreadRelevance.Relevant
+            ? RenderAssignments.Compute(_plan)[thread.Id]
+            : FillerAssignments.Compute(_plan)[thread.Id];
+        return ThreadRenderContext.Create(_draft, _plan, thread, assignment, people, ledger ?? new List<LedgerEntry>(), wave);
+    }
+
+    private static string FillerSchema => JsonSchemaRegistry.GetSchemaName(typeof(FillerRenderer.FillerThreadDto));
+
+    private string FillerJson(string threadId, Action<FillerRenderer.FillerThreadDto> edit)
+    {
+        var thread = AttachmentTestData.Thread(_plan, threadId);
+        FillerAssignments.Compute(_plan).TryGetValue(threadId, out var assignment);
+        var dto = AttachmentResponder.FillerDto(thread, assignment);
+        edit(dto);
+        return JsonSerializer.Serialize(dto, DtoOptions);
+    }
+
+    [Fact]
+    public async Task Filler_DailyBusiness_VolumeTier_StructureOnly_NoLengthRetry()
+    {
+        var ctx = ThreadCtx(AttachmentTestData.DailyBusinessThreadId);
+        ctx.Assignment.Messages.Single(m => m.Seq == 1).Length = LengthBand.Short;
+        _fake.Respond = AttachmentResponder.Create(_plan, _draft.Guide!, (id, attempt) =>
+            id == ctx.Thread.Id && attempt == 1
+                ? FillerJson(id, d => d.Messages[0].Body = "Harlan Voss called. " + EvidenceTestData.Filler(400))
+                : null);
+        var profile = RenderProfile.For(ctx.Thread, _gateway, null);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit().RunAsync(ctx, profile, run);
+
+        Assert.Equal(RenderProfile.FillerName, profile.Name);
+        Assert.Equal(LlmTier.Volume, profile.Tier);
+        Assert.False(profile.UsesLedger);
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        var request = Assert.Single(_fake.Requests);
+        Assert.Equal(FillerSchema, request.SchemaName);
+        Assert.Equal(FillerPrompts.SystemPrompt, request.SystemPrompt);
+        Assert.Equal("claude-volume", request.ModelId);
+
+        var record = SingleRecord(ctx.Thread);
+        Assert.Equal(ThreadWriteStatus.Written, record.Status);
+        Assert.Empty(record.Violations);
+        Assert.Empty(record.LedgerDelta);
+        Assert.Equal(_volume.CalculateTotalCost(1000, 400), record.CostUsd);
+        Assert.NotEqual(_story.CalculateTotalCost(1000, 400), record.CostUsd);
+        Assert.Contains("Harlan Voss", record.Messages[0].BodyPlain);
+
+        // Journal messages carry the rendered From and the filler titles
+        var root = ctx.Thread.Messages.Single(m => m.Seq == 1);
+        var sender = ctx.People.Find(root.FromId)!;
+        Assert.Equal($"{sender.FullName} <{sender.Email}>", record.Messages[0].From);
+        Assert.All(record.Messages, m => Assert.Contains("@", m.From));
+        Assert.Equal(new[] { "Word notes 1" }, record.Messages[0].AttachmentTitles);
+        Assert.Empty(record.Messages[1].AttachmentTitles);
+
+        var view = _snapshot.Drain();
+        Assert.Equal(1, view.Counts.NonRelevantDone);
+        Assert.Equal(0, view.Counts.RelevantDone);
+        Assert.False(Assert.Single(view.Events, e => e.Kind == GenerationEventKind.ThreadWritten).Relevant);
+    }
+
+    [Fact]
+    public async Task Filler_MissingMessage_IsV1_AndRetried()
+    {
+        var ctx = ThreadCtx(AttachmentTestData.DailyBusinessThreadId);
+        _fake.Respond = AttachmentResponder.Create(_plan, _draft.Guide!, (id, attempt) =>
+            id == ctx.Thread.Id && attempt == 1 ? FillerJson(id, d => d.Messages.RemoveAt(d.Messages.Count - 1)) : null);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit().RunAsync(ctx, RenderProfile.For(ctx.Thread, _gateway, null), run);
+
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        Assert.Equal(2, _fake.Requests.Count);
+        Assert.Contains(FeedbackHeader, _fake.Requests[1].UserPrompt);
+        var retry = Assert.Single(_snapshot.Drain().Events, e => e.Kind == GenerationEventKind.Retry);
+        Assert.Contains(retry.Violations, v => v.Contains("the plan has 3", StringComparison.Ordinal));
+        Assert.Equal(_volume.CalculateTotalCost(2000, 800), SingleRecord(ctx.Thread).CostUsd);
+    }
+
+    [Fact]
+    public async Task Decoy_MustNotMentionHit_RetriedWithD1Feedback()
+    {
+        var ctx = ThreadCtx(AttachmentTestData.DecoyThreadId);
+        _fake.Respond = AttachmentResponder.Create(_plan, _draft.Guide!, (id, attempt) =>
+            id == ctx.Thread.Id && attempt == 1
+                ? FillerJson(id, d => d.Messages[0].Body = $"About {AttachmentTestData.DecoyFactTitle}, the log needs tidying.")
+                : null);
+        var profile = RenderProfile.For(ctx.Thread, _gateway, null);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit().RunAsync(ctx, profile, run);
+
+        Assert.Equal(RenderProfile.DecoyName, profile.Name);
+        Assert.Equal(LlmTier.Story, profile.Tier);
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        Assert.Equal(2, _fake.Requests.Count);
+        Assert.All(_fake.Requests, r => Assert.Equal("claude-story", r.ModelId));
+        var second = _fake.Requests[1].UserPrompt!;
+        var block = second[second.IndexOf(FeedbackHeader, StringComparison.Ordinal)..];
+        Assert.Contains(AttachmentTestData.DecoyFactTitle, block);
+        Assert.Empty(SingleRecord(ctx.Thread).LedgerDelta);
+    }
+
+    [Fact]
+    public async Task Decoy_HitOnEveryAttempt_KeptWithWarnings()
+    {
+        var ctx = ThreadCtx(AttachmentTestData.DecoyThreadId);
+        _fake.Respond = AttachmentResponder.Create(_plan, _draft.Guide!, (id, _) =>
+            id == ctx.Thread.Id
+                ? FillerJson(id, d => d.Messages[0].Body = $"The {AttachmentTestData.DecoyAmount} figure is in the log.")
+                : null);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit().RunAsync(ctx, RenderProfile.For(ctx.Thread, _gateway, null), run);
+
+        Assert.Equal(ThreadOutcomeKind.Warnings, outcome.Kind);
+        Assert.Equal(3, _fake.Requests.Count);
+        var record = SingleRecord(ctx.Thread);
+        Assert.Equal(ThreadWriteStatus.Warnings, record.Status);
+        Assert.Contains(record.Violations, v => v.Contains(AttachmentTestData.DecoyAmount, StringComparison.Ordinal));
+        Assert.Equal(_story.CalculateTotalCost(3000, 1200), record.CostUsd);
+    }
+
+    [Fact]
+    public async Task Bulk_Newsletter_VolumeTier_WritesNewsletterHtml()
+    {
+        var ctx = ThreadCtx(AttachmentTestData.NewsletterThreadId);
+        _fake.Respond = AttachmentResponder.Create(_plan, _draft.Guide!);
+        var profile = RenderProfile.For(ctx.Thread, _gateway, null);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit().RunAsync(ctx, profile, run);
+
+        Assert.Equal(LlmTier.Volume, profile.Tier);
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        Assert.Equal("claude-volume", Assert.Single(_fake.Requests).ModelId);
+        var eml = Path.Combine(_folder, MailboxWriter.CopyPathsFor(ctx.Thread.Messages[0], Folders)[0]);
+        var message = MimeKit.MimeMessage.Load(eml);
+        Assert.Contains("You are receiving this because you subscribed to", message.HtmlBody);
+    }
+
+    [Fact]
+    public void Profile_For_RelevantUsesStoryAndLedger()
+    {
+        var profile = RenderProfile.For(AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId), _gateway, null);
+
+        Assert.Equal(RenderProfile.RelevantName, profile.Name);
+        Assert.Equal(LlmTier.Story, profile.Tier);
+        Assert.True(profile.UsesLedger);
+        Assert.Same(_story, profile.Model);
     }
 }

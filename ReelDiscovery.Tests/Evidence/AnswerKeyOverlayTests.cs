@@ -189,7 +189,8 @@ public partial class AnswerKeyOverlayTests
 
         assignments[daily.Id] = new ThreadAssignment { ThreadId = daily.Id, Marking = PrivilegeMarking.BannerAndSubject };
         var marked = Key(draft, plan, state, assignments);
-        Assert.All(daily.Messages, m => Assert.StartsWith("Privileged & Confidential - ", marked.Single(r => r.DocId == m.DocId).Subject));
+        Assert.StartsWith("Privileged & Confidential - ", marked.Single(r => r.DocId == daily.Messages[0].DocId).Subject);
+        Assert.All(daily.Messages, m => Assert.Contains("Privileged & Confidential - ", marked.Single(r => r.DocId == m.DocId).Subject));
         Assert.Equal(AnswerKeyBuilder.NotRelevantLabel, marked.Single(r => r.DocId == daily.Messages[0].DocId).Relevance);
     }
 
@@ -247,7 +248,8 @@ public partial class AnswerKeyOverlayTests
 
         Assert.EndsWith("_v2.xlsx", chained.Single(r => r.DocId == v2.DocId).FileName);
         Assert.Equal(Unchained(v2, plan), unchained.Single(r => r.DocId == v2.DocId).FileName);
-        Assert.DoesNotContain("_v2", unchained.Single(r => r.DocId == v2.DocId).FileName);
+        Assert.Equal(AttachmentNaming.NamesFor(GenerationRunStateTests.ParentOf(plan, v2.DocId), null, chains)[v2.DocId],
+            chained.Single(r => r.DocId == v2.DocId).FileName);
         Assert.Equal("Document 1.docx", chained.Single(r => r.DocId == daily.DocId).FileName);
         Assert.All(chained.Where(r => r.DocType == AnswerKeyBuilder.DocTypeAttachment),
             r => Assert.Equal(AnswerKeyBuilder.StatusPlanned, r.Status));

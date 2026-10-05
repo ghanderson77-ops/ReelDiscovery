@@ -27,7 +27,8 @@ public static class AnswerKeyBuilder
 
     /// <summary>
     /// One row per planned email and per attachment, sorted by DocID (ordinal); never mutates the plan or the guide.
-    /// The optional overlay sets Status and Subject on email rows; attachment rows copy the parent subject but stay Planned.
+    /// The optional overlay sets Status, Subject, From and a rationale note on email rows, and Status, final file name and
+    /// note on attachment rows; attachment rows copy the parent's subject and sender.
     /// </summary>
     public static List<AnswerKeyRow> Build(CorpusPlan plan, CaseGuide guide, AnswerKeyOverlay? overlay = null)
     {
@@ -79,18 +80,26 @@ public static class AnswerKeyBuilder
                     row.Rationale = NonRelevantRationale(thread);
                 }
 
-                // Run state (D-05): applied before attachment rows so they copy the rendered subject
+                // Run state (D-05): applied before attachment rows so they copy the rendered subject and sender
                 if (overlay != null && overlay.ByDocId.TryGetValue(row.DocId, out var o) && o != null)
                 {
                     row.Status = string.IsNullOrWhiteSpace(o.Status) ? StatusPlanned : o.Status;
                     if (!string.IsNullOrWhiteSpace(o.Subject))
                         row.Subject = o.Subject;
+                    if (!string.IsNullOrWhiteSpace(o.From))
+                        row.From = o.From;
+                    row.Rationale = WithNote(row.Rationale, o.Note);
                 }
 
                 rows.Add(row);
 
                 foreach (var attachment in message.Attachments)
-                    rows.Add(AttachmentRow(thread, row, attachment));
+                {
+                    AnswerKeyOverlayEntry? entry = null;
+                    if (overlay != null && !string.IsNullOrEmpty(attachment.DocId))
+                        overlay.ByDocId.TryGetValue(attachment.DocId, out entry);
+                    rows.Add(AttachmentRow(thread, row, attachment, entry));
+                }
             }
         }
 
@@ -133,15 +142,22 @@ public static class AnswerKeyBuilder
     }
 
     // Attachments live inside the parent EML: same path, dates and people; relevance and codes follow the family (D-31)
-    private static AnswerKeyRow AttachmentRow(PlannedThread thread, AnswerKeyRow parent, PlannedAttachment attachment)
+    private static AnswerKeyRow AttachmentRow(PlannedThread thread, AnswerKeyRow parent, PlannedAttachment attachment,
+        AnswerKeyOverlayEntry? overlay)
     {
         var relevant = thread.Relevance == ThreadRelevance.Relevant;
+        var plannedName = string.IsNullOrWhiteSpace(attachment.FileName) ? attachment.DocId : attachment.FileName.Trim();
+        var rationale = relevant
+            ? $"Attachment to relevant email {parent.DocId}; family coded Relevant."
+            : $"Attachment to non-relevant email {parent.DocId}; family coded Not Relevant.";
+
+        // D-05: attachment rows move from Planned as the journal records them
         return new AnswerKeyRow
         {
             DocId = attachment.DocId,
             DocType = DocTypeAttachment,
             FilePath = parent.FilePath,
-            FileName = string.IsNullOrWhiteSpace(attachment.FileName) ? attachment.DocId : attachment.FileName.Trim(),
+            FileName = string.IsNullOrWhiteSpace(overlay?.FileName) ? plannedName : overlay.FileName.Trim(),
             Custodian = parent.Custodian,
             AllCustodians = parent.AllCustodians,
             DateSent = parent.DateSent,
@@ -159,12 +175,14 @@ public static class AnswerKeyBuilder
             Privileged = parent.Privileged,
             NearMiss = parent.NearMiss,
             NonRelevantCategory = parent.NonRelevantCategory,
-            Rationale = relevant
-                ? $"Attachment to relevant email {parent.DocId}; family coded Relevant."
-                : $"Attachment to non-relevant email {parent.DocId}; family coded Not Relevant.",
-            Status = StatusPlanned
+            Rationale = WithNote(rationale, overlay?.Note),
+            Status = string.IsNullOrWhiteSpace(overlay?.Status) ? StatusPlanned : overlay.Status
         };
     }
+
+    // "{rationale} {note}"; the rationale alone when there is no note
+    private static string WithNote(string rationale, string? note) =>
+        string.IsNullOrWhiteSpace(note) ? rationale : $"{rationale} {note.Trim()}".Trim();
 
     // Prefix once from the root subject (no cumulative RE: RE:)
     private static string SubjectOf(PlannedThread thread, PlannedMessage message)
@@ -289,10 +307,20 @@ public class AnswerKeyOverlayEntry
 {
     public string Status { get; set; } = AnswerKeyBuilder.StatusPlanned;
     public string Subject { get; set; } = string.Empty;
+
+    // Final EML part name of an attachment (Pitfall 1); empty keeps the planned name
+    public string FileName { get; set; } = string.Empty;
+
+    // Display sender of an email whose EML sender differs from the plan (voicemail notices); empty keeps the planned sender
+    public string From { get; set; } = string.Empty;
+
+    // Appended to the rationale ("Skipped: {reason}", "Voicemail from {Caller}")
+    public string Note { get; set; } = string.Empty;
 }
 
 /// <summary>
-/// Run-state projection onto the planned key (D-05): status and rendered subject per email DocID.
+/// Run-state projection onto the planned key (D-05): status, rendered subject and sender per email DocID; status, final
+/// file name and note per attachment DocID.
 /// </summary>
 public class AnswerKeyOverlay
 {

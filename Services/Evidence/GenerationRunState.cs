@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
@@ -11,7 +12,7 @@ namespace ReelDiscovery.Services.Evidence;
 /// (relevant and non-relevant) and every planned attachment. Pure: the same plan and journal always give the same state,
 /// after a finished, cancelled or crashed run. Attachment status comes only from committed, identity-validated records.
 /// </summary>
-public class GenerationRunState
+public partial class GenerationRunState
 {
     public Dictionary<string, ThreadRunStatus> StatusByThread { get; set; } = new(StringComparer.Ordinal);
 
@@ -322,15 +323,33 @@ public class GenerationRunState
     }
 
     /// <summary>
-    /// Answer-key status and rendered subject per relevant email DocID. The subject comes from the same function the EML
-    /// writer uses, so key and EML subjects always match (Pitfall 2). Attachments are not overlaid and stay Planned.
+    /// Relevant render assignments plus filler assignments for every non-relevant thread; relevant entries win on a
+    /// repeated id.
     /// </summary>
-    public AnswerKeyOverlay BuildOverlay(CorpusPlan plan, IReadOnlyDictionary<string, ThreadAssignment> assignments)
+    public static Dictionary<string, ThreadAssignment> AllAssignments(CorpusPlan plan)
+    {
+        var all = new Dictionary<string, ThreadAssignment>(RenderAssignments.Compute(plan), StringComparer.Ordinal);
+        foreach (var (id, assignment) in FillerAssignments.Compute(plan))
+            all.TryAdd(id, assignment);
+        return all;
+    }
+
+    /// <summary>
+    /// Answer-key overlay for every generation thread (D-05). Email rows: status, the subject from the same function the
+    /// EML writer uses (Pitfall 2) or the journaled voicemail subject, and the journaled voicemail sender. Attachment rows:
+    /// status from committed records, the final EML part name (Pitfall 1) and the skip reason. Pass the run's chains so
+    /// pending chained attachments show their versioned names.
+    /// </summary>
+    public AnswerKeyOverlay BuildOverlay(CorpusPlan plan, IReadOnlyDictionary<string, ThreadAssignment> assignments,
+        IReadOnlyDictionary<string, AttachmentChainLink>? chains = null)
     {
         var overlay = new AnswerKeyOverlay();
-        foreach (var thread in RelevantThreads(plan))
+        var links = chains ?? new Dictionary<string, AttachmentChainLink>(StringComparer.Ordinal);
+        foreach (var thread in GenerationThreads(plan))
         {
             var status = StatusByThread.TryGetValue(thread.Id, out var s) ? s : ThreadRunStatus.Pending;
+            var done = status is ThreadRunStatus.Written or ThreadRunStatus.Warnings;
+            var relevant = thread.Relevance == ThreadRelevance.Relevant;
             var label = status switch
             {
                 ThreadRunStatus.Written => AnswerKeyBuilder.StatusGenerated,
@@ -338,22 +357,94 @@ public class GenerationRunState
                 ThreadRunStatus.Failed => AnswerKeyBuilder.StatusFailed,
                 _ => AnswerKeyBuilder.StatusPlanned
             };
-            var marking = assignments.TryGetValue(thread.Id, out var assignment) && assignment != null
+            var marking = assignments != null && assignments.TryGetValue(thread.Id, out var assignment) && assignment != null
                 ? assignment.Marking
                 : PrivilegeMarking.None;
+            var journaled = done && Records.TryGetValue(thread.Id, out var record) && record != null
+                ? record.Messages.Where(m => m != null && m.DocId.Length > 0)
+                    .GroupBy(m => m.DocId, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal)
+                : new Dictionary<string, JournalMessage>(StringComparer.Ordinal);
 
             foreach (var message in thread.Messages.Where(m => m != null && !string.IsNullOrEmpty(m.DocId)))
             {
-                overlay.ByDocId[message.DocId] = new AnswerKeyOverlayEntry
+                var entry = new AnswerKeyOverlayEntry
                 {
                     Status = label,
                     Subject = EmailComposer.SubjectFor(thread, message, marking)
                 };
+
+                // UI-SPEC Decision 1: a written voicemail's key row shows what its EML shows, read from the journal
+                if (VoicemailComposer.IsVoicemail(thread, message) && journaled.TryGetValue(message.DocId, out var written))
+                {
+                    if (!string.IsNullOrWhiteSpace(written.Subject))
+                        entry.Subject = written.Subject.Trim();
+
+                    // Phase 5 records have no From: that EML keeps its Phase 5 caller From (06-20)
+                    if (!string.IsNullOrWhiteSpace(written.From))
+                    {
+                        entry.From = written.From.Trim();
+                        var caller = VoicemailCaller().Match(entry.Subject);
+                        if (caller.Success)
+                            entry.Note = $"Voicemail from {caller.Groups[1].Value.Trim()}.";
+                    }
+                }
+
+                overlay.ByDocId[message.DocId] = entry;
+                AddAttachments(overlay, message, relevant || done, links);
             }
         }
 
         return overlay;
     }
+
+    private void AddAttachments(AnswerKeyOverlay overlay, PlannedMessage message, bool finalNames,
+        IReadOnlyDictionary<string, AttachmentChainLink> chains)
+    {
+        if (message.Attachments == null || message.Attachments.Count == 0)
+            return;
+
+        // A pending filler attachment keeps its planned name until its titles are journaled with the thread
+        var names = finalNames
+            ? AttachmentNaming.NamesFor(message, FillerTitlesByDocId.GetValueOrDefault(message.DocId), chains)
+            : new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var attachment in message.Attachments.Where(a => a != null && !string.IsNullOrEmpty(a.DocId)))
+        {
+            if (overlay.ByDocId.ContainsKey(attachment.DocId))
+                continue;
+
+            var status = StatusByAttachment.TryGetValue(attachment.DocId, out var s) ? s : AttachmentRunStatus.Pending;
+            AttachmentRecords.TryGetValue(attachment.DocId, out var record);
+            var entry = new AnswerKeyOverlayEntry
+            {
+                Status = status switch
+                {
+                    AttachmentRunStatus.Written => AnswerKeyBuilder.StatusGenerated,
+                    AttachmentRunStatus.Warnings => AnswerKeyBuilder.StatusGeneratedWithWarnings,
+                    AttachmentRunStatus.Failed => AnswerKeyBuilder.StatusFailed,
+                    AttachmentRunStatus.Skipped => AnswerKeyBuilder.StatusSkipped,
+                    _ => AnswerKeyBuilder.StatusPlanned
+                },
+                // Journaled names passed IsSafeFileName in Normalize (T-06-41)
+                FileName = !string.IsNullOrWhiteSpace(record?.FileName)
+                    ? record.FileName
+                    : names.GetValueOrDefault(attachment.DocId) ?? string.Empty
+            };
+
+            if (status == AttachmentRunStatus.Skipped)
+            {
+                var reason = (record?.Reason ?? string.Empty).Trim().TrimEnd('.');
+                entry.Note = reason.Length > 0 ? $"Skipped: {reason}" : "Skipped";
+            }
+
+            overlay.ByDocId[attachment.DocId] = entry;
+        }
+    }
+
+    // "Voicemail from {Caller} ({m:ss})", the subject VoicemailComposer writes
+    [GeneratedRegex(@"^Voicemail from (.+) \(\d+:\d{2}\)$")]
+    private static partial Regex VoicemailCaller();
 
     public GenerationCounts ToCounts(CorpusPlan plan, int waveCount, int ledgerEntries, decimal remainingCost, bool running,
         bool finished)

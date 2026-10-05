@@ -158,21 +158,26 @@ public class ThreadSkeletonTests
     }
 
     [Fact]
-    public void BuildRelevant_SingleKnower_NotesToSelfAndOneNote()
+    public void BuildRelevant_SingleKnower_ColleagueAddedNoSelfMail()
     {
         var (ctx, _, threads) = Build();
 
-        var f008 = threads.Where(t => t.FactIds.SequenceEqual(new[] { "F-008" })).SelectMany(t => t.Messages).ToList();
+        // F-008 lists only CH-008: a colleague joins under Who knew and every email goes to someone else
+        var f008 = threads.Where(t => t.FactIds.Contains("F-008")).SelectMany(t => t.Messages).ToList();
         Assert.NotEmpty(f008);
-        Assert.All(f008, m =>
-        {
-            Assert.Equal("CH-008", m.FromId);
-            Assert.Equal(new[] { "CH-008" }, m.ToIds);
-            Assert.Empty(m.CcIds);
-        });
+        Assert.All(f008, m => Assert.DoesNotContain(m.FromId, m.ToIds));
+        var added = Assert.Single(ctx.AddedKnowers["F-008"]);
+        Assert.NotEqual("CH-008", added);
+        Assert.Contains(added, ctx.DatedFacts.Single(f => f.Id == "F-008").KnownByIds);
+        Assert.DoesNotContain(ctx.Notes, n => n.Contains("notes to self"));
+    }
 
-        const string note = "F-008 has only one person who knew about it, so its emails are notes to self. Add people under Who knew to get real threads.";
-        Assert.Single(ctx.Notes, n => n == note);
+    [Fact]
+    public void BuildRelevant_NoMessageIsAddressedOnlyToItsSender()
+    {
+        var (_, _, threads) = Build();
+
+        Assert.All(threads.SelectMany(t => t.Messages), m => Assert.False(m.ToIds.All(id => id == m.FromId), $"{m.Id} is addressed to its sender"));
     }
 
     [Fact]

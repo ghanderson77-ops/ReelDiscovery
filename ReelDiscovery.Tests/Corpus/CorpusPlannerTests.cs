@@ -167,6 +167,15 @@ public partial class CorpusPlannerTests
 
     // ----- Tests -----
 
+    // The draft as CorpusApproval saves it with the plan (lone-knower additions applied), on a copy
+    internal static CaseDraft WithAddedKnowers(CaseDraft draft, CorpusPlan plan)
+    {
+        var copy = CaseDraft.FromJson(draft.ToJson());
+        foreach (var (factId, ids) in plan.AddedKnowers)
+            ThreadSkeletonBuilder.AddKnowers(copy.Guide!.Facts.First(f => f.Id == factId), ids);
+        return copy;
+    }
+
     [Fact]
     public async Task PlanAsync_EndToEnd_BuildsCompleteValidatedPlan()
     {
@@ -207,7 +216,8 @@ public partial class CorpusPlannerTests
         Assert.All(numbers, n => Assert.False(string.IsNullOrWhiteSpace(n)));
         Assert.Equal(numbers.Count, numbers.Distinct().Count());
 
-        Assert.Equal(draft.Guide!.ComputeHash(), plan.GuideHash);
+        // The hash covers the guide as saved with the plan: the draft plus the knowers the planner added
+        Assert.Equal(WithAddedKnowers(draft, plan).Guide!.ComputeHash(), plan.GuideHash);
         Assert.Equal(settings.ComputeHash(), plan.SettingsHash);
         Assert.Equal(DocIdPrefix.Effective(settings, draft), plan.DocIdPrefix);
         Assert.False(plan.Protocol.IsFallback);
@@ -246,7 +256,7 @@ public partial class CorpusPlannerTests
 
         Assert.True(result.Succeeded, result.FailureMessage);
         var plan = result.Plan!;
-        var factById = draft.Guide!.Facts.ToDictionary(f => f.Id);
+        var factById = WithAddedKnowers(draft, plan).Guide!.Facts.ToDictionary(f => f.Id);
         var relevant = plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant).ToList();
         Assert.Equal(CorpusSettings.RelevantCount(total, 20), relevant.Sum(t => t.Messages.Count));
 

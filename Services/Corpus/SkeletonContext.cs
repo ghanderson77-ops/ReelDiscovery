@@ -41,6 +41,9 @@ public class SkeletonContext
     // Planner notes surfaced on the plan (gaps, fallbacks)
     public List<string> Notes { get; } = new();
 
+    // Cast ids added under Who knew per fact while building skeletons (carried on the plan)
+    public Dictionary<string, List<string>> AddedKnowers { get; } = new(StringComparer.Ordinal);
+
     /// <summary>
     /// Builds the context; never throws on a partial guide. Production passes Random.Shared (D-20).
     /// </summary>

@@ -51,6 +51,23 @@ public class CorpusPlanner
     /// </summary>
     public async Task<CorpusPlanResult> PlanAsync(CaseDraft draft, bool mediaAvailable, string guidance, IProgress<PlanProgress>? progress = null, CancellationToken ct = default)
     {
+        // Knowers added for lone-knower facts are only on the returned plan; the draft's guide is put back as it was
+        // (T-04-48) and CorpusApproval applies them when the plan is saved
+        var facts = draft.Guide?.Facts?.Where(f => f != null).ToList() ?? new List<KeyFact>();
+        var original = facts.Select(f => f.KnownByIds?.ToList()).ToList();
+        try
+        {
+            return await PlanCoreAsync(draft, mediaAvailable, guidance, progress, ct);
+        }
+        finally
+        {
+            for (var i = 0; i < facts.Count; i++)
+                facts[i].KnownByIds = original[i] ?? new List<string>();
+        }
+    }
+
+    private async Task<CorpusPlanResult> PlanCoreAsync(CaseDraft draft, bool mediaAvailable, string guidance, IProgress<PlanProgress>? progress, CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
         guidance = (guidance ?? string.Empty).Trim();
         var result = new CorpusPlanResult();
@@ -91,6 +108,9 @@ public class CorpusPlanner
         // 3. Allocation and skeletons
         var relevantEmails = CorpusSettings.RelevantCount(settings.TotalEmails, settings.RelevantPercent);
         var ctx = SkeletonContext.Create(draft, settings, mediaAvailable, _rng);
+
+        // Facts known to one person get a colleague under Who knew, before the guide hash is taken (no self-addressed threads)
+        ThreadSkeletonBuilder.FillLoneKnowers(ctx, notes);
         var budget = BudgetAllocator.AllocateRelevant(ctx.DatedFacts, relevantEmails, multipliers, _rng);
         if (budget.Shortfall > 0)
             notes.Add(ShortfallNote);
@@ -110,7 +130,8 @@ public class CorpusPlanner
             Settings = settings,
             Threads = relevant.Concat(nonRelevant.Threads).ToList(),
             Externals = nonRelevant.Externals,
-            Guidance = guidance
+            Guidance = guidance,
+            AddedKnowers = ctx.AddedKnowers.ToDictionary(p => p.Key, p => p.Value.ToList(), StringComparer.Ordinal)
         };
         PlanNumbering.Assign(plan, guide);
 

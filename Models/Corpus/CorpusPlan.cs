@@ -36,6 +36,12 @@ public class CorpusPlan
     // Re-plan guidance text the plan was built with
     public string Guidance { get; set; } = string.Empty;
 
+    /// <summary>
+    /// People the planner added under Who knew (fact id to cast ids) so no fact's emails go to the sender alone. Applied to
+    /// the guide when the plan is saved; GuideHash already includes them.
+    /// </summary>
+    public Dictionary<string, List<string>> AddedKnowers { get; set; } = new(StringComparer.Ordinal);
+
     [JsonIgnore]
     public int EmailCount => Threads.Sum(t => t.Messages.Count);
 

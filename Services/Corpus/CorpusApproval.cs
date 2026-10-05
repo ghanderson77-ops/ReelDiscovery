@@ -159,6 +159,14 @@ public static class CorpusApproval
             return new PlanApplyResult { Saved = false, Error = ex.Message };
         }
 
+        // People the planner added under Who knew, so the guide matches the plan's GuideHash and the emails
+        foreach (var (factId, ids) in plan.AddedKnowers ?? new())
+        {
+            var fact = draft.Guide?.Facts?.FirstOrDefault(f => f != null && f.Id == factId);
+            if (fact != null)
+                ThreadSkeletonBuilder.AddKnowers(fact, ids ?? new List<string>());
+        }
+
         draft.Corpus ??= new CorpusState();
         var corpus = draft.Corpus;
         corpus.Plan = plan;

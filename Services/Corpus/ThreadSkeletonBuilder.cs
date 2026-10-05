@@ -343,12 +343,6 @@ public static class ThreadSkeletonBuilder
         var pool = spec.Pool ?? KnowerPool(ctx, spec.Facts);
         var label = string.Join(" and ", spec.Facts.Select(f => f.Id));
 
-        if (spec.Pool == null && pool.Count == 1 && spec.Facts.Count == 1 && notedSingle.Add(spec.Facts[0].Id))
-        {
-            ctx.Notes.Add($"{spec.Facts[0].Id} has only one person who knew about it, so its emails are notes to self. " +
-                          "Add people under Who knew to get real threads.");
-        }
-
         var active = pool.Where(id => ctx.IsActive(id, spec.Anchor)).ToList();
         if (active.Count == 0)
         {
@@ -372,6 +366,24 @@ public static class ThreadSkeletonBuilder
                 ctx.Notes.Add($"Nobody who knew about {label} was active on {spec.Anchor:yyyy-MM-dd}; the thread uses the people who did it.");
                 var actors = ActorsIn(spec.Facts, pool);
                 active = actors.Count > 0 ? actors : new List<string>(pool);
+            }
+        }
+
+        // One active person would mean emails to themselves: bring in the colleague who knew the most of these facts
+        if (active.Count == 1 && spec.Pool == null)
+        {
+            var colleague = ColleagueFor(ctx, active[0], spec.Facts, spec.Anchor);
+            if (colleague != null)
+            {
+                foreach (var fact in spec.Facts.Where(f => !KnowerPool(ctx, new List<KeyFact> { f }).Contains(colleague)))
+                    AddKnowers(ctx, fact, new List<string> { colleague });
+                pool = pool.Contains(colleague) ? pool : pool.Append(colleague).ToList();
+                active.Add(colleague);
+            }
+            else if (spec.Facts.Count == 1 && notedSingle.Add(spec.Facts[0].Id))
+            {
+                ctx.Notes.Add($"{spec.Facts[0].Id} has only one person who knew about it and nobody else was active, so its emails " +
+                              "are notes to self. Add people under Who knew to get real threads.");
             }
         }
 
@@ -794,6 +806,95 @@ public static class ThreadSkeletonBuilder
         }
 
         return pool ?? new List<string>();
+    }
+
+    /// <summary>
+    /// Gives every dated fact at least two knowers so its emails go between people, not to the sender alone. A fact with
+    /// one knower gains the colleague who shares the most other facts with them (then same organization, Key tier, id);
+    /// a fact with none gains the first active Key character plus that person's colleague. Counsel is only added for a
+    /// counsel knower. Added people go into KnownByIds (with the actors, so KnowledgeGate still counts them) and each
+    /// addition is noted. Deterministic: no random draws.
+    /// </summary>
+    public static void FillLoneKnowers(SkeletonContext ctx, List<string> notes)
+    {
+        var facts = ctx.DatedFacts;
+        var cast = ctx.CastById.Values.OrderBy(c => c.Id, StringComparer.Ordinal).ToList();
+
+        foreach (var fact in facts)
+        {
+            var date = SkeletonContext.FactDate(fact);
+            if (date == null)
+                continue;
+
+            var knowers = KnowerPool(ctx, new List<KeyFact> { fact });
+            if (knowers.Count >= 2)
+                continue;
+
+            var active = cast.Where(c => ctx.IsActive(c.Id, date.Value)).ToList();
+            var added = new List<string>();
+            var anchor = knowers.FirstOrDefault();
+            if (anchor == null)
+            {
+                anchor = active.OrderBy(c => c.Tier).ThenBy(c => c.Id, StringComparer.Ordinal).Select(c => c.Id).FirstOrDefault();
+                if (anchor == null)
+                    continue;
+                added.Add(anchor);
+            }
+
+            var anchorIsCounsel = IsCounsel(ctx, anchor);
+            var anchorOrg = ctx.CastById[anchor].OrganizationId ?? string.Empty;
+            var colleague = active
+                .Where(c => c.Id != anchor && (anchorIsCounsel || !IsCounsel(ctx, c.Id)))
+                .OrderByDescending(c => facts.Count(f => !ReferenceEquals(f, fact) && KnowerPool(ctx, new List<KeyFact> { f }) is var p && p.Contains(anchor) && p.Contains(c.Id)))
+                .ThenByDescending(c => (c.OrganizationId ?? string.Empty) == anchorOrg)
+                .ThenBy(c => c.Tier)
+                .ThenBy(c => c.Id, StringComparer.Ordinal)
+                .Select(c => c.Id)
+                .FirstOrDefault();
+            if (colleague != null)
+                added.Add(colleague);
+            if (added.Count == 0)
+                continue;
+
+            AddKnowers(ctx, fact, added);
+            var names = string.Join(" and ", added.Select(id => ctx.CastById[id].FullName));
+            notes.Add($"{fact.Id} listed fewer than two people under Who knew, so {names} {(added.Count == 1 ? "was" : "were")} added so its emails go between people.");
+        }
+    }
+
+    /// <summary>
+    /// Adds <paramref name="ids"/> under Who knew: KnownByIds becomes actors, then existing knowers, then the additions
+    /// (distinct). <see cref="CorpusApproval"/> applies a saved plan's additions the same way, so the guide hash matches.
+    /// </summary>
+    public static void AddKnowers(KeyFact fact, IEnumerable<string> ids) =>
+        fact.KnownByIds = Clean(fact.ActorIds).Concat(Clean(fact.KnownByIds)).Concat(Clean(ids.ToList()))
+            .Distinct(StringComparer.Ordinal).ToList();
+
+    private static void AddKnowers(SkeletonContext ctx, KeyFact fact, List<string> ids)
+    {
+        AddKnowers(fact, ids);
+        if (!ctx.AddedKnowers.TryGetValue(fact.Id, out var list))
+            ctx.AddedKnowers[fact.Id] = list = new List<string>();
+        list.AddRange(ids.Where(id => !list.Contains(id)));
+    }
+
+    /// <summary>
+    /// For a thread with one active knower: the active person who knew the most of its facts (then shares the most
+    /// facts with the sender, same organization, Key tier, id), never counsel unless the sender is counsel. Null if none.
+    /// </summary>
+    private static string? ColleagueFor(SkeletonContext ctx, string sender, IReadOnlyCollection<KeyFact> threadFacts, DateOnly day)
+    {
+        var senderIsCounsel = IsCounsel(ctx, sender);
+        var senderOrg = ctx.CastById.TryGetValue(sender, out var member) ? member.OrganizationId ?? string.Empty : string.Empty;
+        return ctx.CastById.Values
+            .Where(c => c.Id != sender && ctx.IsActive(c.Id, day) && (senderIsCounsel || !IsCounsel(ctx, c.Id)))
+            .OrderByDescending(c => threadFacts.Count(f => KnowerPool(ctx, new List<KeyFact> { f }).Contains(c.Id)))
+            .ThenByDescending(c => ctx.DatedFacts.Count(f => KnowerPool(ctx, new List<KeyFact> { f }) is var p && p.Contains(sender) && p.Contains(c.Id)))
+            .ThenByDescending(c => (c.OrganizationId ?? string.Empty) == senderOrg)
+            .ThenBy(c => c.Tier)
+            .ThenBy(c => c.Id, StringComparer.Ordinal)
+            .Select(c => c.Id)
+            .FirstOrDefault();
     }
 
     private static List<string> ActorsIn(List<KeyFact> facts, List<string> people)

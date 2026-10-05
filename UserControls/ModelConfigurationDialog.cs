@@ -68,17 +68,22 @@ public class ModelConfigurationDialog : Form
             RowCount = 4,
             Padding = new Padding(10)
         };
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));   // 0: Header
+        mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        // Header and buttons size to their content so neither clips at 144 DPI (DPI rule 25)
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 0: Header
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // 1: Grid
         mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 2: Media prices
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));   // 3: Buttons
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // 3: Buttons
 
         // Header label
         var lblHeader = new Label
         {
             Text = "Configure models per provider: one Story and one Volume default each, optional Effort, output ceiling and pricing (per million tokens). Images and voicemail are priced per unit below.",
+            // AutoSize inside the AutoSize row wraps to the column width instead of clipping
+            AutoSize = true,
             Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(6))
         };
         mainLayout.Controls.Add(lblHeader, 0, 0);
 
@@ -107,7 +112,7 @@ public class ModelConfigurationDialog : Form
             DataPropertyName = "Provider",
             DataSource = Enum.GetValues<LlmProviderKind>(),
             ValueType = typeof(LlmProviderKind),
-            Width = 90
+            Width = LogicalToDeviceUnits(90)
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -115,7 +120,7 @@ public class ModelConfigurationDialog : Form
             Name = "ModelId",
             HeaderText = "Model ID",
             DataPropertyName = "ModelId",
-            Width = 150
+            Width = LogicalToDeviceUnits(150)
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -123,7 +128,7 @@ public class ModelConfigurationDialog : Form
             Name = "DisplayName",
             HeaderText = "Display Name",
             DataPropertyName = "DisplayName",
-            Width = 130
+            Width = LogicalToDeviceUnits(130)
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -131,7 +136,7 @@ public class ModelConfigurationDialog : Form
             Name = "InputPrice",
             HeaderText = "Input $/M",
             DataPropertyName = "InputTokenPricePerMillion",
-            Width = 90,
+            Width = LogicalToDeviceUnits(90),
             DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }
         });
 
@@ -140,7 +145,7 @@ public class ModelConfigurationDialog : Form
             Name = "OutputPrice",
             HeaderText = "Output $/M",
             DataPropertyName = "OutputTokenPricePerMillion",
-            Width = 90,
+            Width = LogicalToDeviceUnits(90),
             DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }
         });
 
@@ -149,7 +154,7 @@ public class ModelConfigurationDialog : Form
             Name = "DefaultForTier",
             HeaderText = "Default For Tier",
             DataPropertyName = "DefaultForTierText",
-            Width = 110
+            Width = LogicalToDeviceUnits(110)
         };
         tierColumn.Items.AddRange("None", "Story", "Volume");
         _gridModels.Columns.Add(tierColumn);
@@ -159,7 +164,7 @@ public class ModelConfigurationDialog : Form
             Name = "Effort",
             HeaderText = "Effort",
             DataPropertyName = "EffortText",
-            Width = 70
+            Width = LogicalToDeviceUnits(70)
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -167,7 +172,7 @@ public class ModelConfigurationDialog : Form
             Name = "MaxOutputTokens",
             HeaderText = "Max Output",
             DataPropertyName = "MaxOutputTokens",
-            Width = 90,
+            Width = LogicalToDeviceUnits(90),
             ValueType = typeof(int)
         });
 
@@ -179,8 +184,11 @@ public class ModelConfigurationDialog : Form
         {
             Dock = DockStyle.Right,
             FlowDirection = FlowDirection.TopDown,
-            Width = 110,
-            Padding = new Padding(5, 0, 0, 0)
+            WrapContents = false,
+            // Sized to the DPI-scaled buttons rather than a fixed 110 px
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(LogicalToDeviceUnits(5), 0, 0, 0)
         };
 
         _btnAdd = ButtonHelper.CreateButton("Add Model", 100, 30, ButtonStyle.Primary);
@@ -192,7 +200,7 @@ public class ModelConfigurationDialog : Form
         gridButtonPanel.Controls.Add(_btnRemove);
 
         _btnResetDefaults = ButtonHelper.CreateButton("Reset Defaults", 100, 30, ButtonStyle.Secondary);
-        _btnResetDefaults.Margin = new Padding(0, 20, 0, 0);
+        _btnResetDefaults.Margin = new Padding(0, LogicalToDeviceUnits(20), 0, 0);
         _btnResetDefaults.Click += BtnResetDefaults_Click;
         gridButtonPanel.Controls.Add(_btnResetDefaults);
 
@@ -208,7 +216,8 @@ public class ModelConfigurationDialog : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Dock = DockStyle.Fill,
-            Margin = new Padding(0, LogicalToDeviceUnits(16), 0, 0),
+            // Same left cell margin as the grid panel, so both left edges line up
+            Margin = new Padding(gridPanel.Margin.Left, LogicalToDeviceUnits(16), gridPanel.Margin.Right, 0),
             Padding = Padding.Empty
         };
 
@@ -243,7 +252,9 @@ public class ModelConfigurationDialog : Form
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.RightToLeft,
-            Padding = new Padding(0, 5, 0, 0)
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(0, LogicalToDeviceUnits(5), 0, 0)
         };
 
         _btnCancel = ButtonHelper.CreateButton("Cancel", 80, 30, ButtonStyle.Default);
@@ -251,7 +262,7 @@ public class ModelConfigurationDialog : Form
         bottomPanel.Controls.Add(_btnCancel);
 
         _btnOk = ButtonHelper.CreateButton("OK", 80, 30, ButtonStyle.Primary);
-        _btnOk.Margin = new Padding(0, 0, 10, 0);
+        _btnOk.Margin = new Padding(0, 0, LogicalToDeviceUnits(10), 0);
         _btnOk.Click += BtnOk_Click;
         bottomPanel.Controls.Add(_btnOk);
 

@@ -6,7 +6,7 @@
 
 ## From 06-12
 
-- `GenerationResetTests.StartOver_LockedFile_IsReported_RestStillDeleted` failed once in the full suite (3170/3171) and passed on an isolated rerun (12/12 GenerationResetTests). Looks timing/file-lock flaky under full-suite load; unrelated to 06-12 files.
+- `GenerationResetTests.StartOver_LockedFile_IsReported_RestStillDeleted` failed once in the full suite (3170/3171) and passed on an isolated rerun (12/12 GenerationResetTests). Looks timing/file-lock flaky under full-suite load; unrelated to 06-12 files. **Addressed in 06-25 (57d663b):** the test opened the just-written EML with FileShare.None, which fails while antivirus or the indexer holds any handle on it. It now retries that open (bounded). Production `GenerationReset.TryDelete` has no transient-lock retry (unlike `CaseStore.WriteAtomic`). That is left as is; see the 06-25 summary.
 
 ## From 06-21
 

@@ -116,6 +116,10 @@ public partial class StepGenerateCorpus : UserControl
     // Visible reads false while a parent is hidden, so the banner layout keeps its own flag
     private bool _bannerHasButton = true;
     private GenerationCounts? _lastCounts;
+    // Running stage row to keep in view (-1 = none) and the last time the user scrolled the Stages grid (05-UI-SPEC S1)
+    private int _runningStageIndex = -1;
+    private DateTime _stagesUserScrollUtc = DateTime.MinValue;
+    private bool _stagesAutoScrolling;
     private string _noticeText = string.Empty;
 
     public string StepTitle => "Generate Corpus";
@@ -185,6 +189,13 @@ public partial class StepGenerateCorpus : UserControl
 
         // Wire handlers only after every control exists (handlers read other controls)
         _gridWaves.CellPainting += Grid_CellPainting;
+        _gridWaves.Scroll += (s, e) =>
+        {
+            if (!_stagesAutoScrolling)
+                _stagesUserScrollUtc = DateTime.UtcNow;
+        };
+        _gridWaves.SizeChanged += (s, e) => ScrollRunningStageIntoView();
+        _gridWaves.VisibleChanged += (s, e) => ScrollRunningStageIntoView();
         _gridActivity.CellPainting += Grid_CellPainting;
         _root.SizeChanged += (s, e) =>
         {
@@ -558,8 +569,14 @@ public partial class StepGenerateCorpus : UserControl
         GridStyle.AddDotColumn(_gridWaves, this);
         AddRightColumn(_gridWaves, "Wave", "Wave", 56);
         AddFillColumn(_gridWaves, "Dates", "Dates", 120);
-        // Stage rows count items (threads or attachments), so the column is Done (06-UI-SPEC S1 Row 4)
-        AddRightColumn(_gridWaves, "Done", "Done", 80);
+        // Stage rows count items (threads or attachments), so the column is Done (06-UI-SPEC S1 Row 4). UI-SPEC says 80;
+        // a 5K run's "2,240 / 3,760" plus the 15 px right inset needs more at Segoe UI 9.5, so it fits "9,999 / 9,999"
+        var doneColumn = AddRightColumn(_gridWaves, "Done", "Done", 80);
+        using (var bodyFont = Theme.BodyFont())
+        {
+            var doneText = TextRenderer.MeasureText("9,999 / 9,999", bodyFont).Width + LogicalToDeviceUnits(15 + 8);
+            doneColumn.Width = Math.Max(doneColumn.Width, doneText);
+        }
         AddRightColumn(_gridWaves, "Warnings", "Warnings", 80);
         AddRightColumn(_gridWaves, "Failed", "Failed", 64);
         layout.Controls.Add(_gridWaves, 0, 1);
@@ -640,13 +657,14 @@ public partial class StepGenerateCorpus : UserControl
     /// <summary>
     /// Right-aligned column: header and cell text end 15 inside the grid (16 from the card's outer edge, Phase 4 rule 15).
     /// </summary>
-    private void AddRightColumn(DataGridView grid, string name, string header, int width)
+    private DataGridViewTextBoxColumn AddRightColumn(DataGridView grid, string name, string header, int width)
     {
         var column = AddTextColumn(grid, name, header, width);
         column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
         column.DefaultCellStyle.Padding = new Padding(0, 0, LogicalToDeviceUnits(15), 0);
         column.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleRight;
         column.HeaderCell.Style.Padding = new Padding(0, LogicalToDeviceUnits(6), LogicalToDeviceUnits(15) - GridStyle.HeaderTextMargin, LogicalToDeviceUnits(6));
+        return column;
     }
 
     private void BuildStatusStrip(int gap)
@@ -803,6 +821,37 @@ public partial class StepGenerateCorpus : UserControl
         }
 
         _gridWaves.ClearSelection();
+        _runningStageIndex = waves.FindIndex(w => w.Running);
+        ScrollRunningStageIntoView();
+    }
+
+    /// <summary>
+    /// Keeps the running stage row visible unless the user scrolled the grid in the last 5 seconds (05-UI-SPEC S1).
+    /// </summary>
+    private void ScrollRunningStageIntoView()
+    {
+        var index = _runningStageIndex;
+        if (index < 0 || index >= _gridWaves.Rows.Count || !_gridWaves.IsHandleCreated || !_gridWaves.Visible)
+            return;
+        if (DateTime.UtcNow - _stagesUserScrollUtc < TimeSpan.FromSeconds(5))
+            return;
+
+        var shown = _gridWaves.DisplayedRowCount(false);
+        if (shown <= 0)
+            return;
+        var first = Math.Max(0, _gridWaves.FirstDisplayedScrollingRowIndex);
+        if (index >= first && index < first + shown)
+            return;
+
+        _stagesAutoScrolling = true;
+        try
+        {
+            _gridWaves.FirstDisplayedScrollingRowIndex = Math.Max(0, index - shown + 1);
+        }
+        finally
+        {
+            _stagesAutoScrolling = false;
+        }
     }
 
     // Wave and Non-relevant rows count their threads and attachments; the repair row counts attachments only
@@ -880,6 +929,7 @@ public partial class StepGenerateCorpus : UserControl
     {
         _gridActivity.Rows.Clear();
         _gridWaves.Rows.Clear();
+        _runningStageIndex = -1;
     }
 
     internal static Color ToneColor(ActivityTone tone) => tone switch

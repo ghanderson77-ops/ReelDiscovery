@@ -1896,6 +1896,29 @@ public partial class GenerationRunnerMixedTests
         Shift(threadId, firstSent - thread.Messages.Min(m => m.SentAt));
     }
 
+    private AttachmentType KindOf(string docId) =>
+        _plan.Threads.SelectMany(AttachmentsOf).First(a => a.DocId == docId).Kind;
+
+    // A late repair that obeys the prompt: the default document without new details (no V6 retry)
+    private static string NoNewDetails(AttachmentType kind)
+    {
+        var dto = AttachmentResponder.DefaultDto(kind, relevant: true);
+        switch (dto)
+        {
+            case AttachmentRenderer.WordAttachmentDto word:
+                word.NewDetails = new List<ThreadRenderer.LedgerDeltaDto>();
+                break;
+            case AttachmentRenderer.ExcelAttachmentDto excel:
+                excel.NewDetails = new List<ThreadRenderer.LedgerDeltaDto>();
+                break;
+            case AttachmentRenderer.PowerPointAttachmentDto slides:
+                slides.NewDetails = new List<ThreadRenderer.LedgerDeltaDto>();
+                break;
+        }
+
+        return JsonSerializer.Serialize(dto, dto.GetType(), DtoOptions);
+    }
+
     private DateTimeOffset AfterLastThread(int days) =>
         _plan.Threads.SelectMany(t => t.Messages).Max(m => m.SentAt).AddDays(days);
 
@@ -1910,7 +1933,7 @@ public partial class GenerationRunnerMixedTests
         await Run(new GenerationRunner(_gateway), Input());
         Assert.Equal(AnswerKeyBuilder.StatusFailed, KeyRows()[refused].Status);
 
-        _fake.Respond = Responder();
+        _fake.Respond = Responder(overrideJson: (docId, _) => docId == refused ? NoNewDetails(AttachmentType.Excel) : null);
         var before = Requests().Count;
         var result = await Run(new GenerationRunner(_gateway), Input());
 
@@ -2144,7 +2167,7 @@ public partial class GenerationRunnerMixedTests
         var first = MimeMessage.Load(Path.Combine(_folder, copies[0]));
         Assert.Equal(first.Subject, key.Subject);
         Assert.Contains(first.From.Mailboxes.Single().Address, key.From);
-        Assert.Contains(first.From.Mailboxes.Single().Name, key.From);
+        Assert.Contains(first.From.Mailboxes.Single().Name!, key.From);
     }
 
     // ---------- snapshot, stage and events (UI-SPEC S1) ----------
@@ -2329,7 +2352,7 @@ public partial class GenerationRunnerMixedTests
     {
         var folder = NewFolder();
         CopyFolder(source, folder);
-        _fake.Respond = Responder();
+        _fake.Respond = Responder(overrideJson: (docId, _) => docIds.Contains(docId) ? NoNewDetails(KindOf(docId)) : null);
         var before = Requests().Count;
         var runner = new GenerationRunner(DelayedGateway(_ => Random.Shared.Next(0, 5)))
         {

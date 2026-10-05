@@ -66,6 +66,9 @@ public class GenerationRunner
     // Non-relevant threads per run step: bounds memory and sets the checkpoint cadence of Stage B (T-06-58)
     public const int FillerChunkSize = 50;
 
+    // Review MEDIUM: bound attachment buffers held by repairs separately from provider slots
+    public const int MaxConcurrentRepairs = 4;
+
     // Debounced so a burst of finishing threads writes the key at most every 2 s; wave and run end always write it
     public static readonly TimeSpan KeyProjectionInterval = TimeSpan.FromSeconds(2);
 
@@ -89,6 +92,18 @@ public class GenerationRunner
 
     // Test seam: passed to ThreadUnitOfWork.BeforeAppendHook (runs just before each ThreadDone append)
     internal Func<JournalRecord, Task>? BeforeThreadAppendHook { get; set; }
+
+    // Test seam: reorders each step's repair list before launch (deadlock tests run it reversed)
+    internal Func<List<AttachmentRepairGroup>, List<AttachmentRepairGroup>>? RepairOrderHook { get; set; }
+
+    // Test seam: repair slots for this run; null uses MaxConcurrentRepairs
+    internal int? RepairSlotsOverride { get; set; }
+
+    // Test seam: passed to AttachmentRepair.BeforeAppendHook (runs just before each AttachmentsRepaired append)
+    internal Func<JournalRecord, Task>? BeforeRepairAppendHook { get; set; }
+
+    // Test seam: called when a repair takes a slot (+1) and gives it back (-1)
+    internal Action<string, int>? RepairSlotHook { get; set; }
 
     /// <summary>
     /// Writes every thread not yet journaled as done: relevant waves first, then non-relevant mail. Never throws: cancel,
@@ -155,14 +170,27 @@ public class GenerationRunner
             .GroupBy(t => t.Id, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
-        // Media items this run will attempt: those of threads not yet written (MediaStopped reports what is left)
+        // D-26 + review concern 5: attachments of written threads, repaired in story order (relevant by wave, then filler)
+        var groups = state.RepairGroups(plan, mediaAvailable: input.Media != null)
+            .Where(g => threads.ContainsKey(g.ThreadId) && state.Records.ContainsKey(g.ThreadId))
+            .ToList();
+        var relevantRepairs = groups.Where(g => g.Relevant).ToLookup(g => g.WaveIndex);
+        var fillerRepairs = groups.Where(g => !g.Relevant).ToList();
+        var kindOf = threads.Values.SelectMany(PlannedAttachments)
+            .GroupBy(a => a.DocId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Kind, StringComparer.Ordinal);
+
+        // Media items this run will attempt: those of threads not yet written and of repairs (MediaStopped reports what is left)
         ctx.MediaGate.SetRemaining(threads.Values
             .Where(t => !state.IsDone(t.Id))
             .SelectMany(PlannedAttachments)
-            .Count(a => a.Kind is AttachmentType.Image or AttachmentType.Voicemail));
+            .Count(a => a.Kind is AttachmentType.Image or AttachmentType.Voicemail)
+            + groups.SelectMany(g => g.AttachmentDocIds)
+                .Count(d => kindOf.TryGetValue(d, out var kind) && kind is AttachmentType.Image or AttachmentType.Voicemail));
 
         var attachmentsUow = new AttachmentUnitOfWork(_llm, snapshot, input.Media, ctx.MediaGate, ctx.StoryModel, ctx.VolumeModel);
-        var uow = new ThreadUnitOfWork(_llm, journal, new MailboxWriter(folder, folders), snapshot, ctx.StoryModel, attachmentsUow)
+        var mailbox = new MailboxWriter(folder, folders);
+        var uow = new ThreadUnitOfWork(_llm, journal, mailbox, snapshot, ctx.StoryModel, attachmentsUow)
         {
             BeforeAppendHook = BeforeThreadAppendHook
         };
@@ -172,12 +200,34 @@ public class GenerationRunner
         ctx.LastGoodState = state;
         ctx.LastGoodLedger = startLedger;
 
+        // One repair service per run; never re-renders email text (D-26)
+        var repair = new AttachmentRepair(journal, mailbox, attachmentsUow, snapshot, folder, folders)
+        {
+            BeforeAppendHook = BeforeRepairAppendHook
+        };
+        ctx.Repair = repair;
+        ctx.RepairSlots = new SemaphoreSlim(RepairSlotsOverride ?? MaxConcurrentRepairs);
+        ctx.RepairAttachments = groups.Sum(g => g.AttachmentDocIds.Count);
+        ctx.RepairThreads = groups.Count;
+        ctx.RepairRow = repairRow;
+
+        // Review concern 5: a repair is late when a later relevant wave holds a thread finished before this run (text and
+        // attachments; a thread with its own pending repair is completed after this one, in story order)
+        var repairing = new HashSet<string>(groups.Select(g => g.ThreadId), StringComparer.Ordinal);
+        ctx.LastFinishedWave = threads.Values
+            .Where(t => t.Relevance == ThreadRelevance.Relevant && state.IsDone(t.Id) && !repairing.Contains(t.Id)
+                        && ctx.WaveOf.ContainsKey(t.Id))
+            .Select(t => ctx.WaveOf[t.Id])
+            .DefaultIfEmpty(0)
+            .Max();
+        ctx.StartLedger = startLedger;
+
         // Same row rules and mediaAvailable as RepairGroups and GenerationHistory.Waves (checker 06-23)
         var seeds = state.AttachmentSeeds(plan, ctx.WaveOf, fillerRow, repairRow, mediaAvailable: mediaAvailable);
         snapshot.Reset(
             state.ToCounts(plan, waves.Count, startLedger.Entries.Count,
                 EstimateRemaining(ctx, state), running: true, finished: false),
-            StageRows(plan, waves, state, seeds, threads, fillerRow),
+            StageRows(plan, waves, state, seeds, threads, fillerRow, repairRow, groups.Count),
             seeds);
 
         var pendingTotal = state.TotalThreads - state.Written - state.Warnings;
@@ -263,26 +313,37 @@ public class GenerationRunner
                 // Distinct: two units of work on one thread would pay twice and race on the same EML paths
                 var pending = wave.ThreadIds.Where(id => !state.IsDone(id) && threads.ContainsKey(id))
                     .Distinct(StringComparer.Ordinal).ToList();
-                if (pending.Count == 0)
+                var waveRepairs = relevantRepairs[wave.Index].ToList();
+                if (pending.Count == 0 && !relevantRepairs[wave.Index].Any())
                     continue;
 
-                snapshot.SetStage(GenerationStage.Writing, wave.Index, waves.Count, wave.Start, wave.End, pending.Count);
-                snapshot.SetWaveRunning(wave.Index, true);
-                snapshot.AddEvent(new GenerationEvent
+                if (pending.Count > 0)
                 {
-                    Kind = GenerationEventKind.WaveStarted,
-                    LocalTime = DateTime.Now,
-                    WaveIndex = wave.Index,
-                    WaveCount = waves.Count,
-                    WaveStart = wave.Start,
-                    WaveEnd = wave.End,
-                    Threads = pending.Count,
-                    Emails = pending.Sum(id => threads[id].Messages.Count(m => m != null))
-                });
+                    snapshot.SetStage(GenerationStage.Writing, wave.Index, waves.Count, wave.Start, wave.End, pending.Count);
+                    snapshot.SetWaveRunning(wave.Index, true);
+                    snapshot.AddEvent(new GenerationEvent
+                    {
+                        Kind = GenerationEventKind.WaveStarted,
+                        LocalTime = DateTime.Now,
+                        WaveIndex = wave.Index,
+                        WaveCount = waves.Count,
+                        WaveStart = wave.Start,
+                        WaveEnd = wave.End,
+                        Threads = pending.Count,
+                        Emails = pending.Sum(id => threads[id].Messages.Count(m => m != null))
+                    });
+                }
+                else
+                {
+                    // Only attachments of written threads in this step ("Adding missing attachments: ...")
+                    snapshot.SetStage(GenerationStage.Attachments, wave.Index, waves.Count, wave.Start, wave.End,
+                        waveRepairs.Sum(g => g.AttachmentDocIds.Count));
+                }
 
-                // Earlier waves only: LedgerSelector filters by wave, and this wave's deltas are not merged yet
+                // Earlier waves only: LedgerSelector filters by wave, and this wave's deltas are not merged yet; deltas from
+                // earlier-wave repairs of this run are already in
                 var ledger = LedgerMerger.Build(plan, guide, ctx.WaveOf, deltas);
-                ctx.ChainScheduler.BeginStep(pending);
+                ctx.ChainScheduler.BeginStep(pending.Concat(waveRepairs.Select(g => g.ThreadId)));
                 var step = StepContext(ctx, wave.Index);
                 var relevantProfile = RenderProfile.Relevant(_llm);
                 var tasks = pending
@@ -295,8 +356,41 @@ public class GenerationRunner
                         return RunThreadAsync(ctx, uow, render, relevantProfile, step, run);
                     })
                     .ToList();
-                var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-                KeepSlots(ctx, step);
+
+                var repairSteps = new List<ThreadAttachmentContext>();
+                var repairTasks = new List<Task<AttachmentRepairOutcome?>>();
+                var repairIds = new List<string>();
+                if (waveRepairs.Count > 0)
+                {
+                    StartRepairs(ctx);
+                    snapshot.SetWaveRunning(repairRow, true);
+                    foreach (var group in RepairOrderHook?.Invoke(waveRepairs.ToList()) ?? waveRepairs)
+                    {
+                        var render = ThreadRenderContext.Create(input.Draft, plan, threads[group.ThreadId],
+                            ctx.Assignments.TryGetValue(group.ThreadId, out var a) ? a : new ThreadAssignment { ThreadId = group.ThreadId },
+                            ctx.People, ledger.Entries, wave.Index);
+                        var actx = RepairContext(ctx, wave.Index, group.ThreadId);
+                        repairSteps.Add(actx);
+                        repairIds.Add(group.ThreadId);
+                        repairTasks.Add(RunRepairAsync(ctx, state, group, render, relevantProfile, actx, run));
+                    }
+                }
+
+                ThreadOutcome[] results;
+                AttachmentRepairOutcome?[] repaired;
+                try
+                {
+                    await Task.WhenAll(tasks.Cast<Task>().Concat(repairTasks)).ConfigureAwait(false);
+                    results = tasks.Select(t => t.Result).ToArray();
+                    repaired = repairTasks.Select(t => t.Result).ToArray();
+                }
+                finally
+                {
+                    KeepSlots(ctx, step);
+                    foreach (var actx in repairSteps)
+                        KeepSlots(ctx, actx);
+                    snapshot.SetWaveRunning(repairRow, false);
+                }
 
                 // Merged after the wave completes: same-wave threads never see each other's details (D-11)
                 foreach (var result in results)
@@ -304,6 +398,17 @@ public class GenerationRunner
                     // D-18 + review concern 1: only details whose line is durable reach later waves
                     if (result.Kind is ThreadOutcomeKind.Written or ThreadOutcomeKind.Warnings && result.Record != null)
                         deltas[result.Record.ThreadId] = result.Record.LedgerDelta.Concat(result.AttachmentDeltas).ToList();
+                }
+
+                // Review concern 5: earlier-wave repairs reach later waves; same-wave threads still never see each other
+                for (var r = 0; r < repaired.Length; r++)
+                {
+                    var done = repaired[r];
+                    if (done == null || done.Unjournaled || done.Deltas.Count == 0)
+                        continue;
+
+                    var id = repairIds[r];
+                    deltas[id] = (deltas.TryGetValue(id, out var existing) ? existing : new List<LedgerDelta>()).Concat(done.Deltas).ToList();
                 }
 
                 snapshot.SetWaveRunning(wave.Index, false);
@@ -318,19 +423,22 @@ public class GenerationRunner
                 snapshot.SetStage(GenerationStage.Merging, wave.Index, waves.Count, wave.Start, wave.End);
                 var merged = LedgerMerger.Build(plan, guide, ctx.WaveOf, deltas);
                 snapshot.SetLedgerEntries(merged.Entries.Count);
-                snapshot.AddEvent(new GenerationEvent
+                if (pending.Count > 0)
                 {
-                    Kind = GenerationEventKind.WaveFinished,
-                    LocalTime = DateTime.Now,
-                    WaveIndex = wave.Index,
-                    WaveCount = waves.Count,
-                    WaveStart = wave.Start,
-                    WaveEnd = wave.End,
-                    Written = results.Count(r => r.Kind == ThreadOutcomeKind.Written),
-                    Warnings = results.Count(r => r.Kind == ThreadOutcomeKind.Warnings),
-                    Failed = results.Count(r => r.Kind == ThreadOutcomeKind.Failed),
-                    LedgerTotal = merged.Entries.Count
-                });
+                    snapshot.AddEvent(new GenerationEvent
+                    {
+                        Kind = GenerationEventKind.WaveFinished,
+                        LocalTime = DateTime.Now,
+                        WaveIndex = wave.Index,
+                        WaveCount = waves.Count,
+                        WaveStart = wave.Start,
+                        WaveEnd = wave.End,
+                        Written = results.Count(r => r.Kind == ThreadOutcomeKind.Written),
+                        Warnings = results.Count(r => r.Kind == ThreadOutcomeKind.Warnings),
+                        Failed = results.Count(r => r.Kind == ThreadOutcomeKind.Failed),
+                        LedgerTotal = merged.Entries.Count
+                    });
+                }
 
                 await CheckpointAsync(ctx, final: false, outcome, message).ConfigureAwait(false);
             }
@@ -344,9 +452,9 @@ public class GenerationRunner
                     .OrderBy(t => t.Messages.Where(m => m != null).Min(m => m.SentAt.UtcDateTime))
                     .ThenBy(t => t.Id, StringComparer.Ordinal)
                     .ToList();
-                if (pendingFiller.Count > 0)
-                    (outcome, message) = await RunNonRelevantAsync(ctx, uow, state, replay, pendingFiller, fillerRow, run, ct)
-                        .ConfigureAwait(false);
+                if (pendingFiller.Count > 0 || fillerRepairs.Count > 0)
+                    (outcome, message) = await RunNonRelevantAsync(ctx, uow, state, replay, pendingFiller, fillerRepairs, threads,
+                        fillerRow, run, ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -400,12 +508,13 @@ public class GenerationRunner
 
     /// <summary>
     /// Stage B (D-25, NOISE-01..05): the side world from the journal or one Volume call, journaled before use, then every
-    /// pending non-relevant thread in chunks with its filler assignment and category profile. Returns the run outcome:
-    /// Finished, Fatal (text provider) or InternalError (side projects not saved). Throws only when the user cancels.
+    /// pending non-relevant thread in chunks with its filler assignment and category profile, then the attachment repairs of
+    /// written non-relevant threads. Returns the run outcome: Finished, Fatal (text provider) or InternalError (side
+    /// projects not saved). Throws only when the user cancels.
     /// </summary>
     private async Task<(GenerationOutcome Outcome, string Message)> RunNonRelevantAsync(RunContext ctx, ThreadUnitOfWork uow,
-        GenerationRunState state, JournalReplay replay, List<PlannedThread> pending, int fillerRow, PlanCallRun run,
-        CancellationToken ct)
+        GenerationRunState state, JournalReplay replay, List<PlannedThread> pending, List<AttachmentRepairGroup> repairs,
+        IReadOnlyDictionary<string, PlannedThread> threads, int fillerRow, PlanCallRun run, CancellationToken ct)
     {
         var input = ctx.Input;
         var plan = input.Plan;
@@ -455,45 +564,108 @@ public class GenerationRunner
             });
         }
 
-        snapshot.SetStage(GenerationStage.NonRelevant, count: pending.Count);
-        snapshot.SetWaveRunning(fillerRow, true);
-        snapshot.AddEvent(new GenerationEvent
+        if (pending.Count > 0)
         {
-            Kind = GenerationEventKind.NonRelevantStarted,
-            LocalTime = DateTime.Now,
-            Threads = pending.Count,
-            Emails = pending.Sum(t => t.Messages.Count(m => m != null))
-        });
+            snapshot.SetStage(GenerationStage.NonRelevant, count: pending.Count);
+            snapshot.SetWaveRunning(fillerRow, true);
+            snapshot.AddEvent(new GenerationEvent
+            {
+                Kind = GenerationEventKind.NonRelevantStarted,
+                LocalTime = DateTime.Now,
+                Threads = pending.Count,
+                Emails = pending.Sum(t => t.Messages.Count(m => m != null))
+            });
 
-        var written = 0;
-        var warnings = 0;
-        var failed = 0;
+            var written = 0;
+            var warnings = 0;
+            var failed = 0;
+            try
+            {
+                // Filler has no ledger dependency: chunks only bound memory and checkpoint cadence (D-25)
+                foreach (var chunk in pending.Chunk(FillerChunkSize))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    snapshot.SetStage(GenerationStage.NonRelevant, count: pending.Count);
+                    ctx.ChainScheduler.BeginStep(chunk.Select(t => t.Id));
+                    var step = StepContext(ctx, fillerRow);
+                    var tasks = chunk
+                        .Select(thread =>
+                        {
+                            // D-08, D-09, D-13: filler assignments and the category profile; never the ledger
+                            var render = ThreadRenderContext.Create(input.Draft, plan, thread,
+                                ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
+                                ctx.People, new List<LedgerEntry>(), fillerRow);
+                            render.PreviousStatus = Status(state, thread.Id);
+                            return RunThreadAsync(ctx, uow, render, RenderProfile.For(thread, _llm, sideWorld), step, run);
+                        })
+                        .ToList();
+                    var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+                    written += results.Count(r => r.Kind == ThreadOutcomeKind.Written);
+                    warnings += results.Count(r => r.Kind == ThreadOutcomeKind.Warnings);
+                    failed += results.Count(r => r.Kind == ThreadOutcomeKind.Failed);
+
+                    if (run.IsFatal)
+                        return (GenerationOutcome.Fatal, run.FatalError);
+
+                    ct.ThrowIfCancellationRequested();
+                    await CheckpointAsync(ctx, final: false, GenerationOutcome.Finished, string.Empty).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                snapshot.SetWaveRunning(fillerRow, false);
+            }
+
+            snapshot.AddEvent(new GenerationEvent
+            {
+                Kind = GenerationEventKind.NonRelevantFinished,
+                LocalTime = DateTime.Now,
+                Written = written,
+                Warnings = warnings,
+                Failed = failed,
+                Relevant = false
+            });
+        }
+
+        // Non-relevant repairs after the side world exists: no ledger, same slots, the repair row
+        if (repairs.Count == 0)
+            return (GenerationOutcome.Finished, string.Empty);
+
+        StartRepairs(ctx);
+        snapshot.SetWaveRunning(ctx.RepairRow, true);
         try
         {
-            // Filler has no ledger dependency: chunks only bound memory and checkpoint cadence (D-25)
-            foreach (var chunk in pending.Chunk(FillerChunkSize))
+            foreach (var chunk in repairs.Chunk(FillerChunkSize))
             {
                 ct.ThrowIfCancellationRequested();
-                snapshot.SetStage(GenerationStage.NonRelevant, count: pending.Count);
-                ctx.ChainScheduler.BeginStep(chunk.Select(t => t.Id));
-                var step = StepContext(ctx, fillerRow);
-                var tasks = chunk
-                    .Select(thread =>
-                    {
-                        // D-08, D-09, D-13: filler assignments and the category profile; never the ledger
-                        var render = ThreadRenderContext.Create(input.Draft, plan, thread,
-                            ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
-                            ctx.People, new List<LedgerEntry>(), fillerRow);
-                        render.PreviousStatus = Status(state, thread.Id);
-                        return RunThreadAsync(ctx, uow, render, RenderProfile.For(thread, _llm, sideWorld), step, run);
-                    })
-                    .ToList();
-                var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+                snapshot.SetStage(GenerationStage.Attachments, count: repairs.Sum(g => g.AttachmentDocIds.Count));
+                var ordered = RepairOrderHook?.Invoke(chunk.ToList()) ?? chunk.ToList();
+                ctx.ChainScheduler.BeginStep(ordered.Select(g => g.ThreadId));
+                var steps = new List<ThreadAttachmentContext>();
+                var tasks = new List<Task<AttachmentRepairOutcome?>>();
+                foreach (var group in ordered)
+                {
+                    var thread = threads[group.ThreadId];
+                    var render = ThreadRenderContext.Create(input.Draft, plan, thread,
+                        ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
+                        ctx.People, new List<LedgerEntry>(), fillerRow);
+                    var actx = StepContext(ctx, ctx.RepairRow);
+                    steps.Add(actx);
+                    tasks.Add(RunRepairAsync(ctx, state, group, render, RenderProfile.For(thread, _llm, sideWorld), actx, run));
+                }
 
-                written += results.Count(r => r.Kind == ThreadOutcomeKind.Written);
-                warnings += results.Count(r => r.Kind == ThreadOutcomeKind.Warnings);
-                failed += results.Count(r => r.Kind == ThreadOutcomeKind.Failed);
+                try
+                {
+                    await Task.WhenAll(tasks).ConfigureAwait(false);
+                }
+                finally
+                {
+                    foreach (var actx in steps)
+                        KeepSlots(ctx, actx);
+                }
 
+                // A fatal stop skips the remaining repairs; committed ones stay journaled
                 if (run.IsFatal)
                     return (GenerationOutcome.Fatal, run.FatalError);
 
@@ -503,20 +675,99 @@ public class GenerationRunner
         }
         finally
         {
-            snapshot.SetWaveRunning(fillerRow, false);
+            snapshot.SetWaveRunning(ctx.RepairRow, false);
         }
 
-        snapshot.AddEvent(new GenerationEvent
-        {
-            Kind = GenerationEventKind.NonRelevantFinished,
-            LocalTime = DateTime.Now,
-            Written = written,
-            Warnings = warnings,
-            Failed = failed,
-            Relevant = false
-        });
-
         return (GenerationOutcome.Finished, string.Empty);
+    }
+
+    // The first repair step of the run announces every repair (UI-SPEC "Adding n missing attachments to m written threads")
+    private static void StartRepairs(RunContext ctx)
+    {
+        if (Interlocked.Exchange(ref ctx.RepairAnnounced, 1) == 1)
+            return;
+
+        ctx.Snapshot.AddEvent(new GenerationEvent
+        {
+            Kind = GenerationEventKind.AttachmentRepairStarted,
+            LocalTime = DateTime.Now,
+            Attachments = ctx.RepairAttachments,
+            Threads = ctx.RepairThreads
+        });
+    }
+
+    // One attachment context per relevant repair: known invite slots, the repair row and the late-repair constraints
+    private static ThreadAttachmentContext RepairContext(RunContext ctx, int waveIndex, string threadId)
+    {
+        var actx = StepContext(ctx, ctx.RepairRow);
+        actx.LateRepair = ctx.LastFinishedWave > waveIndex;
+
+        // Checker 06-20 info: a late repair must not contradict later waves, nor same-wave mail written before this run
+        actx.LaterEstablished = ctx.StartLedger.Entries
+            .Where(e => e != null && (e.WaveIndex > waveIndex || (e.WaveIndex == waveIndex && e.SourceThreadId != threadId)))
+            .ToList();
+        return actx;
+    }
+
+    /// <summary>
+    /// One thread's attachment repair: waits for its lower-ranked chain predecessors, then takes a repair slot. Returns
+    /// null when the run stopped before the repair started. Throws only when the user cancels.
+    /// </summary>
+    private async Task<AttachmentRepairOutcome?> RunRepairAsync(RunContext ctx, GenerationRunState state, AttachmentRepairGroup group,
+        ThreadRenderContext render, RenderProfile profile, ThreadAttachmentContext actx, PlanCallRun run)
+    {
+        var threadId = group.ThreadId;
+        var started = false;
+        var acquired = false;
+        try
+        {
+            if (run.IsFatal)
+            {
+                ctx.ChainScheduler.Complete(threadId, EmptyTexts);
+                return null;
+            }
+
+            // Checker 06-18/06-20: never hold a repair slot while a lower-ranked predecessor still needs one; waits only point to lower ranks (a DAG), so slot holders can always finish
+            await ctx.ChainScheduler.WaitForPredecessorsAsync(threadId, run.UserToken).ConfigureAwait(false);
+            await ctx.RepairSlots.WaitAsync(run.UserToken).ConfigureAwait(false);
+            acquired = true;
+            RepairSlotHook?.Invoke(threadId, 1);
+
+            if (run.IsFatal)
+            {
+                ctx.ChainScheduler.Complete(threadId, EmptyTexts);
+                return null;
+            }
+
+            started = true;
+            var outcome = await ctx.Repair.RepairThreadAsync(render, profile, state.Records[threadId], state.AttachmentRecords, group,
+                actx, run).ConfigureAwait(false);
+
+            // Checker 06-19: tokens and dollars each counted exactly once
+            if (outcome.Unjournaled)
+                ctx.AddUnjournaledSpend(outcome.InputTokens, outcome.OutputTokens, outcome.CostUsd + outcome.MediaCostUsd);
+            else
+                ctx.AddUnjournaledSpend(outcome.NotRunInputTokens, outcome.NotRunOutputTokens, outcome.NotRunCostUsd);
+
+            if (!outcome.Unjournaled)
+                await MaybeProjectAsync(ctx).ConfigureAwait(false);
+            return outcome;
+        }
+        catch (Exception)
+        {
+            // The repair completes in its own finally; this covers a cancel while waiting (idempotent)
+            if (!started)
+                ctx.ChainScheduler.Complete(threadId, EmptyTexts);
+            throw;
+        }
+        finally
+        {
+            if (acquired)
+            {
+                RepairSlotHook?.Invoke(threadId, -1);
+                ctx.RepairSlots.Release();
+            }
+        }
     }
 
     private static async Task<ThreadOutcome> RunThreadAsync(RunContext ctx, ThreadUnitOfWork uow, ThreadRenderContext render,
@@ -864,7 +1115,8 @@ public class GenerationRunner
     /// counts from the replayed state and the attachment seeds so live counters start where the journal left off.
     /// </summary>
     private static List<WaveProgress> StageRows(CorpusPlan plan, List<GenerationWave> waves, GenerationRunState state,
-        IReadOnlyDictionary<string, AttachmentSeed> seeds, IReadOnlyDictionary<string, PlannedThread> threads, int fillerRow)
+        IReadOnlyDictionary<string, AttachmentSeed> seeds, IReadOnlyDictionary<string, PlannedThread> threads, int fillerRow,
+        int repairRow, int repairThreads)
     {
         var rows = waves.Select(w => new WaveProgress
         {
@@ -894,6 +1146,18 @@ public class GenerationRunner
                 Done = filler.Count(t => state.IsDone(t.Id)),
                 Warnings = filler.Count(t => Status(state, t.Id) == ThreadRunStatus.Warnings),
                 Failed = filler.Count(t => Status(state, t.Id) == ThreadRunStatus.Failed)
+            });
+        }
+
+        // Only when the run starts with repairs pending; its attachment counters come from the seeds on repairRow, so
+        // wave rows count only attachments of threads pending at run start and tiles never double count
+        if (repairThreads > 0)
+        {
+            rows.Add(new WaveProgress
+            {
+                Index = repairRow,
+                RowKind = StageRowKind.Attachments,
+                Threads = repairThreads
             });
         }
 
@@ -959,6 +1223,20 @@ public class GenerationRunner
 
         // One per run: a media stop ends only media (UI-SPEC Decision 2)
         public MediaRunGate MediaGate { get; init; } = null!;
+
+        // D-26: attachment repair of written threads, bounded by its own slots
+        public AttachmentRepair Repair { get; set; } = null!;
+        public SemaphoreSlim RepairSlots { get; set; } = null!;
+        public int RepairAttachments { get; set; }
+        public int RepairThreads { get; set; }
+        public int RepairRow { get; set; }
+
+        // Set once by the first repair step (Interlocked)
+        public int RepairAnnounced;
+
+        // Review concern 5: highest wave holding a relevant thread finished (text and attachments) before this run
+        public int LastFinishedWave { get; set; }
+        public NarrativeLedger StartLedger { get; set; } = new();
 
         public SemaphoreSlim ProjectionGate { get; } = new(1, 1);
 

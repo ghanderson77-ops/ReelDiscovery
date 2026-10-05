@@ -21,6 +21,10 @@ public class ModelConfigurationDialog : Form
     /// <summary>Media per-unit prices (D-29); a copy of the prices passed in, normalized on OK.</summary>
     public MediaPrices MediaPrices { get; private set; }
 
+    // Window sizes in logical (96 DPI) units; scaled with LogicalToDeviceUnits and clamped to the working area
+    internal static readonly Size LogicalSize = new(980, 480);
+    internal static readonly Size LogicalMinimumSize = new(820, 360);
+
     public ModelConfigurationDialog(List<AIModelConfig> models)
         : this(models, MediaPrices.Defaults())
     {
@@ -53,8 +57,11 @@ public class ModelConfigurationDialog : Form
     private void InitializeUI()
     {
         this.Text = "Configure AI Models";
-        this.Size = new Size(980, 480);
-        this.MinimumSize = new Size(820, 360);
+        // Logical sizes scaled to the current DPI: fixed pixels left the grid row ~73 px tall at 144 DPI,
+        // so the Add/Remove/Reset buttons and the grid rows were clipped (DPI rule 25)
+        this.Size = new Size(LogicalToDeviceUnits(LogicalSize.Width), LogicalToDeviceUnits(LogicalSize.Height));
+        this.MinimumSize = new Size(LogicalToDeviceUnits(LogicalMinimumSize.Width),
+            LogicalToDeviceUnits(LogicalMinimumSize.Height));
         this.StartPosition = FormStartPosition.CenterParent;
         this.FormBorderStyle = FormBorderStyle.Sizable;
         this.MaximizeBox = false;
@@ -271,6 +278,16 @@ public class ModelConfigurationDialog : Form
         this.Controls.Add(mainLayout);
         this.AcceptButton = _btnOk;
         this.CancelButton = _btnCancel;
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+
+        // Keep the scaled window on screen on small displays at high scaling
+        var area = Screen.FromControl(this).WorkingArea;
+        MinimumSize = new Size(Math.Min(area.Width, MinimumSize.Width), Math.Min(area.Height, MinimumSize.Height));
+        Size = new Size(Math.Min(area.Width, Width), Math.Min(area.Height, Height));
     }
 
     private Label CreatePriceLabel(string text) => new()

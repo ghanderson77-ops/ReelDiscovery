@@ -201,13 +201,13 @@ public partial class AttachmentRepairTests : IDisposable
     }
 
     private static IEnumerable<string> PartIds(MimeMessage message) =>
-        DocParts(message).Select(p => p.Headers[MailboxWriter.DocIdHeader]);
+        DocParts(message).Select(p => p.Headers[MailboxWriter.DocIdHeader] ?? string.Empty);
 
     // Rewrites a copy without the given parts (a complete, readable file)
     private void StripParts(string relative, params string[] docIds)
     {
         var message = Load(relative);
-        foreach (var nested in AllMultiparts(message.Body).ToList())
+        foreach (var nested in AllMultiparts(message.Body!).ToList())
         {
             foreach (var entity in nested.Where(e => docIds.Contains(e.Headers[MailboxWriter.DocIdHeader])).ToList())
                 nested.Remove(entity);
@@ -308,8 +308,7 @@ public partial class AttachmentRepairTests : IDisposable
 
         var replay = GenerationJournal.Replay(_folder, _plan);
         Assert.Equal(JournalRecordType.AttachmentDone, replay.LastByAttachment[excel].Type);
-        Assert.Empty(GenerationRunState.From(_plan, replay).RepairGroups(_plan, mediaAvailable: false)
-            .Where(g => g.ThreadId == thread.Id));
+        Assert.DoesNotContain(GenerationRunState.From(_plan, replay).RepairGroups(_plan, mediaAvailable: false), g => g.ThreadId == thread.Id);
     }
 
     [Fact]
@@ -477,7 +476,8 @@ public partial class AttachmentRepairTests : IDisposable
         Assert.Equal(JournalRecordType.AttachmentFailed, failed.Type);
         Assert.StartsWith($"Could not rewrite {root.DocId}.eml: ", failed.Reason);
         Assert.Equal(_story.CalculateTotalCost(800, 300), failed.CostUsd);
-        Assert.Equal(new[] { copies[0] }, line.Files);
+        // Only fully rewritten emails are listed; the partly rewritten copy is already listed by its ThreadDone line
+        Assert.Empty(line.Files);
         Assert.Equal(0, first.Added);
         var view = _snapshot.Drain();
         Assert.Equal(doneBefore, view.Counts.AttachmentsDone);

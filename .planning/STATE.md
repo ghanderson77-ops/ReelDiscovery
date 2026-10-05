@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-21-PLAN.md
-last_updated: "2026-10-05T03:34:20.512Z"
+stopped_at: Completed 06-23-PLAN.md
+last_updated: "2026-10-05T04:02:32.609Z"
 last_activity: 2026-10-05
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 106
-  completed_plans: 104
-  percent: 98
+  completed_plans: 105
+  percent: 99
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 6 (Attachments & Non-Relevant Corpus) — EXECUTING
-Plan: 24 of 25 (23 summarized: 06-01..06-22, 06-24; wave 8 in progress; next 06-23)
+Plan: 25 of 25 (24 summarized: 06-01..06-24; next 06-25)
 Status: Ready to execute
 Last activity: 2026-10-05
 
-Progress: [██████████] 98%
+Progress: [██████████] 99%
 
 ## Performance Metrics
 
@@ -155,6 +155,7 @@ Progress: [██████████] 98%
 | Phase 06 P19 | 30min | 2 tasks | 2 files |
 | Phase 06 P20 | 35min | 2 tasks | 4 files |
 | Phase 06 P21 | 25min | 1 tasks | 2 files |
+| Phase 06 P23 | 22min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -442,6 +443,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-20: a repair is late only when a later wave holds a thread finished before the run with no repair pending; earlier-wave repair details reach later waves
 - [Phase 06]: 06-20: repairs await chain predecessors before a repair slot (max 4); one AttachmentsRepaired line per thread; a message whose committed part cannot be reused or recreated is left untouched
 - [Phase 06]: 06-21: parity suite compares header sets per shape without Cc (Cc checked against the plan in the structure fact); privilege incidence gap on small production plans (planner 2% daily privilege) deferred to Phase 7 leakage audit
+- [Phase 06]: 06-23: one banner rule (partial > media > Retry Failed Items) for entry, after-run and after-error dashboards over threads and attachments; entry heading keeps LatestAttemptEnded && Outcome Finished
+- [Phase 06]: 06-23: reopened Stages rows use GenerationHistory.Waves(plan, state, mediaAvailable) with the runner's row indexes and AttachmentSeeds; after a run the rows use input.Media != null, banners and estimates use the session's media availability
 
 ### Pending Todos
 
@@ -463,6 +466,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-05T03:34:20.505Z
-Stopped at: Completed 06-21-PLAN.md
+Last session: 2026-10-05T04:02:32.602Z
+Stopped at: Completed 06-23-PLAN.md
 Resume file: None

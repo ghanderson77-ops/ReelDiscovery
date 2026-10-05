@@ -50,6 +50,23 @@ public class GenerationResetTests : IDisposable
         Assert.Equal(GenerationOutcome.Finished, result.Outcome);
     }
 
+    // FileShare.None fails while any other handle is open; antivirus / the search indexer briefly open a just-written EML
+    // (with share-delete, so File.Delete is unaffected), which made the exclusive open flaky under full-suite load
+    private static async Task<FileStream> OpenExclusiveAsync(string path)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            }
+            catch (IOException) when (attempt < 50)
+            {
+                await Task.Delay(100);
+            }
+        }
+    }
+
     private void WriteFile(string relative, string text = "x")
     {
         var full = Path.Combine(_folder, relative.Replace('/', Path.DirectorySeparatorChar));
@@ -294,7 +311,7 @@ public class GenerationResetTests : IDisposable
         var locked = emls[0];
 
         StartOverResult result;
-        using (new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None))
+        using (await OpenExclusiveAsync(locked))
             result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
 
         var error = Assert.Single(result.Errors);

@@ -21,7 +21,7 @@ public partial class SubjectSeeder
     public const int SeedMaxOutputTokens = 8_000;
     public const int MaxParallelCalls = 3;
 
-    private const string SeedTaskText = "Write a realistic subject line for each slot: the everyday work of these people, unrelated to any dispute. For external slots, also give the sending publication, company or person. Keep angle empty.";
+    private const string SeedTaskText = "Write a realistic subject line for each slot: the everyday work of these people, unrelated to any dispute. For external slots, also give senderName: an invented, realistic first and last name for a personal contact (never a role or relationship such as 'A friend' or 'Mom'), or the invented name of the publication or company. Keep angle empty.";
 
     private const string DecoyTaskText = "Each slot is a near-miss: it mentions the same projects, companies and people as the matter, but it is about a routine, unrelated topic. Write a subject and one sentence on that unrelated topic (angle).";
 
@@ -412,8 +412,9 @@ public partial class SubjectSeeder
     /// <summary>
     /// Renames an outside sender from the model's sender name. Business senders get "{mailbox}@{slug}.com" (slug folded to
     /// [a-z0-9], at most 30 characters; "mail" appended on a collision with a case, reserved or other external domain);
-    /// personal contacts keep their consumer domain with "{first}.{last}". Names matching a case organization or person,
-    /// or with nothing usable, keep the existing identity (T-04-42).
+    /// personal contacts keep their consumer domain with "{first}.{last}" and must look like a person's name
+    /// (<see cref="EmailIdentity.LooksLikePersonName"/>). Names matching a case organization or person, roles such as
+    /// "A friend", or names with nothing usable keep the existing identity (T-04-42).
     /// </summary>
     private static bool RenameExternal(ExternalParty external, string? senderName, ApplyState state)
     {
@@ -428,8 +429,9 @@ public partial class SubjectSeeder
 
         if (external.Kind == ExternalKind.Personal)
         {
+            // A role or description ("A friend", "My mom") keeps the code-generated contact
             var tokens = name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (tokens.Length < 2 || EmailIdentity.Fold(tokens[0]).Length == 0 || EmailIdentity.Fold(tokens[^1]).Length == 0)
+            if (!EmailIdentity.LooksLikePersonName(name) || EmailIdentity.Fold(tokens[0]).Length == 0 || EmailIdentity.Fold(tokens[^1]).Length == 0)
                 return false;
             var domain = string.IsNullOrWhiteSpace(external.Domain) ? NonRelevantSkeletonBuilder.PersonalDomains[0] : external.Domain.Trim();
             if (state.CaseDomains.Contains(domain))
@@ -708,7 +710,7 @@ public partial class SubjectSeeder
         public string Angle { get; set; } = string.Empty;
 
         [JsonPropertyName("senderName")]
-        [Description("For external slots: the sending publication, company or person; otherwise empty string")]
+        [Description("For personal slots: a realistic first and last name, never a role such as 'A friend' or 'Mom'. For newsletter, vendor and spam slots: the publication or company name. Otherwise empty string")]
         public string SenderName { get; set; } = string.Empty;
     }
 }

@@ -4,6 +4,7 @@ using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Services.Ai;
+using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Tests.Case;
 using ReelDiscovery.Tests.Fakes;
@@ -141,7 +142,7 @@ public partial class SubjectSeederTests
 
         Assert.Contains("S-0001 | Daily business | from CH-002 Tom Becker, Project Manager, Brightline Glazing, LLC | to CH-009 Owen Reilly | Mar 2024 | 3 messages | attachments: Word", prompt);
         Assert.Contains("S-0042 | Newsletter | external: newsletter | to CH-001 Maria Delgado | Apr 2024 | 1 message | attachments: none", prompt);
-        Assert.Contains("Write a realistic subject line for each slot: the everyday work of these people, unrelated to any dispute. For external slots, also give the sending publication, company or person. Keep angle empty.", prompt);
+        Assert.Contains("Write a realistic subject line for each slot: the everyday work of these people, unrelated to any dispute. For external slots, also give senderName: an invented, realistic first and last name for a personal contact (never a role or relationship such as 'A friend' or 'Mom'), or the invented name of the publication or company. Keep angle empty.", prompt);
         Assert.Contains("Keep every name the document uses exactly as written", prompt);
         Assert.Equal(new[] { "S-0001", "S-0042" }, CorpusTestData.SlotIdsIn(prompt));
     }
@@ -312,7 +313,7 @@ public partial class SubjectSeederTests
         slotId,
         subject = subject ?? $"Subject {slotId}",
         angle = angle ?? (category == "Near-miss" ? $"Angle {slotId}." : string.Empty),
-        senderName = senderName ?? (category is "Newsletter" or "Spam" or "Vendor" ? $"Sender {slotId}" : category == "Personal" ? $"Pat Sender{slotId[2..]}" : string.Empty)
+        senderName = senderName ?? (category is "Newsletter" or "Spam" or "Vendor" ? $"Sender {slotId}" : category == "Personal" ? "Pat Sender" + new string(slotId[2..].Select(c => (char)('a' + c - '0')).ToArray()) : string.Empty)
     };
 
     /// <summary>
@@ -434,6 +435,41 @@ public partial class SubjectSeederTests
         Assert.Equal("Daily Deal Alerts", externals[1].Name);
         Assert.Equal("Spring market outlook", threads[0].Subject);
     }
+
+    [Theory]
+    [InlineData("A friend")]
+    [InlineData("A neighbor")]
+    [InlineData("My mom")]
+    [InlineData("The Smith family")]
+    public async Task SeedAsync_PersonalRoleName_KeepsCodeGeneratedContact(string roleName)
+    {
+        var draft = CorpusTestData.RichDraft();
+        var externals = Externals();
+        var threads = new List<PlannedThread> { NewsletterThread("N-0001", "EXT-003") };
+        var (gateway, fake) = Gateway();
+        fake.Respond = _ => Respond(Seed("S-0001", "Personal", "Farmers market Saturday?", senderName: roleName));
+
+        await new SubjectSeeder(gateway).SeedAsync(draft, threads, externals);
+
+        Assert.Equal("Jamie Ellison", externals[2].Name);
+        Assert.Equal("jamie.ellison@gmail.com", externals[2].Email);
+    }
+
+    [Theory]
+    [InlineData("Dana Whitfield", true)]
+    [InlineData("Mary-Kate O'Neil", true)]
+    [InlineData("Luis J. Ortega", true)]
+    [InlineData("Luis de la Cruz", true)]
+    [InlineData("A friend", false)]
+    [InlineData("a friend", false)]
+    [InlineData("A neighbor", false)]
+    [InlineData("My mom", false)]
+    [InlineData("The Smith family", false)]
+    [InlineData("Book Club", false)]
+    [InlineData("Friend", false)]
+    [InlineData("J. Ortega", false)]
+    public void LooksLikePersonName_RolesRejected(string name, bool expected) =>
+        Assert.Equal(expected, EmailIdentity.LooksLikePersonName(name));
 
     [Fact]
     public async Task SeedAsync_ExternalName_CappedFoldedOrKept()

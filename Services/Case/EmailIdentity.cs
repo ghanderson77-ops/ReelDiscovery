@@ -168,6 +168,65 @@ public static partial class EmailIdentity
         return at < 0 ? string.Empty : email[(at + 1)..].Trim().TrimEnd('.').ToLowerInvariant();
     }
 
+    // Leading words that make a phrase a description of someone ("A friend", "My mom", "The Smith family")
+    private static readonly HashSet<string> NonNameLeadWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "a", "an", "the", "my", "your", "our", "his", "her", "their", "some", "someone"
+    };
+
+    // Relationship and role words a model gives instead of a name ("A neighbor", "Book Club")
+    private static readonly HashSet<string> RoleWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "friend", "neighbor", "neighbour", "mom", "mum", "dad", "mother", "father", "brother", "sister", "cousin", "aunt",
+        "uncle", "grandma", "grandpa", "family", "buddy", "pal", "roommate", "coworker", "colleague", "contact", "member",
+        "team", "club", "group", "sender", "person", "someone", "unknown", "anonymous", "customer", "user"
+    };
+
+    // Lower-case surname particles allowed between the first and last name ("Luis de la Cruz")
+    private static readonly HashSet<string> NameParticles = new(StringComparer.Ordinal)
+    {
+        "de", "del", "della", "da", "di", "du", "la", "le", "van", "von", "der", "den", "bin", "al"
+    };
+
+    public const int MaxPersonNameTokens = 5;
+
+    /// <summary>
+    /// True when <paramref name="name"/> reads as a person's first and last name: 2 to 5 tokens, each a capitalized word
+    /// (hyphens and apostrophes allowed, e.g. O'Brien, Smith-Jones), with initials ("J.") and lower-case particles
+    /// ("de", "van") only between the first and last token. Roles and descriptions such as "A friend", "My mom",
+    /// "The Smith family" or "Book Club" are refused.
+    /// </summary>
+    public static bool LooksLikePersonName(string? name)
+    {
+        var tokens = (name ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length < 2 || tokens.Length > MaxPersonNameTokens || NonNameLeadWords.Contains(tokens[0]))
+            return false;
+
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            var token = tokens[i];
+            if (RoleWords.Contains(token.Trim('\'', '’', '-')))
+                return false;
+
+            var middle = i > 0 && i < tokens.Length - 1;
+            if (NameWordPattern().IsMatch(token))
+                continue;
+            if (middle && (InitialPattern().IsMatch(token) || NameParticles.Contains(token)))
+                continue;
+            return false;
+        }
+
+        return true;
+    }
+
+    // "Dana", "O'Neil", "Mary-Kate", "McAllister": an upper-case letter, then letters with single inner ' or - joins
+    [GeneratedRegex(@"^\p{Lu}\p{Ll}*(?:\p{Lu}\p{Ll}+)?(?:['’-]\p{L}\p{Ll}*)*$", RegexOptions.None, CitationScanner.MatchTimeoutMs)]
+    private static partial Regex NameWordPattern();
+
+    // "J." middle initial
+    [GeneratedRegex(@"^\p{Lu}\.$", RegexOptions.None, CitationScanner.MatchTimeoutMs)]
+    private static partial Regex InitialPattern();
+
     private static bool IsAvailable(string domain, ISet<string> takenDomains) =>
         !takenDomains.Contains(domain) && !IsReservedDomain(domain);
 

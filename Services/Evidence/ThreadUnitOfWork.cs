@@ -320,6 +320,19 @@ public class ThreadUnitOfWork
                     var journalReason = $"Could not save the run journal: {ex.Message}" + RemoveCopies(uncommitted);
                     uncommitted = null;
                     _snapshot.AddCost(cost + spend.TextCost, spend.MediaCost);
+
+                    // WR-02: the cause reaches the activity log even though no record or tile changes
+                    _snapshot.AddEvent(new GenerationEvent
+                    {
+                        Kind = GenerationEventKind.NotSaved,
+                        LocalTime = DateTime.Now,
+                        ThreadId = ctx.Thread.Id,
+                        Subject = RootSubject(ctx),
+                        WaveIndex = ctx.WaveIndex,
+                        Attempt = attempts,
+                        Reason = journalReason,
+                        Relevant = relevant
+                    });
                     return new ThreadOutcome
                     {
                         Kind = ThreadOutcomeKind.Failed,

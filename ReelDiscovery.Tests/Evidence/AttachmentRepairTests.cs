@@ -789,6 +789,11 @@ public partial class AttachmentRepairTests : IDisposable
         var view = _snapshot.Drain();
         Assert.Equal(costBefore + 2 * cost, view.Counts.CostUsd);
         Assert.DoesNotContain(view.Events, e => e.Kind == GenerationEventKind.AttachmentsAdded);
+
+        // WR-02: the cause reaches the activity log
+        var notSaved = Assert.Single(view.Events, e => e.Kind == GenerationEventKind.NotSaved);
+        Assert.Equal(thread.Id, notSaved.ThreadId);
+        Assert.StartsWith("Could not save the run journal", notSaved.Reason);
     }
 
     [Fact]

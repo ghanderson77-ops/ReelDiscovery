@@ -95,6 +95,7 @@ public class AttachmentRepair
                 {
                     result.Reason = $"The saved text of thread {thread.Id} is incomplete.";
                     result.Unjournaled = true;
+                    AddNotSavedEvent(ctx, result.Reason);
                     return result;
                 }
 
@@ -346,6 +347,7 @@ public class AttachmentRepair
                     _snapshot.AddCost(result.CostUsd, result.MediaCostUsd);
                     result.Unjournaled = true;
                     result.Reason = $"Could not save the run journal: {ex.Message}";
+                    AddNotSavedEvent(ctx, result.Reason);
                     if (cancelled)
                         throw new OperationCanceledException(run.UserToken);
                     return result;
@@ -429,12 +431,12 @@ public class AttachmentRepair
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                return Broken(result, outcomes, $"Could not repair thread {thread.Id}: {ex.Message}");
+                return Broken(ctx, result, outcomes, $"Could not repair thread {thread.Id}: {ex.Message}");
             }
             catch (Exception ex)
             {
                 // RUN-02: one thread's repair never aborts the run
-                return Broken(result, outcomes, $"Could not repair thread {thread.Id}: {ex.Message}");
+                return Broken(ctx, result, outcomes, $"Could not repair thread {thread.Id}: {ex.Message}");
             }
         }
         finally
@@ -520,7 +522,8 @@ public class AttachmentRepair
     }
 
     // Spend of every call so far, reported on an Unjournaled outcome
-    private AttachmentRepairOutcome Broken(AttachmentRepairOutcome result, List<AttachmentOutcome> outcomes, string reason)
+    private AttachmentRepairOutcome Broken(ThreadRenderContext ctx, AttachmentRepairOutcome result, List<AttachmentOutcome> outcomes,
+        string reason)
     {
         result.InputTokens = 0;
         result.OutputTokens = 0;
@@ -536,7 +539,23 @@ public class AttachmentRepair
         result.Reason = reason;
         if (result.CostUsd > 0m || result.MediaCostUsd > 0m)
             _snapshot.AddCost(result.CostUsd, result.MediaCostUsd);
+        AddNotSavedEvent(ctx, reason);
         return result;
+    }
+
+    // WR-02: an Unjournaled repair changes no record or tile, so its cause is shown as its own activity row
+    private void AddNotSavedEvent(ThreadRenderContext ctx, string reason)
+    {
+        _snapshot.AddEvent(new GenerationEvent
+        {
+            Kind = GenerationEventKind.NotSaved,
+            LocalTime = DateTime.Now,
+            ThreadId = ctx.Thread.Id,
+            Subject = RootSubject(ctx),
+            WaveIndex = ctx.WaveIndex,
+            Reason = reason,
+            Relevant = ctx.Thread.Relevance == ThreadRelevance.Relevant
+        });
     }
 
     private static void AddSpend(AttachmentRepairOutcome result, List<AttachmentOutcome> outcomes)

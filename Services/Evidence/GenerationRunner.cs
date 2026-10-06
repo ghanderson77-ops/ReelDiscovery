@@ -435,7 +435,8 @@ public class GenerationRunner
                         WaveEnd = wave.End,
                         Written = results.Count(r => r.Kind == ThreadOutcomeKind.Written),
                         Warnings = results.Count(r => r.Kind == ThreadOutcomeKind.Warnings),
-                        Failed = results.Count(r => r.Kind == ThreadOutcomeKind.Failed),
+                        // WR-02: an Unjournaled thread stays pending (its NotSaved row explains why), as on the tiles
+                        Failed = results.Count(r => r.Kind == ThreadOutcomeKind.Failed && !r.Unjournaled),
                         LedgerTotal = merged.Entries.Count
                     });
                 }
@@ -603,7 +604,7 @@ public class GenerationRunner
 
                     written += results.Count(r => r.Kind == ThreadOutcomeKind.Written);
                     warnings += results.Count(r => r.Kind == ThreadOutcomeKind.Warnings);
-                    failed += results.Count(r => r.Kind == ThreadOutcomeKind.Failed);
+                    failed += results.Count(r => r.Kind == ThreadOutcomeKind.Failed && !r.Unjournaled);
 
                     if (run.IsFatal)
                         return (GenerationOutcome.Fatal, run.FatalError);

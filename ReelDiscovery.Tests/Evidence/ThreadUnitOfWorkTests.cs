@@ -1396,6 +1396,11 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         Assert.Equal(0, view.Counts.AttachmentsDone);
         Assert.Equal(spend, view.Counts.CostUsd);
         Assert.DoesNotContain(view.Events, e => e.Kind is GenerationEventKind.ThreadWritten or GenerationEventKind.ThreadFailed);
+
+        // WR-02: the cause still reaches the activity log
+        var notSaved = Assert.Single(view.Events, e => e.Kind == GenerationEventKind.NotSaved);
+        Assert.Equal(first.Id, notSaved.ThreadId);
+        Assert.StartsWith("Could not save the run journal", notSaved.Reason);
     }
 
     [Fact]

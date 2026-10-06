@@ -786,6 +786,17 @@ public class GenerationUiTextTests
     }
 
     [Fact]
+    public void Activity_NotSaved_ShowsReasonAsDanger()
+    {
+        var e = Event(GenerationEventKind.NotSaved);
+        e.Reason = "Could not save the run journal: disk full";
+
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Not saved: Could not save the run journal: disk full. It stays pending for the next Continue.", line.Text);
+        Assert.Equal(ActivityTone.Danger, line.Tone);
+    }
+
+    [Fact]
     public void Activity_RunStopped()
     {
         var e = Event(GenerationEventKind.RunStopped);

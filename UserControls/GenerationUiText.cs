@@ -414,6 +414,8 @@ public static class GenerationUiText
                 ($"Kept with {Plural(violations.Count, "warning", "warnings")} after 3 attempts{Colon(first)}", ActivityTone.Warning),
             GenerationEventKind.ThreadFailed =>
                 ($"Failed{Colon(e.Reason)}. The run continues.", ActivityTone.Danger),
+            GenerationEventKind.NotSaved =>
+                ($"Not saved{Colon(e.Reason)}. It stays pending for the next Continue.", ActivityTone.Danger),
             GenerationEventKind.WaveFinished =>
                 ($"Wave {e.WaveIndex} finished: {N(e.Written)} written, {N(e.Warnings)} with warnings, {N(e.Failed)} failed. Ledger now {N(e.LedgerTotal)} details.",
                     StageTone(e)),

@@ -28,7 +28,10 @@ public enum GenerationEventKind
     MediaStopped,
     AttachmentRepairStarted,
     AttachmentsAdded,
-    AttachmentRegenerated
+    AttachmentRegenerated,
+
+    // WR-02: work that could not be journaled (or saved text too incomplete to repair); the item stays pending
+    NotSaved
 }
 
 /// <summary>

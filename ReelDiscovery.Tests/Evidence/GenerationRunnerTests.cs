@@ -1012,6 +1012,11 @@ public partial class GenerationRunnerMixedTests : IDisposable
         Assert.Equal(400 + 3 * 300, ended.OutputTokens);
         Assert.Equal(_story.CalculateTotalCost(1000, 400) + 3 * _story.CalculateTotalCost(800, 300), ended.CostUsd);
         Assert.Equal(Replay().SpentCostUsd, snapshot.Peek().Counts.CostUsd);
+
+        // WR-02: a NotSaved row explains the pending thread, and the wave row does not count it as failed (as the tiles do not)
+        var events = snapshot.Peek().Events;
+        Assert.Contains(events, e => e.Kind == GenerationEventKind.NotSaved && e.ThreadId == doc.Id);
+        Assert.All(events.Where(e => e.Kind == GenerationEventKind.WaveFinished), e => Assert.Equal(0, e.Failed));
     }
 
     private static string CustomExcel(string statement)

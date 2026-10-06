@@ -167,7 +167,7 @@ public class AnthropicTextProvider : ILlmProvider
     /// Builds a user-facing message from the provider's error.message only; request headers (and thus the key)
     /// are never included.
     /// </summary>
-    private static string SafeMessage(LlmFailureKind kind, AnthropicApiException ex)
+    internal static string SafeMessage(LlmFailureKind kind, AnthropicApiException ex)
     {
         var prefix = kind switch
         {

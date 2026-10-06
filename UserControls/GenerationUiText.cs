@@ -852,6 +852,73 @@ public static class GenerationUiText
     public static string StoryExportFailedText(string fileName, string reason) =>
         $"Could not export {fileName}{Colon(reason)}. Check that the case folder is writable, then click Export Story So Far.";
 
+    // --- Cost breakdown (07-UI-SPEC S6 header ticker tooltip, S2 R1 Case Summary cost row) ---
+
+    /// <summary>
+    /// Header cost ticker tooltip (D-16): the session total, then one line per non-zero component (4 decimals).
+    /// The batch discount is shown as a negative amount; the listed items add up to the total.
+    /// </summary>
+    public static string CostBreakdown(decimal total, decimal input, decimal cacheWrite, decimal cacheRead,
+        decimal output, decimal batchSavings, decimal media)
+    {
+        if (total == 0m && input == 0m && cacheWrite == 0m && cacheRead == 0m && output == 0m && batchSavings == 0m && media == 0m)
+            return "Nothing spent this session yet.";
+
+        var lines = new List<string> { $"Spent this session: {Dollars(total, "0.0000")}" };
+        lines.AddRange(CostItems(input, cacheWrite, cacheRead, output, batchSavings, media, 0m)
+            .Select(item => $"{item.Line}: {item.Sign}{Dollars(item.Amount, "0.0000")}"));
+        return string.Join("\n", lines);
+    }
+
+    /// <summary>
+    /// Case Summary "Generation cost" row (S2 R1): line 3 lists the total and every non-zero clause (2 decimals);
+    /// spend recorded without a breakdown appears as "not itemized" so the clauses always add up to the total.
+    /// </summary>
+    public static SummaryRowContent CostRow(bool anySpend, decimal total, decimal input, decimal cacheWrite,
+        decimal cacheRead, decimal output, decimal batchSavings, decimal media, decimal unsplit)
+    {
+        var row = new SummaryRowContent
+        {
+            Line2 = "What this case has cost so far, across all sessions.",
+            Line3Tone = SummaryTone.Muted
+        };
+
+        if (!anySpend)
+        {
+            row.Line3 = "Nothing spent yet";
+            row.DotTone = SummaryTone.Muted;
+            return row;
+        }
+
+        var items = CostItems(input, cacheWrite, cacheRead, output, batchSavings, media, unsplit);
+        row.Line3 = $"{Dollars(total, "0.00")} spent"
+            + string.Concat(items.Select(item => $" · {item.Clause} {item.Sign}{Dollars(item.Amount, "0.00")}"));
+        row.Line3Tooltip = string.Join("\n", new[] { $"Spent so far: {Dollars(total, "0.00")}" }
+            .Concat(items.Select(item => $"{item.Line}: {item.Sign}{Dollars(item.Amount, "0.00")}")));
+        row.DotTone = SummaryTone.Success;
+        return row;
+    }
+
+    // Non-zero cost components in display order: (row clause, tooltip line, sign, amount)
+    private static List<(string Clause, string Line, string Sign, decimal Amount)> CostItems(decimal input,
+        decimal cacheWrite, decimal cacheRead, decimal output, decimal batchSavings, decimal media, decimal unsplit)
+    {
+        var all = new List<(string Clause, string Line, string Sign, decimal Amount)>
+        {
+            ("input", "Input", "", input),
+            ("cache write", "Cached input, cache write", "", cacheWrite),
+            ("cache read", "Cached input, cache read", "", cacheRead),
+            ("output", "Output", "", output),
+            // U+2212 minus sign: the discount is subtracted from the total
+            ("batch discount", "Batch discount", "−", batchSavings),
+            ("images and voicemail", "Images and voicemail", "", media),
+            ("not itemized", "Not itemized", "", unsplit)
+        };
+        return all.Where(item => item.Amount != 0m).ToList();
+    }
+
+    private static string Dollars(decimal amount, string format) => "$" + amount.ToString(format, Invariant);
+
     // --- Shared formatting ---
 
     private static string Plural(int n, string singular, string plural) => CaseGuideUiText.Plural(n, singular, plural);

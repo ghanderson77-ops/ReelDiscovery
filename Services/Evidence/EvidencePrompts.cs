@@ -25,6 +25,9 @@ public static class EvidencePrompts
 
     private const string TaskText = "Write every message above in order. For each message return its seq, the body, and the signOff (a closing word or phrase such as 'Thanks,', or empty), and list every person the message names in peopleNamed. Then list newDetails: specific new commitments, figures, meetings, decisions, people or documents this thread introduces that later emails may refer back to, each tied to the seq that introduced it.";
 
+    // OQ3: user prompt only, for a regenerated relevant thread (D-02)
+    public const string PriorDetailsHeader = "Details this thread already established (keep every one exactly; add no new details):";
+
     // Shared with FillerPrompts; text unchanged so EvidencePromptsTests stay green
     internal const string FeedbackHeader = "Problems in the previous attempt (fix all of them and rewrite the whole thread):";
 
@@ -112,6 +115,19 @@ public static class EvidencePrompts
             var value = string.IsNullOrWhiteSpace(entry.Value) ? string.Empty : $" [{entry.Value.Trim()}]";
             var known = string.Join(", ", (entry.KnownByIds ?? new List<string>()).Where(onThread.Contains).Select(ctx.People.NameOf));
             sb.AppendLine($"{entry.Date} {entry.Kind}: {entry.About.Trim()} - {entry.Statement.Trim()}{value} (known to: {known})");
+        }
+
+        // OQ3: a regenerated thread restates what later waves already relied on; absent otherwise, so other prompts are unchanged
+        var prior = (ctx.PriorDeltas ?? Array.Empty<LedgerDelta>()).Where(d => d != null).ToList();
+        if (prior.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine(PriorDetailsHeader);
+            foreach (var delta in prior)
+            {
+                var value = string.IsNullOrWhiteSpace(delta.Value) ? string.Empty : $" [{delta.Value.Trim()}]";
+                sb.AppendLine($"msg {delta.Seq} {delta.Kind}: {(delta.About ?? string.Empty).Trim()} - {(delta.Statement ?? string.Empty).Trim()}{value}");
+            }
         }
 
         // (g) The thread

@@ -25,6 +25,9 @@ public class ThreadRenderContext
     // Status the journal held before this run (Failed when Retry Failed Threads re-runs it); keeps live counts exact
     public ThreadRunStatus PreviousStatus { get; set; }
 
+    /// <summary>OQ3: details this thread established before it was regenerated; non-empty only for a regenerated relevant thread.</summary>
+    public IReadOnlyList<LedgerDelta> PriorDeltas { get; set; } = Array.Empty<LedgerDelta>();
+
     public static ThreadRenderContext Create(CaseDraft draft, CorpusPlan plan, PlannedThread thread, ThreadAssignment assignment,
         PeopleDirectory people, IReadOnlyList<LedgerEntry> ledger, int waveIndex)
     {

@@ -386,6 +386,10 @@ public class GenerationRunner
                                 ctx.Assignments.TryGetValue(id, out var a) ? a : new ThreadAssignment { ThreadId = id },
                                 ctx.People, ledger.Entries, wave.Index);
                             render.PreviousStatus = Status(state, id);
+
+                            // OQ3: a regenerated relevant thread keeps the details later waves already relied on (D-02)
+                            if (state.InvalidatedDeltas.TryGetValue(id, out var prior) && prior is { Count: > 0 })
+                                render.PriorDeltas = prior;
                             return RunThreadAsync(ctx, uow, render, relevantProfile, step, run);
                         })
                         .ToList();

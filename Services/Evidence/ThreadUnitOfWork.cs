@@ -151,6 +151,9 @@ public class ThreadUnitOfWork
         var committedTexts = new Dictionary<string, string>(StringComparer.Ordinal);
         var relevant = ctx.Thread.Relevance == ThreadRelevance.Relevant;
 
+        // OQ3/D-02: a regenerated thread never changes what later waves already relied on
+        var keepPrior = relevant && ctx.PriorDeltas.Count > 0;
+
         // WR-01: set once copies may be on disk, cleared again when the ThreadDone line is flushed
         ComposedThread? uncommitted = null;
 
@@ -333,7 +336,8 @@ public class ThreadUnitOfWork
                                             ?? new List<string>()).ToList()
                     }).ToList(),
                     // D-13: non-relevant threads never write ledger deltas
-                    LedgerDelta = profile.UsesLedger ? best.NewDetails : new List<LedgerDelta>(),
+                    LedgerDelta = keepPrior ? ctx.PriorDeltas.ToList() : profile.UsesLedger ? best.NewDetails : new List<LedgerDelta>(),
+                    LateRepair = keepPrior,
                     Attachments = attachmentRecords,
                     InputTokens = inputTokens,
                     OutputTokens = outputTokens,
@@ -399,7 +403,7 @@ public class ThreadUnitOfWork
                         continue;
 
                     committedTexts[attachment.DocId] = attachment.FlattenedText ?? string.Empty;
-                    if (attachment.Relevant && profile.UsesLedger)
+                    if (attachment.Relevant && profile.UsesLedger && !keepPrior)
                         attachmentDeltas.AddRange(attachment.NewDetails);
 
                     // D-20: fallback slots are never shared; the earliest planned committed slot per meeting key wins at the step end
@@ -559,7 +563,10 @@ public class ThreadUnitOfWork
 
         // Every delta of the thread known so far: the render's, then each committed-in-unit attachment's (relevant only)
         var threadDeltas = new List<LedgerDelta>();
-        if (profile.UsesLedger)
+        // OQ3: a regenerated relevant thread's attachments follow the details it had established, not the discarded new ones
+        if (profile.UsesLedger && ctx.Thread.Relevance == ThreadRelevance.Relevant && ctx.PriorDeltas.Count > 0)
+            threadDeltas.AddRange(ctx.PriorDeltas.Where(d => d != null && !d.FromAttachment));
+        else if (profile.UsesLedger)
             threadDeltas.AddRange(best.NewDetails);
         var links = attachments.Chains?.Links ?? new Dictionary<string, AttachmentChainLink>(StringComparer.Ordinal);
 

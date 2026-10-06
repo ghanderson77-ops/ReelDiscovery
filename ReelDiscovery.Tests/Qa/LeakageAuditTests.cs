@@ -285,9 +285,14 @@ public class LeakageAuditTests
 
     // ----- real planner (D-23 before/after) -----
 
-    private static async Task<(CaseDraft Draft, CorpusPlan Plan)> RealPlanAsync()
+    // The default 8% privileged share gives this 250-email plan only 2 privileged relevant emails, below
+    // MinSignalSupport, so the D-23 before/after proof uses 20% (9 privileged relevant emails)
+    private const int PrivilegeProofPercent = 20;
+
+    private static async Task<(CaseDraft Draft, CorpusPlan Plan)> RealPlanAsync(int? privilegedPercent = null)
     {
         var draft = CorpusPlannerTests.Draft(250);
+        draft.Corpus!.Settings.PrivilegedPercent = privilegedPercent;
         var (planner, fake) = CorpusPlannerTests.Planner(2106);
         fake.Respond = CorpusPlannerTests.Responder();
         var result = await planner.PlanAsync(draft, mediaAvailable: true, string.Empty);
@@ -298,7 +303,7 @@ public class LeakageAuditTests
     [Fact]
     public async Task RealPlanner_PreD23_ReportsPrivilegeBannerOnlyOnRelevant()
     {
-        var (draft, plan) = await RealPlanAsync();
+        var (draft, plan) = await RealPlanAsync(PrivilegeProofPercent);
         // Test seam: the pre-D-23 rule left non-relevant mail without privileged threads in small corpora
         foreach (var thread in plan.Threads.Where(t => t.Relevance != ThreadRelevance.Relevant))
             thread.IsPrivileged = false;
@@ -313,7 +318,9 @@ public class LeakageAuditTests
     [Fact]
     public async Task RealPlanner_PostD23_NoPrivilegeBannerOnlyOnRelevant()
     {
-        var (draft, plan) = await RealPlanAsync();
+        var (draft, plan) = await RealPlanAsync(PrivilegeProofPercent);
+        Assert.True(plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant && t.IsPrivileged)
+            .Sum(t => t.Messages.Count) >= LeakageAudit.MinSignalSupport);
 
         var report = LeakageAudit.Run(plan, draft.Guide!);
 

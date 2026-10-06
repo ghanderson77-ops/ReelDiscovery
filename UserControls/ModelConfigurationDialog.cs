@@ -48,7 +48,12 @@ public class ModelConfigurationDialog : Form
             Effort = m.Effort,
             MaxOutputTokens = m.MaxOutputTokens,
             InputTokenPricePerMillion = m.InputTokenPricePerMillion,
-            OutputTokenPricePerMillion = m.OutputTokenPricePerMillion
+            OutputTokenPricePerMillion = m.OutputTokenPricePerMillion,
+            // Carry cache/batch prices through the copy so OK never zeroes them (07-01)
+            CacheWriteTokenPricePerMillion = m.CacheWriteTokenPricePerMillion,
+            CacheReadTokenPricePerMillion = m.CacheReadTokenPricePerMillion,
+            BatchDiscountPercent = m.BatchDiscountPercent,
+            MinCacheablePrefixTokens = m.MinCacheablePrefixTokens
         }).ToList();
 
         InitializeUI();

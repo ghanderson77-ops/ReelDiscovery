@@ -573,16 +573,31 @@ public partial class OfficeDocumentService
         doc.PackageProperties.Modified = meta.Modified.UtcDateTime;
     }
 
-    // Model text is untrusted: drop control characters XML cannot carry, keep line breaks and tabs
-    private static string Clean(string? text)
+    // Model text is untrusted: drop control characters and unpaired surrogates XML cannot carry, keep line breaks and tabs
+    internal static string Clean(string? text)
     {
         if (string.IsNullOrEmpty(text))
             return string.Empty;
 
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
         var sb = new StringBuilder(normalized.Length);
-        foreach (var c in normalized)
+        for (var i = 0; i < normalized.Length; i++)
         {
+            var c = normalized[i];
+            if (char.IsHighSurrogate(c))
+            {
+                // Keep a full pair only; a lone surrogate makes the OpenXml writer throw (IN-01)
+                if (i + 1 < normalized.Length && char.IsLowSurrogate(normalized[i + 1]))
+                {
+                    sb.Append(c).Append(normalized[i + 1]);
+                    i++;
+                }
+                continue;
+            }
+
+            if (char.IsLowSurrogate(c))
+                continue;
+
             if (c == '\n' || c == '\t' || !char.IsControl(c))
                 sb.Append(c);
         }

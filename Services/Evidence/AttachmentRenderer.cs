@@ -322,12 +322,16 @@ public static partial class AttachmentRenderer
         (items ?? new List<string>()).Select(Clean).Where(s => s.Length > 0).Take(max).ToList();
 
     // Line breaks and tabs become one space, other control characters are removed, then trim and cut (T-06-35)
-    private static string Clean(string? value)
+    internal static string Clean(string? value)
     {
         if (string.IsNullOrEmpty(value))
             return string.Empty;
         var text = ControlChars().Replace(LineBreaks().Replace(value, " "), string.Empty).Trim();
-        return text.Length > MaxChars ? text[..MaxChars].TrimEnd() : text;
+        if (text.Length <= MaxChars)
+            return text;
+        // Never end on a high surrogate: a lone surrogate makes the OpenXml writer throw (IN-01)
+        var cut = char.IsHighSurrogate(text[MaxChars - 1]) ? MaxChars - 1 : MaxChars;
+        return text[..cut].TrimEnd();
     }
 
     private static string JoinRow(List<string> row) =>

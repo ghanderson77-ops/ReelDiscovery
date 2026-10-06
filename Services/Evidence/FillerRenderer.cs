@@ -101,7 +101,11 @@ public static partial class FillerRenderer
         if (string.IsNullOrEmpty(value))
             return string.Empty;
         var text = ControlChars().Replace(LineBreaks().Replace(value, " "), string.Empty).Trim();
-        return text.Length > MaxTitleChars ? text[..MaxTitleChars].TrimEnd() : text;
+        if (text.Length <= MaxTitleChars)
+            return text;
+        // Never end on a high surrogate: a lone surrogate makes the OpenXml writer throw (IN-01)
+        var cut = char.IsHighSurrogate(text[MaxTitleChars - 1]) ? MaxTitleChars - 1 : MaxTitleChars;
+        return text[..cut].TrimEnd();
     }
 
     // ----- strict-schema DTOs (D-01): no nullable members, no recursion -----

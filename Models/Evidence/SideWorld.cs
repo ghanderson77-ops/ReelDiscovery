@@ -43,10 +43,14 @@ public class SideWorld
         }
     }
 
-    private static string Clip(string? value)
+    internal static string Clip(string? value)
     {
         var text = value?.Trim() ?? string.Empty;
-        return text.Length > MaxNameChars ? text[..MaxNameChars].TrimEnd() : text;
+        if (text.Length <= MaxNameChars)
+            return text;
+        // Never end on a high surrogate: a lone surrogate makes the OpenXml writer throw (IN-01)
+        var cut = char.IsHighSurrogate(text[MaxNameChars - 1]) ? MaxNameChars - 1 : MaxNameChars;
+        return text[..cut].TrimEnd();
     }
 }
 

@@ -391,10 +391,24 @@ public class GenerateCorpusRenderTests
             Assert.False(step.UseBatchCheckBox.Visible);
             Assert.True(step.CancelButton.Visible);
             var row = step.WavesGrid.Rows[2];
-            var wait = (string)row.Cells["Dates"].Value!;
-            Assert.StartsWith("Waiting on provider batch, submitted ", wait);
-            Assert.EndsWith("6 of 14 requests done", wait);
-            Assert.Contains("Next check in ", row.Cells["Dates"].ToolTipText);
+            // Compact cell (DPI rule 27, amended in 07-11); the full S1 sentence is in the tooltip
+            var cell = (string)row.Cells["Dates"].Value!;
+            Assert.Equal("Batch: 6 of 14 done", cell);
+            Assert.Contains(". Waiting on provider batch, submitted ", row.Cells["Dates"].ToolTipText);
+            Assert.Contains("6 of 14 requests done. Next check in ", row.Cells["Dates"].ToolTipText);
+            // Rule 27: never cut at Large for a single batch
+            if (step.Width >= step.LogicalToDeviceUnits(1050))
+            {
+                using var body = Theme.BodyFont();
+                var dates = step.WavesGrid.Columns["Dates"]!;
+                var available = dates.Width - dates.DefaultCellStyle.Padding.Horizontal;
+                // The shown cell and the widest single-batch count a provider allows (10,000 requests)
+                foreach (var text in new[] { cell, "Batch: 9,999 of 10,000 done" })
+                {
+                    var needed = TextRenderer.MeasureText(text, body).Width;
+                    Assert.True(needed <= available, $"batch cell '{text}' needs {needed}, Dates has {available}");
+                }
+            }
             Assert.StartsWith(GenerationUiText.WaveDates(view.Waves[2].Start, view.Waves[2].End) + ". ", row.Cells["Dates"].ToolTipText);
             // Other rows keep their dates
             Assert.Equal(GenerationUiText.WaveDates(view.Waves[0].Start, view.Waves[0].End), step.WavesGrid.Rows[0].Cells["Dates"].Value);

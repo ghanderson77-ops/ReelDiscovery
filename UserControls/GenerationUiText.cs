@@ -421,6 +421,22 @@ public static class GenerationUiText
     }
 
     /// <summary>
+    /// Compact Dates-cell form of <see cref="BatchWaitText"/> (07-UI-SPEC S1 Row 4, amended in execution 07-11 for DPI
+    /// rule 27): "Batch: 6 of 14 done", "2 batches: 6 of 14 done" when several wait; "" when not waiting. The submission
+    /// time and the full sentence stay in the row tooltip (and the status strip), because the time does not fit the
+    /// Dates column at Large / 144 DPI next to a 10,000-request count.
+    /// </summary>
+    public static string BatchWaitCellText(WaveProgress row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!row.BatchWaiting)
+            return "";
+
+        var subject = row.BatchCount > 1 ? Plural(row.BatchCount, "batch", "batches") : "Batch";
+        return $"{subject}: {N(row.BatchDone)} of {N(row.BatchTotal)} done";
+    }
+
+    /// <summary>
     /// Row tooltip while waiting: "{dates or stage name}. {full wait text}. Next check in {s} s."
     /// </summary>
     public static string BatchWaitTooltip(string datesOrStage, string waitText, int secondsToNextCheck) =>

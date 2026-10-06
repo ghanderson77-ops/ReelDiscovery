@@ -495,7 +495,7 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-10]: Orphan spend joins RunEnded and the snapshot cost on finished batch runs; a billing failure is swallowed and the next finished run bills it
 - [Phase 07]: [07-10]: D-05 parity compares EML bytes exactly except Office package internals (content XML compared with relationship ids masked; OpenXml output is non-deterministic)
 - [07-11]: Status strip priority is Stopping, Collecting after restart, lowest waiting stage row with countdown, then normal stage text; Start Over keeps the case's UseBatch and cancels pending provider batches best effort
-- [07-11]: DPI rule 27 (batch-wait text never ellipsizes at Large) is unattainable with the S1 copy in the Dates column; tooltip and status strip carry the full text; left for UI review
+- [07-11]: Stages grid Dates cell shows the compact batch wait "Batch: {d} of {t} done" (GenerationUiText.BatchWaitCellText) so DPI rule 27 holds at Large; the full S1 sentence with the submission time stays in the row tooltip and status strip (07-UI-SPEC S1 amended)
 
 ### Pending Todos
 

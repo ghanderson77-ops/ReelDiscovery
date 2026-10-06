@@ -160,7 +160,8 @@ Batch hint variants (`GenerationUiText.BatchHint(plannedEmails, batchChecked, th
 
 **Row 4, Stages grid: batch wait (D-09).** No new columns. While a stage row's requests sit in a provider batch:
 - Dot: `Theme.Accent` (running).
-- `Dates` cell: `Waiting on provider batch, submitted {h:mm tt}, {d:N0} of {Plural(t, "request")} done` (`GenerationUiText.BatchWaitText`). With more than one batch for the stage: `Waiting on {Plural(b, "provider batch", "provider batches")}, first submitted {h:mm tt}, {d:N0} of {Plural(t, "request")} done`. The cell may ellipsize; the row tooltip becomes `{dates or stage name}. {full wait text}. Next check in {s} s.`
+- `Dates` cell: `Batch: {d:N0} of {t:N0} done`; with more than one batch for the stage `{Plural(b, "batch", "batches")}: {d:N0} of {t:N0} done` (`GenerationUiText.BatchWaitCellText`). **[amended in execution 07-11]**: the full sentence below did not fit the `Dates` column at `Large` / 144 DPI (rule 27), so the cell shows this compact form and the submission time moves to the tooltip.
+- Full wait text (row tooltip, `GenerationUiText.BatchWaitText`): `Waiting on provider batch, submitted {h:mm tt}, {d:N0} of {Plural(t, "request")} done`. With more than one batch for the stage: `Waiting on {Plural(b, "provider batch", "provider batches")}, first submitted {h:mm tt}, {d:N0} of {Plural(t, "request")} done`. The row tooltip becomes `{dates or stage name}. {full wait text}. Next check in {s} s.`
 - When the batch results arrive, the cell returns to the normal dates / stage text.
 - `{h:mm tt}` is local time; when the submission is not today, use `{MMM d, h:mm tt}`.
 
@@ -397,7 +398,7 @@ Tone rules unchanged: plain verbs, say what happens next, name the button, no ex
 Rules 1-25 apply unchanged. Additions:
 
 26. The Ready card (body + estimate line + checkbox + batch hint + media notice + button) fits the `WizardMin` body without clipping or a scrollbar, with every optional line visible at once. The checkbox text never ellipsizes or clips; its box is vertically centered on the first text line.
-27. The Stages grid batch-wait text may ellipsize in `Dates` at `WizardMin`, never at `Large` for a single batch; the row tooltip carries the full text. No horizontal scrollbar.
+27. The Stages grid batch-wait text (compact cell form, up to `Batch: 9,999 of 10,000 done`) may ellipsize in `Dates` at `WizardMin`, never at `Large` for a single batch; the row tooltip carries the full text. No horizontal scrollbar. **[amended in execution 07-11]**
 28. Case Summary: the three QA rows and the `Generation cost` row show line 3 on one line with ellipsis + tooltip; their buttons never ellipsize and the button column never overlaps line 3 at `WizardMin`.
 29. `QaFindingsDialog` at 640 x 400 and 144 DPI: all buttons fully visible on one row, the grid shows at least 4 rows, Fill columns respect their minimum widths (horizontal scrollbar allowed only below the sum of minimums).
 30. `BlindReviewDialog` at 144 DPI: the sample row may wrap to two lines but never clips; the `NumericUpDown` shows 6 digits with separators.

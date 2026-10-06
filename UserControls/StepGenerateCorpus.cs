@@ -876,11 +876,12 @@ public partial class StepGenerateCorpus : UserControl
             var (dates, done, tooltip) = GenerationUiText.StageRowText(stage);
             if (stage.BatchWaiting)
             {
-                // D-09: the Dates cell shows the wait (it may ellipsize); the tooltip keeps the dates and the countdown
+                // D-09: the Dates cell shows the compact wait (DPI rule 27); the tooltip keeps the dates, the full
+                // sentence and the countdown
                 var wait = GenerationUiText.BatchWaitText(stage, DateTime.Now);
                 tooltip = GenerationUiText.BatchWaitTooltip(dates, wait,
                     GenerationUiText.SecondsUntil(stage.BatchNextCheckUtc, DateTime.UtcNow));
-                dates = wait;
+                dates = GenerationUiText.BatchWaitCellText(stage);
             }
             SetCell(row, "Dates", dates);
             row.Cells["Dates"].ToolTipText = tooltip;

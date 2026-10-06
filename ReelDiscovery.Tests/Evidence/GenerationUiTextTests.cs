@@ -1993,6 +1993,21 @@ public class GenerationUiTextTests
     }
 
     [Fact]
+    public void BatchWaitCellText_CompactVariants()
+    {
+        Assert.Equal("Batch: 3 of 5 done", GenerationUiText.BatchWaitCellText(Waiting()));
+        Assert.Equal("2 batches: 3 of 5 done", GenerationUiText.BatchWaitCellText(Waiting(count: 2)));
+        Assert.Equal("Batch: 1,000 of 2,000 done", GenerationUiText.BatchWaitCellText(Waiting(done: 1000, total: 2000)));
+        Assert.Equal("1,000 batches: 0 of 1 done", GenerationUiText.BatchWaitCellText(Waiting(count: 1000, done: 0, total: 1)));
+        Assert.Equal("Batch: 0 of 0 done", GenerationUiText.BatchWaitCellText(Waiting(done: 0, total: 0)));
+
+        var idle = Waiting();
+        idle.BatchWaiting = false;
+        Assert.Equal("", GenerationUiText.BatchWaitCellText(idle));
+        AssertNoBannedWords(GenerationUiText.BatchWaitCellText(Waiting(count: 2)));
+    }
+
+    [Fact]
     public void BatchWaitText_NotWaiting_IsEmpty()
     {
         var row = Waiting();

@@ -14,7 +14,7 @@ requires:
     provides: "BatchLedger.PendingBatchCount, FakeBatchTransport"
 provides:
   - "GenerationState.UseBatch (per-case batch choice, survives Start Over)"
-  - "GenerationUiText: EstimateLine, EstimateTooltip, BatchHint, BatchCheckboxText, BatchRecommendThreshold, BatchWaitText/Tooltip, SecondsUntil, ProgressText(view, nowUtc), ProgressBatchText, CollectingAfterRestartText, BatchCancelFailedText, batch activity texts, banner and C-G1..C-G3 batch clauses, cost tile batch clauses"
+  - "GenerationUiText: EstimateLine, EstimateTooltip, BatchHint, BatchCheckboxText, BatchRecommendThreshold, BatchWaitText/Tooltip, BatchWaitCellText, SecondsUntil, ProgressText(view, nowUtc), ProgressBatchText, CollectingAfterRestartText, BatchCancelFailedText, batch activity texts, banner and C-G1..C-G3 batch clauses, cost tile batch clauses"
   - "StepGenerateCorpus: Ready-card batch checkbox + hint, RunGatewayFactory and BatchTransportFactory seams, PendingProviderBatches, Start Over batch cancel"
   - "GenerationCounts.BatchOn / BatchSavingsUsd"
 affects: [07-21, 07-22]
@@ -118,7 +118,7 @@ Generate Corpus now shows and uses batch mode. The Ready card has a live/batch e
 | generate-corpus-ready-batch-recommended-1000x540.png | Same, all lines fit inside the card. No scrollbar. |
 | generate-corpus-ready-batch-checked-1100x750.png | Checked box aligned with its text, Warning hint, no media notice. One Primary. |
 | generate-corpus-ready-batch-checked-1000x540.png | Same, fits. |
-| generate-corpus-running-batch-wait-1100x750.png | Wave 3 row has an Accent dot and "Waiting on provider bat..." (ellipsized, see note). Activity shows Batch submitted (Accent), Batch failed at Anthropic and finished-with-failures (Warning), and Batch finished (Success). The status strip shows the full wait text with "Next check in 25 s." Cancel Generation is Danger. |
+| generate-corpus-running-batch-wait-1100x750.png | Wave 3 row has an Accent dot and "Batch: 6 of 14 done", not cut off (after the rule-27 fix). Activity shows Batch submitted (Accent), Batch failed at Anthropic and finished-with-failures (Warning), and Batch finished (Success). The status strip shows the full wait text with "Next check in 25 s." Cancel Generation is Danger. |
 | generate-corpus-running-batch-wait-1000x540.png | Same. The status strip wraps to 2 lines without clipping. |
 | generate-corpus-partial-pending-batches-1100x750.png | Banner ends "1 provider batch submitted earlier will be collected first, without paying again." Continue Generating is the only Primary. |
 | generate-corpus-partial-pending-batches-1000x540.png | Same. The banner body wraps to 2 lines, fits. |
@@ -157,9 +157,16 @@ Generate Corpus now shows and uses batch mode. The Ready card has a live/batch e
 - `ReadyCard_MixedCase_TieredEstimateAndMediaNotice` now checks model names in the tooltip.
 - `ReadyWithMediaEstimate` now expects the estimate margin 4 and the hint as the last line.
 
-## Known Issues / UI review note
+## DPI rule 27 resolution (follow-up fix)
 
-- **DPI rule 27 cannot be met with the S1 copy.** Rule 27 says the batch-wait text in `Dates` never ellipsizes at `Large` for a single batch. The copy ("Waiting on provider batch, submitted 4:09 PM, 6 of 14 requests done", about 68 characters) is far wider than the `Dates` column at Large, which is about 250 device px in a 50 % width Stages card. The row tooltip and the status strip carry the full text, and the rule-27 WizardMin case (ellipsize allowed) passes. Meeting rule 27 at Large needs either a shorter Dates-cell variant or a layout change. This is left for UI review, not changed here.
+- **Before:** with the full S1 sentence, the batch-wait text in the `Dates` cell was cut off at `Large` / 144 DPI, which breaks rule 27.
+- **Fix:** the cell now shows a compact form, `Batch: {d} of {t} done` (or `{b} batches: ...`), from the new `GenerationUiText.BatchWaitCellText`. The full sentence with the submission time stays in the row tooltip and the status strip.
+- **Why there is no time in the cell:** the coordinator's suggested `Batch: 6 of 14 done · sent 4:09 PM` measured 244 px against the 208 px `Dates` column at `Large`.
+- **New checks:**
+  - A copy test covers the single, multiple, thousands and empty variants.
+  - The render test asserts that the shown cell and the widest single-batch case (`Batch: 9,999 of 10,000 done`) fit at `Large`.
+- **Re-inspected:** generate-corpus-running-batch-wait-1100x750.png. The wave 3 row reads "Batch: 6 of 14 done" in full.
+- **Spec:** 07-UI-SPEC S1 Row 4 and rule 27 are marked [amended in execution 07-11].
 
 ## Requirements
 

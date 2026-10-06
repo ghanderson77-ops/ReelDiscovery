@@ -174,6 +174,78 @@ public class NonRelevantSkeletonTests
         });
     }
 
+    // ----- D-23: privilege incidence parity -----
+
+    private static async Task<(CaseDraft Draft, CorpusPlan Plan)> RealPlanAsync(int total)
+    {
+        var draft = CorpusPlannerTests.Draft(total);
+        var (planner, fake) = CorpusPlannerTests.Planner(2106);
+        fake.Respond = CorpusPlannerTests.Responder();
+        var result = await planner.PlanAsync(draft, mediaAvailable: true, string.Empty);
+        Assert.True(result.Succeeded, result.FailureMessage);
+        return (draft, result.Plan!);
+    }
+
+    private static int OldDailyTarget(int dailyThreads)
+    {
+        var target = (int)Math.Round(dailyThreads * NonRelevantSkeletonBuilder.PrivilegedDailyShare, MidpointRounding.AwayFromZero);
+        return target == 0 && dailyThreads >= 50 ? 1 : target;
+    }
+
+    [Theory]
+    [InlineData(50)]
+    [InlineData(120)]
+    [InlineData(250)]
+    public async Task RealPlanner_SmallCorpus_PrivilegedRelevantMeansPrivilegedDaily(int total)
+    {
+        var (draft, plan) = await RealPlanAsync(total);
+        var relevant = plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant).ToList();
+        var daily = plan.Threads.Where(t => t.Category == NonRelevantCategory.DailyBusiness).ToList();
+        Assert.Contains(relevant, t => t.IsPrivileged);
+        Assert.NotEmpty(daily);
+
+        // D-23: the banner must not appear on relevant mail only
+        var privileged = daily.Where(t => t.IsPrivileged).ToList();
+        Assert.NotEmpty(privileged);
+
+        var cast = draft.Guide!.Cast.ToDictionary(c => c.Id, StringComparer.Ordinal);
+        Assert.All(privileged, t =>
+        {
+            var people = ThreadPeople(t).ToList();
+            var orgs = people.Select(id => cast[id].OrganizationId).Distinct(StringComparer.Ordinal).ToList();
+            Assert.Single(orgs);
+            Assert.Contains(people, id => cast[id].Role == CastRole.InHouseCounsel);
+        });
+    }
+
+    [Fact]
+    public async Task RealPlanner_LargeCorpus_DailyPrivilegeTracksRelevantShare()
+    {
+        var (_, plan) = await RealPlanAsync(1_000);
+        var relevant = plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant).ToList();
+        var daily = plan.Threads.Where(t => t.Category == NonRelevantCategory.DailyBusiness).ToList();
+        var relevantShare = relevant.Count(t => t.IsPrivileged) / (double)relevant.Count;
+        var dailyPrivileged = daily.Count(t => t.IsPrivileged);
+
+        Assert.True(relevantShare > 0);
+        Assert.True(dailyPrivileged / (double)daily.Count >= relevantShare * 0.5,
+            $"daily {dailyPrivileged}/{daily.Count} vs relevant share {relevantShare:P1}");
+        Assert.True(dailyPrivileged >= OldDailyTarget(daily.Count));
+    }
+
+    [Theory]
+    [InlineData(42)]
+    [InlineData(7)]
+    public void Daily_NoPrivilegedRelevant_KeepsOldTwoPercentRule(int seed)
+    {
+        var settings = new CorpusSettings { PrivilegedPercent = 0 };
+        var (_, relevant, skeleton) = Build(Mix(daily: 300), settings: settings, seed: seed);
+        Assert.DoesNotContain(relevant, t => t.IsPrivileged);
+
+        var daily = Of(skeleton, NonRelevantCategory.DailyBusiness);
+        Assert.Equal(OldDailyTarget(daily.Count), daily.Count(t => t.IsPrivileged));
+    }
+
     [Theory]
     [InlineData(42)]
     [InlineData(7)]

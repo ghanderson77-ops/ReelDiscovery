@@ -467,8 +467,9 @@ public class AttachmentRepair
         }
     }
 
-    // The ThreadDone text as a RenderedThread (Body = BodyPlain, by DocId); null when a planned message has no saved text
-    private static RenderedThread? Accepted(PlannedThread thread, JournalRecord threadDone, List<PlannedMessage> messages)
+    // The ThreadDone text as a RenderedThread (Body = BodyPlain, by DocId); null when a planned message has no saved text.
+    // Shared with the QA scans (CorpusScans), which re-check the accepted text
+    internal static RenderedThread? Accepted(PlannedThread thread, JournalRecord threadDone, List<PlannedMessage> messages)
     {
         var byDocId = (threadDone?.Messages ?? new List<JournalMessage>())
             .Where(m => m != null && !string.IsNullOrEmpty(m.DocId))

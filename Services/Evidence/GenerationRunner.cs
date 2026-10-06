@@ -142,7 +142,8 @@ public class GenerationRunner
         var mediaAvailable = input.Media != null;
 
         // Whole plan, never the remaining threads: Continue sees the same waves and ledger visibility (Pitfall 3)
-        var waves = WavePlanner.Plan(input.Plan);
+        var scaffold = BuildScaffold(input.Draft, plan);
+        var waves = scaffold.Waves;
         var fillerRow = waves.Count + 1;
         var repairRow = waves.Count + 2;
         var folders = PlanNumbering.CustodianFolders(guide);
@@ -153,9 +154,9 @@ public class GenerationRunner
             Input = input,
             Guide = guide,
             Waves = waves,
-            WaveOf = WavePlanner.WaveIndexByThread(waves),
-            Assignments = GenerationRunState.AllAssignments(plan),
-            People = PeopleDirectory.Create(guide, plan),
+            WaveOf = scaffold.WaveOf,
+            Assignments = scaffold.Assignments,
+            People = scaffold.People,
             Journal = journal,
             Snapshot = snapshot,
             Persist = persist,
@@ -1305,6 +1306,24 @@ public class GenerationRunner
     private static IEnumerable<PlannedThread> NonRelevantThreads(IEnumerable<PlannedThread> threads) =>
         threads.Where(t => t.Relevance != ThreadRelevance.Relevant && t.Messages != null && t.Messages.Any(m => m != null));
 
+    /// <summary>
+    /// The plan-wide render scaffolding every thread context is built from: waves of the whole plan, the wave of each
+    /// relevant thread, every assignment (filler included) and the people directory. Shared with the QA scans so a
+    /// re-check sees exactly what the run saw.
+    /// </summary>
+    internal static RunScaffold BuildScaffold(CaseDraft draft, CorpusPlan plan)
+    {
+        var guide = draft?.Guide ?? new CaseGuide();
+        var waves = WavePlanner.Plan(plan);
+        return new RunScaffold
+        {
+            Waves = waves,
+            WaveOf = WavePlanner.WaveIndexByThread(waves),
+            Assignments = GenerationRunState.AllAssignments(plan),
+            People = PeopleDirectory.Create(guide, plan)
+        };
+    }
+
     // Per-run shared values; one instance per RunAsync call
     private sealed class RunContext
     {
@@ -1392,4 +1411,15 @@ public class GenerationRunner
                 return (_unjournaledInput, _unjournaledOutput, _unjournaledDetail.Clone(), _unjournaledMedia);
         }
     }
+}
+
+/// <summary>
+/// Plan-wide render scaffolding (see <see cref="GenerationRunner.BuildScaffold"/>).
+/// </summary>
+internal class RunScaffold
+{
+    public List<GenerationWave> Waves { get; init; } = new();
+    public Dictionary<string, int> WaveOf { get; init; } = new();
+    public Dictionary<string, ThreadAssignment> Assignments { get; init; } = new();
+    public PeopleDirectory People { get; init; } = null!;
 }

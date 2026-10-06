@@ -1,4 +1,5 @@
 using System.Globalization;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
@@ -163,7 +164,7 @@ public class CorpusScansTests : IDisposable
     }
 
     // An earlier-wave thread A and a later-wave thread B that shares A's first sender and starts after A's first email
-    private (PlannedThread Earlier, PlannedThread Later, PlannedThread SameWave) WavePair()
+    private (PlannedThread Earlier, PlannedThread Later) WavePair()
     {
         var waveOf = WavePlanner.WaveIndexByThread(WavePlanner.Plan(_plan));
         foreach (var a in Relevant)
@@ -171,14 +172,9 @@ public class CorpusScansTests : IDisposable
             var root = First(a);
             foreach (var b in Relevant)
             {
-                if (waveOf[b.Id] <= waveOf[a.Id] || MessageTime.FirstLocalDate(b) <= MessageTime.LocalDate(root))
-                    continue;
-                if (!KnowledgeGate.Build(Guide, b).Participants.Contains(root.FromId))
-                    continue;
-
-                var same = Relevant.FirstOrDefault(t => t.Id != a.Id && waveOf[t.Id] == waveOf[a.Id]);
-                if (same != null)
-                    return (a, b, same);
+                if (waveOf[b.Id] > waveOf[a.Id] && MessageTime.FirstLocalDate(b) > MessageTime.LocalDate(root)
+                    && KnowledgeGate.Build(Guide, b).Participants.Contains(root.FromId))
+                    return (a, b);
             }
         }
 
@@ -194,14 +190,17 @@ public class CorpusScansTests : IDisposable
         Value = value
     };
 
-    [Fact]
-    public void Run_LaterWaveContradictingEarlierLedger_IsStoryDetailFinding_SameWaveIsNot()
+    // The later wave sees the earlier wave's ledger; the earlier wave never sees a later one, so the finding is always on
+    // the later thread whichever of the two values came first
+    [Theory]
+    [InlineData("$50,000", "$61,000")]
+    [InlineData("$61,000", "$50,000")]
+    public void Run_LaterWaveContradictingEarlierLedger_IsStoryDetailFinding_EarlierWaveIsNot(string first, string second)
     {
-        var (earlier, later, sameWave) = WavePair();
+        var (earlier, later) = WavePair();
         var replay = Replay();
-        replay.LastByThread[earlier.Id].LedgerDelta.Add(Retainage("$50,000"));
-        replay.LastByThread[later.Id].LedgerDelta.Add(Retainage("$61,000"));
-        replay.LastByThread[sameWave.Id].LedgerDelta.Add(Retainage("$61,000"));
+        replay.LastByThread[earlier.Id].LedgerDelta.Add(Retainage(first));
+        replay.LastByThread[later.Id].LedgerDelta.Add(Retainage(second));
 
         var report = CorpusScans.Run(_draft, _plan, replay);
 
@@ -209,8 +208,8 @@ public class CorpusScansTests : IDisposable
         Assert.Equal(ScanCheck.StoryDetail, finding.Check);
         Assert.Equal(later.Id, finding.ThreadId);
         Assert.Equal(First(later).DocId, finding.DocId);
-        Assert.Equal("gives retainage release as $61,000; earlier emails say $50,000", finding.Text);
-        Assert.DoesNotContain(report.Findings, f => f.ThreadId == sameWave.Id);
+        Assert.Equal($"gives retainage release as {second}; earlier emails say {first}", finding.Text);
+        Assert.DoesNotContain(report.Findings, f => f.ThreadId == earlier.Id);
     }
 
     [Fact]

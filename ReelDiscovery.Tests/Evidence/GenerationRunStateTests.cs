@@ -962,6 +962,24 @@ public class GenerationRunStateTests
     }
 
     [Fact]
+    public void EstimateRemaining_BatchFlag_ReturnsBatchTotal()
+    {
+        var (draft, plan) = AttachmentTestData.MixedCase();
+        var state = GenerationRunState.From(plan, new JournalReplay());
+        var prices = MediaPrices.Defaults();
+        var opus = AIModelConfig.GetDefaultModels().First(m => m.ModelId == "claude-opus-5-5");
+        var haiku = AIModelConfig.GetDefaultModels().First(m => m.ModelId == "claude-haiku-4-5-20251001");
+
+        var ready = GenerationCostEstimator.Estimate(plan, opus, haiku, prices, true, draft.Guide);
+
+        Assert.Equal(ready.BatchTotal,
+            GenerationRunState.EstimateRemaining(plan, state, opus, haiku, prices, true, draft.Guide, batch: true));
+        Assert.Equal(ready.Total,
+            GenerationRunState.EstimateRemaining(plan, state, opus, haiku, prices, true, draft.Guide, batch: false));
+        Assert.True(ready.BatchTotal < ready.Total);
+    }
+
+    [Fact]
     public void Apply_CopiesPhase6CachedCounts_RelevantThreadCountsStayRelevant()
     {
         var (draft, plan) = AttachmentTestData.MixedCase();

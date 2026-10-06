@@ -1,6 +1,7 @@
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Corpus;
 
 namespace ReelDiscovery.Tests.Corpus;
@@ -264,6 +265,113 @@ public class GenerationCostEstimatorTests
         Assert.Equal(viaEstimate.Total, viaWork.Total);
         Assert.Equal(viaEstimate.ModelName, viaWork.ModelName);
         Assert.Equal(viaEstimate.VolumeModelName, viaWork.VolumeModelName);
+    }
+
+    private static AIModelConfig Catalog(string modelId) =>
+        AIModelConfig.GetDefaultModels().First(m => m.ModelId == modelId);
+
+    private static decimal Cost(AIModelConfig model, TokenUsage usage) => model.CalculateCost(usage).TotalUsd;
+
+    // 10 relevant messages only, no attachments: isolates the per-message text price
+    private static CorpusPlan RelevantOnlyPlan() =>
+        new() { Threads = new List<PlannedThread> { NewThread(ThreadRelevance.Relevant, NonRelevantCategory.None, 10, "T-0001") } };
+
+    [Fact]
+    public void PriceWork_OpusStory_PricesStablePrefixAsCacheReads()
+    {
+        var opus = Catalog("claude-opus-5-5");
+        Assert.True(GenerationCostEstimator.StablePrefixTokens >= opus.MinCacheablePrefixTokens);
+
+        var estimate = GenerationCostEstimator.Estimate(RelevantOnlyPlan(), opus, opus, Prices);
+
+        var cached = Cost(opus, new TokenUsage
+        {
+            InputTokens = 4_000 - GenerationCostEstimator.StablePrefixTokens,
+            CacheReadTokens = GenerationCostEstimator.StablePrefixTokens,
+            OutputTokens = 450
+        });
+        Assert.Equal(10 * cached * 1.15m, estimate.RelevantCost);
+        Assert.True(estimate.RelevantCost < 10 * opus.CalculateTotalCost(4_000, 450) * 1.15m);
+    }
+
+    [Theory]
+    [InlineData("claude-haiku-4-5-20251001")]
+    [InlineData("gpt-6-sol")]
+    [InlineData("gpt-6.1-sol")]
+    [InlineData("gpt-6-luna")]
+    public void PriceWork_PrefixBelowModelMinimum_NoCacheTerm(string modelId)
+    {
+        var model = Catalog(modelId);
+        Assert.True(GenerationCostEstimator.StablePrefixTokens < model.MinCacheablePrefixTokens);
+
+        var estimate = GenerationCostEstimator.Estimate(RelevantOnlyPlan(), model, model, Prices);
+
+        Assert.Equal(10 * model.CalculateTotalCost(4_000, 450) * 1.15m, estimate.RelevantCost);
+    }
+
+    [Fact]
+    public void PriceWork_LegacyModelWithoutMinPrefix_NoCacheTerm()
+    {
+        var legacy = new AIModelConfig
+        {
+            DisplayName = "Legacy", InputTokenPricePerMillion = 3m, OutputTokenPricePerMillion = 15m,
+            CacheReadTokenPricePerMillion = 0.3m, MinCacheablePrefixTokens = 0
+        };
+
+        var estimate = GenerationCostEstimator.Estimate(RelevantOnlyPlan(), legacy, legacy, Prices);
+
+        Assert.Equal(10 * legacy.CalculateTotalCost(4_000, 450) * 1.15m, estimate.RelevantCost);
+    }
+
+    [Fact]
+    public void PriceWork_BatchTotal_NoCacheReadsBatchDiscountPlusLiveMedia()
+    {
+        var opus = Catalog("claude-opus-5-5");
+        var haiku = Catalog("claude-haiku-4-5-20251001");
+
+        var estimate = GenerationCostEstimator.Estimate(MixedPlan(), opus, haiku, Prices);
+
+        decimal B(AIModelConfig m, int input, int output) =>
+            Cost(m, new TokenUsage { InputTokens = input, OutputTokens = output, IsBatch = true });
+
+        var batchStory = 14 * B(opus, 4_000, 450) * 1.15m + 2 * B(opus, 3_000, 1_500) * 1.15m;
+        var batchVolume = 20 * B(haiku, 1_500, 300) * 1.15m + 3 * B(haiku, 800, 200) * 1.15m
+                          + B(haiku, 3_000, 1_200) * 1.15m + B(haiku, 2_500, 400) * 1.15m;
+
+        Assert.Equal(batchStory, estimate.BatchStoryCost);
+        Assert.Equal(batchVolume, estimate.BatchVolumeCost);
+        Assert.Equal(batchStory + batchVolume + estimate.MediaCost, estimate.BatchTotal);
+
+        // 50% discount: batch text is half the uncached live text
+        var liveNoCacheStory = (14 * opus.CalculateTotalCost(4_000, 450) + 2 * opus.CalculateTotalCost(3_000, 1_500)) * 1.15m;
+        Assert.Equal(liveNoCacheStory / 2, estimate.BatchStoryCost);
+        Assert.True(estimate.BatchTotal < estimate.Total);
+    }
+
+    [Fact]
+    public void PriceWork_MediaSameInBothTotals_ZeroWhenUnavailable()
+    {
+        var opus = Catalog("claude-opus-5-5");
+        var haiku = Catalog("claude-haiku-4-5-20251001");
+
+        var withMedia = GenerationCostEstimator.Estimate(MixedPlan(), opus, haiku, Prices);
+        Assert.Equal(withMedia.StoryCost + withMedia.VolumeCost + withMedia.MediaCost, withMedia.Total);
+        Assert.Equal(withMedia.BatchStoryCost + withMedia.BatchVolumeCost + withMedia.MediaCost, withMedia.BatchTotal);
+        Assert.True(withMedia.MediaCost > 0m);
+
+        var noMedia = GenerationCostEstimator.Estimate(MixedPlan(), opus, haiku, Prices, mediaAvailable: false);
+        Assert.Equal(0m, noMedia.MediaCost);
+        Assert.Equal(noMedia.BatchStoryCost + noMedia.BatchVolumeCost, noMedia.BatchTotal);
+    }
+
+    [Fact]
+    public void PriceWork_NoDiscountModels_BatchEqualsLive()
+    {
+        var estimate = GenerationCostEstimator.Estimate(MixedPlan(), Story, Volume, Prices);
+
+        Assert.Equal(estimate.Total, estimate.BatchTotal);
+        Assert.Equal(estimate.StoryCost, estimate.BatchStoryCost);
+        Assert.Equal(estimate.VolumeCost, estimate.BatchVolumeCost);
     }
 
     [Fact]

@@ -321,6 +321,63 @@ public class GenerationResetTests : IDisposable
         Assert.False(File.Exists(StoryPath));
     }
 
+    // ----- D-25: transient locks are retried -----
+
+    [Fact]
+    public async Task TryDelete_BrieflyLockedFile_RetriesAndDeletes()
+    {
+        WriteFile("brief.txt");
+        var path = Path.Combine(_folder, "brief.txt");
+        var result = new StartOverResult();
+
+        var handle = await OpenExclusiveAsync(path);
+        var release = Task.Run(async () =>
+        {
+            await Task.Delay(150);
+            handle.Dispose();
+        });
+
+        var deleted = await Task.Run(() => GenerationReset.TryDelete(path, "brief.txt", result));
+        await release;
+
+        Assert.True(deleted);
+        Assert.Empty(result.Errors);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task TryDelete_HeldLock_ReportsOneErrorAfterRetries()
+    {
+        WriteFile("held.txt");
+        var path = Path.Combine(_folder, "held.txt");
+        var result = new StartOverResult();
+
+        bool deleted;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        using (await OpenExclusiveAsync(path))
+            deleted = GenerationReset.TryDelete(path, "held.txt", result);
+        watch.Stop();
+
+        Assert.False(deleted);
+        var error = Assert.Single(result.Errors);
+        Assert.StartsWith("held.txt: ", error);
+        // Waits 100 + 200 + 300 + 400 ms between the 5 attempts
+        Assert.True(watch.ElapsedMilliseconds >= 900, $"{watch.ElapsedMilliseconds} ms");
+    }
+
+    [Fact]
+    public void TryDelete_MissingFile_ReturnsFalseWithoutWaiting()
+    {
+        var result = new StartOverResult();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var deleted = GenerationReset.TryDelete(Path.Combine(_folder, "missing.txt"), "missing.txt", result);
+
+        Assert.False(deleted);
+        Assert.Empty(result.Errors);
+        Assert.True(watch.ElapsedMilliseconds < 100);
+    }
+
     [Fact]
     public async Task StartOver_EmptyFolder_DoesNothing()
     {

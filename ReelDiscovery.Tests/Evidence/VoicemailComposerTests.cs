@@ -195,14 +195,37 @@ public class VoicemailComposerTests
         Assert.DoesNotContain(VoicemailComposer.TranscriptHeader, emails[0].PlainText);
     }
 
+    // IN-07: a personal external recipient never lends its consumer host; the cast caller's organization does
     [Fact]
-    public void Compose_recipient_without_organization_uses_plain_voice_mail_and_own_domain()
+    public void Compose_personal_external_recipient_uses_the_cast_callers_organization()
     {
         var email = Compose(Build(recipientId: "EXT-001")).Emails.Single();
-        Assert.Equal("Voice Mail", email.From.Name);
-        Assert.Equal("voicemail@mailbox.example", email.From.Email);
+        Assert.Equal("Dunder Mifflin Voice Mail", email.From.Name);
+        Assert.Equal("voicemail@dundermifflin.com", email.From.Email);
+    }
 
-        var blank = Compose(Build(recipientId: "EXT-002")).Emails.Single();
+    [Fact]
+    public void Compose_cast_recipient_in_cc_wins_over_external_to_and_caller()
+    {
+        var f = Build(recipientId: "EXT-001");
+        f.Guide.Organizations.Add(new CaseOrganization { Id = "ORG-02", Name = "Vance Refrigeration", Domain = "vancerefrigeration.com", TimeZoneId = "America/New_York" });
+        f.Guide.Cast.Add(new CastMember { Id = "CH-003", FirstName = "Bob", LastName = "Vance", OrganizationId = "ORG-02", Email = "bob@vancerefrigeration.com" });
+        f.Thread.Messages[0].CcIds = new List<string> { "CH-003" };
+
+        var email = Compose(f).Emails.Single();
+
+        Assert.Equal("Vance Refrigeration Voice Mail", email.From.Name);
+        Assert.Equal("voicemail@vancerefrigeration.com", email.From.Email);
+    }
+
+    [Fact]
+    public void Compose_no_cast_on_the_message_uses_plain_voice_mail_and_the_recipients_domain()
+    {
+        var f = Build(recipientId: "EXT-002");
+        f.Thread.Messages[0].FromId = "EXT-001";
+
+        var blank = Compose(f).Emails.Single();
+
         Assert.Equal("Voice Mail", blank.From.Name);
         Assert.Equal("voicemail@" + EmailComposer.FallbackDomain, blank.From.Email);
     }

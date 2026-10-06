@@ -8,7 +8,7 @@ namespace ReelDiscovery.Services.Evidence;
 
 /// <summary>
 /// Turns a planned voicemail (a single-message thread with a Voicemail attachment) into the phone-system notice email
-/// (D-28): sender "{Recipient org} Voice Mail", subject "Voicemail from {Caller} ({m:ss})", a code-written body with the
+/// (D-28): sender "{First cast recipient's org} Voice Mail", subject "Voicemail from {Caller} ({m:ss})", a code-written body with the
 /// transcript and no signature. Pure and deterministic; the message body stays the spoken transcript in BodyPlain.
 /// </summary>
 public static partial class VoicemailComposer
@@ -68,10 +68,17 @@ public static partial class VoicemailComposer
         var callerName = Clean(caller != null && caller.FullName.Trim().Length > 0 ? caller.FullName : email.From.Name);
         var phone = Clean(caller?.Cast?.Phone ?? string.Empty);
 
-        // The phone system belongs to the first recipient's organization
-        var recipient = people.Find((planned.ToIds ?? new List<string>()).FirstOrDefault());
-        var organization = Clean(recipient?.OrganizationName ?? string.Empty);
-        var domain = EmailComposer.SanitizeDomain(recipient?.Domain);
+        // IN-07: the phone system belongs to the first cast recipient's organization (To, then Cc), else the caller's when
+        // the caller is cast; a personal or vendor external never lends its host ("voicemail@gmail.com")
+        var recipients = (planned.ToIds ?? new List<string>()).Concat(planned.CcIds ?? new List<string>())
+            .Select(id => people.Find(id))
+            .Where(p => p != null)
+            .ToList();
+        var owner = recipients.FirstOrDefault(p => !p!.IsExternal)
+                    ?? (caller != null && !caller.IsExternal ? caller : null)
+                    ?? recipients.FirstOrDefault();
+        var organization = Clean(owner?.OrganizationName ?? string.Empty);
+        var domain = EmailComposer.SanitizeDomain(owner?.Domain);
 
         var transcript = email.BodyPlain;
         var duration = Duration(DurationSeconds(transcript));

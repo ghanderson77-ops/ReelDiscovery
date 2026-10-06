@@ -250,14 +250,14 @@ public class OpenAITextProvider : ILlmProvider
         return LlmFailureKind.Unknown;
     }
 
-    private static string ReadBody(ClientResultException ex) =>
+    internal static string ReadBody(ClientResultException ex) =>
         ex.GetRawResponse()?.Content?.ToString() ?? string.Empty;
 
     /// <summary>
     /// Builds a user-facing message from the provider's error.message only; request headers (and thus the key)
     /// are never included.
     /// </summary>
-    private static string SafeMessage(LlmFailureKind kind, int status, string body)
+    internal static string SafeMessage(LlmFailureKind kind, int status, string body)
     {
         var prefix = kind switch
         {

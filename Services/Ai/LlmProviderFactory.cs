@@ -14,7 +14,7 @@ public static class LlmProviderFactory
 
     public static IBatchTransport CreateBatchTransport(LlmProviderKind kind, string apiKey) => kind switch
     {
-        LlmProviderKind.OpenAI => throw new NotSupportedException("OpenAI batch transport not yet available"),
+        LlmProviderKind.OpenAI => new OpenAIBatchTransport(apiKey),
         LlmProviderKind.Anthropic => new AnthropicBatchTransport(apiKey),
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
     };

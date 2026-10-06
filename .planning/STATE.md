@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-14-PLAN.md
-last_updated: "2026-10-06T17:13:22.613Z"
+stopped_at: Completed 07-08-PLAN.md
+last_updated: "2026-10-06T22:31:53.860Z"
 last_activity: 2026-10-06
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 115
-  percent: 90
+  completed_plans: 116
+  percent: 91
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 10 of 22
+Plan: 11 of 22
 Status: Ready to execute
 Last activity: 2026-10-06
 
@@ -166,6 +166,7 @@ Progress: [██████████] 99%
 | Phase 07 P07 | 15 min | 2 tasks | 6 files |
 | Phase 07 P12 | 25min | 2 tasks | 7 files |
 | Phase 07 P14 | 7min | 2 tasks | 9 files |
+| Phase 07 P08 | 4h | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -478,6 +479,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [07-14]: Leakage BA cut-off is the relevant share, not 0.5 (T-07-41)
 - [Phase ?]: [07-14]: D-23 before/after proof uses the real planner at 250 emails with PrivilegedPercent 20 (default 8% gives 2 privileged relevant emails)
 - [Phase ?]: [07-14]: Real-planner 250-email fixture measures Warning/Fail from sender and weekday skew; measurement only, planner tuning is a follow-up
+- [Phase ?]: [07-08]: Only evidence first attempts (thread, filler, attachment) are batch-eligible; feedback retries, cast voice, side world, case guide, planner and QA calls stay live
+- [Phase ?]: [07-08]: Items errored/expired in a batch run live on re-request, never re-batched; items whose callers all cancelled before flush are dropped
+- [Phase ?]: [07-08]: BatchTimings has an injectable Clock for deterministic poll/NextCheckUtc tests
 
 ### Pending Todos
 
@@ -499,6 +503,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T17:13:22.606Z
-Stopped at: Completed 07-14-PLAN.md
+Last session: 2026-10-06T22:31:53.854Z
+Stopped at: Completed 07-08-PLAN.md
 Resume file: None

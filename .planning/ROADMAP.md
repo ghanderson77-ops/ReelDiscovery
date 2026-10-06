@@ -238,7 +238,7 @@ Plans:
 - [x] 07-05-PLAN.md — Gateway cost through units and runner; journal cost detail and writer provider (Wave 2)
 - [x] 07-06-PLAN.md — Live and batch totals from one PriceWork with the cache term (Wave 2)
 - [x] 07-07-PLAN.md — Batch contracts, request identity, on-disk batch ledger, fake transport (Wave 2)
-- [ ] 07-08-PLAN.md — BatchingLlmProvider decorator (queue, flush, poll, live fallback, restart recovery) (Wave 3)
+- [x] 07-08-PLAN.md — BatchingLlmProvider decorator (queue, flush, poll, live fallback, restart recovery) (Wave 3)
 - [ ] 07-09-PLAN.md — Anthropic and OpenAI batch transports with live-parity wire tests (Wave 3)
 - [ ] 07-10-PLAN.md — Runner batch integration, snapshot batch status, Start Over cleanup, D-05 parity proof (Wave 4)
 - [ ] 07-11-PLAN.md — Generate Corpus UI: batch checkbox, live/batch estimate, batch wait rows and events (Wave 5)

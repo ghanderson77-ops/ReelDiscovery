@@ -392,10 +392,10 @@ public class AttachmentRepair
                     if (outcome.Relevant && profile.UsesLedger && !(actx?.LateRepair ?? false))
                         result.Deltas.AddRange(outcome.NewDetails);
 
-                    // D-20: the first committed slot per canonical meeting key wins; fallback slots are never shared
+                    // D-20: fallback slots are never shared; the earliest planned committed slot per meeting key wins at the step end
                     if (actx != null && outcome.AttachmentKind == AttachmentType.CalendarInvite && outcome.Relevant
                         && slots.TryGetValue(outcome.DocId, out var slot) && !string.IsNullOrEmpty(slot.MeetingKey))
-                        actx.InviteSlots.TryAdd(slot.MeetingKey, slot);
+                        actx.CommittedInvites[outcome.DocId] = ThreadUnitOfWork.CommittedInviteOf(thread, outcome.ParentDocId, outcome.DocId, slot);
                 }
 
                 result.Added = added;

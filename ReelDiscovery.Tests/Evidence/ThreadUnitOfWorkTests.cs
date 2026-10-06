@@ -1061,9 +1061,12 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         var inviteA = first.Record!.Attachments.Single(r => r.AttachmentKind == AttachmentType.CalendarInvite);
         Assert.Equal(JournalRecordType.AttachmentDone, inviteA.Type);
         Assert.NotEmpty(inviteA.InviteMeetingKey);
-        var registered = Assert.Single(attachments.InviteSlots);
-        Assert.Equal(inviteA.InviteMeetingKey, registered.Key);
-        Assert.Equal(inviteA.InviteStart, registered.Value.Start);
+        // WR-04: the step-start slots stay frozen; the committed slot waits for the step end
+        Assert.Empty(attachments.InviteSlots);
+        var registered = Assert.Single(attachments.CommittedInvites).Value;
+        Assert.Equal(inviteA.AttachmentDocId, registered.DocId);
+        Assert.Equal(inviteA.InviteMeetingKey, registered.Slot.MeetingKey);
+        Assert.Equal(inviteA.InviteStart, registered.Slot.Start);
 
         // B runs in a later wave and sees A's meeting through the ledger
         var waves = new Dictionary<string, int> { [a.Id] = 1, [b.Id] = 2 };
@@ -1071,8 +1074,7 @@ public partial class ThreadUnitOfWorkTests : IDisposable
             new Dictionary<string, List<LedgerDelta>> { [a.Id] = first.Record.LedgerDelta.ToList() });
         Assert.Contains(ledger.Entries, e => e.Kind == LedgerKind.Meeting);
         var next = new ThreadAttachmentContext { Chains = chains, RowIndex = 2 };
-        foreach (var (key, slot) in attachments.InviteSlots)
-            next.InviteSlots.TryAdd(key, slot);
+        GenerationRunner.KeepSlots(next.InviteSlots, new[] { attachments });
         chains.BeginStep(new[] { b.Id });
         _fake.Respond = Responder();
 
@@ -1082,6 +1084,44 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         Assert.Equal(inviteA.InviteMeetingKey, inviteB.InviteMeetingKey);
         Assert.Equal(inviteA.InviteStart, inviteB.InviteStart);
         Assert.Equal(inviteA.InviteEnd, inviteB.InviteEnd);
+    }
+
+    [Fact]
+    public void KeepSlots_SameStepCommits_EarliestPlannedInviteWins_WhateverTheFinishOrder()
+    {
+        // WR-04: two units of one step commit different slots for one meeting; the later steps (and a Continue, via
+        // GenerationRunState.InviteSlotsByMeeting) must see the same winner
+        static ThreadAttachmentContext Unit(string docId, DateTime parentUtc, int hour)
+        {
+            var unit = new ThreadAttachmentContext();
+            unit.CommittedInvites[docId] = new CommittedInvite
+            {
+                DocId = docId,
+                ParentUtc = parentUtc,
+                Slot = new InviteSlot
+                {
+                    MeetingKey = "fact:F-012",
+                    Start = new DateTimeOffset(2024, 3, 5, hour, 0, 0, TimeSpan.Zero),
+                    End = new DateTimeOffset(2024, 3, 5, hour + 1, 0, 0, TimeSpan.Zero)
+                }
+            };
+            return unit;
+        }
+
+        var early = Unit("DOC-000020.0001", new DateTime(2024, 3, 1, 9, 0, 0, DateTimeKind.Utc), 10);
+        var late = Unit("DOC-000010.0001", new DateTime(2024, 3, 2, 9, 0, 0, DateTimeKind.Utc), 14);
+        var known = new System.Collections.Concurrent.ConcurrentDictionary<string, InviteSlot>(StringComparer.Ordinal);
+        var reversed = new System.Collections.Concurrent.ConcurrentDictionary<string, InviteSlot>(StringComparer.Ordinal);
+
+        GenerationRunner.KeepSlots(known, new[] { late, early });
+        GenerationRunner.KeepSlots(reversed, new[] { early, late });
+
+        Assert.Equal(10, known["fact:F-012"].Start.Hour);
+        Assert.Equal(10, reversed["fact:F-012"].Start.Hour);
+
+        // A slot already known from an earlier step is never replaced
+        GenerationRunner.KeepSlots(known, new[] { Unit("DOC-000001.0001", DateTime.MinValue, 8) });
+        Assert.Equal(10, known["fact:F-012"].Start.Hour);
     }
 
     [Fact]
@@ -1117,8 +1157,7 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         Assert.Equal(c.Id, meeting.SourceThreadId);
 
         var next = new ThreadAttachmentContext { Chains = chains, RowIndex = 2 };
-        foreach (var (key, slot) in attachments.InviteSlots)
-            next.InviteSlots.TryAdd(key, slot);
+        GenerationRunner.KeepSlots(next.InviteSlots, new[] { attachments });
         chains.BeginStep(new[] { b.Id });
         _fake.Respond = Responder();
 
@@ -1132,7 +1171,7 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         // Documented edge (06-08): the key B sees is C's canonical key, not the one A registered; the schedule still matches
         Assert.StartsWith($"mtg:{a.Id}:", inviteA.InviteMeetingKey);
         Assert.StartsWith($"mtg:{c.Id}:", inviteB.InviteMeetingKey);
-        Assert.True(attachments.InviteSlots.ContainsKey(inviteA.InviteMeetingKey));
+        Assert.True(next.InviteSlots.ContainsKey(inviteA.InviteMeetingKey));
     }
 
     [Fact]

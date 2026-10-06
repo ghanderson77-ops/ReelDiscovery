@@ -344,11 +344,14 @@ public class GenerationRunner
                 // earlier-wave repairs of this run are already in
                 var ledger = LedgerMerger.Build(plan, guide, ctx.WaveOf, deltas);
                 ctx.ChainScheduler.BeginStep(pending.Concat(waveRepairs.Select(g => g.ThreadId)));
-                var step = StepContext(ctx, wave.Index);
+                // WR-04: one frozen context per unit; committed slots are published only at the step end
+                var threadSteps = new List<ThreadAttachmentContext>();
                 var relevantProfile = RenderProfile.Relevant(_llm);
                 var tasks = pending
                     .Select(id =>
                     {
+                        var step = StepContext(ctx, wave.Index);
+                        threadSteps.Add(step);
                         var render = ThreadRenderContext.Create(input.Draft, plan, threads[id],
                             ctx.Assignments.TryGetValue(id, out var a) ? a : new ThreadAssignment { ThreadId = id },
                             ctx.People, ledger.Entries, wave.Index);
@@ -386,9 +389,7 @@ public class GenerationRunner
                 }
                 finally
                 {
-                    KeepSlots(ctx, step);
-                    foreach (var actx in repairSteps)
-                        KeepSlots(ctx, actx);
+                    KeepSlots(ctx, threadSteps.Concat(repairSteps));
                     snapshot.SetWaveRunning(repairRow, false);
                 }
 
@@ -662,8 +663,7 @@ public class GenerationRunner
                 }
                 finally
                 {
-                    foreach (var actx in steps)
-                        KeepSlots(ctx, actx);
+                    KeepSlots(ctx, steps);
                 }
 
                 // A fatal stop skips the remaining repairs; committed ones stay journaled
@@ -1104,12 +1104,22 @@ public class GenerationRunner
         return step;
     }
 
-    // Slots registered by committed invites of the step stay known to later steps (D-20: the first one wins)
-    private static void KeepSlots(RunContext ctx, ThreadAttachmentContext step)
+    // Slots committed in the step stay known to later steps. D-20 + WR-04: per meeting key the earliest planned invite
+    // (parent SentAt, then DocId) wins, the rule GenerationRunState applies on replay, so finish order never matters
+    internal static void KeepSlots(ConcurrentDictionary<string, InviteSlot> known, IEnumerable<ThreadAttachmentContext> steps)
     {
-        foreach (var (key, slot) in step.InviteSlots)
-            ctx.InviteSlots.TryAdd(key, slot);
+        var committed = steps
+            .Where(s => s != null)
+            .SelectMany(s => s.CommittedInvites.Values)
+            .Where(i => i?.Slot != null && !string.IsNullOrEmpty(i.Slot.MeetingKey))
+            .OrderBy(i => i.ParentUtc)
+            .ThenBy(i => i.DocId, StringComparer.Ordinal)
+            .ToList();
+        foreach (var invite in committed)
+            known.TryAdd(invite.Slot.MeetingKey, invite.Slot);
     }
+
+    private static void KeepSlots(RunContext ctx, IEnumerable<ThreadAttachmentContext> steps) => KeepSlots(ctx.InviteSlots, steps);
 
     /// <summary>
     /// Wave rows plus the Non-relevant mail row (when the plan has non-relevant threads), with thread and attachment

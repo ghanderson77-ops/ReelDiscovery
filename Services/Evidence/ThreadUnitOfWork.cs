@@ -43,14 +43,29 @@ public class ThreadOutcome
 }
 
 /// <summary>
-/// Run-step inputs of the attachment step shared by every thread unit of the step.
+/// A relevant invite slot committed by a unit, published to later steps at the step end (WR-04).
+/// </summary>
+public class CommittedInvite
+{
+    public string DocId { get; set; } = string.Empty;
+    public DateTime ParentUtc { get; set; }
+    public InviteSlot Slot { get; set; } = new();
+}
+
+/// <summary>
+/// Attachment-step inputs of one thread unit (or one repair): the run's chain scheduler and a frozen copy of the slots
+/// known at the step start.
 /// </summary>
 public class ThreadAttachmentContext
 {
     public ChainScheduler Chains { get; set; } = null!;
 
-    // Shared per run step; InviteSlots seeded from GenerationRunState.InviteSlotsByMeeting (D-20)
+    // Step-start copy of GenerationRunState.InviteSlotsByMeeting plus earlier steps (D-20). Never written during the
+    // step, so same-step units cannot see one another's slots whatever their finish order (WR-04)
     public ConcurrentDictionary<string, InviteSlot> InviteSlots { get; } = new(StringComparer.Ordinal);
+
+    // Invites this unit committed, keyed by DocId; the runner publishes them at the step end in replay order
+    public ConcurrentDictionary<string, CommittedInvite> CommittedInvites { get; } = new(StringComparer.Ordinal);
 
     // Stage row the attachment counters move to (GenerationSnapshot.RecordAttachment)
     public int RowIndex { get; set; }
@@ -365,10 +380,10 @@ public class ThreadUnitOfWork
                     if (attachment.Relevant && profile.UsesLedger)
                         attachmentDeltas.AddRange(attachment.NewDetails);
 
-                    // D-20: the first committed slot per canonical meeting key wins; fallback slots are never shared
+                    // D-20: fallback slots are never shared; the earliest planned committed slot per meeting key wins at the step end
                     if (attachments != null && attachment.AttachmentKind == AttachmentType.CalendarInvite && attachment.Relevant
                         && slots.TryGetValue(attachment.DocId, out var slot) && !string.IsNullOrEmpty(slot.MeetingKey))
-                        attachments.InviteSlots.TryAdd(slot.MeetingKey, slot);
+                        attachments.CommittedInvites[attachment.DocId] = CommittedInviteOf(ctx.Thread, attachment.ParentDocId, attachment.DocId, slot);
                 }
 
                 // NotRun attachments have no record; their spend still counts
@@ -591,6 +606,19 @@ public class ThreadUnitOfWork
     /// Journals ThreadFailed with the tokens and cost spent so far (thread and every attachment attempt), counts it and
     /// adds an Activity row. Reports no attachment state. Never throws.
     /// </summary>
+    // Parent SentAt (UTC) orders committed invites the way GenerationRunState.InviteSlotsByMeeting does on replay
+    internal static CommittedInvite CommittedInviteOf(PlannedThread thread, string parentDocId, string docId, InviteSlot slot)
+    {
+        var parent = (thread.Messages ?? new List<PlannedMessage>())
+            .FirstOrDefault(m => m != null && string.Equals(m.DocId, parentDocId, StringComparison.Ordinal));
+        return new CommittedInvite
+        {
+            DocId = docId,
+            ParentUtc = parent?.SentAt.UtcDateTime ?? DateTime.MaxValue,
+            Slot = slot
+        };
+    }
+
     // WR-01: removes every copy of an uncommitted thread (only pending threads run, so no committed EML shares these
     // paths); returns a reason suffix naming copies that could not be removed
     private string RemoveCopies(ComposedThread? composed)

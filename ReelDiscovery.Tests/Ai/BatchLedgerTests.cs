@@ -144,7 +144,7 @@ public class BatchLedgerTests : IDisposable
         var state = ledger.Replay();
 
         Assert.Single(state.SubmittedById);
-        Assert.Equal(1, state.Pending(_plan).Count());
+        Assert.Single(state.Pending(_plan));
     }
 
     [Fact]
@@ -217,6 +217,9 @@ public class BatchLedgerTests : IDisposable
         var longId = BatchLedger.SafeFileId(new string('a', 100));
         Assert.Matches("^h[0-9a-f]{40}$", longId);
         Assert.Equal(longId, BatchLedger.SafeFileId(new string('a', 100)));
+
+        // $ would accept a trailing newline; the anchor must be end-of-string
+        Assert.Matches("^h[0-9a-f]{40}$", BatchLedger.SafeFileId("batch_1\n"));
     }
 
     [Fact]

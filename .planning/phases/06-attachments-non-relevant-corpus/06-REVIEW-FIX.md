@@ -1,10 +1,10 @@
 ---
 phase: 06-attachments-non-relevant-corpus
-fixed_at: 2026-10-06T01:29:57Z
+fixed_at: 2026-10-06T14:27:22Z
 review_path: .planning/phases/06-attachments-non-relevant-corpus/06-REVIEW.md
-iteration: 1
-findings_in_scope: 6
-fixed: 6
+iteration: 2
+findings_in_scope: 13
+fixed: 13
 skipped: 0
 status: all_fixed
 ---
@@ -16,7 +16,7 @@ status: all_fixed
 **Iteration:** 1
 
 **Summary:**
-- Findings in scope: 6 (CR-01, WR-01..WR-05; IN-01..IN-07 out of scope)
+- Findings in scope (iteration 1): 6 (CR-01, WR-01..WR-05; IN-01..IN-07 were handled in iteration 2, below)
 - Fixed: 6
 - Skipped: 0
 - I checked every finding against the code before fixing it. All six were accurate.
@@ -107,6 +107,118 @@ I rejected reordering by generation rank. It would number a version that is sent
 
 ---
 
-_Fixed: 2026-10-06T01:29:57Z_
+## Iteration 2: Info findings (IN-01..IN-07)
+
+**Fixed at:** 2026-10-06T14:27:22Z
+**Scope:** `all`. CR-01 and WR-01..WR-05 were fixed in iteration 1 and were not touched again.
+
+**Summary:**
+- Findings in scope this iteration: 7 (IN-01..IN-07)
+- Fixed: 7
+- Skipped: 0
+- I checked every finding against the current code first. All seven still applied. Some line numbers had moved because of the WR fixes; for example, IN-07's sender code is now at `VoicemailComposer.cs:69-84`, not 321-334.
+- For two findings I used a different fix than the reviewer suggested: IN-05 (a "no space" rule would have broken tests set in review 06-06) and IN-06 (I chose to refuse appends rather than move FlattenedText out of the journal). Details are below.
+- Verification: `dotnet build ReelDiscovery.csproj -c Release --no-incremental` gives 0 warnings and 0 errors. The full suite (`dotnet test ReelDiscovery.Tests/ReelDiscovery.Tests.csproj -c Release`) gives **3443 passed, 0 failed**. The baseline was 3420; the 23 extra tests are new regression tests. One old voicemail test was replaced because IN-07 changed the behavior it checked.
+
+### IN-01: Truncation can split a surrogate pair, and the Office builders do not strip lone surrogates
+
+**Files modified:** `Services/Evidence/AttachmentRenderer.cs`, `Services/Evidence/FillerRenderer.cs`, `Models/Evidence/SideWorld.cs`, `Services/OfficeDocumentService.cs`, `ReelDiscovery.Tests/Evidence/SurrogateCutTests.cs` (new)
+**Commit:** c7264af
+**Applied fix:**
+- `AttachmentRenderer.Clean`, `FillerRenderer.CleanTitle` and `SideWorld.Clip` now cut one character earlier when the cut would end on a high surrogate.
+- `OfficeDocumentService.Clean` keeps only complete surrogate pairs and drops unpaired high or low surrogates.
+- `AttachmentRenderer.Clean`, `SideWorld.Clip` and `OfficeDocumentService.Clean` are now `internal`, so the tests can call them.
+
+**Tests:** 6 new tests in `SurrogateCutTests`:
+- each of the three cut points, with a pair straddling the cut;
+- a pair just before the cut is kept whole;
+- `Clean` drops lone surrogates;
+- a Word document built from text with lone surrogates opens and holds no lone surrogate.
+
+### IN-02: MailboxWriter silently drops parts that the journal records as Written
+
+**Files modified:** `Services/Evidence/MailboxWriter.cs`, `Services/Evidence/ThreadUnitOfWork.cs`, `Services/Evidence/AttachmentRepair.cs`, `ReelDiscovery.Tests/Evidence/AttachmentRepairTests.cs`
+**Commit:** b8df9e9
+**Applied fix:**
+- New `MailboxWriter.CanCarry(part)`: the part has bytes and a safe bare file name. `AddAttachments` now uses it, so there is one rule for which parts the writer keeps.
+- `ThreadUnitOfWork` and `AttachmentRepair` check every committed outcome before building the journal line. If the writer would drop its part, the outcome is marked as a Write failure (`ThreadUnitOfWork.FailUncarriable`, with the spend kept). The key then says Failed, not Generated.
+- In repair, `Rebuilt` falls back to the planned `AttachmentNaming.NamesFor` name when the journaled name is unsafe (or was blanked by `Normalize`). A reused part that still cannot be carried is regenerated, not dropped.
+
+**Tests:**
+- `Repair_UnsafeJournaledFileName_ReusedPartKeptUnderPlannedName`. I confirmed it fails on the old `AttachmentRepair`.
+- `CanCarry_RejectsEmptyBytesAndUnsafeNames`.
+- `FailUncarriable_MarksWriteFailure_DropsPartKeepsSpend`.
+
+**Note:** in the first-write path, the unit of work already fails empty media bytes, and `NamesFor` names are always safe. So in that path this is defense in depth; the repair path is where the bug could actually happen.
+
+### IN-03: The side world is rebuilt on every Continue when one covered organization has no projects
+
+**Files modified:** `Services/Evidence/SideWorldBuilder.cs`, `ReelDiscovery.Tests/Evidence/SideWorldTests.cs`
+**Commit:** 469e807
+**Applied fix:** `FromRecord` now only requires that every covered organization is listed. An empty project list counts as listed, because `ProjectsFor` already falls back to templates. A guide that gains a new organization still forces a rebuild.
+**Tests:** new `FromRecord_CoveredOrganizationWithNoProjects_WorldReused`. The existing coverage test (a missing organization still means null) still passes.
+
+### IN-04: The voicemail TTS input has no length limit in code
+
+**Files modified:** `Services/Evidence/AttachmentUnitOfWork.cs`, `ReelDiscovery.Tests/Evidence/AttachmentUnitOfWorkTests.cs`
+**Commit:** 81e6e9a
+**Applied fix:**
+- New `AttachmentUnitOfWork.SpeechText`: text up to `MaxSpeechChars` (4,000) passes through unchanged.
+- Longer text is cut at the last sentence end in the second half of the window. Without one, it is cut at the last space. It never cuts inside a surrogate pair.
+- A clipped voicemail is kept as Warnings with a code-owned `S1` violation ("the audio stops before the end of the written text"). Before, it got a 400 that failed the same way on every Retry.
+- The email transcript (BodyPlain) is unchanged.
+
+**Tests:**
+- `Voicemail_OverlongTranscript_ClippedAtSentence_KeptWithWarning`.
+- `SpeechText_ShortUnchanged_NoSentenceCutsAtSpace_NeverSplitsPair`.
+
+### IN-05: The new K/M/B amount suffixes produce false positives
+
+**Files modified:** `Services/Case/CanonicalValueScanner.cs`, `ReelDiscovery.Tests/Case/CanonicalValueScannerTests.cs`
+**Commit:** ca8e721
+**Applied fix:** I used the reviewer's second option, refined. I rejected the first option ("no space before a single-letter suffix") because existing tests deliberately accept `$1.25 M`, a decision from review 06-06. The new rules:
+- A suffix written directly after the number must not be followed by a letter or `&`.
+- A suffix written after a space must also not be followed by `-`.
+
+So `$500 M&A`, `$500M&A` and `$10 K-cups` are no longer scaled. `$1.25 M`, `$2.5 MM` and ranges such as `$500K-$600K` still scale.
+**Status:** fixed: requires human verification. This is a heuristic change to the regex.
+**Tests:** 4 new `InlineData` cases in `Amounts_SuffixOnlyAtWordBoundary`, plus new `Amounts_AdjacentSuffixRange_BothEndsScaled`.
+
+### IN-06: Nothing stops the journal from growing past the 200 MB replay cap
+
+**Files modified:** `Services/Evidence/GenerationJournal.cs`, `Services/Evidence/GenerationRunner.cs`, `ReelDiscovery.Tests/Evidence/GenerationJournalTests.cs`, `ReelDiscovery.Tests/Evidence/GenerationRunnerTests.cs`
+**Commit:** d04eef5
+**Applied fix:** I used the reviewer's first option, a stop near 90% of the cap. I did not defer it to Phase 7, because a minimal fix was safe: it reuses paths that already exist.
+- `AppendAsync` refuses a line that would take the file past `StopBytes`, which is 90% of the replay cap. The `RunEnded` line may use the remaining space up to the cap. A refused line throws `JournalFullException`, which is a subclass of `IOException`.
+- Because it is an `IOException`, every existing caller already handles it as a failed journal save. The thread stays pending, copies are removed (WR-01), and a NotSaved row is shown (WR-02). The journal stays readable, so the Unreadable card and Start Over are never forced.
+- `GenerationRunner` checks `journal.IsFull` after each thread or repair and calls `run.SetFatal(...)`. This is the same path as a provider fatal error, so no further calls are paid for.
+- If the journal is already past the stop line, the `RunStarted` append is refused. That now gives a `Fatal` outcome before any LLM call is made, instead of `InternalError`.
+
+**Still open (Phase 7, Claude's discretion per 07-CONTEXT.md):** a full journal stops the run, but it does not compact. Moving FlattenedText out of the journal, or compacting superseded lines, would raise the real limit.
+**Tests:**
+- `Append_PastStopLine_RefusedFileUnchanged_ReplayStaysReadable`.
+- `Append_RunEnded_MayUseTheRestOfTheCap`.
+- `JournalAtStopLine_StopsRunFatal_JournalStaysReadable`: one thread is requested, the outcome is Fatal with the full message, the journal holds only RunStarted and RunEnded, a NotSaved event is raised, and no EML is left.
+- `JournalAlreadyPastStopLine_StopsBeforeAnyCall`.
+
+### IN-07: The voicemail system sender takes the first recipient's domain, even a consumer one
+
+**Files modified:** `Services/Evidence/VoicemailComposer.cs`, `ReelDiscovery.Tests/Evidence/VoicemailComposerTests.cs`
+**Commit:** 36f35cb
+**Applied fix:** The notice sender is now chosen in this order:
+1. the first cast recipient (To, then Cc);
+2. the caller, if the caller is cast;
+3. the first recipient, as before.
+
+A personal or vendor external no longer produces `voicemail@gmail.com`.
+**Status:** fixed: requires human verification. This changes the D-28 sender rule: a cast caller's organization now owns the notice when the recipient is external.
+**Tests:**
+- `Compose_recipient_without_organization_uses_plain_voice_mail_and_own_domain` checked the old behavior, so I replaced it with `Compose_personal_external_recipient_uses_the_cast_callers_organization`.
+- New `Compose_cast_recipient_in_cc_wins_over_external_to_and_caller`.
+- New `Compose_no_cast_on_the_message_uses_plain_voice_mail_and_the_recipients_domain`, which keeps the plain "Voice Mail" fallback covered.
+
+---
+
+_Fixed: 2026-10-06T01:29:57Z (iteration 1), 2026-10-06T14:27:22Z (iteration 2)_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 1_
+_Iteration: 2_

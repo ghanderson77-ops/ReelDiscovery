@@ -23,8 +23,9 @@ public class ScannedValue
 public static partial class CanonicalValueScanner
 {
     // "$184,250.00", "$12,000", "$7.5 million", "$ 500", "$1.25M", "$500K", "$2.5MM"; the grouped form is tried first so
-    // commas are kept; a K/M/MM/B suffix must not run into a letter ("$12 Main Street", "$5 Mbps" stay unscaled)
-    [GeneratedRegex(@"\$\s?\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?:\s(?:million|billion|thousand)\b|\s?(?:MM|[KMB])(?![A-Za-z]))?|\$\s?\d+(?:\.\d+)?(?:\s(?:million|billion|thousand)\b|\s?(?:MM|[KMB])(?![A-Za-z]))?", RegexOptions.IgnoreCase, CitationScanner.MatchTimeoutMs)]
+    // commas are kept; a K/M/MM/B suffix must not run into a letter or "&" ("$12 Main Street", "$5 Mbps", "$500 M&A"
+    // stay unscaled), and a spaced suffix must not run into "-" either ("$10 K-cups"), while "$500K-$600K" still scales (IN-05)
+    [GeneratedRegex(@"\$\s?\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?:\s(?:million|billion|thousand)\b|(?:MM|[KMB])(?![A-Za-z&])|\s(?:MM|[KMB])(?![A-Za-z&\-]))?|\$\s?\d+(?:\.\d+)?(?:\s(?:million|billion|thousand)\b|(?:MM|[KMB])(?![A-Za-z&])|\s(?:MM|[KMB])(?![A-Za-z&\-]))?", RegexOptions.IgnoreCase, CitationScanner.MatchTimeoutMs)]
     private static partial Regex Amount();
 
     // "CO-007", "INV-2024-118", "PO-4471", "SOW-3", "ACCT-99812"

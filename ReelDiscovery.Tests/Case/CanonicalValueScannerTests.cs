@@ -80,9 +80,21 @@ public class CanonicalValueScannerTests
     [InlineData("$12 Main Street", "$12")]
     [InlineData("$5 Mbps plan", "$5")]
     [InlineData("$40 kits", "$40")]
+    // IN-05: "&" and a spaced "-" are not amount suffix boundaries
+    [InlineData("a $500 M&A budget", "$500")]
+    [InlineData("a $500M&A budget", "$500")]
+    [InlineData("$10 K-cups for the office", "$10")]
+    [InlineData("a $2.5 MM fund", "$2.5 MM")]
     public void Amounts_SuffixOnlyAtWordBoundary(string text, string expected)
     {
         Assert.Equal(new[] { expected }, Texts(CanonicalValueScanner.Scan(text), ScannedKind.Amount));
+    }
+
+    // IN-05: an adjacent suffix before a hyphen still scales, so ranges keep both ends
+    [Fact]
+    public void Amounts_AdjacentSuffixRange_BothEndsScaled()
+    {
+        Assert.Equal(new[] { "$500K", "$600K" }, Texts(CanonicalValueScanner.Scan("a range of $500K-$600K"), ScannedKind.Amount));
     }
 
     [Theory]

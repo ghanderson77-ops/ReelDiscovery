@@ -51,19 +51,13 @@ public class CorpusPlanner
     /// </summary>
     public async Task<CorpusPlanResult> PlanAsync(CaseDraft draft, bool mediaAvailable, string guidance, IProgress<PlanProgress>? progress = null, CancellationToken ct = default)
     {
-        // Knowers added for lone-knower facts are only on the returned plan; the draft's guide is put back as it was
-        // (T-04-48) and CorpusApproval applies them when the plan is saved
-        var facts = draft.Guide?.Facts?.Where(f => f != null).ToList() ?? new List<KeyFact>();
-        var original = facts.Select(f => f.KnownByIds?.ToList()).ToList();
-        try
-        {
-            return await PlanCoreAsync(draft, mediaAvailable, guidance, progress, ct);
-        }
-        finally
-        {
-            for (var i = 0; i < facts.Count; i++)
-                facts[i].KnownByIds = original[i] ?? new List<string>();
-        }
+        // T-04-48 + WR-05: the whole pass runs on a deep copy taken before the first await, so the knowers added for
+        // lone-knower facts never touch the live draft (a save, a Cast/Facts view or a cancel mid-plan sees it unchanged).
+        // They reach the guide only through plan.AddedKnowers, which CorpusApproval applies when the plan is saved.
+        ArgumentNullException.ThrowIfNull(draft);
+        var working = CaseDraft.FromJson(draft.ToJson());
+        working.FolderPath = draft.FolderPath;
+        return await PlanCoreAsync(working, mediaAvailable, guidance, progress, ct);
     }
 
     private async Task<CorpusPlanResult> PlanCoreAsync(CaseDraft draft, bool mediaAvailable, string guidance, IProgress<PlanProgress>? progress, CancellationToken ct)

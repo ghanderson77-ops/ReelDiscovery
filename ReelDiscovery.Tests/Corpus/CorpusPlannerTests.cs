@@ -241,6 +241,38 @@ public partial class CorpusPlannerTests
             _output.WriteLine($"Finding: {finding.Where}: {finding.Message}");
     }
 
+    [Fact]
+    public async Task PlanAsync_LoneKnowerFact_LiveDraftNeverChangesDuringLlmCalls()
+    {
+        // WR-05: the planner used to write added knowers into the live guide and restore them in a finally; any save
+        // during the LLM stages would have persisted knowers the user never accepted
+        var draft = Draft();
+        var lone = draft.Guide!.Facts.First(f => CaseDraft.TryParseDate(f.Date, out _) && f.ActorIds.Concat(f.KnownByIds).Any());
+        var only = lone.ActorIds.Concat(lone.KnownByIds).First();
+        lone.ActorIds = new List<string>();
+        lone.KnownByIds = new List<string> { only };
+        var before = draft.ToJson();
+        var (planner, fake) = Planner();
+        fake.Respond = Responder();
+        var seen = new List<string>();
+        fake.OnSend = _ =>
+        {
+            lock (seen)
+                seen.Add(draft.ToJson());
+        };
+
+        var result = await planner.PlanAsync(draft, false, string.Empty);
+
+        Assert.True(result.Succeeded, result.FailureMessage);
+        Assert.True(result.Plan!.AddedKnowers.ContainsKey(lone.Id));
+        Assert.NotEmpty(seen);
+        Assert.All(seen, json => Assert.Equal(before, json));
+        Assert.Equal(before, draft.ToJson());
+
+        // The hash still covers the guide as CorpusApproval saves it (draft plus the added knowers)
+        Assert.Equal(WithAddedKnowers(draft, result.Plan).Guide!.ComputeHash(), result.Plan.GuideHash);
+    }
+
     [Theory]
     [InlineData(250)]
     [InlineData(1000)]

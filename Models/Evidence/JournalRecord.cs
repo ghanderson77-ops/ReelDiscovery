@@ -8,7 +8,8 @@ namespace ReelDiscovery.Models.Evidence;
 // Appended only: an older build reads an unknown name as a JsonException and skips the line (06-RESEARCH Pattern 12)
 public enum JournalRecordType
 {
-    RunStarted, ThreadDone, ThreadFailed, RunEnded, AttachmentDone, AttachmentFailed, AttachmentSkipped, SideWorld, CastVoices, AttachmentsRepaired
+    // ThreadInvalidated: Phase 7 D-13/D-15: "Regenerate thread"; older builds skip this line
+    RunStarted, ThreadDone, ThreadFailed, RunEnded, AttachmentDone, AttachmentFailed, AttachmentSkipped, SideWorld, CastVoices, AttachmentsRepaired, ThreadInvalidated
 }
 
 public enum ThreadWriteStatus { Written, Warnings }

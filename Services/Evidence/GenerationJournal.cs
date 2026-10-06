@@ -31,6 +31,12 @@ public class JournalReplay
     // Last outcome per planned attachment DocId, only from records whose thread and parent own that attachment
     public Dictionary<string, JournalRecord> LastByAttachment { get; set; } = new(StringComparer.Ordinal);
 
+    // D-13/D-15: threads invalidated by "Regenerate thread" and not yet re-written (the "queued" state)
+    public HashSet<string> InvalidatedThreadIds { get; set; } = new(StringComparer.Ordinal);
+
+    // OQ3: ledger deltas a thread had established when it was invalidated; kept canonical for later waves (D-02)
+    public Dictionary<string, List<LedgerDelta>> InvalidatedDeltas { get; set; } = new(StringComparer.Ordinal);
+
     public JournalRecord? LastRunEnded { get; set; }
 
     public JournalRecord? LastSideWorld { get; set; }
@@ -226,6 +232,7 @@ public class GenerationJournal
                         if (threadIds.Contains(record.ThreadId))
                         {
                             replay.LastByThread[record.ThreadId] = record;
+                            replay.InvalidatedThreadIds.Remove(record.ThreadId);
                             AddSpend(replay, record, withMedia: false);
 
                             // A fresh ThreadDone carries the full attachment state of that render
@@ -239,7 +246,19 @@ public class GenerationJournal
                         if (threadIds.Contains(record.ThreadId))
                         {
                             replay.LastByThread[record.ThreadId] = record;
+                            replay.InvalidatedThreadIds.Remove(record.ThreadId);
                             AddSpend(replay, record);
+                        }
+                        break;
+                    case JournalRecordType.ThreadInvalidated:
+                        // "Regenerate thread": the thread and its attachments count as pending again; spend stays counted (T-07-50)
+                        if (threadIds.Contains(record.ThreadId))
+                        {
+                            replay.LastByThread.Remove(record.ThreadId);
+                            foreach (var owned in owners.Where(o => o.Value.ThreadId == record.ThreadId))
+                                replay.LastByAttachment.Remove(owned.Key);
+                            replay.InvalidatedThreadIds.Add(record.ThreadId);
+                            replay.InvalidatedDeltas[record.ThreadId] = record.LedgerDelta.ToList();
                         }
                         break;
                     case JournalRecordType.AttachmentsRepaired:
@@ -281,6 +300,8 @@ public class GenerationJournal
             replay.Exists = true;
             replay.LastByThread.Clear();
             replay.LastByAttachment.Clear();
+            replay.InvalidatedThreadIds.Clear();
+            replay.InvalidatedDeltas.Clear();
             replay.LastSideWorld = null;
             replay.LastCastVoices = null;
             replay.LastRunEnded = null;

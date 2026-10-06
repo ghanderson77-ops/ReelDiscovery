@@ -22,6 +22,13 @@ public partial class GenerationRunState
     // Ledger deltas of done relevant threads only (input to LedgerMerger), committed attachment deltas after the thread's own
     public Dictionary<string, List<LedgerDelta>> DeltasByThread { get; set; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// OQ3: deltas a relevant thread had established when "Regenerate thread" invalidated it, by thread id. A re-render
+    /// must keep them exactly (D-02).
+    /// </summary>
+    public IReadOnlyDictionary<string, List<LedgerDelta>> InvalidatedDeltas { get; set; } =
+        new Dictionary<string, List<LedgerDelta>>(StringComparer.Ordinal);
+
     // Every planned attachment DocId of a generation thread; Pending until a committed record says otherwise
     public Dictionary<string, AttachmentRunStatus> StatusByAttachment { get; set; } = new(StringComparer.Ordinal);
 
@@ -89,7 +96,9 @@ public partial class GenerationRunState
             UnreadableReason = replay.Reason ?? string.Empty,
             HasSideWorld = replay.LastSideWorld != null,
             HasCastVoices = replay.LastCastVoices != null,
-            LatestAttemptEnded = replay.LatestAttemptEnded
+            LatestAttemptEnded = replay.LatestAttemptEnded,
+            InvalidatedDeltas = new Dictionary<string, List<LedgerDelta>>(
+                replay.InvalidatedDeltas ?? new Dictionary<string, List<LedgerDelta>>(), StringComparer.Ordinal)
         };
 
         var files = new HashSet<string>(StringComparer.Ordinal);
@@ -180,7 +189,8 @@ public partial class GenerationRunState
                         state.AttachmentRecords[attachment.DocId] = outcome;
 
                     // D-18: committed attachment details follow the thread's own in plan order; late repairs stay out (review concerns 5, 7)
-                    if (attachmentStatus is AttachmentRunStatus.Written or AttachmentRunStatus.Warnings && !outcome.LateRepair)
+                    if (attachmentStatus is AttachmentRunStatus.Written or AttachmentRunStatus.Warnings && !outcome.LateRepair
+                        && !(record?.LateRepair ?? false))
                         attachmentDeltas.AddRange(outcome.LedgerDelta.Where(d => d != null).Select(d => CopyDelta(d, attachment.DocId)));
                 }
 
@@ -204,7 +214,17 @@ public partial class GenerationRunState
 
             // D-13: filler details never reach the narrative ledger
             if (done && relevant && record != null)
-                state.DeltasByThread[thread.Id] = record.LedgerDelta.Concat(attachmentDeltas).ToList();
+            {
+                // A regenerated thread's ThreadDone (LateRepair) already carries every detail it had established, attachments included
+                state.DeltasByThread[thread.Id] = record.LateRepair
+                    ? record.LedgerDelta.ToList()
+                    : record.LedgerDelta.Concat(attachmentDeltas).ToList();
+            }
+            else if (!done && relevant && state.InvalidatedDeltas.TryGetValue(thread.Id, out var prior) && prior != null)
+            {
+                // OQ3: a regenerated thread's established details stay canonical (D-02)
+                state.DeltasByThread[thread.Id] = prior.ToList();
+            }
         }
 
         // D-20: the earliest planned committed invite of a meeting owns its schedule

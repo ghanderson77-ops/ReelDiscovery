@@ -280,6 +280,101 @@ public class DialogRenderTests
         });
     }
 
+    // 07-UI-SPEC S5 (D-18, D-04): 11 columns at the 1180 x 480 default size, no horizontal scrollbar
+    [Fact]
+    public void ModelDialog_CacheColumns_DefaultSize()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var hiddenColumns = new List<string>();
+            var hScrollVisible = true;
+            var clientArea = Rectangle.Empty;
+            var ttsBounds = Rectangle.Empty;
+            var headerHeight = 0;
+            var rowHeight = 0;
+            var expected = Size.Empty;
+            var size = Size.Empty;
+            var area = Rectangle.Empty;
+            var result = RenderHarness.RenderForm(
+                () => new ModelConfigurationDialog(AIModelConfig.GetDefaultModels(), MediaPrices.Defaults()),
+                "dialog-model-config-cache-default",
+                form =>
+                {
+                    var dialog = (ModelConfigurationDialog)form;
+                    var grid = dialog.ModelsGrid;
+                    expected = new Size(form.LogicalToDeviceUnits(ModelConfigurationDialog.LogicalSize.Width),
+                        form.LogicalToDeviceUnits(ModelConfigurationDialog.LogicalSize.Height));
+                    size = form.Size;
+                    area = Screen.FromControl(form).WorkingArea;
+                    hiddenColumns = grid.Columns.Cast<DataGridViewColumn>()
+                        .Where(c => grid.GetColumnDisplayRectangle(c.Index, cutOverflow: false).Width < c.Width
+                            || grid.GetColumnDisplayRectangle(c.Index, cutOverflow: true).Width < c.Width)
+                        .Select(c => c.Name).ToList();
+                    hScrollVisible = grid.Controls.OfType<HScrollBar>().Any(s => s.Visible);
+                    clientArea = form.RectangleToScreen(form.ClientRectangle);
+                    ttsBounds = dialog.TtsPriceInput.RectangleToScreen(dialog.TtsPriceInput.ClientRectangle);
+                    headerHeight = grid.ColumnHeadersHeight;
+                    rowHeight = grid.RowTemplate.Height;
+                    Assert.Contains(Descendants(form).OfType<Label>(),
+                        l => l.Text.EndsWith("the batch discount applies when batch pricing is on.", StringComparison.Ordinal));
+                });
+
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
+            Assert.True(File.Exists(result.PngPath));
+            Assert.Empty(result.Clipping);
+            if (area.Width >= expected.Width && area.Height >= expected.Height)
+                Assert.Equal(expected, size);
+            Assert.Empty(hiddenColumns);
+            Assert.False(hScrollVisible, "Horizontal scrollbar shown at the default size");
+            Assert.True(clientArea.Contains(ttsBounds), $"Voicemail price {ttsBounds} outside client {clientArea}");
+            // Wrapped two-line headers are taller than a single row
+            Assert.True(headerHeight > rowHeight, $"Header height {headerHeight} vs row {rowHeight}");
+        });
+    }
+
+    // 07-UI-SPEC S5: at the 820 x 360 minimum Provider and Model ID stay frozen and at least 3 rows show
+    [Fact]
+    public void ModelDialog_CacheColumns_MinimumSize()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var frozen = new List<string>();
+            var displayedRows = 0;
+            var firstScrolled = -1;
+            var providerShown = false;
+            var modelIdShown = false;
+            var result = RenderHarness.RenderForm(
+                () => new ModelConfigurationDialog(AIModelConfig.GetDefaultModels(), MediaPrices.Defaults()),
+                "dialog-model-config-cache-min",
+                form =>
+                {
+                    var dialog = (ModelConfigurationDialog)form;
+                    var grid = dialog.ModelsGrid;
+                    form.Size = form.MinimumSize;
+                    form.PerformLayout();
+                    Application.DoEvents();
+
+                    // Scroll to the last column: frozen columns must stay in view
+                    grid.FirstDisplayedScrollingColumnIndex = grid.Columns["MaxOutputTokens"]!.Index;
+                    Application.DoEvents();
+                    firstScrolled = grid.FirstDisplayedScrollingColumnIndex;
+                    frozen = grid.Columns.Cast<DataGridViewColumn>().Where(c => c.Frozen).Select(c => c.Name).ToList();
+                    providerShown = grid.Columns["Provider"]!.Displayed;
+                    modelIdShown = grid.Columns["ModelId"]!.Displayed;
+                    displayedRows = grid.DisplayedRowCount(includePartialRow: false);
+                },
+                new ClippingOptions { AllowGridHorizontalScroll = true });
+
+            Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
+            Assert.True(File.Exists(result.PngPath));
+            Assert.Empty(result.Clipping);
+            Assert.Equal(new[] { "Provider", "ModelId" }, frozen);
+            Assert.True(firstScrolled > 1, $"First scrolled column {firstScrolled}");
+            Assert.True(providerShown && modelIdShown, "Frozen columns scrolled out of view");
+            Assert.True(displayedRows >= 3, $"Only {displayedRows} grid rows visible");
+        });
+    }
+
     private static void AssertRendered(RenderResult result, int clientHeight, int workingHeight)
     {
         Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");

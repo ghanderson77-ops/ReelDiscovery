@@ -1,3 +1,4 @@
+using System.Globalization;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Services.Ai;
@@ -22,7 +23,7 @@ public class ModelConfigurationDialog : Form
     public MediaPrices MediaPrices { get; private set; }
 
     // Window sizes in logical (96 DPI) units; scaled with LogicalToDeviceUnits and clamped to the working area
-    internal static readonly Size LogicalSize = new(980, 480);
+    internal static readonly Size LogicalSize = new(1180, 480);
     internal static readonly Size LogicalMinimumSize = new(820, 360);
 
     public ModelConfigurationDialog(List<AIModelConfig> models)
@@ -90,7 +91,7 @@ public class ModelConfigurationDialog : Form
         // Header label
         var lblHeader = new Label
         {
-            Text = "Configure models per provider: one Story and one Volume default each, optional Effort, output ceiling and pricing (per million tokens). Images and voicemail are priced per unit below.",
+            Text = "Configure models per provider: one Story and one Volume default each, optional Effort, output ceiling and pricing (per million tokens). Images and voicemail are priced per unit below. Cache write and cache read apply when the shared prompt is cached; the batch discount applies when batch pricing is on.",
             // AutoSize inside the AutoSize row wraps to the column width instead of clipping
             AutoSize = true,
             Dock = DockStyle.Fill,
@@ -114,8 +115,11 @@ public class ModelConfigurationDialog : Form
             MultiSelect = false,
             RowHeadersVisible = false,
             BackgroundColor = SystemColors.Window,
-            DataSource = _bindingSource
+            DataSource = _bindingSource,
+            // 07-UI-SPEC S5: long headers (Cache Write $/M, Default For Tier, Batch Discount %) wrap to two lines
+            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
         };
+        _gridModels.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.True;
 
         _gridModels.Columns.Add(new DataGridViewComboBoxColumn
         {
@@ -124,7 +128,9 @@ public class ModelConfigurationDialog : Form
             DataPropertyName = "Provider",
             DataSource = Enum.GetValues<LlmProviderKind>(),
             ValueType = typeof(LlmProviderKind),
-            Width = LogicalToDeviceUnits(90)
+            Width = LogicalToDeviceUnits(90),
+            // Provider and Model ID stay in view when the grid scrolls sideways at the minimum size
+            Frozen = true
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -132,7 +138,8 @@ public class ModelConfigurationDialog : Form
             Name = "ModelId",
             HeaderText = "Model ID",
             DataPropertyName = "ModelId",
-            Width = LogicalToDeviceUnits(150)
+            Width = LogicalToDeviceUnits(150),
+            Frozen = true
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -140,7 +147,8 @@ public class ModelConfigurationDialog : Form
             Name = "DisplayName",
             HeaderText = "Display Name",
             DataPropertyName = "DisplayName",
-            Width = LogicalToDeviceUnits(130)
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            MinimumWidth = LogicalToDeviceUnits(100)
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -148,7 +156,7 @@ public class ModelConfigurationDialog : Form
             Name = "InputPrice",
             HeaderText = "Input $/M",
             DataPropertyName = "InputTokenPricePerMillion",
-            Width = LogicalToDeviceUnits(90),
+            Width = LogicalToDeviceUnits(72),
             DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }
         });
 
@@ -157,8 +165,36 @@ public class ModelConfigurationDialog : Form
             Name = "OutputPrice",
             HeaderText = "Output $/M",
             DataPropertyName = "OutputTokenPricePerMillion",
-            Width = LogicalToDeviceUnits(90),
+            Width = LogicalToDeviceUnits(72),
             DefaultCellStyle = new DataGridViewCellStyle { Format = "F2" }
+        });
+
+        // Cache and batch prices (07-UI-SPEC S5, D-18); bounds enforced in CellValidating
+        _gridModels.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "CacheWritePrice",
+            HeaderText = "Cache Write $/M",
+            DataPropertyName = nameof(AIModelConfig.CacheWriteTokenPricePerMillion),
+            Width = LogicalToDeviceUnits(84),
+            DefaultCellStyle = new DataGridViewCellStyle { Format = "0.00#" }
+        });
+
+        _gridModels.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "CacheReadPrice",
+            HeaderText = "Cache Read $/M",
+            DataPropertyName = nameof(AIModelConfig.CacheReadTokenPricePerMillion),
+            Width = LogicalToDeviceUnits(84),
+            DefaultCellStyle = new DataGridViewCellStyle { Format = "0.00#" }
+        });
+
+        _gridModels.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "BatchDiscount",
+            HeaderText = "Batch Discount %",
+            DataPropertyName = nameof(AIModelConfig.BatchDiscountPercent),
+            Width = LogicalToDeviceUnits(72),
+            DefaultCellStyle = new DataGridViewCellStyle { Format = "0" }
         });
 
         var tierColumn = new DataGridViewComboBoxColumn
@@ -166,7 +202,7 @@ public class ModelConfigurationDialog : Form
             Name = "DefaultForTier",
             HeaderText = "Default For Tier",
             DataPropertyName = "DefaultForTierText",
-            Width = LogicalToDeviceUnits(110)
+            Width = LogicalToDeviceUnits(100)
         };
         tierColumn.Items.AddRange("None", "Story", "Volume");
         _gridModels.Columns.Add(tierColumn);
@@ -176,7 +212,7 @@ public class ModelConfigurationDialog : Form
             Name = "Effort",
             HeaderText = "Effort",
             DataPropertyName = "EffortText",
-            Width = LogicalToDeviceUnits(70)
+            Width = LogicalToDeviceUnits(64)
         });
 
         _gridModels.Columns.Add(new DataGridViewTextBoxColumn
@@ -184,11 +220,12 @@ public class ModelConfigurationDialog : Form
             Name = "MaxOutputTokens",
             HeaderText = "Max Output",
             DataPropertyName = "MaxOutputTokens",
-            Width = LogicalToDeviceUnits(90),
+            Width = LogicalToDeviceUnits(80),
             ValueType = typeof(int)
         });
 
         _gridModels.DataError += GridModels_DataError;
+        _gridModels.CellParsing += GridModels_CellParsing;
         _gridModels.CurrentCellDirtyStateChanged += GridModels_CurrentCellDirtyStateChanged;
 
         // Button panel on the right side of grid
@@ -322,11 +359,41 @@ public class ModelConfigurationDialog : Form
 
     private void GridModels_DataError(object? sender, DataGridViewDataErrorEventArgs e)
     {
-        // Invalid typed values (e.g. text in Max Output) are rejected instead of crashing the dialog
-        MessageBox.Show("Please enter a valid value for this column.", "Validation Error",
-            MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        e.Cancel = true;
+        // UI-SPEC S5: a bad entry reverts the cell silently (no modal prompt)
+        e.ThrowException = false;
+        _gridModels.CancelEdit();
+        e.Cancel = false;
     }
+
+    // Upper bound of each price/discount column (lower bound 0); other columns are not range-checked here
+    internal static decimal? UpperBoundFor(string columnName) => columnName switch
+    {
+        "InputPrice" or "OutputPrice" or "CacheWritePrice" or "CacheReadPrice" => 1000m,
+        "BatchDiscount" => 100m,
+        _ => null
+    };
+
+    // Out-of-range or non-numeric prices revert the cell (T-07-37); no MessageBox (T-07-38).
+    // Parsing (not CellValidating) does the revert: cancelling the edit inside CellValidating still commits the typed value.
+    private void GridModels_CellParsing(object? sender, DataGridViewCellParsingEventArgs e)
+    {
+        if (e.ColumnIndex < 0 || e.RowIndex < 0)
+            return;
+
+        var max = UpperBoundFor(_gridModels.Columns[e.ColumnIndex].Name);
+        if (max == null)
+            return;
+
+        var text = Convert.ToString(e.Value, CultureInfo.CurrentCulture);
+        e.Value = IsValidPrice(text, max.Value)
+            ? decimal.Parse(text!, NumberStyles.Number, CultureInfo.CurrentCulture)
+            : _gridModels[e.ColumnIndex, e.RowIndex].Value;
+        e.ParsingApplied = true;
+    }
+
+    internal static bool IsValidPrice(string? text, decimal max) =>
+        decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out var value)
+        && value >= 0m && value <= max;
 
     private void BtnAdd_Click(object? sender, EventArgs e)
     {

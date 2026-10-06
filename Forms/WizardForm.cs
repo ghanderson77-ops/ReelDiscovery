@@ -25,6 +25,9 @@ public partial class WizardForm : Form
     private Label _lblStepTitle = null!;
     private Label _lblCostTracker = null!;
     private System.Windows.Forms.Timer _costUpdateTimer = null!;
+    // D-16: cost breakdown tooltip on the header ticker, refreshed by the 1 s timer only when the text changes
+    private readonly ToolTip _costToolTip = new();
+    private string _lastCostTip = string.Empty;
 
     public WizardForm()
         : this(new WizardState(), forRender: false)
@@ -130,6 +133,24 @@ public partial class WizardForm : Form
         else
         {
             _lblCostTracker.Text = "API Cost: $0.0000";
+        }
+
+        var tip = GenerationUiText.CostBreakdown(tracker.TotalCost, tracker.TotalInputCost, tracker.TotalCacheWriteCost,
+            tracker.TotalCacheReadCost, tracker.TotalOutputCost, tracker.TotalBatchSavings, tracker.TotalMediaCost);
+        if (tip != _lastCostTip)
+        {
+            _costToolTip.SetToolTip(_lblCostTracker, tip);
+            _lastCostTip = tip;
+        }
+    }
+
+    // Test accessors: the ticker tooltip after a forced refresh (no timer wait)
+    internal string CostTooltipForTest
+    {
+        get
+        {
+            UpdateCostDisplay();
+            return _costToolTip.GetToolTip(_lblCostTracker);
         }
     }
 
@@ -648,6 +669,7 @@ public partial class WizardForm : Form
 
         _costUpdateTimer?.Stop();
         _costUpdateTimer?.Dispose();
+        _costToolTip.Dispose();
         base.OnFormClosing(e);
     }
 }

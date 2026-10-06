@@ -1,8 +1,10 @@
 using ReelDiscovery.Forms;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Tests.Case;
+using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Render;
 
@@ -52,6 +54,37 @@ public class WizardShellRenderTests
     public void Shell_CoreDocumentStep()
     {
         RenderStep(2, "wizard-shell-core-document", "Step 3 of 8: Review Core Document", "Next >");
+    }
+
+    // D-16 (07-UI-SPEC S6): the header ticker tooltip is the session cost breakdown of the tracker totals
+    [Fact]
+    public void Shell_CostTickerTooltip_MatchesBreakdown()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            using var fixture = new ShellFixture();
+            using var form = WizardForm.CreateForRender(fixture.State);
+
+            Assert.Equal("Nothing spent this session yet.", form.CostTooltipForTest);
+
+            var tracker = fixture.State.UsageTracker;
+            var model = AIModelConfig.GetDefaultModels().Single(m => m.ModelId == "claude-opus-5-5");
+            var usage = new TokenUsage
+            {
+                InputTokens = 100_000, CacheWriteTokens = 50_000, CacheReadTokens = 200_000, OutputTokens = 40_000, IsBatch = true
+            };
+            tracker.RecordUsage("Test", model, usage, model.CalculateCost(usage));
+            tracker.RecordMediaUsage("Images", 0.25m);
+
+            var expected = GenerationUiText.CostBreakdown(tracker.TotalCost, tracker.TotalInputCost,
+                tracker.TotalCacheWriteCost, tracker.TotalCacheReadCost, tracker.TotalOutputCost,
+                tracker.TotalBatchSavings, tracker.TotalMediaCost);
+            Assert.Equal(expected, form.CostTooltipForTest);
+            Assert.StartsWith("Spent this session: $", expected);
+            Assert.Contains("\nCached input, cache write: $", expected);
+            Assert.Contains("\nBatch discount: −$", expected);
+            Assert.Contains("\nImages and voicemail: $0.2500", expected);
+        });
     }
 
     private static void RenderStep(int index, string name, string expectedTitle, string expectedNext,

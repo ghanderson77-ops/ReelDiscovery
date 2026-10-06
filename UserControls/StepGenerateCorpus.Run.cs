@@ -836,7 +836,7 @@ public partial class StepGenerateCorpus : IWizardStep
 
                 var state = GenerationRunState.From(plan, replay);
                 var k = retryKey
-                    ? await GenerationOutputs.WriteAnswerKeyAsync(folder, guide, plan, state.BuildOverlay(plan, RenderAssignments.Compute(plan)))
+                    ? await GenerationOutputs.WriteAnswerKeyAsync(folder, guide, plan, state.BuildFullOverlay(plan, guide))
                     : null;
                 var s = retryStory
                     ? await GenerationOutputs.WriteStorySoFarAsync(folder, draft, plan, ledger, state, PeopleDirectory.Create(guide, plan))
@@ -941,7 +941,7 @@ public partial class StepGenerateCorpus : IWizardStep
         {
             data.Ledger = LedgerMerger.Build(plan, guide, WavePlanner.WaveIndexByThread(WavePlanner.Plan(plan)), state.DeltasByThread);
             data.KeyResult = await GenerationOutputs.WriteAnswerKeyAsync(folder, guide, plan,
-                state.BuildOverlay(plan, RenderAssignments.Compute(plan)));
+                state.BuildFullOverlay(plan, guide));
         }
 
         return data;
@@ -966,7 +966,7 @@ public partial class StepGenerateCorpus : IWizardStep
                 finished: !IsPartial(state)),
             // What the next Continue will use (_state.IsMediaAvailable), the same value its runner seeds with
             Waves = GenerationHistory.Waves(plan, state, mediaAvailable),
-            Events = GenerationHistory.Events(plan, replay, RenderAssignments.Compute(plan))
+            Events = GenerationHistory.Events(plan, replay, GenerationRunState.AllAssignments(plan))
         };
     }
 

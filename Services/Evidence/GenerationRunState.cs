@@ -335,6 +335,13 @@ public partial class GenerationRunState
     }
 
     /// <summary>
+    /// The runner's projection (every assignment, filler included, plus the plan's version chains) for writers outside the
+    /// run: the reopen projection and the leave-step retry must produce the same subjects and file names as the EMLs (CR-01).
+    /// </summary>
+    public AnswerKeyOverlay BuildFullOverlay(CorpusPlan plan, CaseGuide? guide) =>
+        BuildOverlay(plan, AllAssignments(plan), AttachmentChains.Compute(plan, guide));
+
+    /// <summary>
     /// Answer-key overlay for every generation thread (D-05). Email rows: status, the subject from the same function the
     /// EML writer uses (Pitfall 2) or the journaled voicemail subject, and the journaled voicemail sender. Attachment rows:
     /// status from committed records, the final EML part name (Pitfall 1) and the skip reason. Pass the run's chains so

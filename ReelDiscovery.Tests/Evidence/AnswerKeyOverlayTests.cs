@@ -338,4 +338,61 @@ public partial class AnswerKeyOverlayTests
         Assert.Equal(planned.From, part.From);
         Assert.Equal("Call me back re CO-007", part.Subject);
     }
+
+    // ---- CR-01: one projection for the runner, the reopen projection, the leave-step retry and the activity rows ----
+
+    [Fact]
+    public void BuildFullOverlay_MatchesRunnerProjection_PrivilegedFillerKeepsSubjectTag()
+    {
+        var (draft, plan) = AttachmentTestData.MixedCase();
+        foreach (var thread in plan.Threads.Where(t => t.Relevance == ThreadRelevance.NotRelevant))
+            thread.IsPrivileged = true;
+        var filler = FillerAssignments.Compute(plan);
+        var tagged = plan.Threads.First(t => t.Relevance == ThreadRelevance.NotRelevant
+            && filler.TryGetValue(t.Id, out var a) && a.Marking == PrivilegeMarking.BannerAndSubject);
+        var records = GenerationRunStateTests.GenerationThreads(plan)
+            .Select(t => GenerationRunStateTests.Done(plan, t, ThreadWriteStatus.Written, 0.01m))
+            .ToArray();
+        var replay = GenerationRunStateTests.Journal(plan, records);
+        var state = GenerationRunState.From(plan, replay);
+
+        var full = AnswerKeyBuilder.Build(plan, draft.Guide!, state.BuildFullOverlay(plan, draft.Guide));
+        var runner = Key(draft, plan, state, GenerationRunState.AllAssignments(plan), AttachmentChains.Compute(plan, draft.Guide));
+
+        Assert.Equal(Fingerprint(runner), Fingerprint(full));
+        foreach (var message in tagged.Messages)
+        {
+            var row = full.Single(r => r.DocId == message.DocId);
+            Assert.StartsWith("Privileged & Confidential - ", row.Subject);
+            Assert.Equal(EmailComposer.SubjectFor(tagged, message, PrivilegeMarking.BannerAndSubject), row.Subject);
+        }
+
+        // Pending chained attachments keep their versioned names
+        var pending = AnswerKeyBuilder.Build(plan, draft.Guide!,
+            GenerationRunState.From(plan, new JournalReplay()).BuildFullOverlay(plan, draft.Guide));
+        var v2 = A(plan, AttachmentTestData.ChainThreadId).Single();
+        Assert.EndsWith("_v2.xlsx", pending.Single(r => r.DocId == v2.DocId).FileName);
+    }
+
+    [Fact]
+    public void HistoryView_ActivityRows_UseFillerMarkingSubjects()
+    {
+        var (draft, plan) = AttachmentTestData.MixedCase();
+        foreach (var thread in plan.Threads.Where(t => t.Relevance == ThreadRelevance.NotRelevant))
+            thread.IsPrivileged = true;
+        var filler = FillerAssignments.Compute(plan);
+        var tagged = plan.Threads.First(t => t.Relevance == ThreadRelevance.NotRelevant
+            && filler.TryGetValue(t.Id, out var a) && a.Marking == PrivilegeMarking.BannerAndSubject);
+        var replay = GenerationRunStateTests.Journal(plan,
+            GenerationRunStateTests.Done(plan, tagged, ThreadWriteStatus.Written, 0.01m));
+        var state = GenerationRunState.From(plan, replay);
+
+        var view = ReelDiscovery.UserControls.StepGenerateCorpus.HistoryView(plan, draft.Guide!, replay, state, null, null,
+            MediaPrices.Defaults(), mediaAvailable: false);
+
+        var row = Assert.Single(view.Events, e => e.ThreadId == tagged.Id);
+        var first = tagged.Messages.OrderBy(m => m.Seq).First();
+        Assert.Equal(EmailComposer.SubjectFor(tagged, first, PrivilegeMarking.BannerAndSubject), row.Subject);
+        Assert.StartsWith("Privileged & Confidential - ", row.Subject);
+    }
 }

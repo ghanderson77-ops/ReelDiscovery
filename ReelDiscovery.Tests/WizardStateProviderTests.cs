@@ -1,5 +1,6 @@
 using ReelDiscovery.Models;
 using ReelDiscovery.Services.Ai;
+using ReelDiscovery.Tests.Fakes;
 
 namespace ReelDiscovery.Tests;
 
@@ -96,5 +97,82 @@ public class WizardStateProviderTests
         state.SetTextProvider(LlmProviderKind.OpenAI);
         Assert.Equal("gpt-6.1-sol", state.GetKeyTestModelId(LlmProviderKind.OpenAI));
         Assert.Equal("claude-haiku-4-5-20251001", state.GetKeyTestModelId(LlmProviderKind.Anthropic));
+    }
+    public class EchoDto
+    {
+        public string Name { get; set; } = string.Empty;
+    }
+
+    [Fact]
+    public void CreateRunGateway_Live_NoBatch_SameAsCreateGateway()
+    {
+        var state = new WizardState { AnthropicApiKey = "k" };
+        state.SetTextProvider(LlmProviderKind.Anthropic);
+
+        var (gateway, batch) = state.CreateRunGateway(useBatch: false, Path.GetTempPath(), Guid.NewGuid());
+
+        Assert.Null(batch);
+        Assert.Equal(LlmProviderKind.Anthropic, gateway.Provider);
+        Assert.Equal(state.CreateGateway().ResolveModel(LlmTier.Story).ModelId, gateway.ResolveModel(LlmTier.Story).ModelId);
+        Assert.Equal(state.CreateGateway().ResolveModel(LlmTier.Volume).ModelId, gateway.ResolveModel(LlmTier.Volume).ModelId);
+    }
+
+    [Fact]
+    public void CreateRunGateway_NoModel_Throws()
+    {
+        var state = new WizardState { OpenAIApiKey = "k" };
+        state.VolumeModelId = "";
+
+        var ex = Assert.Throws<InvalidOperationException>(() => state.CreateRunGateway(true, Path.GetTempPath(), Guid.NewGuid(),
+            new FakeBatchTransport()));
+        Assert.Equal("No Volume model selected for OpenAI", ex.Message);
+    }
+
+    [Fact]
+    public async Task CreateRunGateway_Batch_RoutesBatchableRequestsThroughTransport()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "rd-wsp-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var state = new WizardState { OpenAIApiKey = "k" };
+            var transport = new FakeBatchTransport { Respond = _ => FakeLlmProvider.Ok("{\"name\":\"batched\"}", 100, 20) };
+            var timings = new BatchTimings
+            {
+                QuietPeriod = TimeSpan.FromMilliseconds(20),
+                PollInterval = TimeSpan.FromMilliseconds(10),
+                SlowPollInterval = TimeSpan.FromMilliseconds(10)
+            };
+
+            var (gateway, batch) = state.CreateRunGateway(useBatch: true, folder, Guid.NewGuid(), transport, timings);
+
+            Assert.NotNull(batch);
+            Assert.Equal(LlmProviderKind.OpenAI, gateway.Provider);
+            var result = await gateway.GenerateAsync<EchoDto>(new LlmRequest
+            {
+                Tier = LlmTier.Volume,
+                OperationName = "Test",
+                SystemPrompt = "system",
+                UserPrompt = "user",
+                MaxOutputTokens = 1000,
+                AllowBatch = true
+            }).WaitAsync(TimeSpan.FromSeconds(30));
+
+            Assert.Equal("batched", result.Value?.Name);
+            Assert.Single(transport.Submissions);
+            Assert.True(File.Exists(BatchLedger.PathFor(folder)));
+            batch!.Detach();
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Temp folder cleanup only
+            }
+        }
     }
 }

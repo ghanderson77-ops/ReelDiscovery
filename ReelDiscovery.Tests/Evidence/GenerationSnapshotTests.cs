@@ -1,4 +1,5 @@
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Evidence;
 
 namespace ReelDiscovery.Tests.Evidence;
@@ -400,5 +401,214 @@ public class GenerationSnapshotTests
         var next = snapshot.Drain();
         Assert.Equal(1, next.Counts.AttachmentsDone);
         Assert.Equal(1, next.Waves[0].AttachmentsDone);
+    }
+
+    // ----- provider batches (D-09) -----
+
+    private static readonly DateTime Submitted = new(2026, 10, 6, 14, 14, 0, DateTimeKind.Utc);
+
+    private static BatchStatusEvent Batch(BatchStatusKind kind, string id = "b1", string stage = "wave 3", int done = 0,
+        int total = 12) => new()
+    {
+        Kind = kind,
+        BatchId = id,
+        StageLabel = stage,
+        Provider = LlmProviderKind.Anthropic,
+        SubmittedUtc = Submitted,
+        Done = done,
+        Total = total,
+        NextCheckUtc = Submitted.AddSeconds(30)
+    };
+
+    [Fact]
+    public void RecordBatchStatus_Submitted_MarksRowWaiting_AddsEvent()
+    {
+        var snapshot = Create();
+        snapshot.MapBatchStage("wave 3", 2);
+
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Submitted));
+        var view = snapshot.Drain();
+
+        var row = view.Waves.Single(w => w.Index == 2);
+        Assert.True(row.BatchWaiting);
+        Assert.Equal(1, row.BatchCount);
+        Assert.Equal(Submitted, row.BatchFirstSubmittedUtc);
+        Assert.Equal(12, row.BatchTotal);
+        Assert.Equal(0, row.BatchDone);
+        Assert.Equal(Submitted.AddSeconds(30), row.BatchNextCheckUtc);
+        Assert.False(view.Waves.Single(w => w.Index == 3).BatchWaiting);
+        Assert.Equal(1, view.PendingProviderBatches);
+
+        var e = Assert.Single(view.Events);
+        Assert.Equal(GenerationEventKind.BatchSubmitted, e.Kind);
+        Assert.Equal(12, e.BatchRequests);
+        Assert.Equal("Anthropic", e.BatchProvider);
+        Assert.Equal("wave 3", e.BatchStage);
+        Assert.Equal(Submitted, e.BatchSubmittedUtc);
+    }
+
+    [Fact]
+    public void RecordBatchStatus_Progress_UpdatesRow_NoActivityRow_CurrentWait()
+    {
+        var snapshot = Create();
+        snapshot.MapBatchStage("wave 3", 2);
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Submitted));
+        snapshot.Drain();
+
+        var progress = Batch(BatchStatusKind.Progress, done: 5);
+        progress.NextCheckUtc = Submitted.AddSeconds(90);
+        snapshot.RecordBatchStatus(progress);
+        var view = snapshot.Drain();
+
+        var row = view.Waves.Single(w => w.Index == 2);
+        Assert.Equal(5, row.BatchDone);
+        Assert.Equal(12, row.BatchTotal);
+        Assert.Equal(Submitted.AddSeconds(90), row.BatchNextCheckUtc);
+        Assert.Empty(view.Events);
+
+        var wait = snapshot.CurrentBatchWait();
+        Assert.NotNull(wait);
+        Assert.Equal(2, wait!.Index);
+        Assert.Equal(5, wait.BatchDone);
+    }
+
+    [Fact]
+    public void RecordBatchStatus_TwoBatchesOneRow_Aggregates()
+    {
+        var snapshot = Create();
+        snapshot.MapBatchStage("wave 3", 2);
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Submitted, "b1", total: 10));
+        var second = Batch(BatchStatusKind.Submitted, "b2", total: 4);
+        second.SubmittedUtc = Submitted.AddMinutes(1);
+        snapshot.RecordBatchStatus(second);
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Progress, "b1", done: 3, total: 10));
+
+        var row = snapshot.Drain().Waves.Single(w => w.Index == 2);
+        Assert.Equal(2, row.BatchCount);
+        Assert.Equal(Submitted, row.BatchFirstSubmittedUtc);
+        Assert.Equal(3, row.BatchDone);
+        Assert.Equal(14, row.BatchTotal);
+
+        var done = Batch(BatchStatusKind.Finished, "b1", done: 10, total: 10);
+        done.Succeeded = 10;
+        snapshot.RecordBatchStatus(done);
+        row = snapshot.Drain().Waves.Single(w => w.Index == 2);
+        Assert.True(row.BatchWaiting);
+        Assert.Equal(1, row.BatchCount);
+        Assert.Equal(Submitted.AddMinutes(1), row.BatchFirstSubmittedUtc);
+        Assert.Equal(4, row.BatchTotal);
+    }
+
+    [Fact]
+    public void RecordBatchStatus_TerminalKinds_ClearWaiting_AddTheirEvents()
+    {
+        var snapshot = Create();
+        snapshot.MapBatchStage("wave 3", 2);
+        snapshot.MapBatchStage("non-relevant mail", 3);
+
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Submitted, "b1"));
+        var finished = Batch(BatchStatusKind.Finished, "b1", done: 12);
+        finished.Succeeded = 12;
+        finished.Duration = TimeSpan.FromMinutes(14);
+        snapshot.RecordBatchStatus(finished);
+
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Submitted, "b2", "non-relevant mail", total: 20));
+        var partial = Batch(BatchStatusKind.FinishedWithFailures, "b2", "non-relevant mail", done: 20, total: 20);
+        partial.Succeeded = 18;
+        partial.Failed = 2;
+        snapshot.RecordBatchStatus(partial);
+
+        var failed = Batch(BatchStatusKind.FailedAtProvider, "b3");
+        failed.Reason = "the batch expired before it finished";
+        snapshot.RecordBatchStatus(failed);
+
+        var after = Batch(BatchStatusKind.CollectedAfterRestart, "b4");
+        after.Duration = TimeSpan.FromHours(2);
+        snapshot.RecordBatchStatus(after);
+
+        var view = snapshot.Drain();
+        Assert.All(view.Waves, w => Assert.False(w.BatchWaiting));
+        Assert.Equal(0, view.PendingProviderBatches);
+
+        var kinds = view.Events.Select(e => e.Kind).ToList();
+        Assert.Equal(new[]
+        {
+            GenerationEventKind.BatchSubmitted, GenerationEventKind.BatchFinished, GenerationEventKind.BatchSubmitted,
+            GenerationEventKind.BatchFinishedWithFailures, GenerationEventKind.BatchFailedAtProvider,
+            GenerationEventKind.BatchCollectedAfterRestart
+        }, kinds);
+        Assert.Equal(TimeSpan.FromMinutes(14), view.Events[1].BatchDuration);
+        Assert.Equal(12, view.Events[1].BatchSucceeded);
+        Assert.Equal(18, view.Events[3].BatchSucceeded);
+        Assert.Equal(2, view.Events[3].BatchFailed);
+        Assert.Equal("non-relevant mail", view.Events[3].BatchStage);
+        Assert.Equal("the batch expired before it finished", view.Events[4].BatchReason);
+        Assert.Equal(Submitted, view.Events[5].BatchSubmittedUtc);
+        Assert.Equal(TimeSpan.FromHours(2), view.Events[5].BatchDuration);
+    }
+
+    [Fact]
+    public void RecordBatchStatus_UnmappedStage_StillAddsEvent()
+    {
+        var snapshot = Create();
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Submitted, stage: "batch"));
+        var view = snapshot.Drain();
+
+        Assert.All(view.Waves, w => Assert.False(w.BatchWaiting));
+        Assert.Equal(GenerationEventKind.BatchSubmitted, Assert.Single(view.Events).Kind);
+        Assert.Null(snapshot.CurrentBatchWait());
+    }
+
+    [Fact]
+    public void ResumedBatch_FirstProgress_MarksRowWaiting()
+    {
+        var snapshot = Create();
+        snapshot.MapBatchStage("wave 1", 1);
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Progress, "old", "wave 1", done: 2, total: 6));
+
+        var row = snapshot.Drain().Waves.Single(w => w.Index == 1);
+        Assert.True(row.BatchWaiting);
+        Assert.Equal(Submitted, row.BatchFirstSubmittedUtc);
+        Assert.Equal(2, row.BatchDone);
+    }
+
+    [Fact]
+    public void CollectingAfterRestart_VisibleUntilFirstCollectedOrFinished()
+    {
+        var snapshot = Create();
+        snapshot.SetCollectingAfterRestart(true);
+        snapshot.SetPendingProviderBatches(2);
+        var view = snapshot.Peek();
+        Assert.True(view.CollectingAfterRestart);
+        Assert.Equal(2, view.PendingProviderBatches);
+
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Progress, "old", done: 1));
+        Assert.True(snapshot.Peek().CollectingAfterRestart);
+
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.CollectedAfterRestart, "old"));
+        view = snapshot.Peek();
+        Assert.False(view.CollectingAfterRestart);
+        Assert.Equal(1, view.PendingProviderBatches);
+
+        snapshot.SetCollectingAfterRestart(true);
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Finished, "other"));
+        Assert.False(snapshot.Peek().CollectingAfterRestart);
+    }
+
+    [Fact]
+    public void Reset_ClearsBatchState()
+    {
+        var snapshot = Create();
+        snapshot.MapBatchStage("wave 3", 2);
+        snapshot.SetCollectingAfterRestart(true);
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Submitted));
+
+        snapshot.Reset(new GenerationCounts(), new[] { new WaveProgress { Index = 2 } });
+        snapshot.RecordBatchStatus(Batch(BatchStatusKind.Progress, done: 4));
+        var view = snapshot.Drain();
+
+        // Labels are mapped again by the next run; the old mapping and batch tracks are gone
+        Assert.False(view.Waves.Single().BatchWaiting);
+        Assert.False(view.CollectingAfterRestart);
     }
 }

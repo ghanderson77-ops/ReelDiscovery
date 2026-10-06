@@ -784,4 +784,78 @@ public class InviteSchedulerTests
         Assert.Equal(TimeSpan.FromHours(-4), afterDst.Start.Offset);
         Assert.Equal(TimeSpan.FromHours(-5), beforeDst.Start.Offset);
     }
+
+    // ---------- D-24: one meeting time across sender time zones ----------
+
+    private const string LosAngeles = "America/Los_Angeles";
+
+    // Moves every message of the thread to Los Angeles at the same local wall time
+    private static PlannedThread InLosAngeles(PlannedThread thread)
+    {
+        var la = BusinessCalendar.ResolveId(LosAngeles)!;
+        foreach (var m in thread.Messages)
+        {
+            var local = TimeZoneInfo.ConvertTime(m.SentAt, Tz);
+            m.SentAt = BusinessCalendar.At(la, DateOnly.FromDateTime(local.DateTime), TimeOnly.FromDateTime(local.DateTime));
+            m.TimeZoneId = LosAngeles;
+        }
+
+        return thread;
+    }
+
+    private static (InviteSlot A, InviteSlot B) AcrossZones(string canonical)
+    {
+        var guide = Guide();
+        var deltas = new List<LedgerDelta> { MeetingDelta(1) };
+        var a = NewThread("T-0801", new DateOnly(2024, 3, 5), 1, "8010");
+        var requestA = Request(guide, a, 1, deltas);
+        requestA.CanonicalTimeZoneId = canonical;
+        var view = Ledger(guide, (a, 1, deltas));
+        var b = InLosAngeles(NewThread("T-0802", new DateOnly(2024, 3, 7), 1, "8020"));
+        var requestB = Request(guide, b, 1, view: view, wave: 2);
+        requestB.CanonicalTimeZoneId = canonical;
+        return (InviteScheduler.Resolve(requestA), InviteScheduler.Resolve(requestB));
+    }
+
+    [Fact]
+    public void Invites_DifferentTimeZones_SameInstant()
+    {
+        var (a, b) = AcrossZones("America/Chicago");
+
+        Assert.Equal(a.MeetingKey, b.MeetingKey);
+        Assert.Equal(a.Start, b.Start);
+        Assert.Equal(a.End, b.End);
+        var chicago = BusinessCalendar.ResolveId("America/Chicago")!;
+        Assert.Equal(TimeSpan.FromHours(-5), a.Start.Offset);
+        Assert.Equal(Meeting, BusinessCalendar.LocalDate(a.Start, chicago));
+    }
+
+    [Fact]
+    public void Invites_NoCanonicalZone_UseSenderZone()
+    {
+        var (a, b) = AcrossZones(string.Empty);
+
+        Assert.Equal(a.MeetingKey, b.MeetingKey);
+        var la = BusinessCalendar.ResolveId(LosAngeles)!;
+        Assert.Equal(TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(a.Start, Tz).DateTime),
+            TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(b.Start, la).DateTime));
+        Assert.NotEqual(a.Start, b.Start);
+    }
+
+    [Fact]
+    public void Invites_CanonicalZone_NotBeforeComparesInstants()
+    {
+        var guide = Guide();
+        // Los Angeles email on the meeting day at 16:00 local = 18:00 Chicago, after every Chicago business slot
+        var thread = InLosAngeles(NewThread("T-0803", Meeting, 1, "8030"));
+        var la = BusinessCalendar.ResolveId(LosAngeles)!;
+        thread.Messages[0].SentAt = BusinessCalendar.At(la, Meeting, new TimeOnly(16, 0));
+        var request = Request(guide, thread, 1, new[] { MeetingDelta(1) });
+        request.CanonicalTimeZoneId = "America/Chicago";
+
+        var slot = InviteScheduler.Resolve(request);
+
+        Assert.True(slot.Start > thread.Messages[0].SentAt.AddMinutes(15));
+        Assert.NotEqual(InviteSource.OwnDelta, slot.Source);
+    }
 }

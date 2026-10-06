@@ -5,6 +5,7 @@ using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Services.Qa;
 using ReelDiscovery.Tests.Corpus;
 using ReelDiscovery.Tests.Fakes;
 
@@ -376,6 +377,51 @@ public class GenerationResetTests : IDisposable
         Assert.False(deleted);
         Assert.Empty(result.Errors);
         Assert.True(watch.ElapsedMilliseconds < 100);
+    }
+
+    [Fact]
+    public async Task StartOver_DeletesBatchLedgerResultsAndQaReports_OnlyConstantNames()
+    {
+        WriteFile(BatchLedger.FileName, "{}");
+        WriteFile(BatchLedger.ResultsFolderName + "/msgbatch_1.jsonl");
+        WriteFile(BatchLedger.ResultsFolderName + "/batch_2.jsonl");
+        WriteFile(BatchLedger.ResultsFolderName + "/notes.txt");
+        WriteFile(BatchLedger.ResultsFolderName + "/nested/deep.jsonl");
+        WriteFile(QaReportStore.ScansFileName, "{}");
+        WriteFile(QaReportStore.LeakageFileName, "{}");
+        WriteFile(QaReportStore.BlindReviewFileName, "{}");
+        WriteFile("qa-other.json", "{}");
+        WriteFile("provider-batches.jsonl.bak", "{}");
+        var outside = Path.Combine(_root, "elsewhere.jsonl");
+        File.WriteAllText(outside, "x");
+
+        var result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+
+        Assert.Empty(result.Errors);
+        Assert.False(File.Exists(Path.Combine(_folder, BatchLedger.FileName)));
+        Assert.False(File.Exists(Path.Combine(_folder, BatchLedger.ResultsFolderName, "msgbatch_1.jsonl")));
+        Assert.False(File.Exists(Path.Combine(_folder, BatchLedger.ResultsFolderName, "batch_2.jsonl")));
+        Assert.False(File.Exists(Path.Combine(_folder, QaReportStore.ScansFileName)));
+        Assert.False(File.Exists(Path.Combine(_folder, QaReportStore.LeakageFileName)));
+        Assert.False(File.Exists(Path.Combine(_folder, QaReportStore.BlindReviewFileName)));
+
+        // T-07-34: only *.jsonl directly inside the results folder and the constant names
+        Assert.True(File.Exists(Path.Combine(_folder, BatchLedger.ResultsFolderName, "notes.txt")));
+        Assert.True(File.Exists(Path.Combine(_folder, BatchLedger.ResultsFolderName, "nested", "deep.jsonl")));
+        Assert.True(File.Exists(Path.Combine(_folder, "qa-other.json")));
+        Assert.True(File.Exists(Path.Combine(_folder, "provider-batches.jsonl.bak")));
+        Assert.True(File.Exists(outside));
+    }
+
+    [Fact]
+    public async Task StartOver_EmptyResultsFolder_IsRemoved()
+    {
+        WriteFile(BatchLedger.ResultsFolderName + "/msgbatch_1.jsonl");
+
+        var result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+
+        Assert.Empty(result.Errors);
+        Assert.False(Directory.Exists(Path.Combine(_folder, BatchLedger.ResultsFolderName)));
     }
 
     [Fact]

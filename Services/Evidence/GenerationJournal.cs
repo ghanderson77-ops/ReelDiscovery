@@ -3,6 +3,7 @@ using System.Text.Json;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Services.Evidence;
 
@@ -53,6 +54,15 @@ public class JournalReplay
 
     // Media share (images, speech) of SpentCostUsd, superseded attempts included (D-29)
     public decimal MediaSpentCostUsd { get; set; }
+
+    // PROV-07/D-16: summed CostDetail of every itemized record across all sessions (text only; media is above)
+    public CostBreakdown SpentDetail { get; set; } = new();
+
+    // Text spend no CostDetail explains (pre-Phase-7 lines); SpentDetail.TotalUsd + MediaSpentCostUsd + this == SpentCostUsd
+    public decimal UnsplitSpentUsd { get; set; }
+
+    // Provider of the newest RunStarted that recorded one; empty for pre-Phase-7 journals (D-12 reviewer choice)
+    public string WriterProvider { get; set; } = string.Empty;
 
     // Blank, torn or corrupt lines
     public int SkippedLines { get; set; }
@@ -201,18 +211,22 @@ public class GenerationJournal
                     case JournalRecordType.RunStarted:
                         replay.HasRunStarted = true;
                         replay.LastRunStartedLine = line;
+                        if (record.Provider.Length > 0)
+                            replay.WriterProvider = record.Provider;
                         break;
                     case JournalRecordType.RunEnded:
+                        // Phase 7: CostUsd = unjournaled text, MediaCostUsd = unjournaled media; older lines (combined
+                        // CostUsd, no media, no detail) replay to the same total and count as not itemized
                         replay.LastRunEnded = record;
                         replay.LastRunEndedLine = line;
-                        replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+                        AddSpend(replay, record);
                         break;
                     case JournalRecordType.ThreadDone:
                         // Later lines win: a retried thread's newest outcome replaces the earlier one, but its spend stays counted
                         if (threadIds.Contains(record.ThreadId))
                         {
                             replay.LastByThread[record.ThreadId] = record;
-                            replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+                            AddSpend(replay, record, withMedia: false);
 
                             // A fresh ThreadDone carries the full attachment state of that render
                             foreach (var owned in owners.Where(o => o.Value.ThreadId == record.ThreadId))
@@ -225,15 +239,14 @@ public class GenerationJournal
                         if (threadIds.Contains(record.ThreadId))
                         {
                             replay.LastByThread[record.ThreadId] = record;
-                            replay.SpentCostUsd += Math.Max(0m, record.CostUsd) + record.MediaCostUsd;
-                            replay.MediaSpentCostUsd += record.MediaCostUsd;
+                            AddSpend(replay, record);
                         }
                         break;
                     case JournalRecordType.AttachmentsRepaired:
                         // A repair is only valid on top of a written thread
                         var written = replay.LastByThread.TryGetValue(record.ThreadId, out var thread)
                                       && thread.Type == JournalRecordType.ThreadDone;
-                        replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+                        AddSpend(replay, record, withMedia: false);
                         foreach (var attachment in record.Attachments)
                         {
                             if (written)
@@ -249,12 +262,12 @@ public class GenerationJournal
                         break;
                     case JournalRecordType.SideWorld:
                         replay.LastSideWorld = record;
-                        replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+                        AddSpend(replay, record, withMedia: false);
                         break;
                     case JournalRecordType.CastVoices:
                         // D-28: the last voice set wins; replay never re-asks for voices
                         replay.LastCastVoices = record;
-                        replay.SpentCostUsd += Math.Max(0m, record.CostUsd);
+                        AddSpend(replay, record, withMedia: false);
                         break;
                 }
             }
@@ -275,6 +288,9 @@ public class GenerationJournal
             replay.LastRunEndedLine = -1;
             replay.SpentCostUsd = 0m;
             replay.MediaSpentCostUsd = 0m;
+            replay.SpentDetail = new CostBreakdown();
+            replay.UnsplitSpentUsd = 0m;
+            replay.WriterProvider = string.Empty;
             replay.Reason = $"The saved run could not be read: {ex.Message.Trim().TrimEnd('.')}.";
             return replay;
         }
@@ -302,11 +318,27 @@ public class GenerationJournal
         && owner.ThreadId == threadId
         && owner.ParentDocId == attachment.ParentDocId;
 
-    private static void AddSpend(JournalReplay replay, JournalRecord attachment)
+    /// <summary>
+    /// Counts one record's spend: text CostUsd (itemized through CostDetail when present) plus, when withMedia, its
+    /// MediaCostUsd. Whatever CostDetail does not explain goes to UnsplitSpentUsd, a safety net so the listed items always
+    /// add up to the total (revision 1, blocker 2).
+    /// </summary>
+    private static void AddSpend(JournalReplay replay, JournalRecord record, bool withMedia = true)
     {
-        var media = Math.Max(0m, attachment.MediaCostUsd);
-        replay.SpentCostUsd += Math.Max(0m, attachment.CostUsd) + media;
+        var text = Math.Max(0m, record.CostUsd);
+        var media = withMedia ? Math.Max(0m, record.MediaCostUsd) : 0m;
+        replay.SpentCostUsd += text + media;
         replay.MediaSpentCostUsd += media;
+
+        if (record.CostDetail != null)
+        {
+            replay.SpentDetail.Add(record.CostDetail);
+            replay.UnsplitSpentUsd += Math.Max(0m, text - record.CostDetail.TotalUsd);
+        }
+        else
+        {
+            replay.UnsplitSpentUsd += text;
+        }
     }
 
     private static void ApplyAttachment(JournalReplay replay, JournalRecord attachment, string threadId,

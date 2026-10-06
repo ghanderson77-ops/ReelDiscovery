@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Models.Evidence;
 
@@ -62,6 +63,16 @@ public partial class JournalRecord
     public int OutputTokens { get; set; }
     public decimal CostUsd { get; set; }
 
+    // PROV-07: cache parts of InputTokens (InputTokens counts all billed input)
+    public int CacheWriteTokens { get; set; }
+    public int CacheReadTokens { get; set; }
+
+    // PROV-07: pre-discount category dollars of CostUsd; null on lines written before Phase 7
+    public CostBreakdown? CostDetail { get; set; }
+
+    // RunStarted: the provider that writes the corpus (D-12 reviewer choice)
+    public string Provider { get; set; } = string.Empty;
+
     // ThreadFailed
     public ThreadFailureKind FailureKind { get; set; }
     public string Reason { get; set; } = string.Empty;
@@ -111,6 +122,7 @@ public partial class JournalRecord
         ThreadId ??= string.Empty;
         Reason ??= string.Empty;
         Message ??= string.Empty;
+        Provider ??= string.Empty;
         Violations = CaseGuide.CleanStrings(Violations);
 
         // Only "Mailboxes/{folder}/{box}/{name}.eml" survives, so no replayed path can leave the case folder (T-05-01)
@@ -177,6 +189,18 @@ public partial class JournalRecord
         OutputTokens = Math.Max(0, OutputTokens);
         CostUsd = Math.Max(0m, CostUsd);
         MediaCostUsd = Math.Max(0m, MediaCostUsd);
+        CacheWriteTokens = Math.Max(0, CacheWriteTokens);
+        CacheReadTokens = Math.Max(0, CacheReadTokens);
+
+        // A tampered line never carries negative dollars into the replayed breakdown (T-07-14)
+        if (CostDetail != null)
+        {
+            CostDetail.InputUsd = Math.Max(0m, CostDetail.InputUsd);
+            CostDetail.CacheWriteUsd = Math.Max(0m, CostDetail.CacheWriteUsd);
+            CostDetail.CacheReadUsd = Math.Max(0m, CostDetail.CacheReadUsd);
+            CostDetail.OutputUsd = Math.Max(0m, CostDetail.OutputUsd);
+            CostDetail.BatchSavingsUsd = Math.Max(0m, CostDetail.BatchSavingsUsd);
+        }
     }
 
     private void NormalizeAttachmentFields()

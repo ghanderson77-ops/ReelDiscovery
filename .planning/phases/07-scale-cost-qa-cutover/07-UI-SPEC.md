@@ -1,7 +1,8 @@
 ---
 phase: 7
 slug: scale-cost-qa-cutover
-status: draft
+status: approved
+reviewed_at: 2026-10-06
 shadcn_initialized: false
 preset: none
 created: 2026-10-06
@@ -245,7 +246,7 @@ The `Quality checks` group sits between Corpus and Case guide because it reports
 
 | State | Line 3 | Tone / dot |
 |-------|--------|------------|
-| Not run | `Not run yet. About ≈${c} to review {Plural(n, "email")} with {model}.` | Muted / BorderStrong |
+| Not run | `Not run yet. ≈${c} to review {Plural(n, "email")} with {model}.` | Muted / BorderStrong |
 | Running | `Reviewing: {d:N0} of {Plural(n, "email")}...` | Accent / Accent |
 | Stopped part way | `{d:N0} of {Plural(n, "email")} reviewed; the review stopped. Run Blind Review again to finish the rest.` | Warning |
 | Done, agreement | `{Plural(n, "email")} reviewed by {model}: all agree with the answer key{fallback}` | Success (Warning when `{fallback}` shows) |
@@ -255,7 +256,7 @@ The `Quality checks` group sits between Corpus and Case guide because it reports
 - Buttons: `View Findings` (Default; visible when disagreements exist), `Run Blind Review...` (Default; opens S4). While running, `Run Blind Review...` is replaced by `Cancel Review` (**Danger**) and `View Findings` is hidden; Next/Back stay enabled but leaving the step asks C-Q3.
 - Progress also shows in the status strip: `Blind review: {d:N0} of {Plural(n, "email")} reviewed...` (Accent). Done: `Blind review finished: {Plural(k, "disagreement")}.` (Success when 0, else Warning). Error: `Blind review stopped: {message}. Reviewed emails are kept; run it again to finish.` (Danger).
 
-**Row empty state rule.** Before any email is generated, all three QA rows show their Not run line and only `Run Blind Review...` / `Run Audit` are hidden (nothing to check yet).
+**Row empty state rule.** Before any email is generated, all three QA rows show their Not run line; `Run Blind Review...` and `Run Audit` are hidden until at least one email is generated.
 
 ### S3. `QaFindingsDialog` (new; D-13, D-14, D-15)
 
@@ -452,11 +453,11 @@ No new NuGet packages or UI libraries.
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: FLAG (9 vs 9.5 pt; keep Small in TextMuted)
+- [x] Dimension 5 Spacing: FLAG (ModelConfigurationDialog legacy 10/5 paddings retained)
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-10-06 (gsd-ui-checker, 4 PASS / 2 FLAG)

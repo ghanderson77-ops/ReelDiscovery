@@ -347,6 +347,9 @@ public class AttachmentPromptsTests
         Assert.Equal($"Generate Corpus - {ctx.Spec.DocId} attempt 2", second.OperationName);
         Assert.Equal(AttachmentRenderer.MaxOutputTokens, first.MaxOutputTokens);
         Assert.EndsWith("- fix", second.UserPrompt.TrimEnd());
+        // D-07/D-10: only the first attempt is batch-eligible
+        Assert.True(first.AllowBatch);
+        Assert.False(second.AllowBatch);
     }
 
     // ---------- images (D-27, Pitfall 12) ----------

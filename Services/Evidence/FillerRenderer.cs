@@ -35,7 +35,9 @@ public static partial class FillerRenderer
         OperationName = $"Generate Corpus - {ctx.Thread.Id}" + (attempt > 1 ? $" attempt {attempt}" : string.Empty),
         SystemPrompt = FillerPrompts.SystemPrompt,
         UserPrompt = FillerPrompts.BuildThreadPrompt(ctx, sideWorld, feedback),
-        MaxOutputTokens = ThreadRenderer.MaxOutputTokens
+        MaxOutputTokens = ThreadRenderer.MaxOutputTokens,
+        // D-07/D-10: only a unit's first attempt may wait in a provider batch; feedback retries run live
+        AllowBatch = attempt == 1
     };
 
     /// <summary>

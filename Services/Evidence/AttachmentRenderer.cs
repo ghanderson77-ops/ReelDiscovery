@@ -80,7 +80,9 @@ public static partial class AttachmentRenderer
         OperationName = $"Generate Corpus - {ctx.Spec.DocId}" + (attempt > 1 ? $" attempt {attempt}" : string.Empty),
         SystemPrompt = ctx.Relevant ? AttachmentPrompts.SystemPrompt : AttachmentPrompts.FillerSystemPrompt,
         UserPrompt = AttachmentPrompts.Build(ctx, feedback),
-        MaxOutputTokens = MaxOutputTokens
+        MaxOutputTokens = MaxOutputTokens,
+        // D-07/D-10: only a unit's first attempt may wait in a provider batch; feedback retries run live
+        AllowBatch = attempt == 1
     };
 
     /// <summary>

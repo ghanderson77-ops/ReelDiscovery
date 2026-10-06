@@ -210,6 +210,9 @@ public class FillerPromptsTests
         Assert.Equal(FillerPrompts.SystemPrompt, story.SystemPrompt);
         Assert.Equal(FillerPrompts.BuildThreadPrompt(ctx, null), story.UserPrompt);
         Assert.Equal(ThreadRenderer.MaxOutputTokens, story.MaxOutputTokens);
+        // D-07/D-10: only the first attempt is batch-eligible
+        Assert.True(story.AllowBatch);
+        Assert.False(volume.AllowBatch);
     }
 
     [Fact]

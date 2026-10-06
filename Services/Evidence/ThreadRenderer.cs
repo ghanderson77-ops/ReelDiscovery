@@ -26,7 +26,9 @@ public static class ThreadRenderer
         OperationName = $"Generate Corpus - {ctx.Thread.Id}" + (attempt > 1 ? $" attempt {attempt}" : string.Empty),
         SystemPrompt = EvidencePrompts.SystemPrompt,
         UserPrompt = EvidencePrompts.BuildThreadPrompt(ctx, feedback),
-        MaxOutputTokens = MaxOutputTokens
+        MaxOutputTokens = MaxOutputTokens,
+        // D-07/D-10: only a unit's first attempt may wait in a provider batch; feedback retries run live
+        AllowBatch = attempt == 1
     };
 
     // ----- strict-schema DTOs: no nullable members, no recursion, no dates/people/labels decided by the model (D-01, D-02) -----

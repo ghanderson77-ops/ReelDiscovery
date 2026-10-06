@@ -262,6 +262,9 @@ public class EvidencePromptsTests
         Assert.Equal($"Generate Corpus - {thread.Id} attempt 2", second.OperationName);
         Assert.StartsWith(first.UserPrompt, second.UserPrompt, StringComparison.Ordinal);
         Assert.EndsWith("- msg 2: names \"X\", who is not in the cast" + Environment.NewLine, second.UserPrompt);
+        // D-07/D-10: only the first attempt is batch-eligible
+        Assert.True(first.AllowBatch);
+        Assert.False(second.AllowBatch);
     }
 
     [Fact]

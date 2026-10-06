@@ -95,6 +95,8 @@ public class SideWorldTests
         var request = SideWorldBuilder.BuildRequest(Draft(guide), guide);
         Assert.Equal(LlmTier.Volume, request.Tier);
         Assert.Equal("Generate Corpus - side projects", request.OperationName);
+        // Single calls stay live (keep the default path fast)
+        Assert.False(request.AllowBatch);
         Assert.Contains("ORG-02 Org2 Holdings, Inc. (org2.com)", request.UserPrompt);
         Assert.Contains("Give each organization 3 or 4 projects with 2-4 topics each.", request.UserPrompt);
         Assert.Contains("Do not use these names or terms:", request.UserPrompt);

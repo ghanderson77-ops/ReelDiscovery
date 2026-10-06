@@ -72,6 +72,8 @@ public class CastVoiceTests
         var request = CastVoiceBuilder.BuildRequest(Draft(guide), guide);
         Assert.Equal(LlmTier.Volume, request.Tier);
         Assert.Equal("Generate Corpus - voicemail voices", request.OperationName);
+        // Single calls stay live (keep the default path fast)
+        Assert.False(request.AllowBatch);
     }
 
     [Fact]

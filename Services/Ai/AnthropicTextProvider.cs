@@ -217,25 +217,39 @@ public class AnthropicTextProvider : ILlmProvider
         Message = message
     };
 
-    internal static MessageCreateParams BuildParams(LlmProviderRequest r)
+    /// <summary>
+    /// Builds the strict structured-output config (json_schema format plus optional effort). Shared with the
+    /// batch transport so live and batch requests carry identical output settings (D-05).
+    /// </summary>
+    internal static OutputConfig BuildOutputConfig(LlmProviderRequest r)
     {
         var format = new JsonOutputFormat { Schema = GetSchemaDictionary(r.SchemaJson) };
 
         // Effort only when the catalog sets it (never for Haiku 4.5); the property is init-only,
         // so the unset case uses an initializer without it to keep "effort" off the wire
         var effort = MapEffort(r.Effort);
-        var outputConfig = effort != null
+        return effort != null
             ? new OutputConfig { Format = format, Effort = effort.Value }
             : new OutputConfig { Format = format };
+    }
+
+    internal static MessageCreateParams BuildParams(LlmProviderRequest r)
+    {
+        // D-19: block-level breakpoint on the byte-stable prefix; never top-level CacheControl, which would cache
+        // the unique per-thread user prompt (research anti-pattern). Below the model minimum the provider silently
+        // skips caching.
+        var systemBlock = string.IsNullOrEmpty(r.SystemPrompt)
+            ? new TextBlockParam(r.SystemPrompt)
+            : new TextBlockParam(r.SystemPrompt) { CacheControl = new CacheControlEphemeral() };
 
         // Opus 4.7+/5.5 reject non-default sampling and thinking params (400): never set them here.
         return new MessageCreateParams
         {
             Model = r.ModelId,
             MaxTokens = Math.Min(r.MaxTokens, MaxNonStreamingTokens),
-            System = new List<TextBlockParam> { new(r.SystemPrompt) },
+            System = new List<TextBlockParam> { systemBlock },
             Messages = [new() { Role = Role.User, Content = r.UserPrompt }],
-            OutputConfig = outputConfig
+            OutputConfig = BuildOutputConfig(r)
         };
     }
 
@@ -252,8 +266,11 @@ public class AnthropicTextProvider : ILlmProvider
         var response = new LlmProviderResponse
         {
             Text = text.ToString(),
-            InputTokens = (int)Math.Min(m.Usage.InputTokens, int.MaxValue),
-            OutputTokens = (int)Math.Min(m.Usage.OutputTokens, int.MaxValue)
+            // Anthropic input_tokens excludes cached tokens; total input = read + write + input (PROV-07)
+            InputTokens = ClampTokens(m.Usage.InputTokens),
+            CacheWriteTokens = ClampTokens(m.Usage.CacheCreationInputTokens ?? 0),
+            CacheReadTokens = ClampTokens(m.Usage.CacheReadInputTokens ?? 0),
+            OutputTokens = ClampTokens(m.Usage.OutputTokens)
         };
 
         // Raw string is robust to stop reasons added after this SDK version
@@ -281,6 +298,8 @@ public class AnthropicTextProvider : ILlmProvider
 
         return response;
     }
+
+    private static int ClampTokens(long value) => (int)Math.Clamp(value, 0, int.MaxValue);
 
     private static string BuildRefusalMessage(AnthropicMessage m)
     {

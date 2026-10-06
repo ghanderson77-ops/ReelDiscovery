@@ -511,8 +511,14 @@ public class BatchingLlmProviderTests : IDisposable
         var first = await tasks[0].WaitAsync(Wait);
         Assert.True(first.IsBatch);
 
-        // Consumed is appended before the waiter completes, so it is already on disk
-        Assert.Contains(IdOf(Req("r0")), new BatchLedger(_folder).Replay().ConsumedCustomIds);
+        // Consumed is appended before the waiter completes, so it is already on disk. Read with FileShare.ReadWrite:
+        // the other items' Consumed appends may hold the file open for writing right now
+        string text;
+        using (var stream = new FileStream(BatchLedger.PathFor(_folder), FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var reader = new StreamReader(stream))
+            text = reader.ReadToEnd();
+
+        Assert.Contains(text.Split('\n'), l => l.Contains("\"Consumed\"") && l.Contains(IdOf(Req("r0"))));
 
         await Task.WhenAll(tasks).WaitAsync(Wait);
         var lines = File.ReadAllLines(BatchLedger.PathFor(_folder));

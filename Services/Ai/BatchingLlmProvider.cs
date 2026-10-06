@@ -82,6 +82,7 @@ public class BatchingLlmProvider : ILlmProvider
     private readonly Dictionary<string, AvailableResult> _available = new(StringComparer.Ordinal);
     private readonly HashSet<string> _failedIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TrackedBatch> _batches = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _orphansBilled = new(StringComparer.Ordinal);
 
     public BatchingLlmProvider(ILlmProvider live, IBatchTransport transport, BatchLedger ledger, Guid planId,
         Func<string, AIModelConfig?> priceLookup, BatchTimings? timings = null)
@@ -92,7 +93,181 @@ public class BatchingLlmProvider : ILlmProvider
         _planId = planId;
         _priceLookup = priceLookup ?? throw new ArgumentNullException(nameof(priceLookup));
         _timings = timings ?? new BatchTimings();
+
+        Recover(_ledger.Replay());
     }
+
+    /// <summary>
+    /// Rebuilds what an earlier session left behind (RUN-04): collected-but-unconsumed results become available, and items
+    /// of this plan's pending batches of this provider become in-flight so matching requests attach instead of resubmitting.
+    /// </summary>
+    private void Recover(BatchLedgerState state)
+    {
+        _orphansBilled.UnionWith(state.OrphansBilledIds);
+
+        foreach (var record in state.SubmittedById.Values.Where(r => r.PlanId == _planId && state.CollectedIds.Contains(r.BatchId)))
+        {
+            if (state.OrphansBilledIds.Contains(record.BatchId))
+                continue;
+
+            var batch = TrackedBatch.From(record, resumed: false);
+            foreach (var result in _ledger.ReadResults(record.BatchId))
+            {
+                // T-07-23: only ids this batch was submitted with; consumed results are never served twice (D-09)
+                if (!batch.Contains(result.CustomId) || state.ConsumedCustomIds.Contains(result.CustomId))
+                    continue;
+
+                if (IsUsable(result))
+                    _available[result.CustomId] = new AvailableResult(record.BatchId, result, batch.ModelFor(result.CustomId));
+                else
+                    _failedIds.Add(result.CustomId);
+            }
+        }
+
+        // Batches of another provider are left alone: their requests hash differently under the new model ids
+        foreach (var record in state.Pending(_planId).Where(r => r.Provider == _transport.Kind))
+        {
+            var batch = TrackedBatch.From(record, resumed: true);
+            _batches[batch.BatchId] = batch;
+            foreach (var id in batch.ItemIds.Where(id => !state.ConsumedCustomIds.Contains(id) && !_inflight.ContainsKey(id)))
+                _inflight[id] = new PendingItem(id, new LlmProviderRequest()) { BatchId = batch.BatchId };
+        }
+    }
+
+    /// <summary>
+    /// Starts polling every pending batch of this plan and provider from an earlier session; their results are saved and
+    /// served to matching requests. Returns the number of batches resumed.
+    /// </summary>
+    public int ResumePending()
+    {
+        if (_cts.IsCancellationRequested)
+            return 0;
+
+        List<TrackedBatch> resume;
+        lock (_lock)
+        {
+            resume = _batches.Values.Where(b => b.Resumed && !b.Polling).ToList();
+            foreach (var batch in resume)
+                batch.Polling = true;
+        }
+
+        foreach (var batch in resume)
+            _ = Task.Run(() => PollLoopAsync(batch));
+
+        return resume.Count;
+    }
+
+    /// <summary>
+    /// Prices collected results of this plan that no unit consumed (still billed by the provider) with the catalog model at
+    /// batch prices, appends OrphansBilled per batch and returns the spend. A second call returns zero (T-07-26).
+    /// </summary>
+    public async Task<(CostBreakdown Cost, int InputTokens, int OutputTokens)> BillOrphansAsync(CancellationToken ct = default)
+    {
+        List<IGrouping<string, KeyValuePair<string, AvailableResult>>> groups;
+        lock (_lock)
+        {
+            groups = _available.Where(kv => !_orphansBilled.Contains(kv.Value.BatchId))
+                .GroupBy(kv => kv.Value.BatchId, StringComparer.Ordinal)
+                .ToList();
+        }
+
+        var total = new CostBreakdown();
+        var input = 0;
+        var output = 0;
+        foreach (var group in groups)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var cost = new CostBreakdown();
+            foreach (var (_, orphan) in group)
+            {
+                var usage = orphan.Result.Response!.ToUsage();
+                usage.IsBatch = true;
+                usage.Normalize();
+                cost.Add(_priceLookup(orphan.ModelId)?.CalculateCost(usage));
+                input += usage.TotalInputTokens;
+                output += usage.OutputTokens;
+            }
+
+            try
+            {
+                await _ledger.AppendAsync(new BatchLedgerRecord
+                {
+                    Type = BatchLedgerRecordType.OrphansBilled,
+                    Utc = Now(),
+                    Provider = _transport.Kind,
+                    BatchId = group.Key,
+                    PlanId = _planId
+                }, ct);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // The spend is still reported now; without the line a later session may report it again (over, never under)
+            }
+
+            lock (_lock)
+            {
+                foreach (var (id, _) in group)
+                    _available.Remove(id);
+                _orphansBilled.Add(group.Key);
+            }
+
+            total.Add(cost);
+        }
+
+        return (total, input, output);
+    }
+
+    /// <summary>
+    /// Start Over: cancels this plan's pending provider batches (one transport per record's provider; a null transport is
+    /// skipped), appends Cancelled, then deletes uploaded batch files (best effort).
+    /// </summary>
+    public static async Task CancelPendingAsync(BatchLedger ledger, Func<LlmProviderKind, IBatchTransport?> transportFor,
+        Guid planId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ledger);
+        ArgumentNullException.ThrowIfNull(transportFor);
+
+        var state = ledger.Replay();
+        foreach (var record in state.Pending(planId).ToList())
+        {
+            var transport = transportFor(record.Provider);
+            if (transport == null)
+                continue;
+
+            await transport.CancelAsync(record.BatchId, ct);
+            try
+            {
+                await ledger.AppendAsync(new BatchLedgerRecord
+                {
+                    Type = BatchLedgerRecordType.Cancelled,
+                    Utc = DateTime.UtcNow,
+                    Provider = record.Provider,
+                    BatchId = record.BatchId,
+                    PlanId = planId
+                }, ct);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Start Over deletes the ledger next; the provider batch is cancelled either way
+            }
+        }
+
+        foreach (var record in state.SubmittedById.Values.Where(r => r.PlanId == planId))
+        {
+            if (string.IsNullOrEmpty(record.InputFileId) && string.IsNullOrEmpty(record.OutputFileId))
+                continue;
+
+            var transport = transportFor(record.Provider);
+            if (transport == null)
+                continue;
+
+            // Best effort: the transport ignores delete failures; uploaded prompts should not outlive the case
+            await transport.DeleteFilesAsync(NullIfEmpty(record.InputFileId), NullIfEmpty(record.OutputFileId), ct);
+        }
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     /// <summary>Raised off the UI thread; subscribers marshal to the UI themselves.</summary>
     public event Action<BatchStatusEvent>? StatusChanged;
@@ -173,7 +348,10 @@ public class BatchingLlmProvider : ILlmProvider
             _ = Task.Run(() => FlushLoopAsync(label));
 
         if (ready != null)
+        {
+            await AppendConsumedAsync(ready.BatchId, id);
             return Copy(ready.Result.Response!, isBatch: true, withUsage: true);
+        }
 
         if (goLive)
             return await _live.SendAsync(Live(request), ct);
@@ -593,7 +771,7 @@ public class BatchingLlmProvider : ILlmProvider
         }));
     }
 
-    private Task DeliverAsync(TrackedBatch batch, BatchItemResult result)
+    private async Task DeliverAsync(TrackedBatch batch, BatchItemResult result)
     {
         var usable = IsUsable(result);
         List<TaskCompletionSource<Delivery>> waiters;
@@ -613,8 +791,31 @@ public class BatchingLlmProvider : ILlmProvider
                 _available[result.CustomId] = new AvailableResult(batch.BatchId, result, batch.ModelFor(result.CustomId));
         }
 
+        // Consumed before the waiter completes, so a later Continue (or Regenerate) never reuses this result (D-09)
+        if (usable && waiters.Count > 0)
+            await AppendConsumedAsync(batch.BatchId, result.CustomId);
+
         CompleteResult(waiters, result);
-        return Task.CompletedTask;
+    }
+
+    private async Task AppendConsumedAsync(string batchId, string customId)
+    {
+        try
+        {
+            await _ledger.AppendAsync(new BatchLedgerRecord
+            {
+                Type = BatchLedgerRecordType.Consumed,
+                Utc = Now(),
+                Provider = _transport.Kind,
+                BatchId = batchId,
+                PlanId = _planId,
+                Items = new List<BatchLedgerItem> { new() { CustomId = customId } }
+            }, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Still delivered: the unit's journal line is the source of truth for finished work
+        }
     }
 
     // ----- release helpers -----
@@ -866,6 +1067,15 @@ public class BatchingLlmProvider : ILlmProvider
                 return;
 
             ItemIds.Add(customId);
+        }
+
+        public static TrackedBatch From(BatchLedgerRecord record, bool resumed)
+        {
+            var batch = new TrackedBatch(record.BatchId, record.StageLabel ?? string.Empty, record.SubmittedUtc, resumed);
+            foreach (var item in record.Items.Where(i => i != null))
+                batch.Add(item.CustomId, item.ModelId);
+
+            return batch;
         }
 
         public bool Contains(string? customId) => customId != null && _modelById.ContainsKey(customId);

@@ -622,7 +622,7 @@ public partial class WizardForm : Form
                     var (runTitle, runText) = _steps[_currentStepIndex] switch
                     {
                         StepReviewPlan => CorpusUiText.CP2ClosePlanning(),
-                        StepGenerateCorpus => GenerationUiText.CG3CloseDuringRun(),
+                        StepGenerateCorpus s => GenerationUiText.CG3CloseDuringRun(s.PendingProviderBatches > 0),
                         _ => CaseGuideUiText.C12CloseDuringRun()
                     };
                     if (MessageBox.Show(this, runText, runTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question,

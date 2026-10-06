@@ -694,6 +694,10 @@ public static class GenerationUiText
     public static string FileWriteFailedText(string fileName, string reason) =>
         $"Could not update {fileName}{Colon(reason)}. Your emails are saved; the file is written again when you leave this step.";
 
+    // Start Over could not reach a provider to cancel its batches (best effort, T-07-53)
+    public const string BatchCancelFailedText =
+        "Pending provider batches could not be cancelled; the provider ends them when they expire.";
+
     public static string StartedOverText(int files) =>
         $"Cleared the earlier run: deleted {Plural(files, "EML file", "EML files")}, the narrative ledger and the side projects.";
 

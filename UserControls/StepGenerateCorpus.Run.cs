@@ -47,6 +47,34 @@ public partial class StepGenerateCorpus : IWizardStep
     /// </summary>
     internal Func<ILlmGateway>? GatewayFactory;
 
+    /// <summary>
+    /// Builds the run's gateway and batching decorator from the case's batch choice; null uses GatewayFactory, then
+    /// WizardState.CreateRunGateway. Test seam: fake live provider + fake batch transport.
+    /// </summary>
+    internal Func<bool, (ILlmGateway Gateway, BatchingLlmProvider? Batch)>? RunGatewayFactory;
+
+    /// <summary>
+    /// Batch transport per provider for Start Over's cancel; null uses LlmProviderFactory with the session's keys. Test seam.
+    /// </summary>
+    internal Func<LlmProviderKind, IBatchTransport?>? BatchTransportFactory;
+
+    // Provider batches of this plan not yet collected: the ledger count on entry and after a run, the live count during one
+    private int _pendingProviderBatches;
+
+    // What the batch discount took off this case's spend so far (journal on entry, plus this session's runs)
+    private decimal _caseBatchSavings;
+
+    // Session batch savings when the current run started, so the cost tile adds only this run's share
+    private decimal _runSavingsBase;
+
+    /// <summary>
+    /// Provider batches submitted for this plan and not yet collected (C-G1..C-G3 batch clauses, the banner clause).
+    /// </summary>
+    internal int PendingProviderBatches => _pendingProviderBatches;
+
+    // D-08: the case's saved batch choice; Continue Generating, Retry Failed Items and Create Skipped Media reuse it
+    private bool CaseUseBatch => _state?.Case?.Corpus?.Generation?.UseBatch == true;
+
     // Test seam: called after each checkpoint is applied to the draft
     internal Action? CheckpointApplied;
 
@@ -71,6 +99,8 @@ public partial class StepGenerateCorpus : IWizardStep
         // Set when the journal was re-projected on entry (crash recovery)
         public NarrativeLedger? Ledger;
         public GenerationFileResult? KeyResult;
+        // Provider batches of this plan still pending in the ledger (07 S1 banner clause)
+        public int PendingBatches;
     }
 
     // ----- IWizardStep lifecycle -----
@@ -98,6 +128,8 @@ public partial class StepGenerateCorpus : IWizardStep
         }
 
         RefreshHeader();
+        _pendingProviderBatches = 0;
+        _caseBatchSavings = 0m;
         // A referenced plan that does not load reads as "no plan" here; Review Plan shows its unreadable card
         CorpusPlanStore.EnsureLoaded(Draft);
         var corpus = Draft.Corpus;
@@ -133,7 +165,8 @@ public partial class StepGenerateCorpus : IWizardStep
                     Story = _state.StoryModelConfig,
                     Volume = _state.VolumeModelConfig,
                     Prices = _state.MediaPrices.Clone(),
-                    MediaAvailable = _state.IsMediaAvailable
+                    MediaAvailable = _state.IsMediaAvailable,
+                    Batch = CaseUseBatch
                 };
                 var cached = corpus!.Generation;
                 var cachedPlanId = cached?.RunPlanId;
@@ -142,6 +175,9 @@ public partial class StepGenerateCorpus : IWizardStep
                 data = await Task.Run(() => ReadEntryAsync(folder, plan, guide, pricing, cachedPlanId, cachedProjected));
                 if (IsDisposed || _isGenerating)
                     return;
+
+                _pendingProviderBatches = data.PendingBatches;
+                _caseBatchSavings = data.Replay.SpentDetail?.BatchSavingsUsd ?? 0m;
 
                 if (data.Ledger != null)
                 {
@@ -349,10 +385,14 @@ public partial class StepGenerateCorpus : IWizardStep
 
         string folder;
         ILlmGateway gateway;
+        BatchingLlmProvider? batch;
+        // D-08: the saved choice, so Continue Generating and the retry buttons run the way the case was set up
+        var useBatch = CaseUseBatch;
         try
         {
             folder = _state.CaseStore.EnsureFolder(Draft);
-            gateway = GatewayFactory?.Invoke() ?? _state.CreateGateway();
+            (gateway, batch) = RunGatewayFactory?.Invoke(useBatch)
+                ?? (GatewayFactory != null ? (GatewayFactory(), null) : _state.CreateRunGateway(useBatch, folder, plan.PlanId));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -370,6 +410,7 @@ public partial class StepGenerateCorpus : IWizardStep
         var snapshot = new GenerationSnapshot();
         _snapshot = snapshot;
         _fileErrorStatus = null;
+        _runSavingsBase = _state.UsageTracker.TotalBatchSavings;
         _btnCancel.Enabled = true;
         _progress.Marquee = false;
         _progress.Value = 0;
@@ -391,7 +432,8 @@ public partial class StepGenerateCorpus : IWizardStep
                 Plan = plan,
                 CaseFolder = folder,
                 Media = _state.CreateMediaGenerator(),
-                MediaPrices = _state.MediaPrices.Clone()
+                MediaPrices = _state.MediaPrices.Clone(),
+                Batch = batch
             };
             RunInputCreated?.Invoke(input);
             _runMediaAvailable = input.Media != null;
@@ -423,6 +465,13 @@ public partial class StepGenerateCorpus : IWizardStep
             }
         }
 
+        if (IsDisposed)
+            return;
+
+        // This run's batch discount joins the case total; the ledger says which batches are still at the provider
+        _caseBatchSavings += Math.Max(0m, _state.UsageTracker.TotalBatchSavings - _runSavingsBase);
+        _runSavingsBase = _state.UsageTracker.TotalBatchSavings;
+        _pendingProviderBatches = await Task.Run(() => BatchLedger.PendingBatchCount(folder, plan.PlanId));
         if (IsDisposed)
             return;
 
@@ -463,7 +512,7 @@ public partial class StepGenerateCorpus : IWizardStep
         // The remaining cost is what the next run would spend: the session's models, prices and media availability
         var counts = state.ToCounts(plan, WavePlanner.Plan(plan).Count, result.Ledger.Entries.Count,
             GenerationRunState.EstimateRemaining(plan, state, _state.StoryModelConfig, _state.VolumeModelConfig,
-                _state.MediaPrices, _state.IsMediaAvailable, Draft.Guide),
+                _state.MediaPrices, _state.IsMediaAvailable, Draft.Guide, CaseUseBatch),
             running: false, finished: !partial);
         // Stages rows with the mediaAvailable the run used (input.Media != null), so they match the live rows it showed
         ApplyView(new GenerationView { Counts = counts, Waves = GenerationHistory.Waves(plan, state, _runMediaAvailable) });
@@ -677,7 +726,7 @@ public partial class StepGenerateCorpus : IWizardStep
         if (!_isGenerating || _cts == null || !_btnCancel.Enabled)
             return;
 
-        var (title, text) = CancelConfirmation(_lastCounts);
+        var (title, text) = CancelConfirmation(_lastCounts, _pendingProviderBatches > 0);
         if (!Confirm(title, text, MessageBoxIcon.Question))
             return;
 
@@ -698,8 +747,8 @@ public partial class StepGenerateCorpus : IWizardStep
     }
 
     // C-G1 with the threads and attachments written so far in this view
-    internal static (string Title, string Text) CancelConfirmation(GenerationCounts? counts) =>
-        GenerationUiText.CG1CancelGeneration(counts?.DoneThreads ?? 0, counts?.AttachmentsDone ?? 0);
+    internal static (string Title, string Text) CancelConfirmation(GenerationCounts? counts, bool batchesPending = false) =>
+        GenerationUiText.CG1CancelGeneration(counts?.DoneThreads ?? 0, counts?.AttachmentsDone ?? 0, batchesPending);
 
     private static string ErrorText(Exception ex) =>
         ex.InnerException != null ? $"{ex.Message} ({ex.InnerException.Message})" : ex.Message;
@@ -729,12 +778,14 @@ public partial class StepGenerateCorpus : IWizardStep
             return;
         }
 
-        // The journal can be large; counting its files stays off the UI thread
-        var files = await Task.Run(() => GenerationJournal.ListAllFiles(folder).Count);
+        // The journal can be large; counting its files (and the batch ledger) stays off the UI thread
+        var planId = plan?.PlanId ?? Guid.Empty;
+        var (files, pending) = await Task.Run(() =>
+            (GenerationJournal.ListAllFiles(folder).Count, plan == null ? 0 : BatchLedger.PendingBatchCount(folder, planId)));
         if (IsDisposed || _isGenerating || _isResetting)
             return;
 
-        var (title, text) = GenerationUiText.CG2StartOver(files);
+        var (title, text) = GenerationUiText.CG2StartOver(files, pending > 0);
         if (!Confirm(title, text, MessageBoxIcon.Warning))
             return;
 
@@ -742,14 +793,24 @@ public partial class StepGenerateCorpus : IWizardStep
         _btnStartOver.Enabled = false;
         _btnStateAction.Enabled = false;
         RaiseStateChanged();
+        var useBatch = CaseUseBatch;
         try
         {
+            var cancelFailed = false;
+            if (plan != null && pending > 0)
+                cancelFailed = !await CancelPendingBatchesAsync(folder, planId);
+            if (IsDisposed)
+                return;
+
             // Deletes only journal-listed and planned relevant EML paths under Mailboxes plus two constant-name files (T-05-49)
             var reset = await GenerationReset.StartOverAsync(folder, plan, Draft.Guide);
             if (IsDisposed)
                 return;
 
             GenerationStateApplier.Clear(Draft);
+            // D-08: the batch choice belongs to the case, not to the run that was cleared
+            if (useBatch && Draft.Corpus != null)
+                (Draft.Corpus.Generation ??= new GenerationState()).UseBatch = true;
             GenerationFileResult? key = null;
             if (plan != null && Draft.Corpus?.Approved == true)
             {
@@ -773,6 +834,8 @@ public partial class StepGenerateCorpus : IWizardStep
                 SetStatus($"Some files could not be deleted: {reset.Errors[0]}", Theme.Danger);
             else if (key is { Succeeded: false })
                 ShowFileError(key);
+            else if (cancelFailed)
+                SetStatus(GenerationUiText.StartedOverText(reset.FilesDeleted) + " " + GenerationUiText.BatchCancelFailedText, Theme.Warning);
             else
                 SetStatus(GenerationUiText.StartedOverText(reset.FilesDeleted), Theme.Success);
         }
@@ -791,6 +854,35 @@ public partial class StepGenerateCorpus : IWizardStep
                 _btnStateAction.Enabled = true;
                 RaiseStateChanged();
             }
+        }
+    }
+
+    /// <summary>
+    /// Start Over (T-07-53): cancels this plan's provider batches before the ledger is deleted. Best effort: returns false
+    /// when a provider could not be reached, and Start Over continues (the provider ends an uncollected batch when it
+    /// expires, and its results are never billed into this case). Keys go only to the transport constructors (T-07-54).
+    /// </summary>
+    private async Task<bool> CancelPendingBatchesAsync(string folder, Guid planId)
+    {
+        var transportFor = BatchTransportFactory ?? (kind =>
+        {
+            var key = _state.GetApiKey(kind);
+            return string.IsNullOrWhiteSpace(key) ? null : LlmProviderFactory.CreateBatchTransport(kind, key);
+        });
+
+        try
+        {
+            await Task.Run(() => BatchingLlmProvider.CancelPendingAsync(new BatchLedger(folder), transportFor, planId, CancellationToken.None));
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Best effort by design: a provider outage must not block deleting the case's own files
+            return false;
         }
     }
 
@@ -923,6 +1015,8 @@ public partial class StepGenerateCorpus : IWizardStep
         public AIModelConfig? Volume;
         public MediaPrices Prices = MediaPrices.Defaults();
         public bool MediaAvailable;
+        // D-08: the remaining estimate uses batch prices when the case runs in batch mode
+        public bool Batch;
     }
 
     private static async Task<EntryData> ReadEntryAsync(string folder, CorpusPlan plan, CaseGuide guide, EntryPricing pricing,
@@ -930,11 +1024,12 @@ public partial class StepGenerateCorpus : IWizardStep
     {
         var replay = GenerationJournal.Replay(folder, plan);
         var state = GenerationRunState.From(plan, replay);
-        var data = new EntryData { Replay = replay, State = state };
+        var data = new EntryData { Replay = replay, State = state, PendingBatches = BatchLedger.PendingBatchCount(folder, plan.PlanId) };
         if (!state.HasRun || !replay.Readable || replay.PlanChanged)
             return data;
 
-        data.View = HistoryView(plan, guide, replay, state, pricing.Story, pricing.Volume, pricing.Prices, pricing.MediaAvailable);
+        data.View = HistoryView(plan, guide, replay, state, pricing.Story, pricing.Volume, pricing.Prices, pricing.MediaAvailable,
+            pricing.Batch);
 
         // case.json is behind the journal (killed mid-run, or never projected): rebuild the ledger and the key from it
         if (NeedsProjection(plan, replay, cachedPlanId, cachedProjectedUtc))
@@ -954,16 +1049,19 @@ public partial class StepGenerateCorpus : IWizardStep
     /// Dashboard of a saved run rebuilt from the journal: counts, ledger size, waves and activity (reopen, RUN-06).
     /// </summary>
     internal static GenerationView HistoryView(CorpusPlan plan, CaseGuide guide, JournalReplay replay, GenerationRunState state,
-        AIModelConfig? story, AIModelConfig? volume, MediaPrices prices, bool mediaAvailable)
+        AIModelConfig? story, AIModelConfig? volume, MediaPrices prices, bool mediaAvailable, bool batch = false)
     {
         var waves = WavePlanner.Plan(plan);
         var ledger = LedgerMerger.Build(plan, guide, WavePlanner.WaveIndexByThread(waves), state.DeltasByThread);
+        // Same pricing path as the Ready card and the runner (06-15); batch prices when the case runs in batch mode
+        var counts = state.ToCounts(plan, waves.Count, ledger.Entries.Count,
+            GenerationRunState.EstimateRemaining(plan, state, story, volume, prices, mediaAvailable, guide, batch), running: false,
+            finished: !IsPartial(state));
+        counts.BatchOn = batch;
+        counts.BatchSavingsUsd = replay.SpentDetail?.BatchSavingsUsd ?? 0m;
         return new GenerationView
         {
-            // Same pricing path as the Ready card and the runner (06-15)
-            Counts = state.ToCounts(plan, waves.Count, ledger.Entries.Count,
-                GenerationRunState.EstimateRemaining(plan, state, story, volume, prices, mediaAvailable, guide), running: false,
-                finished: !IsPartial(state)),
+            Counts = counts,
             // What the next Continue will use (_state.IsMediaAvailable), the same value its runner seeds with
             Waves = GenerationHistory.Waves(plan, state, mediaAvailable),
             Events = GenerationHistory.Events(plan, replay, GenerationRunState.AllAssignments(plan))
@@ -995,11 +1093,32 @@ public partial class StepGenerateCorpus : IWizardStep
             StoryCost = est.StoryCost,
             VolumeCost = est.VolumeCost,
             MediaCost = est.MediaCost,
+            // D-17: both totals from this one estimate
+            LiveTotal = est.Total,
+            BatchStoryCost = est.BatchStoryCost,
+            BatchVolumeCost = est.BatchVolumeCost,
+            BatchTotal = est.BatchTotal,
+            BatchChecked = CaseUseBatch,
             StoryModel = est.ModelName.Length > 0 ? est.ModelName : _state.StoryModelId,
             VolumeModel = est.VolumeModelName.Length > 0 ? est.VolumeModelName : _state.VolumeModelId,
             MediaPlanned = media,
             MediaAvailable = _state.IsMediaAvailable
         });
+    }
+
+    /// <summary>
+    /// The Ready card's batch checkbox (D-08): saves the choice to the case and redraws the card so the hint follows it.
+    /// </summary>
+    private void OnUseBatchChanged()
+    {
+        if (_syncingBatch || _state == null || _cardKind != GenerationStateCard.Ready || Draft.Corpus == null)
+            return;
+
+        (Draft.Corpus.Generation ??= new GenerationState()).UseBatch = _chkUseBatch.Checked;
+        QueueSave();
+        var plan = Draft.Corpus.Plan;
+        if (plan != null)
+            ShowStateCard(ReadyCard(plan), GenerationStateCard.Ready);
     }
 
     // Non-relevant threads the run writes (an id and at least one message, as GenerationRunState counts them)

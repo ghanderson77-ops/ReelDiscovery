@@ -1042,7 +1042,7 @@ public class GenerationRunner
     // D-29: Story, Volume and media with the shared pricing, same mediaAvailable as the seeds and repairs
     private static decimal EstimateRemaining(RunContext ctx, GenerationRunState state) =>
         GenerationRunState.EstimateRemaining(ctx.Input.Plan, state, ctx.StoryModel, ctx.VolumeModel, ctx.Input.MediaPrices,
-            ctx.Input.Media != null, ctx.Guide);
+            ctx.Input.Media != null, ctx.Guide, ctx.Input.Batch != null);
 
     /// <summary>
     /// The journal could not be projected (unreadable, foreign plan or a projection bug). Keeps the last good projection:

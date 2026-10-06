@@ -56,6 +56,9 @@ public class GenerationState
     // Media (image + voicemail) share of CostUsd
     public decimal MediaCostUsd { get; set; }
 
+    // D-08: per-case batch choice; Continue reuses it
+    public bool UseBatch { get; set; }
+
     // Last answer-key / story-so-far write error; empty when fine
     public string KeyError { get; set; } = string.Empty;
     public string StoryError { get; set; } = string.Empty;

@@ -750,9 +750,12 @@ public class GenerateCorpusStepTests
             Pump(step.OnEnterStepAsync());
 
             Assert.Equal("Ready to write the corpus", step.StateHeading);
-            Assert.Contains(state.StoryModelConfig!.DisplayName, step.EstimateLabel.Text);
-            Assert.Contains(state.VolumeModelConfig!.DisplayName, step.EstimateLabel.Text);
-            Assert.Contains("images and voicemail", step.EstimateLabel.Text);
+            // 07 S1 (D-17): two totals on the line, the per-model breakdown in its tooltip
+            Assert.StartsWith("Estimated cost ≈$", step.EstimateLabel.Text);
+            Assert.Contains("with batch pricing", step.EstimateLabel.Text);
+            Assert.Contains(state.StoryModelConfig!.DisplayName, step.EstimateTooltipText);
+            Assert.Contains(state.VolumeModelConfig!.DisplayName, step.EstimateTooltipText);
+            Assert.Contains("images and voicemail", step.EstimateTooltipText);
             Assert.NotEqual(string.Empty, step.MediaNoticeLabel.Text);
             // The body names the non-relevant threads and the attachments (run order)
             Assert.Contains("non-relevant thread", step.StateBody);
@@ -762,6 +765,152 @@ public class GenerateCorpusStepTests
             state.OpenAIKeyTested = true;
             Pump(step.OnEnterStepAsync());
             Assert.Equal(string.Empty, step.MediaNoticeLabel.Text);
+        });
+    }
+
+    // ----- 07-11: batch choice, run wiring, Start Over cancel -----
+
+    [Fact]
+    public void BatchCheckbox_ReadyCardOnly_SavedToCase_HintFollows()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+
+            Assert.True(step.UseBatchCheckBox.Visible);
+            Assert.False(step.UseBatchCheckBox.Checked);
+            Assert.Equal(GenerationUiText.BatchCheckboxText, step.UseBatchCheckBox.Text);
+            Assert.False(step.UseBatchCheckBox.UseMnemonic);
+
+            step.UseBatchCheckBox.Checked = true;
+            Assert.True(h.Draft.Corpus!.Generation!.UseBatch);
+            Assert.True(step.UseBatchCheckBox.Checked);
+            Assert.True(step.BatchHintLabel.Visible);
+            Assert.Equal(GenerationUiText.BatchHint(0, true, GenerationUiText.BatchRecommendThreshold).Text, step.BatchHintLabel.Text);
+            Assert.Equal(Theme.Warning, step.BatchHintLabel.ForeColor);
+
+            // Re-entering reads the saved choice
+            Pump(step.OnEnterStepAsync());
+            Assert.True(step.UseBatchCheckBox.Checked);
+
+            step.UseBatchCheckBox.Checked = false;
+            Assert.False(h.Draft.Corpus.Generation.UseBatch);
+        });
+    }
+
+    [Fact]
+    public void BatchCheckbox_HiddenOnNotApprovedCard()
+    {
+        using var h = new Harness(approved: false);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Assert.Equal("Approve the plan first", step.StateHeading);
+            Assert.False(step.UseBatchCheckBox.Visible);
+            Assert.False(step.BatchHintLabel.Visible);
+        });
+    }
+
+    [Fact]
+    public void Run_UsesSavedBatchChoice()
+    {
+        using var h = new Harness();
+        h.Draft.Corpus!.Generation = new GenerationState { UseBatch = true };
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var choices = new List<bool>();
+            step.RunGatewayFactory = useBatch =>
+            {
+                choices.Add(useBatch);
+                return (h.Gateway, null);
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            Assert.Equal(new[] { true }, choices);
+            Assert.True(h.Draft.Corpus.Generation!.UseBatch);
+        });
+    }
+
+    [Fact]
+    public void StartOver_CancelsPendingProviderBatches_KeepsBatchChoice()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+            h.Draft.Corpus!.Generation!.UseBatch = true;
+
+            // One batch still at the provider from before the app closed
+            new BatchLedger(h.Folder).AppendAsync(new BatchLedgerRecord
+            {
+                Type = BatchLedgerRecordType.Submitted,
+                Utc = DateTime.UtcNow,
+                Provider = LlmProviderKind.OpenAI,
+                BatchId = "batch_pending",
+                PlanId = h.Plan.PlanId,
+                SubmittedUtc = DateTime.UtcNow,
+                StageLabel = "wave 1",
+                Total = 2
+            }).GetAwaiter().GetResult();
+
+            var transport = new FakeBatchTransport();
+            step.BatchTransportFactory = _ => transport;
+            string? confirmText = null;
+            step.Confirm = (title, text, icon) =>
+            {
+                confirmText = text;
+                return true;
+            };
+            Pump(step.ClickStartOverAsync());
+
+            Assert.EndsWith(" Pending provider batches are cancelled.", confirmText);
+            Assert.Equal(new[] { "batch_pending" }, transport.CancelledIds);
+            Assert.True(h.Draft.Corpus.Generation!.UseBatch);
+            Assert.Equal(0, step.PendingProviderBatches);
+            Assert.Equal(Theme.Success, step.StatusLabel.ForeColor);
+        });
+    }
+
+    [Fact]
+    public void StartOver_CancelFailure_StillClears_WithWarning()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            new BatchLedger(h.Folder).AppendAsync(new BatchLedgerRecord
+            {
+                Type = BatchLedgerRecordType.Submitted,
+                Utc = DateTime.UtcNow,
+                Provider = LlmProviderKind.OpenAI,
+                BatchId = "batch_pending",
+                PlanId = h.Plan.PlanId,
+                SubmittedUtc = DateTime.UtcNow,
+                Total = 1
+            }).GetAwaiter().GetResult();
+
+            step.BatchTransportFactory = _ => throw new InvalidOperationException("provider down");
+            Pump(step.ClickStartOverAsync());
+
+            Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+            Assert.EndsWith(GenerationUiText.BatchCancelFailedText, step.StatusLabel.Text);
+            Assert.Equal(Theme.Warning, step.StatusLabel.ForeColor);
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
         });
     }
 

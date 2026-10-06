@@ -92,6 +92,12 @@ public partial class StepGenerateCorpus : UserControl
     private Label _lblStateMediaNotice = null!;
     private Button _btnStateAction = null!;
 
+    // Ready card only (07 S1, D-08): the saved batch choice and its hint
+    private CheckBox _chkUseBatch = null!;
+    private Label _lblBatchHint = null!;
+    // Set while the step writes the checkbox itself, so CheckedChanged does not save
+    private bool _syncingBatch;
+
     private Label _lblStatus = null!;
     private SlimProgressBar _progress = null!;
     private Button _btnCancel = null!;
@@ -472,12 +478,39 @@ public partial class StepGenerateCorpus : UserControl
             Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(20)),
             Visible = false
         };
+        // Batch opt-in (07-UI-SPEC S1 rows 4-5): saved to the case on change; the hint wraps at 520 like the other lines
+        _chkUseBatch = new CheckBox
+        {
+            Text = GenerationUiText.BatchCheckboxText,
+            AutoSize = true,
+            FlatStyle = FlatStyle.System,
+            Font = Theme.BodyFont(),
+            ForeColor = Theme.Text,
+            BackColor = Theme.Surface,
+            UseMnemonic = false,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(4)),
+            Visible = false
+        };
+        _chkUseBatch.CheckedChanged += (s, e) => OnUseBatchChanged();
+        _lblBatchHint = new Label
+        {
+            AutoSize = true,
+            UseMnemonic = false,
+            MaximumSize = new Size(LogicalToDeviceUnits(520), 0),
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.TextMuted,
+            BackColor = Theme.Surface,
+            Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(20)),
+            Visible = false
+        };
         _btnStateAction = ButtonHelper.CreateButton("Generate Emails", 0, _buttonHeight, ButtonStyle.Primary);
         _btnStateAction.Margin = new Padding(0);
 
         _stateContent.Controls.Add(_lblStateHeading);
         _stateContent.Controls.Add(_lblStateBody);
         _stateContent.Controls.Add(_lblStateEstimate);
+        _stateContent.Controls.Add(_chkUseBatch);
+        _stateContent.Controls.Add(_lblBatchHint);
         _stateContent.Controls.Add(_lblStateMediaNotice);
         _stateContent.Controls.Add(_btnStateAction);
         _stateCard.Controls.Add(_stateContent);
@@ -723,6 +756,19 @@ public partial class StepGenerateCorpus : UserControl
             return;
 
         var counts = view.Counts ?? new GenerationCounts();
+        // Cost tile batch clauses: the case's saved choice and the savings known from the journal (07 S1 tile 7)
+        counts.BatchOn = CaseUseBatch;
+        if (counts.Running)
+        {
+            // Live: the case's earlier savings plus what this run's batch discount took off so far
+            var session = _state?.UsageTracker.TotalBatchSavings ?? _runSavingsBase;
+            counts.BatchSavingsUsd = _caseBatchSavings + Math.Max(0m, session - _runSavingsBase);
+            _pendingProviderBatches = view.PendingProviderBatches;
+        }
+        else
+        {
+            counts.BatchSavingsUsd = Math.Max(counts.BatchSavingsUsd, _caseBatchSavings);
+        }
         _lastCounts = counts.Clone();
         for (var i = FractionTiles; i < TileKinds.Length; i++)
             _tiles[i].SetContent(GenerationUiText.Tile(TileKinds[i], counts));
@@ -738,7 +784,8 @@ public partial class StepGenerateCorpus : UserControl
             var (maximum, value) = ProgressUnits(counts);
             _progress.Maximum = maximum;
             _progress.Value = value;
-            var text = GenerationUiText.ProgressText(view);
+            // Batch wait and collecting texts with the countdown (D-09); otherwise the normal stage text
+            var text = GenerationUiText.ProgressText(view, DateTime.UtcNow);
             if (text.Length > 0)
                 SetStatus(text, Theme.Accent);
         }
@@ -827,6 +874,14 @@ public partial class StepGenerateCorpus : UserControl
                 ? stage.Index.ToString(System.Globalization.CultureInfo.InvariantCulture)
                 : string.Empty);
             var (dates, done, tooltip) = GenerationUiText.StageRowText(stage);
+            if (stage.BatchWaiting)
+            {
+                // D-09: the Dates cell shows the wait (it may ellipsize); the tooltip keeps the dates and the countdown
+                var wait = GenerationUiText.BatchWaitText(stage, DateTime.Now);
+                tooltip = GenerationUiText.BatchWaitTooltip(dates, wait,
+                    GenerationUiText.SecondsUntil(stage.BatchNextCheckUtc, DateTime.UtcNow));
+                dates = wait;
+            }
             SetCell(row, "Dates", dates);
             row.Cells["Dates"].ToolTipText = tooltip;
             SetCell(row, "Done", done);
@@ -888,7 +943,8 @@ public partial class StepGenerateCorpus : UserControl
     /// </summary>
     private static Color StageColor(WaveProgress stage)
     {
-        if (stage.Running)
+        // A stage waiting on a provider batch is still running (07 S1 Row 4)
+        if (stage.Running || stage.BatchWaiting)
             return Theme.Accent;
 
         var (warnings, failed) = StageProblems(stage);
@@ -980,14 +1036,35 @@ public partial class StepGenerateCorpus : UserControl
         _lblStateHeading.Text = content.Heading;
         _lblStateBody.Text = content.Body;
 
-        // Ready card: body bottom 8 when the estimate follows, estimate bottom 4 when the notice follows, last line 20
+        // Ready card: body bottom 8 when a line follows; estimate, checkbox and hint bottom 4 when a line follows; whichever
+        // line is last carries 20 (07-UI-SPEC S1, 06 S1 rule extended). The checkbox shows on the Ready card only (D-08)
         var estimate = content.EstimateLine ?? string.Empty;
         var notice = content.MediaNotice ?? string.Empty;
+        var ready = kind == GenerationStateCard.Ready;
+        var hint = ready ? content.BatchHint ?? string.Empty : string.Empty;
         var last = LogicalToDeviceUnits(20);
-        _lblStateBody.Margin = new Padding(0, 0, 0, estimate.Length > 0 || notice.Length > 0 ? LogicalToDeviceUnits(Theme.SmallGap) : last);
+        var xs = LogicalToDeviceUnits(4);
+        _lblStateBody.Margin = new Padding(0, 0, 0,
+            estimate.Length > 0 || ready || notice.Length > 0 ? LogicalToDeviceUnits(Theme.SmallGap) : last);
         _lblStateEstimate.Text = estimate;
         _lblStateEstimate.Visible = estimate.Length > 0;
-        _lblStateEstimate.Margin = new Padding(0, 0, 0, notice.Length > 0 ? LogicalToDeviceUnits(4) : last);
+        _lblStateEstimate.Margin = new Padding(0, 0, 0, ready || notice.Length > 0 ? xs : last);
+        _toolTip.SetToolTip(_lblStateEstimate, ready ? content.EstimateTooltip ?? string.Empty : string.Empty);
+        _syncingBatch = true;
+        try
+        {
+            _chkUseBatch.Checked = ready && CaseUseBatch;
+        }
+        finally
+        {
+            _syncingBatch = false;
+        }
+        _chkUseBatch.Visible = ready;
+        _chkUseBatch.Margin = new Padding(0, 0, 0, hint.Length > 0 || notice.Length > 0 ? xs : last);
+        _lblBatchHint.Text = hint;
+        _lblBatchHint.ForeColor = content.BatchHintTone == SummaryTone.Warning ? Theme.Warning : Theme.TextMuted;
+        _lblBatchHint.Visible = hint.Length > 0;
+        _lblBatchHint.Margin = new Padding(0, 0, 0, notice.Length > 0 ? xs : last);
         _lblStateMediaNotice.Text = notice;
         _lblStateMediaNotice.Visible = notice.Length > 0;
         ButtonHelper.StyleButton(_btnStateAction, content.Danger ? ButtonStyle.Danger : ButtonStyle.Primary);
@@ -1020,7 +1097,8 @@ public partial class StepGenerateCorpus : UserControl
         _btnRetryFailed.Visible = !banner && finishedWithFailures;
         if (banner)
             SetBanner(GenerateCorpusBanner.PartialRun, GenerationUiText.BannerHeading(runEnded),
-                GenerationUiText.BannerBody(done, total, attachmentsDone, attachmentsTotal, failed), GenerationUiText.BannerButton);
+                GenerationUiText.BannerBody(done, total, attachmentsDone, attachmentsTotal, failed, CaseUseBatch, _pendingProviderBatches),
+                GenerationUiText.BannerButton);
         else
             SetBanner(GenerateCorpusBanner.None, string.Empty, string.Empty, string.Empty);
         SetStateCardShown(false);
@@ -1037,7 +1115,8 @@ public partial class StepGenerateCorpus : UserControl
     {
         _btnRetryFailed.Visible = false;
         SetBanner(GenerateCorpusBanner.PartialRun, GenerationUiText.BannerHeading(runEnded),
-            GenerationUiText.BannerBody(threadsDone, threadsTotal, attachmentsDone, attachmentsTotal, failedItems),
+            GenerationUiText.BannerBody(threadsDone, threadsTotal, attachmentsDone, attachmentsTotal, failedItems, CaseUseBatch,
+                _pendingProviderBatches),
             GenerationUiText.BannerButton);
         RaiseStateChanged();
     }
@@ -1308,6 +1387,9 @@ public partial class StepGenerateCorpus : UserControl
     internal Button BannerButton => _btnContinue;
     internal Label EstimateLabel => _lblStateEstimate;
     internal Label MediaNoticeLabel => _lblStateMediaNotice;
+    internal CheckBox UseBatchCheckBox => _chkUseBatch;
+    internal Label BatchHintLabel => _lblBatchHint;
+    internal string EstimateTooltipText => _toolTip.GetToolTip(_lblStateEstimate) ?? string.Empty;
     internal Label StatusLabel => _lblStatus;
     internal Label NoticeLabel => _lblNotice;
     internal SlimProgressBar ProgressBar => _progress;

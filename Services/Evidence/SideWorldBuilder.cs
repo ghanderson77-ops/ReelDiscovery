@@ -282,7 +282,9 @@ internal static class SideWorldBuilder
     }
 
     /// <summary>
-    /// The journaled side world when it covers every covered guide organization, else null (forces a rebuild).
+    /// The journaled side world when it lists every covered guide organization, else null (forces a rebuild). An
+    /// organization with no projects still counts: every template may collide with case terms, and
+    /// <see cref="ProjectsFor"/> falls back for it, so such a world is never rebuilt on each Continue (IN-03).
     /// </summary>
     public static SideWorld? FromRecord(JournalRecord? record, CaseGuide guide)
     {
@@ -291,8 +293,7 @@ internal static class SideWorldBuilder
             return null;
 
         world.Normalize();
-        var present = new HashSet<string>(
-            world.Organizations.Where(o => o.Projects.Count > 0).Select(o => o.OrganizationId), StringComparer.Ordinal);
+        var present = new HashSet<string>(world.Organizations.Select(o => o.OrganizationId), StringComparer.Ordinal);
         return CoveredOrganizations(guide).All(o => present.Contains(o.Id.Trim())) ? world : null;
     }
 

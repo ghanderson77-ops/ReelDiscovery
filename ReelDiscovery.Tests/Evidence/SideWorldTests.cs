@@ -332,4 +332,16 @@ public class SideWorldTests
         Assert.Equal(24, bigWorld.Organizations.Count);
         Assert.NotNull(SideWorldBuilder.FromRecord(new JournalRecord { Type = JournalRecordType.SideWorld, SideWorld = bigWorld }, big));
     }
+
+    // IN-03: an organization whose templates all collided has no projects; the journaled world must still be reused
+    [Fact]
+    public void FromRecord_CoveredOrganizationWithNoProjects_WorldReused()
+    {
+        var guide = Guide();
+        var world = SideWorldBuilder.Fallback(guide);
+        world.Organizations[1].Projects.Clear();
+        var record = new JournalRecord { Type = JournalRecordType.SideWorld, SideWorld = world };
+
+        Assert.Same(world, SideWorldBuilder.FromRecord(record, guide));
+    }
 }

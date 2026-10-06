@@ -104,7 +104,7 @@ public class BlindReviewTests
             Assert.Equal(i % 2 == 0, relevantIds.Contains(first[i]));
         var nrPicks = first.Where((_, i) => i % 2 == 1).ToList();
         Assert.True(nrPicks.Take(3).All(decoyIds.Contains));
-        Assert.False(nrPicks.Skip(3).Any(decoyIds.Contains));
+        Assert.DoesNotContain(nrPicks.Skip(3), decoyIds.Contains);
     }
 
     [Fact]

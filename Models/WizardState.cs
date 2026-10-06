@@ -93,6 +93,47 @@ public class WizardState
         return new LlmGateway(LlmProviderFactory.Create(TextProvider, key), story, volume, UsageTracker);
     }
 
+    /// <summary>
+    /// Blind-review gateway (D-12): the provider other than the corpus writer when its key is tested, else the writer's
+    /// provider with SameProviderFallback true, else a null gateway. Both tiers use that provider's Volume default (OQ5).
+    /// </summary>
+    /// <param name="writerProvider">JournalReplay.WriterProvider; empty or unknown means the current text provider.</param>
+    public (ILlmGateway? Gateway, LlmProviderKind Provider, bool SameProviderFallback, AIModelConfig? Model) CreateReviewerGateway(string writerProvider)
+    {
+        var writer = Enum.TryParse<LlmProviderKind>(writerProvider?.Trim(), ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : TextProvider;
+        var other = writer == LlmProviderKind.OpenAI ? LlmProviderKind.Anthropic : LlmProviderKind.OpenAI;
+
+        LlmProviderKind provider;
+        bool fallback;
+        if (IsKeyReady(other))
+        {
+            provider = other;
+            fallback = false;
+        }
+        else if (IsKeyReady(writer))
+        {
+            provider = writer;
+            fallback = true;
+        }
+        else
+        {
+            return (null, writer, false, null);
+        }
+
+        var model = AIModelConfig.GetTierDefault(AvailableModelConfigs, provider, LlmTier.Volume);
+        if (model == null)
+            return (null, provider, fallback, null);
+
+        var gateway = new LlmGateway(LlmProviderFactory.Create(provider, GetApiKey(provider)), model, model, UsageTracker);
+        return (gateway, provider, fallback, model);
+    }
+
+    private bool IsKeyReady(LlmProviderKind provider) =>
+        (provider == LlmProviderKind.OpenAI ? OpenAIKeyTested : AnthropicKeyTested)
+        && !string.IsNullOrWhiteSpace(GetApiKey(provider));
+
     public OpenAIMediaClient? CreateMediaClient() =>
         IsMediaAvailable ? new OpenAIMediaClient(OpenAIApiKey, Config.ImageModel, Config.ImageQuality) : null;
 

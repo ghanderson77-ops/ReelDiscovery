@@ -1,7 +1,9 @@
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Services.Qa;
 
 namespace ReelDiscovery.Services.Evidence;
 
@@ -86,6 +88,53 @@ public static class GenerationReset
         var folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(caseFolder));
         var storyName = StorySoFarDocxBuilder.FileNameFor(folderName);
         TryDelete(Path.Combine(caseFolder, storyName), storyName, result);
+
+        // Constant names only (T-04-26); provider batches are cancelled by the step before this runs
+        ct.ThrowIfCancellationRequested();
+        TryDelete(Path.Combine(caseFolder, BatchLedger.FileName), BatchLedger.FileName, result);
+        DeleteBatchResults(caseFolder, result);
+        TryDelete(Path.Combine(caseFolder, QaReportStore.ScansFileName), QaReportStore.ScansFileName, result);
+        TryDelete(Path.Combine(caseFolder, QaReportStore.LeakageFileName), QaReportStore.LeakageFileName, result);
+        TryDelete(Path.Combine(caseFolder, QaReportStore.BlindReviewFileName), QaReportStore.BlindReviewFileName, result);
+    }
+
+    // T-07-34: only *.jsonl directly inside the constant results folder; the folder goes when nothing else is left in it
+    private static void DeleteBatchResults(string caseFolder, StartOverResult result)
+    {
+        var folder = Path.Combine(caseFolder, BatchLedger.ResultsFolderName);
+        if (!Directory.Exists(folder))
+            return;
+
+        string[] files;
+        try
+        {
+            files = Directory.GetFiles(folder, "*.jsonl", SearchOption.TopDirectoryOnly);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            result.Errors.Add($"{BatchLedger.ResultsFolderName}: {ex.Message}");
+            return;
+        }
+
+        foreach (var file in files)
+        {
+            // GetFiles' "*.jsonl" also matches longer extensions on Windows (8.3 rule); keep the exact one only
+            if (!string.Equals(Path.GetExtension(file), ".jsonl", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var name = Path.GetFileName(file);
+            TryDelete(file, $"{BatchLedger.ResultsFolderName}/{name}", result);
+        }
+
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(folder).Any())
+                Directory.Delete(folder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An empty folder left behind is harmless; the next Start Over tries again
+        }
     }
 
     // True when an existing file was deleted; a missing file is not an error. Runs inside DeleteAll's Task.Run, so the

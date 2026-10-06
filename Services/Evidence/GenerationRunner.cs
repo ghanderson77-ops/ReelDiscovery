@@ -21,6 +21,9 @@ public class GenerationRunInput
     public IMediaGenerator? Media { get; set; }
 
     public MediaPrices MediaPrices { get; set; } = MediaPrices.Defaults();
+
+    /// <summary>Batch mode (D-07): the decorator behind the run's gateway; null = live.</summary>
+    public BatchingLlmProvider? Batch { get; set; }
 }
 
 /// <summary>
@@ -68,6 +71,11 @@ public class GenerationRunner
 
     // Review MEDIUM: bound attachment buffers held by repairs separately from provider slots
     public const int MaxConcurrentRepairs = 4;
+
+    public const int BatchMaxParallel = 10_000; // batch mode: queued requests cost nothing, so every unit of a wave starts at once (research Pattern 1)
+
+    // Batch mode Stage B chunk: one provider batch of non-relevant mail per chunk (live mode keeps FillerChunkSize)
+    public const int BatchFillerChunkSize = 2_000;
 
     // Debounced so a burst of finishing threads writes the key at most every 2 s; wave and run end always write it
     public static readonly TimeSpan KeyProjectionInterval = TimeSpan.FromSeconds(2);
@@ -240,11 +248,25 @@ public class GenerationRunner
             Total = state.TotalThreads
         });
 
+        // D-09: provider batch status reaches the stage rows; batches an earlier session left pending are polled again
+        var batch = input.Batch;
+        if (batch != null)
+        {
+            foreach (var wave in waves)
+                snapshot.MapBatchStage(WaveStageLabel(wave.Index), wave.Index);
+            snapshot.MapBatchStage(NonRelevantStageLabel, fillerRow);
+            batch.StatusChanged += snapshot.RecordBatchStatus;
+            var resumed = batch.ResumePending();
+            snapshot.SetCollectingAfterRestart(resumed > 0);
+            snapshot.SetPendingProviderBatches(resumed);
+        }
+
         var outcome = GenerationOutcome.Finished;
         var message = string.Empty;
         GenerationCheckpoint? final = null;
 
-        using var run = new PlanCallRun(ct, _maxParallel, RetryHint);
+        // Live mode keeps MaxParallelThreads (research anti-pattern: never raise live parallelism)
+        using var run = new PlanCallRun(ct, batch != null ? BatchMaxParallel : _maxParallel, RetryHint);
         try
         {
             await journal.AppendAsync(new JournalRecord
@@ -350,18 +372,24 @@ public class GenerationRunner
                 // WR-04: one frozen context per unit; committed slots are published only at the step end
                 var threadSteps = new List<ThreadAttachmentContext>();
                 var relevantProfile = RenderProfile.Relevant(_llm);
-                var tasks = pending
-                    .Select(id =>
-                    {
-                        var step = StepContext(ctx, wave.Index);
-                        threadSteps.Add(step);
-                        var render = ThreadRenderContext.Create(input.Draft, plan, threads[id],
-                            ctx.Assignments.TryGetValue(id, out var a) ? a : new ThreadAssignment { ThreadId = id },
-                            ctx.People, ledger.Entries, wave.Index);
-                        render.PreviousStatus = Status(state, id);
-                        return RunThreadAsync(ctx, uow, render, relevantProfile, step, run);
-                    })
-                    .ToList();
+                List<Task<ThreadOutcome>> tasks;
+
+                // D-07: one batch per wave; the label keeps waves apart (the AsyncLocal flows into every unit task)
+                using (BatchStage.Enter(WaveStageLabel(wave.Index)))
+                {
+                    tasks = pending
+                        .Select(id =>
+                        {
+                            var step = StepContext(ctx, wave.Index);
+                            threadSteps.Add(step);
+                            var render = ThreadRenderContext.Create(input.Draft, plan, threads[id],
+                                ctx.Assignments.TryGetValue(id, out var a) ? a : new ThreadAssignment { ThreadId = id },
+                                ctx.People, ledger.Entries, wave.Index);
+                            render.PreviousStatus = Status(state, id);
+                            return RunThreadAsync(ctx, uow, render, relevantProfile, step, run);
+                        })
+                        .ToList();
+                }
 
                 var repairSteps = new List<ThreadAttachmentContext>();
                 var repairTasks = new List<Task<AttachmentRepairOutcome?>>();
@@ -370,6 +398,9 @@ public class GenerationRunner
                 {
                     StartRepairs(ctx);
                     snapshot.SetWaveRunning(repairRow, true);
+
+                    // Revision 1 W9: at most MaxConcurrentRepairs in flight, so repairs never wait a provider cycle in a batch
+                    using var live = BatchStage.EnterLive();
                     foreach (var group in RepairOrderHook?.Invoke(waveRepairs.ToList()) ?? waveRepairs)
                     {
                         var render = ThreadRenderContext.Create(input.Draft, plan, threads[group.ThreadId],
@@ -487,6 +518,10 @@ public class GenerationRunner
             if (outcome == GenerationOutcome.Cancelled)
                 snapshot.SetStage(GenerationStage.Stopping);
 
+            // D-10: results collected but never used are still billed; RunEnded carries them once (OrphansBilled)
+            if (outcome == GenerationOutcome.Finished && batch != null)
+                await AddOrphanSpendAsync(ctx, batch).ConfigureAwait(false);
+
             try
             {
                 final = await CheckpointAsync(ctx, final: true, outcome, message).ConfigureAwait(false);
@@ -506,6 +541,13 @@ public class GenerationRunner
 
             // Always runs, so the snapshot never stays "running" without a RunEnded event
             FinishSnapshot(snapshot, final, outcome, message);
+
+            // D-09: stop polling; provider batches still running stay in the ledger for the next Continue
+            if (batch != null)
+            {
+                batch.StatusChanged -= snapshot.RecordBatchStatus;
+                batch.Detach();
+            }
         }
 
         return new GenerationRunResult
@@ -594,23 +636,28 @@ public class GenerationRunner
             try
             {
                 // Filler has no ledger dependency: chunks only bound memory and checkpoint cadence (D-25)
-                foreach (var chunk in pending.Chunk(FillerChunkSize))
+                // D-07: batch mode sends one provider batch per 2,000 threads; live mode keeps the 50-thread cadence
+                foreach (var chunk in pending.Chunk(input.Batch != null ? BatchFillerChunkSize : FillerChunkSize))
                 {
                     ct.ThrowIfCancellationRequested();
                     snapshot.SetStage(GenerationStage.NonRelevant, count: pending.Count);
                     ctx.ChainScheduler.BeginStep(chunk.Select(t => t.Id));
                     var step = StepContext(ctx, fillerRow);
-                    var tasks = chunk
-                        .Select(thread =>
-                        {
-                            // D-08, D-09, D-13: filler assignments and the category profile; never the ledger
-                            var render = ThreadRenderContext.Create(input.Draft, plan, thread,
-                                ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
-                                ctx.People, new List<LedgerEntry>(), fillerRow);
-                            render.PreviousStatus = Status(state, thread.Id);
-                            return RunThreadAsync(ctx, uow, render, RenderProfile.For(thread, _llm, sideWorld), step, run);
-                        })
-                        .ToList();
+                    List<Task<ThreadOutcome>> tasks;
+                    using (BatchStage.Enter(NonRelevantStageLabel))
+                    {
+                        tasks = chunk
+                            .Select(thread =>
+                            {
+                                // D-08, D-09, D-13: filler assignments and the category profile; never the ledger
+                                var render = ThreadRenderContext.Create(input.Draft, plan, thread,
+                                    ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
+                                    ctx.People, new List<LedgerEntry>(), fillerRow);
+                                render.PreviousStatus = Status(state, thread.Id);
+                                return RunThreadAsync(ctx, uow, render, RenderProfile.For(thread, _llm, sideWorld), step, run);
+                            })
+                            .ToList();
+                    }
                     var results = await Task.WhenAll(tasks).ConfigureAwait(false);
 
                     written += results.Count(r => r.Kind == ThreadOutcomeKind.Written);
@@ -656,15 +703,20 @@ public class GenerationRunner
                 ctx.ChainScheduler.BeginStep(ordered.Select(g => g.ThreadId));
                 var steps = new List<ThreadAttachmentContext>();
                 var tasks = new List<Task<AttachmentRepairOutcome?>>();
-                foreach (var group in ordered)
+
+                // Revision 1 W9: repairs run live even in batch mode
+                using (BatchStage.EnterLive())
                 {
-                    var thread = threads[group.ThreadId];
-                    var render = ThreadRenderContext.Create(input.Draft, plan, thread,
-                        ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
-                        ctx.People, new List<LedgerEntry>(), fillerRow);
-                    var actx = StepContext(ctx, ctx.RepairRow);
-                    steps.Add(actx);
-                    tasks.Add(RunRepairAsync(ctx, state, group, render, RenderProfile.For(thread, _llm, sideWorld), actx, run));
+                    foreach (var group in ordered)
+                    {
+                        var thread = threads[group.ThreadId];
+                        var render = ThreadRenderContext.Create(input.Draft, plan, thread,
+                            ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
+                            ctx.People, new List<LedgerEntry>(), fillerRow);
+                        var actx = StepContext(ctx, ctx.RepairRow);
+                        steps.Add(actx);
+                        tasks.Add(RunRepairAsync(ctx, state, group, render, RenderProfile.For(thread, _llm, sideWorld), actx, run));
+                    }
                 }
 
                 try
@@ -1009,6 +1061,29 @@ public class GenerationRunner
             Outcome = outcome,
             Message = message ?? string.Empty
         };
+    }
+
+    // D-07 stage labels: provider batches never mix two labels
+    private const string NonRelevantStageLabel = "non-relevant mail";
+
+    private static string WaveStageLabel(int waveIndex) => $"wave {waveIndex}";
+
+    // D-10 + T-07-36: orphan spend joins the unjournaled spend RunEnded carries; BillOrphansAsync returns it only once
+    private static async Task AddOrphanSpendAsync(RunContext ctx, BatchingLlmProvider batch)
+    {
+        try
+        {
+            var orphan = await batch.BillOrphansAsync(CancellationToken.None).ConfigureAwait(false);
+            if (orphan.Cost.TotalUsd > 0)
+            {
+                ctx.AddUnjournaledSpend(orphan.Cost, 0m, orphan.InputTokens, orphan.OutputTokens);
+                ctx.Snapshot.AddCost(orphan.Cost.TotalUsd);
+            }
+        }
+        catch (Exception)
+        {
+            // RunAsync never throws; an unbilled orphan stays in the ledger and the next finished run bills it
+        }
     }
 
     private static async Task AppendRunEndedAsync(RunContext ctx, GenerationOutcome outcome, string? message)

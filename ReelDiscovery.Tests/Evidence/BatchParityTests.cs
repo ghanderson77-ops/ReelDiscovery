@@ -1,7 +1,10 @@
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using MimeKit;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
@@ -52,6 +55,8 @@ public partial class BatchParityTests : IDisposable
         _story.OutputTokenPricePerMillion = 15m;
         _volume.InputTokenPricePerMillion = 1m;
         _volume.OutputTokenPricePerMillion = 5m;
+        _story.BatchDiscountPercent = 50m;
+        _volume.BatchDiscountPercent = 50m;
     }
 
     public void Dispose()
@@ -222,8 +227,70 @@ public partial class BatchParityTests : IDisposable
         Assert.Equal(expected.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase),
             actual.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase));
         foreach (var (path, bytes) in expected)
-            Assert.True(bytes.AsSpan().SequenceEqual(actual[path]), $"EML differs: {path}");
+            AssertSameEml(bytes, actual[path], path);
         Assert.Equal(AnswerKey(expectedFolder), AnswerKey(actualFolder));
+    }
+
+    [GeneratedRegex(@"\bR[0-9a-f]{16}\b")]
+    private static partial Regex PackageRelationshipId();
+
+    /// <summary>
+    /// Byte-identical EMLs, except inside Office attachments: the OpenXml SDK writes zip timestamps, a random
+    /// core-properties part name and random relationship ids into every package, so two runs of the same mode differ there
+    /// too. Every header, every other part byte and the Office content XML (ids masked) must match.
+    /// </summary>
+    private static void AssertSameEml(byte[] expected, byte[] actual, string path)
+    {
+        if (expected.AsSpan().SequenceEqual(actual))
+            return;
+
+        var a = MimeMessage.Load(new MemoryStream(expected));
+        var b = MimeMessage.Load(new MemoryStream(actual));
+        Assert.Equal(a.Headers.Select(h => h.ToString()), b.Headers.Select(h => h.ToString()));
+        var partsA = a.BodyParts.ToList();
+        var partsB = b.BodyParts.ToList();
+        Assert.Equal(partsA.Count, partsB.Count);
+        for (var i = 0; i < partsA.Count; i++)
+        {
+            Assert.Equal(partsA[i].Headers.Select(h => h.ToString()), partsB[i].Headers.Select(h => h.ToString()));
+            var bytesA = Decoded(partsA[i]);
+            var bytesB = Decoded(partsB[i]);
+            if (bytesA.AsSpan().SequenceEqual(bytesB))
+                continue;
+
+            var name = (partsA[i] as MimePart)?.FileName ?? string.Empty;
+            Assert.True(name.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)
+                        || name.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase), $"EML part differs: {path} / {name}");
+            Assert.Equal(PackageContent(bytesA), PackageContent(bytesB));
+        }
+    }
+
+    private static byte[] Decoded(MimeEntity entity)
+    {
+        using var stream = new MemoryStream();
+        if (entity is MimePart part)
+            part.Content?.DecodeTo(stream);
+        else
+            entity.WriteTo(stream);
+        return stream.ToArray();
+    }
+
+    // Content parts of an Office package (no package plumbing), relationship ids masked
+    private static List<(string Name, string Xml)> PackageContent(byte[] package)
+    {
+        using var zip = new ZipArchive(new MemoryStream(package), ZipArchiveMode.Read);
+        return zip.Entries
+            .Where(e => e.FullName.StartsWith("word/", StringComparison.Ordinal)
+                        || e.FullName.StartsWith("xl/", StringComparison.Ordinal)
+                        || e.FullName.StartsWith("ppt/", StringComparison.Ordinal))
+            .OrderBy(e => e.FullName, StringComparer.Ordinal)
+            .Select(e =>
+            {
+                using var reader = new StreamReader(e.Open(), Encoding.UTF8);
+                return (e.FullName, PackageRelationshipId().Replace(reader.ReadToEnd(), "R#"));
+            })
+            .ToList();
     }
 
     private Dictionary<string, int> WaveOf() => WavePlanner.WaveIndexByThread(WavePlanner.Plan(_plan));

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-05-PLAN.md
-last_updated: "2026-10-06T16:43:00.111Z"
+stopped_at: Completed 07-06-PLAN.md
+last_updated: "2026-10-06T16:49:04.895Z"
 last_activity: 2026-10-06
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 111
-  percent: 87
+  completed_plans: 112
+  percent: 88
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 6 of 22
+Plan: 7 of 22
 Status: Ready to execute
 Last activity: 2026-10-06
 
@@ -162,6 +162,7 @@ Progress: [██████████] 99%
 | Phase 07 P04 | 6min | 2 tasks | 7 files |
 | Phase 07 P02 | 4min | 2 tasks | 4 files |
 | Phase 07 P05 | 16min | 2 tasks | 14 files |
+| Phase 07 P06 | 6 min | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -464,6 +465,7 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-05]: RunEnded writes CostUsd = unjournaled text (CostDetail.TotalUsd) + MediaCostUsd = unjournaled media; replay counts both (old lines unchanged)
 - [Phase 07]: [07-05]: Replay itemizes text spend into SpentDetail; whatever CostDetail does not explain goes to UnsplitSpentUsd so SpentDetail.TotalUsd + MediaSpentCostUsd + UnsplitSpentUsd == SpentCostUsd
 - [Phase 07]: [07-05]: Runtime cost comes only from LlmResult.Cost (ModelCost and unit Cost helpers deleted); unit constructors keep their model params unused
+- [Phase ?]: 07-06: PriceWork returns live Total (cache reads only when StablePrefixTokens 600 >= model MinCacheablePrefixTokens > 0) and BatchTotal (batch prices, no cache reads, live media); EstimateRemaining batch flag
 
 ### Pending Todos
 
@@ -485,6 +487,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T16:43:00.102Z
-Stopped at: Completed 07-05-PLAN.md
+Last session: 2026-10-06T16:49:04.883Z
+Stopped at: Completed 07-06-PLAN.md
 Resume file: None

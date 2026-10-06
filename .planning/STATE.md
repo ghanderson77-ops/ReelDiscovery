@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-04-PLAN.md
-last_updated: "2026-10-06T16:21:59.247Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-10-06T16:26:00.093Z"
 last_activity: 2026-10-06
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 109
-  percent: 85
+  completed_plans: 110
+  percent: 86
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 4 of 22
+Plan: 5 of 22
 Status: Ready to execute
 Last activity: 2026-10-06
 
@@ -160,6 +160,7 @@ Progress: [██████████] 99%
 | Phase 07 P01 | 7min | 2 tasks | 12 files |
 | Phase 07 P03 | 9min | 3 tasks | 7 files |
 | Phase 07 P04 | 6min | 2 tasks | 7 files |
+| Phase 07 P02 | 4min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -457,6 +458,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [07-03]: Start Over TryDelete retries transient locks 5 attempts, 100 ms x attempt (D-25)
 - [Phase 07]: [07-04]: ThemeSanitizer.TemplateTheme keeps 6-hex colors (original case) and allowed fonts (original spelling); else SanitizeHexColor/SanitizeFont, else Default (D-26)
 - [Phase 07]: [07-04]: ThemeSanitizer test namespace is ReelDiscovery.Tests.HelperTests (Tests.Helpers would shadow ReelDiscovery.Helpers in render tests)
+- [Phase 07]: [07-02]: Anthropic marks only the non-empty system text block with cache_control ephemeral (no top-level CacheControl); BuildOutputConfig shared for batch
+- [Phase 07]: [07-02]: OpenAI InputTokens = prompt - cached - cache_write (clamped); cache_write_tokens read from raw JSON, 0 when absent; no cache options sent until the 07-22 spike
 
 ### Pending Todos
 
@@ -478,6 +481,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T16:21:59.236Z
-Stopped at: Completed 07-04-PLAN.md
+Last session: 2026-10-06T16:26:00.084Z
+Stopped at: Completed 07-02-PLAN.md
 Resume file: None

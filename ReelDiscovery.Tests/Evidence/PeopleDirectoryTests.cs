@@ -1,3 +1,4 @@
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Services;
 using ReelDiscovery.Services.Evidence;
@@ -177,10 +178,10 @@ public class PeopleDirectoryTests
         foreach (var theme in themes)
         {
             foreach (var color in new[] { theme.PrimaryColor, theme.SecondaryColor, theme.AccentColor })
-                Assert.Equal(color, ThemeGenerator.SanitizeHexColor(color));
-            Assert.Contains(theme.HeadingFont, ThemeGenerator.AllowedFonts);
-            Assert.Contains(theme.BodyFont, ThemeGenerator.AllowedFonts);
-            Assert.Equal(theme.BodyFont, ThemeGenerator.SanitizeFont(theme.BodyFont));
+                Assert.Equal(color, ThemeSanitizer.SanitizeHexColor(color));
+            Assert.Contains(theme.HeadingFont, ThemeSanitizer.AllowedFonts);
+            Assert.Contains(theme.BodyFont, ThemeSanitizer.AllowedFonts);
+            Assert.Equal(theme.BodyFont, ThemeSanitizer.SanitizeFont(theme.BodyFont));
         }
     }
 

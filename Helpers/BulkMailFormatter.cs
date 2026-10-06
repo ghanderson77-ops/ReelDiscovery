@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using ReelDiscovery.Models;
-using ReelDiscovery.Services;
 
 namespace ReelDiscovery.Helpers;
 
@@ -62,7 +61,7 @@ public static partial class BulkMailFormatter
     public static string Compose(BulkMailContent content)
     {
         var theme = content.Kind == BulkMailKind.Personal ? OrganizationTheme.Default : content.Theme ?? OrganizationTheme.Default;
-        return HtmlEmailFormatter.WrapInTemplate(ComposeFragment(content), SanitizedTheme(theme));
+        return HtmlEmailFormatter.WrapInTemplate(ComposeFragment(content), ThemeSanitizer.SanitizedTheme(theme));
     }
 
     public static string ComposeFragment(BulkMailContent content)
@@ -247,31 +246,11 @@ public static partial class BulkMailFormatter
     private static string[] SplitLines(string text) =>
         text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').Select(l => l.TrimEnd()).ToArray();
 
-    // WrapInTemplate writes theme colors and fonts into the <style> block verbatim, so only sanitized values reach it (T-06-19)
-    private static OrganizationTheme SanitizedTheme(OrganizationTheme theme)
-    {
-        var d = OrganizationTheme.Default;
-        return new OrganizationTheme
-        {
-            Domain = theme.Domain,
-            OrganizationName = theme.OrganizationName,
-            ThemeName = theme.ThemeName,
-            PrimaryColor = ThemeGenerator.SanitizeHexColor(theme.PrimaryColor) ?? d.PrimaryColor,
-            SecondaryColor = ThemeGenerator.SanitizeHexColor(theme.SecondaryColor) ?? d.SecondaryColor,
-            AccentColor = ThemeGenerator.SanitizeHexColor(theme.AccentColor) ?? d.AccentColor,
-            TextLight = ThemeGenerator.SanitizeHexColor(theme.TextLight) ?? d.TextLight,
-            TextDark = ThemeGenerator.SanitizeHexColor(theme.TextDark) ?? d.TextDark,
-            BackgroundLight = ThemeGenerator.SanitizeHexColor(theme.BackgroundLight) ?? d.BackgroundLight,
-            HeadingFont = ThemeGenerator.SanitizeFont(theme.HeadingFont) ?? d.HeadingFont,
-            BodyFont = ThemeGenerator.SanitizeFont(theme.BodyFont) ?? d.BodyFont
-        };
-    }
-
     private static string PrimaryColor(OrganizationTheme theme) =>
-        "#" + (ThemeGenerator.SanitizeHexColor(theme.PrimaryColor) ?? "2B579A");
+        "#" + (ThemeSanitizer.SanitizeHexColor(theme.PrimaryColor) ?? "2B579A");
 
     private static string FontStack(OrganizationTheme theme) =>
-        HtmlEmailFormatter.GetFontStack(ThemeGenerator.SanitizeFont(theme.BodyFont) ?? "Segoe UI");
+        HtmlEmailFormatter.GetFontStack(ThemeSanitizer.SanitizeFont(theme.BodyFont) ?? "Segoe UI");
 
     // string.GetHashCode is randomized per process; composition must be deterministic for Retry Failed rewrites
     private static int StableIndex(string text, int count)

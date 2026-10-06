@@ -16,7 +16,8 @@ public static partial class HtmlEmailFormatter
     /// </summary>
     private static string BuildEmailTemplate(OrganizationTheme? theme)
     {
-        var t = theme ?? OrganizationTheme.Default;
+        // D-26: same cleaning as the bulk path; valid themes are unchanged (golden HTML)
+        var t = ThemeSanitizer.TemplateTheme(theme);
 
         // Build font stack based on theme
         var bodyFontStack = GetFontStack(t.BodyFont);
@@ -646,9 +647,9 @@ public static partial class HtmlEmailFormatter
     {
         // Never touch [ThreadStatic] _currentTheme: composition runs on pool threads
         var t = theme ?? OrganizationTheme.Default;
-        var primary = "#" + (Services.ThemeGenerator.SanitizeHexColor(t.PrimaryColor) ?? "2B579A");
-        var secondary = "#" + (Services.ThemeGenerator.SanitizeHexColor(t.SecondaryColor) ?? "5B9BD5");
-        var fontStack = GetFontStack(Services.ThemeGenerator.SanitizeFont(t.BodyFont) ?? "Segoe UI");
+        var primary = "#" + (ThemeSanitizer.SanitizeHexColor(t.PrimaryColor) ?? "2B579A");
+        var secondary = "#" + (ThemeSanitizer.SanitizeHexColor(t.SecondaryColor) ?? "5B9BD5");
+        var fontStack = GetFontStack(ThemeSanitizer.SanitizeFont(t.BodyFont) ?? "Segoe UI");
 
         var html = new System.Text.StringBuilder();
         html.Append($"<div style=\"font-family: {fontStack};\">\n");

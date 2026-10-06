@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 
 namespace ReelDiscovery.Services.Evidence;
@@ -44,11 +45,11 @@ public static class OrganizationThemes
         var fallback = OrganizationTheme.Default;
 
         // Fixed palettes still pass the generator's sanitizers so no unchecked CSS reaches an EML (T-05-13)
-        theme.PrimaryColor = ThemeGenerator.SanitizeHexColor(theme.PrimaryColor) ?? fallback.PrimaryColor;
-        theme.SecondaryColor = ThemeGenerator.SanitizeHexColor(theme.SecondaryColor) ?? fallback.SecondaryColor;
-        theme.AccentColor = ThemeGenerator.SanitizeHexColor(theme.AccentColor) ?? fallback.AccentColor;
-        theme.HeadingFont = ThemeGenerator.SanitizeFont(theme.HeadingFont) ?? fallback.HeadingFont;
-        theme.BodyFont = ThemeGenerator.SanitizeFont(theme.BodyFont) ?? fallback.BodyFont;
+        theme.PrimaryColor = ThemeSanitizer.SanitizeHexColor(theme.PrimaryColor) ?? fallback.PrimaryColor;
+        theme.SecondaryColor = ThemeSanitizer.SanitizeHexColor(theme.SecondaryColor) ?? fallback.SecondaryColor;
+        theme.AccentColor = ThemeSanitizer.SanitizeHexColor(theme.AccentColor) ?? fallback.AccentColor;
+        theme.HeadingFont = ThemeSanitizer.SanitizeFont(theme.HeadingFont) ?? fallback.HeadingFont;
+        theme.BodyFont = ThemeSanitizer.SanitizeFont(theme.BodyFont) ?? fallback.BodyFont;
         theme.Domain = key;
         return theme;
     }

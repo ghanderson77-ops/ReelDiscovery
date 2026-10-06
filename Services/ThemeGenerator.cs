@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Services.Ai;
 
@@ -107,11 +108,11 @@ Sans-serif: Segoe UI, Arial, Calibri, Trebuchet MS, Century Gothic, Verdana, Tah
                     Domain = t.Domain,
                     OrganizationName = t.OrganizationName ?? domainOrgs.GetValueOrDefault(t.Domain, "Organization"),
                     ThemeName = t.ThemeName ?? "Corporate",
-                    PrimaryColor = SanitizeHexColor(t.PrimaryColor) ?? "2B579A",
-                    SecondaryColor = SanitizeHexColor(t.SecondaryColor) ?? "5B9BD5",
-                    AccentColor = SanitizeHexColor(t.AccentColor) ?? "ED7D31",
-                    HeadingFont = SanitizeFont(t.HeadingFont) ?? "Segoe UI Semibold",
-                    BodyFont = SanitizeFont(t.BodyFont) ?? "Segoe UI"
+                    PrimaryColor = ThemeSanitizer.SanitizeHexColor(t.PrimaryColor) ?? "2B579A",
+                    SecondaryColor = ThemeSanitizer.SanitizeHexColor(t.SecondaryColor) ?? "5B9BD5",
+                    AccentColor = ThemeSanitizer.SanitizeHexColor(t.AccentColor) ?? "ED7D31",
+                    HeadingFont = ThemeSanitizer.SanitizeFont(t.HeadingFont) ?? "Segoe UI Semibold",
+                    BodyFont = ThemeSanitizer.SanitizeFont(t.BodyFont) ?? "Segoe UI"
                 };
             }
         }
@@ -132,27 +133,6 @@ Sans-serif: Segoe UI, Arial, Calibri, Trebuchet MS, Century Gothic, Verdana, Tah
 
         progress?.Report($"Generated {themes.Count} presentation themes.");
         return themes;
-    }
-
-    /// <summary>
-    /// Validates and sanitizes a hex color string (removes # if present, validates length).
-    /// </summary>
-    internal static string? SanitizeHexColor(string? color)
-    {
-        if (string.IsNullOrEmpty(color))
-            return null;
-
-        color = color.Trim().TrimStart('#');
-
-        // Must be exactly 6 hex characters
-        if (color.Length != 6)
-            return null;
-
-        // Validate hex characters
-        if (!color.All(c => "0123456789ABCDEFabcdef".Contains(c)))
-            return null;
-
-        return color.ToUpperInvariant();
     }
 
     internal class ThemeApiResponse
@@ -194,34 +174,5 @@ Sans-serif: Segoe UI, Arial, Calibri, Trebuchet MS, Century Gothic, Verdana, Tah
         [JsonPropertyName("bodyFont")]
         [Description("Font for body text")]
         public string BodyFont { get; set; } = string.Empty;
-    }
-
-    // Allowed fonts that are commonly installed on Windows
-    internal static readonly HashSet<string> AllowedFonts = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // Serif
-        "Georgia", "Times New Roman", "Garamond", "Book Antiqua", "Palatino Linotype",
-        // Sans-serif
-        "Segoe UI", "Segoe UI Semibold", "Segoe UI Light", "Arial", "Arial Black",
-        "Calibri", "Calibri Light", "Trebuchet MS", "Century Gothic", "Verdana", "Tahoma"
-    };
-
-    /// <summary>
-    /// Validates font name against allowed list, returns null if invalid.
-    /// </summary>
-    internal static string? SanitizeFont(string? font)
-    {
-        if (string.IsNullOrWhiteSpace(font))
-            return null;
-
-        font = font.Trim();
-
-        // Check if it's in our allowed list
-        if (AllowedFonts.Contains(font))
-            return font;
-
-        // Try to find a close match (case-insensitive)
-        var match = AllowedFonts.FirstOrDefault(f => f.Equals(font, StringComparison.OrdinalIgnoreCase));
-        return match;
     }
 }

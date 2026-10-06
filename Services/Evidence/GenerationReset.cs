@@ -24,6 +24,9 @@ public static class GenerationReset
     public const string JournalKeptMessage =
         "The saved run could not be read in full, so it was kept. Emails it lists may still be in Mailboxes; try Start Over again.";
 
+    // D-25: attempts per file before a lock is reported (waits 100 ms x attempt in between)
+    private const int MaxDeleteAttempts = 5;
+
     /// <summary>
     /// Deletes every EML listed by the journal (any plan) and every planned copy path of every thread (relevant and non-relevant), then the journal (only when
     /// it was read in full) and the story file. Files that cannot be deleted are reported in Errors; only OperationCanceledException escapes.
@@ -85,21 +88,30 @@ public static class GenerationReset
         TryDelete(Path.Combine(caseFolder, storyName), storyName, result);
     }
 
-    // True when an existing file was deleted; a missing file is not an error
-    private static bool TryDelete(string fullPath, string displayPath, StartOverResult result)
+    // True when an existing file was deleted; a missing file is not an error. Runs inside DeleteAll's Task.Run, so the
+    // retry waits never block the UI thread (T-07-09: at most 5 attempts, about 1 s per file)
+    internal static bool TryDelete(string fullPath, string displayPath, StartOverResult result)
     {
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            if (!File.Exists(fullPath))
-                return false;
+            try
+            {
+                if (!File.Exists(fullPath))
+                    return false;
 
-            File.Delete(fullPath);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            result.Errors.Add($"{displayPath}: {ex.Message}");
-            return false;
+                File.Delete(fullPath);
+                return true;
+            }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < MaxDeleteAttempts)
+            {
+                // D-25: transient lock (Defender, search indexer, OneDrive), same as CaseStore.WriteAtomic
+                Thread.Sleep(100 * attempt);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                result.Errors.Add($"{displayPath}: {ex.Message}");
+                return false;
+            }
         }
     }
 }

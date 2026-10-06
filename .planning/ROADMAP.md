@@ -235,7 +235,7 @@ Plans:
 - [x] 07-02-PLAN.md — Anthropic block-level cache marker, cache usage normalization on both providers (Wave 2)
 - [x] 07-03-PLAN.md — Folded fixes: privilege parity (D-23), invite times across zones (D-24), Start Over delete retry (D-25) (Wave 1)
 - [x] 07-04-PLAN.md — ThemeSanitizer moved out of ThemeGenerator; D-26 theme cleaning on the business HTML path (Wave 1)
-- [ ] 07-05-PLAN.md — Gateway cost through units and runner; journal cost detail and writer provider (Wave 2)
+- [x] 07-05-PLAN.md — Gateway cost through units and runner; journal cost detail and writer provider (Wave 2)
 - [ ] 07-06-PLAN.md — Live and batch totals from one PriceWork with the cache term (Wave 2)
 - [ ] 07-07-PLAN.md — Batch contracts, request identity, on-disk batch ledger, fake transport (Wave 2)
 - [ ] 07-08-PLAN.md — BatchingLlmProvider decorator (queue, flush, poll, live fallback, restart recovery) (Wave 3)

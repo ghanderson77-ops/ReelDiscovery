@@ -20,7 +20,10 @@ public class LlmGatewayTests
         Effort = "none",
         MaxOutputTokens = maxOutput,
         InputTokenPricePerMillion = 2m,
-        OutputTokenPricePerMillion = 10m
+        OutputTokenPricePerMillion = 10m,
+        CacheWriteTokenPricePerMillion = 2.5m,
+        CacheReadTokenPricePerMillion = 0.2m,
+        BatchDiscountPercent = 50m
     };
 
     private static AIModelConfig VolumeModel(LlmProviderKind provider = LlmProviderKind.OpenAI) => new()
@@ -339,5 +342,147 @@ public class LlmGatewayTests
         Assert.Equal(LlmOutcome.Succeeded, result.Outcome);
         Assert.Equal(7, result.InputTokens);
         Assert.Equal(3, result.OutputTokens);
+    }
+
+    private static LlmProviderResponse Cached(string text, int input, int cacheWrite, int cacheRead, int output, bool isBatch = false) => new()
+    {
+        Outcome = LlmOutcome.Succeeded,
+        Text = text,
+        InputTokens = input,
+        CacheWriteTokens = cacheWrite,
+        CacheReadTokens = cacheRead,
+        OutputTokens = output,
+        IsBatch = isBatch
+    };
+
+    [Fact]
+    public async Task CacheTokens_FlowToResultAndCost()
+    {
+        var (gateway, fake, tracker) = Create();
+        fake.Responses.Enqueue(Cached("{\"name\":\"A\",\"count\":1}", 100, 50, 400, 20));
+
+        var result = await gateway.GenerateAsync<ResultDto>(Request());
+
+        var model = gateway.ResolveModel(LlmTier.Story);
+        var expected = model.CalculateCost(new TokenUsage { InputTokens = 100, CacheWriteTokens = 50, CacheReadTokens = 400, OutputTokens = 20 });
+
+        Assert.Equal(550, result.InputTokens);
+        Assert.Equal(50, result.CacheWriteTokens);
+        Assert.Equal(400, result.CacheReadTokens);
+        Assert.Equal(20, result.OutputTokens);
+        Assert.Equal(expected.TotalUsd, result.Cost.TotalUsd);
+        Assert.Equal(expected.CacheReadUsd, result.Cost.CacheReadUsd);
+        Assert.Equal(expected.TotalUsd, result.CostUsd);
+        Assert.True(result.Cost.CacheReadUsd > 0);
+        Assert.Equal(expected.TotalUsd, tracker.TotalCost);
+        Assert.Equal(550, tracker.TotalInputTokens);
+    }
+
+    [Fact]
+    public async Task CostAndTokens_SumOverAttempts()
+    {
+        var (gateway, fake, tracker) = Create();
+        fake.Responses.Enqueue(Cached("not json", 10, 0, 100, 5));
+        fake.Responses.Enqueue(Cached("{\"name\":\"A\",\"count\":1}", 20, 30, 200, 7));
+
+        var result = await gateway.GenerateAsync<ResultDto>(Request());
+
+        var model = gateway.ResolveModel(LlmTier.Story);
+        var expected = model.CalculateCost(new TokenUsage { InputTokens = 10, CacheReadTokens = 100, OutputTokens = 5 });
+        expected.Add(model.CalculateCost(new TokenUsage { InputTokens = 20, CacheWriteTokens = 30, CacheReadTokens = 200, OutputTokens = 7 }));
+
+        Assert.Equal(LlmOutcome.Succeeded, result.Outcome);
+        Assert.Equal(2, result.Attempts);
+        Assert.Equal(360, result.InputTokens);
+        Assert.Equal(30, result.CacheWriteTokens);
+        Assert.Equal(300, result.CacheReadTokens);
+        Assert.Equal(12, result.OutputTokens);
+        Assert.Equal(expected.TotalUsd, result.Cost.TotalUsd);
+        Assert.Equal(2, tracker.Entries.Count);
+        Assert.Equal(expected.TotalUsd, tracker.TotalCost);
+    }
+
+    [Fact]
+    public async Task AllowBatch_OnlyOnFirstAttempt()
+    {
+        var (gateway, fake, _) = Create();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok("not json"));
+        fake.Responses.Enqueue(FakeLlmProvider.Ok("{\"name\":\"A\",\"count\":1}"));
+
+        var request = Request();
+        request.AllowBatch = true;
+        await gateway.GenerateAsync<ResultDto>(request);
+
+        Assert.Equal(2, fake.Requests.Count);
+        Assert.True(fake.Requests[0].AllowBatch);
+        Assert.False(fake.Requests[1].AllowBatch);
+    }
+
+    [Fact]
+    public async Task AllowBatchFalse_NeverSent()
+    {
+        var (gateway, fake, _) = Create();
+        fake.Responses.Enqueue(FakeLlmProvider.Ok("not json"));
+        fake.Responses.Enqueue(FakeLlmProvider.Ok("{\"name\":\"A\",\"count\":1}"));
+
+        await gateway.GenerateAsync<ResultDto>(Request());
+
+        Assert.All(fake.Requests, r => Assert.False(r.AllowBatch));
+    }
+
+    [Fact]
+    public async Task BatchResponse_PricedWithDiscount()
+    {
+        var (gateway, fake, tracker) = Create();
+        fake.Responses.Enqueue(Cached("{\"name\":\"A\",\"count\":1}", 1000, 0, 0, 500, isBatch: true));
+
+        var result = await gateway.GenerateAsync<ResultDto>(Request());
+
+        var model = gateway.ResolveModel(LlmTier.Story);
+        var expected = model.CalculateCost(new TokenUsage { InputTokens = 1000, OutputTokens = 500, IsBatch = true });
+
+        Assert.True(result.Cost.BatchSavingsUsd > 0);
+        Assert.Equal(expected.BatchSavingsUsd, result.Cost.BatchSavingsUsd);
+        Assert.Equal(expected.TotalUsd, result.CostUsd);
+        Assert.Equal(expected.BatchSavingsUsd, tracker.TotalBatchSavings);
+    }
+
+    [Fact]
+    public void Tracker_BreakdownAndMedia()
+    {
+        var tracker = new TokenUsageTracker();
+        var model = StoryModel();
+        var usage = new TokenUsage { InputTokens = 1000, CacheWriteTokens = 200, CacheReadTokens = 5000, OutputTokens = 300, IsBatch = true };
+        var cost = model.CalculateCost(usage);
+
+        tracker.RecordUsage("Op", model, usage, cost);
+        tracker.RecordMediaUsage("Image - x", 0.04m);
+
+        Assert.Equal(cost.TotalUsd + 0.04m, tracker.TotalCost);
+        Assert.Equal(cost.InputUsd, tracker.TotalInputCost);
+        Assert.Equal(cost.CacheWriteUsd, tracker.TotalCacheWriteCost);
+        Assert.Equal(cost.CacheReadUsd, tracker.TotalCacheReadCost);
+        Assert.Equal(cost.OutputUsd, tracker.TotalOutputCost);
+        Assert.Equal(cost.BatchSavingsUsd, tracker.TotalBatchSavings);
+        Assert.Equal(0.04m, tracker.TotalMediaCost);
+        Assert.Equal(6200, tracker.TotalInputTokens);
+        Assert.Equal(200, tracker.TotalCacheWriteTokens);
+        Assert.Equal(5000, tracker.TotalCacheReadTokens);
+        Assert.Equal(300, tracker.TotalOutputTokens);
+        Assert.Equal(cost.TotalUsd, tracker.Entries[0].Cost);
+    }
+
+    [Fact]
+    public void Tracker_LegacyRecordUsage_Unchanged()
+    {
+        var tracker = new TokenUsageTracker();
+        var model = StoryModel();
+
+        tracker.RecordUsage("Op", model, 1000, 500);
+
+        Assert.Equal(model.CalculateTotalCost(1000, 500), tracker.TotalCost);
+        Assert.Equal(model.CalculateTotalCost(1000, 500), tracker.TotalInputCost + tracker.TotalOutputCost);
+        Assert.Equal(1000, tracker.TotalInputTokens);
+        Assert.Equal(500, tracker.TotalOutputTokens);
     }
 }

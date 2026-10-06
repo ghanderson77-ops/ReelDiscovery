@@ -26,4 +26,7 @@ public class LlmRequest
     /// Output token budget; includes thinking/reasoning tokens.
     /// </summary>
     public int MaxOutputTokens { get; set; } = 16_000;
+
+    /// <summary>May the first attempt wait in a provider batch (batch mode only). Default false: case-guide, planning and QA calls are always live.</summary>
+    public bool AllowBatch { get; set; }
 }

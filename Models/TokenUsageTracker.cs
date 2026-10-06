@@ -1,3 +1,5 @@
+using ReelDiscovery.Services.Ai;
+
 namespace ReelDiscovery.Models;
 
 public class TokenUsageTracker
@@ -5,9 +7,28 @@ public class TokenUsageTracker
     private readonly object _lock = new();
     private readonly List<TokenUsageEntry> _entries = new();
 
+    // All input tokens billed (uncached + cache write + cache read)
     public int TotalInputTokens { get; private set; }
     public int TotalOutputTokens { get; private set; }
+
+    // Cache-write and cache-read input tokens (already included in TotalInputTokens)
+    public int TotalCacheWriteTokens { get; private set; }
+    public int TotalCacheReadTokens { get; private set; }
+
+    // The one real session total: text TotalUsd (after batch savings) + media (D-16)
     public decimal TotalCost { get; private set; }
+
+    // Pre-discount text dollars per category for the header tooltip (D-16)
+    public decimal TotalInputCost { get; private set; }
+    public decimal TotalCacheWriteCost { get; private set; }
+    public decimal TotalCacheReadCost { get; private set; }
+    public decimal TotalOutputCost { get; private set; }
+
+    // Dollars the batch discount took off (already subtracted from TotalCost)
+    public decimal TotalBatchSavings { get; private set; }
+
+    // Per-unit priced image/speech dollars (included in TotalCost)
+    public decimal TotalMediaCost { get; private set; }
 
     public IReadOnlyList<TokenUsageEntry> Entries
     {
@@ -22,13 +43,32 @@ public class TokenUsageTracker
 
     public void RecordUsage(string operation, AIModelConfig model, int inputTokens, int outputTokens)
     {
-        var cost = model.CalculateTotalCost(inputTokens, outputTokens);
+        var usage = new TokenUsage { InputTokens = inputTokens, OutputTokens = outputTokens };
+        RecordUsage(operation, model, usage, model.CalculateCost(usage));
+    }
+
+    /// <summary>
+    /// Records one billed text call with its normalized usage and the cost priced by
+    /// AIModelConfig.CalculateCost (PROV-07).
+    /// </summary>
+    public void RecordUsage(string operation, AIModelConfig model, TokenUsage usage, CostBreakdown cost)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        usage ??= new TokenUsage();
+        cost ??= new CostBreakdown();
 
         lock (_lock)
         {
-            TotalInputTokens += inputTokens;
-            TotalOutputTokens += outputTokens;
-            TotalCost += cost;
+            TotalInputTokens += usage.TotalInputTokens;
+            TotalOutputTokens += usage.OutputTokens;
+            TotalCacheWriteTokens += usage.CacheWriteTokens;
+            TotalCacheReadTokens += usage.CacheReadTokens;
+            TotalInputCost += cost.InputUsd;
+            TotalCacheWriteCost += cost.CacheWriteUsd;
+            TotalCacheReadCost += cost.CacheReadUsd;
+            TotalOutputCost += cost.OutputUsd;
+            TotalBatchSavings += cost.BatchSavingsUsd;
+            TotalCost += cost.TotalUsd;
 
             _entries.Add(new TokenUsageEntry
             {
@@ -36,9 +76,9 @@ public class TokenUsageTracker
                 Operation = operation,
                 ModelId = model.ModelId,
                 Provider = model.Provider.ToString(),
-                InputTokens = inputTokens,
-                OutputTokens = outputTokens,
-                Cost = cost
+                InputTokens = usage.TotalInputTokens,
+                OutputTokens = usage.OutputTokens,
+                Cost = cost.TotalUsd
             });
         }
     }
@@ -51,6 +91,7 @@ public class TokenUsageTracker
         lock (_lock)
         {
             TotalCost += cost;
+            TotalMediaCost += cost;
 
             _entries.Add(new TokenUsageEntry
             {
@@ -71,7 +112,15 @@ public class TokenUsageTracker
         {
             TotalInputTokens = 0;
             TotalOutputTokens = 0;
+            TotalCacheWriteTokens = 0;
+            TotalCacheReadTokens = 0;
             TotalCost = 0;
+            TotalInputCost = 0;
+            TotalCacheWriteCost = 0;
+            TotalCacheReadCost = 0;
+            TotalOutputCost = 0;
+            TotalBatchSavings = 0;
+            TotalMediaCost = 0;
             _entries.Clear();
         }
     }

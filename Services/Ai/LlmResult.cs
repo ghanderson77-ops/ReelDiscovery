@@ -37,11 +37,22 @@ public class LlmResult
     public string ModelId { get; set; } = string.Empty;
     public int Attempts { get; set; }
 
-    /// <summary>Input tokens summed over every billed attempt of this call.</summary>
+    /// <summary>All input tokens billed (uncached + cache write + cache read), summed over every billed attempt of this call.</summary>
     public int InputTokens { get; set; }
 
     /// <summary>Output tokens summed over every billed attempt of this call.</summary>
     public int OutputTokens { get; set; }
+
+    /// <summary>Cache-write input tokens summed over every billed attempt (included in InputTokens).</summary>
+    public int CacheWriteTokens { get; set; }
+
+    /// <summary>Cache-read input tokens summed over every billed attempt (included in InputTokens).</summary>
+    public int CacheReadTokens { get; set; }
+
+    /// <summary>Cost of every billed attempt, priced through AIModelConfig.CalculateCost.</summary>
+    public CostBreakdown Cost { get; set; } = new();
+
+    public decimal CostUsd => Cost.TotalUsd;
 
     /// <summary>
     /// True when the failure cannot be fixed by retrying (bad key or exhausted spend limit);

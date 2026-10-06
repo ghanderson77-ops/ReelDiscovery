@@ -59,7 +59,8 @@ public sealed class FakeLlmProvider : ILlmProvider
             SchemaJson = request.SchemaJson,
             SystemPrompt = request.SystemPrompt,
             UserPrompt = request.UserPrompt,
-            MaxTokens = request.MaxTokens
+            MaxTokens = request.MaxTokens,
+            AllowBatch = request.AllowBatch
         };
 
         lock (_lock)

@@ -75,20 +75,27 @@ public class LlmGateway : ILlmGateway
         var attempts = 0;
         var invalidAttempts = 0;
         var truncationRetries = 0;
-        var inputTotal = 0;
-        var outputTotal = 0;
+        var total = new TokenUsage();
+        var cost = new CostBreakdown();
 
         while (true)
         {
             attempts++;
             ct.ThrowIfCancellationRequested();
 
+            // Only the first attempt may wait in a batch; invalid-JSON and truncation retries go live (D-10)
+            providerRequest.AllowBatch = request.AllowBatch && attempts == 1;
+
             var response = await _provider.SendAsync(providerRequest, ct);
-            inputTotal += Math.Max(0, response.InputTokens); outputTotal += Math.Max(0, response.OutputTokens);
 
             // Every attempt is billed, including failed parses and truncations
-            if (response.InputTokens > 0 || response.OutputTokens > 0)
-                _usageTracker?.RecordUsage(request.OperationName, model, response.InputTokens, response.OutputTokens);
+            var usage = response.ToUsage();
+            usage.Normalize();
+            total.Add(usage);
+            var attemptCost = model.CalculateCost(usage);
+            cost.Add(attemptCost);
+            if (usage.TotalInputTokens > 0 || usage.OutputTokens > 0)
+                _usageTracker?.RecordUsage(request.OperationName, model, usage, attemptCost);
 
             switch (response.Outcome)
             {
@@ -118,14 +125,14 @@ public class LlmGateway : ILlmGateway
                         }
 
                         if (value != null)
-                            return BuildResult(request, model, attempts, inputTotal, outputTotal, response, LlmOutcome.Succeeded, LlmFailureKind.None, response.Message, value);
+                            return BuildResult(request, model, attempts, total, cost, response, LlmOutcome.Succeeded, LlmFailureKind.None, response.Message, value);
                     }
 
                     invalidAttempts++;
                     if (invalidAttempts < MaxInvalidAttempts)
                         continue;
 
-                    return BuildResult<T>(request, model, attempts, inputTotal, outputTotal, response, LlmOutcome.Invalid, LlmFailureKind.None, invalidMessage, null);
+                    return BuildResult<T>(request, model, attempts, total, cost, response, LlmOutcome.Invalid, LlmFailureKind.None, invalidMessage, null);
                 }
 
                 case LlmOutcome.Truncated:
@@ -136,12 +143,12 @@ public class LlmGateway : ILlmGateway
                         continue;
                     }
 
-                    return BuildResult<T>(request, model, attempts, inputTotal, outputTotal, response, LlmOutcome.Truncated, LlmFailureKind.None,
+                    return BuildResult<T>(request, model, attempts, total, cost, response, LlmOutcome.Truncated, LlmFailureKind.None,
                         response.Message ?? $"Output truncated at {providerRequest.MaxTokens} max tokens", null);
 
                 default:
                     // Refused / Failed: no app retry (the SDKs already retried 429/5xx)
-                    return BuildResult<T>(request, model, attempts, inputTotal, outputTotal, response, response.Outcome, response.FailureKind, response.Message, null);
+                    return BuildResult<T>(request, model, attempts, total, cost, response, response.Outcome, response.FailureKind, response.Message, null);
             }
         }
     }
@@ -150,8 +157,8 @@ public class LlmGateway : ILlmGateway
         LlmRequest request,
         AIModelConfig model,
         int attempts,
-        int inputTokens,
-        int outputTokens,
+        TokenUsage total,
+        CostBreakdown cost,
         LlmProviderResponse response,
         LlmOutcome outcome,
         LlmFailureKind failureKind,
@@ -168,8 +175,11 @@ public class LlmGateway : ILlmGateway
             Provider = _provider.Kind,
             ModelId = model.ModelId,
             Attempts = attempts,
-            InputTokens = inputTokens,
-            OutputTokens = outputTokens,
+            InputTokens = total.TotalInputTokens,
+            OutputTokens = total.OutputTokens,
+            CacheWriteTokens = total.CacheWriteTokens,
+            CacheReadTokens = total.CacheReadTokens,
+            Cost = cost.Clone(),
             Value = value
         };
     }

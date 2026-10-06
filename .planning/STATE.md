@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-10-06T16:05:10.926Z"
+stopped_at: Completed 07-03-PLAN.md
+last_updated: "2026-10-06T16:15:00.780Z"
 last_activity: 2026-10-06
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 107
+  completed_plans: 108
   percent: 84
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 2 of 22
+Plan: 3 of 22
 Status: Ready to execute
 Last activity: 2026-10-06
 
@@ -158,6 +158,7 @@ Progress: [██████████] 99%
 | Phase 06 P21 | 25min | 1 tasks | 2 files |
 | Phase 06 P23 | 22min | 2 tasks | 6 files |
 | Phase 07 P01 | 7min | 2 tasks | 12 files |
+| Phase 07 P03 | 9min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -450,6 +451,9 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-01]: LlmResult.InputTokens and tracker TotalInputTokens count all billed input (uncached + cache write + cache read); cache parts also reported separately
 - [Phase 07]: [07-01]: Legacy RecordUsage(op, model, in, out) delegates to the TokenUsage overload via CalculateCost
 - [Phase 07]: [07-01]: ModelConfigurationDialog working copy carries cache/batch prices so OK never zeroes them
+- [Phase ?]: [07-03]: Daily privileged target = max(2% rule, relevant privileged thread share), min 1 whenever relevant mail is privileged (D-23)
+- [Phase ?]: [07-03]: New invite slots derive in the first guide organization's time zone (InviteRequest.CanonicalTimeZoneId); KnownSlots still win; not-before compares instants (D-24)
+- [Phase ?]: [07-03]: Start Over TryDelete retries transient locks 5 attempts, 100 ms x attempt (D-25)
 
 ### Pending Todos
 
@@ -471,6 +475,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T16:05:02.858Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-10-06T16:15:00.771Z
+Stopped at: Completed 07-03-PLAN.md
 Resume file: None

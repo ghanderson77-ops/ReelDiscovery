@@ -4,6 +4,7 @@ using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Evidence;
 using Xunit;
 
@@ -976,6 +977,186 @@ public class GenerationJournalTests : IDisposable
             Assert.Equal(-1, replay.LastRunStartedLine);
             Assert.Equal(-1, replay.LastRunEndedLine);
             Assert.False(replay.LatestAttemptEnded);
+            Assert.Equal(0m, replay.SpentDetail.TotalUsd);
+            Assert.Equal(0m, replay.UnsplitSpentUsd);
         }
+    }
+
+    // ---- Phase 7 cost detail (07-05 Task 1) ----
+
+    private static void AssertItemsAddUp(JournalReplay replay) =>
+        Assert.Equal(replay.SpentCostUsd,
+            replay.SpentDetail.TotalUsd + replay.MediaSpentCostUsd + replay.UnsplitSpentUsd);
+
+    private static JournalRecord WithDetail(JournalRecord record, CostBreakdown detail)
+    {
+        record.CostDetail = detail;
+        return record;
+    }
+
+    [Fact]
+    public async Task Replay_CostDetail_RoundTripsIntoSpentDetail()
+    {
+        var done = Done("T-0003");
+        done.CostUsd = 0.21m;
+        done.CacheReadTokens = 1200;
+        done.CacheWriteTokens = 300;
+        done.CostDetail = new CostBreakdown { InputUsd = 0.10m, CacheReadUsd = 0.02m, OutputUsd = 0.30m, BatchSavingsUsd = 0.21m };
+        await new GenerationJournal(_folder).AppendAsync(done);
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        var record = replay.LastByThread["T-0003"];
+        Assert.Equal(1200, record.CacheReadTokens);
+        Assert.Equal(300, record.CacheWriteTokens);
+        Assert.NotNull(record.CostDetail);
+        Assert.Equal(0.21m, replay.SpentCostUsd);
+        Assert.Equal(0.10m, replay.SpentDetail.InputUsd);
+        Assert.Equal(0.02m, replay.SpentDetail.CacheReadUsd);
+        Assert.Equal(0.30m, replay.SpentDetail.OutputUsd);
+        Assert.Equal(0.21m, replay.SpentDetail.BatchSavingsUsd);
+        Assert.Equal(0.21m, replay.SpentDetail.TotalUsd);
+        Assert.Equal(0m, replay.UnsplitSpentUsd);
+        AssertItemsAddUp(replay);
+    }
+
+    [Fact]
+    public async Task Replay_Phase6Line_NoCostDetail_CountsAsUnsplit()
+    {
+        // Written by a Phase 6 build: no CostDetail, cache token or Provider properties
+        var lines = "{\"Type\":\"RunStarted\",\"PlanId\":\"" + _plan.PlanId + "\"}\n"
+                    + "{\"Type\":\"ThreadDone\",\"PlanId\":\"" + _plan.PlanId
+                    + "\",\"ThreadId\":\"T-0003\",\"Status\":\"Written\",\"CostUsd\":0.50}\n";
+        await File.WriteAllTextAsync(JournalPath, lines);
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(0, replay.SkippedLines);
+        Assert.Null(replay.LastByThread["T-0003"].CostDetail);
+        Assert.Equal(0.50m, replay.SpentCostUsd);
+        Assert.Equal(0.50m, replay.UnsplitSpentUsd);
+        Assert.Equal(0m, replay.SpentDetail.TotalUsd);
+        Assert.Equal(string.Empty, replay.WriterProvider);
+        AssertItemsAddUp(replay);
+    }
+
+    [Fact]
+    public async Task Replay_NestedAttachmentCostDetail_Counted()
+    {
+        var done = Done("T-0003");
+        done.CostUsd = 0.20m;
+        done.CostDetail = new CostBreakdown { InputUsd = 0.05m, OutputUsd = 0.15m };
+        done.Attachments.Add(WithDetail(
+            Outcome(JournalRecordType.AttachmentDone, "PL-000001.0001", "PL-000001", 0.03m, 0.04m),
+            new CostBreakdown { InputUsd = 0.01m, CacheWriteUsd = 0.01m, OutputUsd = 0.01m }));
+        var journal = new GenerationJournal(_folder);
+        await journal.AppendAsync(done);
+        await journal.AppendAsync(Repaired("T-0003", WithDetail(
+            Outcome(JournalRecordType.AttachmentDone, "PL-000001.0002", "PL-000001", 0.02m),
+            new CostBreakdown { OutputUsd = 0.02m })));
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(0.29m, replay.SpentCostUsd);
+        Assert.Equal(0.04m, replay.MediaSpentCostUsd);
+        Assert.Equal(0.25m, replay.SpentDetail.TotalUsd);
+        Assert.Equal(0.01m, replay.SpentDetail.CacheWriteUsd);
+        Assert.Equal(0.18m, replay.SpentDetail.OutputUsd);
+        Assert.Equal(0m, replay.UnsplitSpentUsd);
+        AssertItemsAddUp(replay);
+    }
+
+    [Fact]
+    public void Normalize_NegativeCacheTokensAndCostDetail_Clamped()
+    {
+        var record = new JournalRecord
+        {
+            Type = JournalRecordType.ThreadDone,
+            CacheWriteTokens = -5,
+            CacheReadTokens = -7,
+            Provider = null!,
+            CostDetail = new CostBreakdown
+            {
+                InputUsd = -1m, CacheWriteUsd = -2m, CacheReadUsd = -3m, OutputUsd = -4m, BatchSavingsUsd = -5m
+            }
+        };
+
+        record.Normalize();
+
+        Assert.Equal(0, record.CacheWriteTokens);
+        Assert.Equal(0, record.CacheReadTokens);
+        Assert.Equal(string.Empty, record.Provider);
+        Assert.Equal(0m, record.CostDetail!.InputUsd);
+        Assert.Equal(0m, record.CostDetail.CacheWriteUsd);
+        Assert.Equal(0m, record.CostDetail.CacheReadUsd);
+        Assert.Equal(0m, record.CostDetail.OutputUsd);
+        Assert.Equal(0m, record.CostDetail.BatchSavingsUsd);
+    }
+
+    [Fact]
+    public async Task Replay_MixedRunEnded_TotalEqualsItems()
+    {
+        var journal = new GenerationJournal(_folder);
+        await journal.AppendAsync(new JournalRecord
+        {
+            Type = JournalRecordType.RunEnded, PlanId = _plan.PlanId, Outcome = GenerationOutcome.Fatal,
+            CostUsd = 0.50m, MediaCostUsd = 0.20m,
+            CostDetail = new CostBreakdown { InputUsd = 0.10m, OutputUsd = 0.40m }
+        });
+
+        var first = GenerationJournal.Replay(_folder, _plan);
+        Assert.Equal(0.70m, first.SpentCostUsd);
+        Assert.Equal(0.50m, first.SpentDetail.TotalUsd);
+        Assert.Equal(0.20m, first.MediaSpentCostUsd);
+        Assert.Equal(0m, first.UnsplitSpentUsd);
+        AssertItemsAddUp(first);
+
+        // CostUsd above the itemized total: the 0.10 gap is not itemized
+        await journal.AppendAsync(new JournalRecord
+        {
+            Type = JournalRecordType.SideWorld, PlanId = _plan.PlanId, CostUsd = 0.60m,
+            CostDetail = new CostBreakdown { InputUsd = 0.20m, OutputUsd = 0.30m }
+        });
+
+        // Old RunEnded: combined CostUsd, no media, no detail
+        await journal.AppendAsync(new JournalRecord
+        {
+            Type = JournalRecordType.RunEnded, PlanId = _plan.PlanId, Outcome = GenerationOutcome.Cancelled, CostUsd = 0.30m
+        });
+        var failed = Failed("T-0005");
+        failed.CostUsd = 0.05m;
+        failed.MediaCostUsd = 0.01m;
+        failed.CostDetail = new CostBreakdown { OutputUsd = 0.05m };
+        await journal.AppendAsync(failed);
+        await journal.AppendAsync(new JournalRecord
+        {
+            Type = JournalRecordType.CastVoices, PlanId = _plan.PlanId, CostUsd = 0.04m,
+            CostDetail = new CostBreakdown { InputUsd = 0.04m }
+        });
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(1.70m, replay.SpentCostUsd);
+        Assert.Equal(0.21m, replay.MediaSpentCostUsd);
+        Assert.Equal(1.09m, replay.SpentDetail.TotalUsd);
+        Assert.Equal(0.40m, replay.UnsplitSpentUsd);
+        AssertItemsAddUp(replay);
+    }
+
+    [Fact]
+    public async Task Replay_WriterProvider_LatestRunStartedWins()
+    {
+        var journal = new GenerationJournal(_folder);
+        var openAi = Started();
+        openAi.Provider = "OpenAI";
+        var anthropic = Started();
+        anthropic.Provider = "Anthropic";
+        await journal.AppendAsync(openAi);
+        await journal.AppendAsync(anthropic);
+        await journal.AppendAsync(Started());
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal("Anthropic", replay.WriterProvider);
     }
 }

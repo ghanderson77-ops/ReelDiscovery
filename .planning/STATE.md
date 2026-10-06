@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-10-PLAN.md
-last_updated: "2026-10-06T23:05:43.115Z"
+stopped_at: Completed 07-11-PLAN.md
+last_updated: "2026-10-06T23:24:52.422Z"
 last_activity: 2026-10-06
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 119
-  percent: 93
+  completed_plans: 120
+  percent: 94
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 14 of 22
+Plan: 15 of 22
 Status: Ready to execute
 Last activity: 2026-10-06
 
@@ -170,6 +170,7 @@ Progress: [██████████] 99%
 | Phase 07 P09 | 25 min | 2 tasks | 7 files |
 | Phase 07 P16 | 7min | 2 tasks | 5 files |
 | Phase 07 P10 | 16min | 2 tasks | 9 files |
+| Phase 07 P11 | 20min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -493,6 +494,8 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-10]: Batch stage rows aggregate only waiting batches; terminal events decrement PendingProviderBatches and clear CollectingAfterRestart; a resumed batch's first Progress creates its row track
 - [Phase 07]: [07-10]: Orphan spend joins RunEnded and the snapshot cost on finished batch runs; a billing failure is swallowed and the next finished run bills it
 - [Phase 07]: [07-10]: D-05 parity compares EML bytes exactly except Office package internals (content XML compared with relationship ids masked; OpenXml output is non-deterministic)
+- [07-11]: Status strip priority is Stopping, Collecting after restart, lowest waiting stage row with countdown, then normal stage text; Start Over keeps the case's UseBatch and cancels pending provider batches best effort
+- [07-11]: DPI rule 27 (batch-wait text never ellipsizes at Large) is unattainable with the S1 copy in the Dates column; tooltip and status strip carry the full text; left for UI review
 
 ### Pending Todos
 
@@ -514,6 +517,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T23:05:43.108Z
-Stopped at: Completed 07-10-PLAN.md
+Last session: 2026-10-06T23:24:52.416Z
+Stopped at: Completed 07-11-PLAN.md
 Resume file: None

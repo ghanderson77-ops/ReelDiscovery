@@ -97,6 +97,11 @@ public class GenerationCardContent
     // Ready card only: the Small estimate line and the Warning media notice (empty when not shown)
     public string EstimateLine = "";
     public string MediaNotice = "";
+
+    // Ready card only (07 S1): the estimate line's per-model tooltip and the batch hint under the checkbox (empty = hidden)
+    public string EstimateTooltip = "";
+    public string BatchHint = "";
+    public SummaryTone BatchHintTone;
 }
 
 /// <summary>
@@ -120,6 +125,15 @@ public class GenerationReadyInput
 
     // A tested OpenAI key is set up this session (PROV-06)
     public bool MediaAvailable;
+
+    // D-17: both totals from the one GenerationCostEstimator.Estimate call; the batch costs assume no cache reads
+    public decimal LiveTotal;
+    public decimal BatchStoryCost;
+    public decimal BatchVolumeCost;
+    public decimal BatchTotal;
+
+    // D-08: the case's saved batch choice (drives the hint variant)
+    public bool BatchChecked;
 }
 
 /// <summary>
@@ -306,7 +320,8 @@ public static class GenerationUiText
                     Caption = "Cost",
                     Value = Money(c.CostUsd),
                     SubLine = c.Finished ? "this case" : $"≈{Money(c.RemainingCostUsd)} to go",
-                    Tooltip = $"Spent on generation in this case: ${c.CostUsd.ToString("0.00", Invariant)}{media}. Estimate for the remaining items: ≈{Money(c.RemainingCostUsd)}, ±50%. The cost ticker in the header shows the whole session."
+                    Tooltip = $"Spent on generation in this case: ${c.CostUsd.ToString("0.00", Invariant)}{media}. Estimate for the remaining items: ≈{Money(c.RemainingCostUsd)}, ±50%{(c.BatchOn ? " at batch prices" : "")}. The cost ticker in the header shows the whole session."
+                        + (c.BatchSavingsUsd > 0m ? $" Batch pricing saved ${c.BatchSavingsUsd.ToString("0.00", Invariant)}." : "")
                 };
         }
     }
@@ -384,6 +399,59 @@ public static class GenerationUiText
         }
     }
 
+    /// <summary>
+    /// Dates-cell text of a stage row waiting on provider batches (07-UI-SPEC S1 Row 4, D-09); "" when not waiting.
+    /// The submission time is local, with the date when it is not today.
+    /// </summary>
+    public static string BatchWaitText(WaveProgress row, DateTime nowLocal)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (!row.BatchWaiting)
+            return "";
+
+        var submitted = row.BatchFirstSubmittedUtc.HasValue ? SubmittedText(row.BatchFirstSubmittedUtc.Value, nowLocal) : "";
+        var progress = $"{N(row.BatchDone)} of {Plural(row.BatchTotal, "request", "requests")} done";
+        if (row.BatchCount > 1)
+        {
+            var when = submitted.Length > 0 ? $", first submitted {submitted}" : "";
+            return $"Waiting on {Plural(row.BatchCount, "provider batch", "provider batches")}{when}, {progress}";
+        }
+
+        return $"Waiting on provider batch{(submitted.Length > 0 ? ", submitted " + submitted : "")}, {progress}";
+    }
+
+    /// <summary>
+    /// Row tooltip while waiting: "{dates or stage name}. {full wait text}. Next check in {s} s."
+    /// </summary>
+    public static string BatchWaitTooltip(string datesOrStage, string waitText, int secondsToNextCheck) =>
+        $"{TrimMessage(datesOrStage)}. {TrimMessage(waitText)}. Next check in {Math.Max(0, secondsToNextCheck).ToString(Invariant)} s.";
+
+    /// <summary>
+    /// Whole seconds until the decorator checks the provider again, never negative (the 1 s UI timer counts it down).
+    /// </summary>
+    public static int SecondsUntil(DateTime? nextCheckUtc, DateTime nowUtc) =>
+        nextCheckUtc.HasValue ? Math.Max(0, (int)Math.Ceiling((nextCheckUtc.Value - nowUtc).TotalSeconds)) : 0;
+
+    // "2:14 PM" today, "Oct 5, 2:14 PM" on another day (local time)
+    private static string SubmittedText(DateTime submittedUtc, DateTime nowLocal)
+    {
+        var local = submittedUtc.Kind == DateTimeKind.Local
+            ? submittedUtc
+            : DateTime.SpecifyKind(submittedUtc, DateTimeKind.Utc).ToLocalTime();
+        return local.Date == nowLocal.Date ? local.ToString("h:mm tt", EnUs) : local.ToString("MMM d, h:mm tt", EnUs);
+    }
+
+    // "42 min" or "2 h 15 min" (at least 1 min)
+    private static string DurationText(TimeSpan duration)
+    {
+        var minutes = Math.Max(1, (int)Math.Floor(duration.TotalMinutes));
+        return minutes < 60 ? $"{minutes} min" : $"{minutes / 60} h {minutes % 60} min";
+    }
+
+    // "Anthropic" / "OpenAI" (LlmProviderKind names); empty falls back to "the provider"
+    private static string ProviderName(string? provider) =>
+        string.IsNullOrWhiteSpace(provider) ? "the provider" : provider.Trim();
+
     // --- Activity ---
 
     public static ActivityLine ActivityText(GenerationEvent e)
@@ -448,6 +516,22 @@ public static class GenerationUiText
                 ($"Cancelled. {N(e.Done)} of {Plural(e.Total, "thread", "threads")}{AttachmentProgress(e.AttachmentsDone, e.AttachmentsTotal)} are saved.", ActivityTone.Warning),
             GenerationEventKind.RunStopped =>
                 (string.IsNullOrWhiteSpace(e.Reason) ? "Stopped" : $"Stopped: {e.Reason.Trim()}", ActivityTone.Danger),
+            // D-09 batch events (07-UI-SPEC S1 Row 4); provider and reason are fixed plain words from the decorator (T-07-52)
+            GenerationEventKind.BatchSubmitted =>
+                ($"Batch submitted: {Plural(e.BatchRequests, "request", "requests")} to {ProviderName(e.BatchProvider)}"
+                    + (TrimMessage(e.BatchStage).Length > 0 ? " for " + TrimMessage(e.BatchStage) : ""), ActivityTone.Accent),
+            GenerationEventKind.BatchFinished =>
+                ($"Batch finished: {Plural(e.BatchRequests, "result", "results")} collected after {DurationText(e.BatchDuration)}", ActivityTone.Success),
+            GenerationEventKind.BatchFinishedWithFailures =>
+                ($"Batch finished: {N(e.BatchSucceeded)} succeeded, {N(e.BatchFailed)} failed or expired. The {Plural(e.BatchFailed, "request", "requests")} run live at full price.",
+                    ActivityTone.Warning),
+            GenerationEventKind.BatchFailedAtProvider =>
+                ($"Batch failed at {ProviderName(e.BatchProvider)}{Colon(e.BatchReason)}. Its {Plural(e.BatchRequests, "request", "requests")} run live at full price.",
+                    ActivityTone.Warning),
+            GenerationEventKind.BatchCollectedAfterRestart =>
+                ($"Collected {Plural(e.BatchRequests, "result", "results")} from a batch submitted"
+                    + (e.BatchSubmittedUtc.HasValue ? " at " + SubmittedText(e.BatchSubmittedUtc.Value, e.LocalTime) : "")
+                    + " before the app closed", ActivityTone.Success),
             _ =>
                 ("Finished. Answer key and story so far updated.", ActivityTone.Success)
         };
@@ -499,6 +583,46 @@ public static class GenerationUiText
             default:
                 return "";
         }
+    }
+
+    public const string CollectingAfterRestartText = "Collecting batches submitted before the app closed...";
+
+    /// <summary>
+    /// Status strip with the D-09 batch texts (07-UI-SPEC S1 Row 5): Stopping first, then collecting after a restart,
+    /// then the lowest waiting stage row with its countdown, else the normal stage text.
+    /// </summary>
+    public static string ProgressText(GenerationView v, DateTime nowUtc)
+    {
+        ArgumentNullException.ThrowIfNull(v);
+        if (v.Stage == GenerationStage.Stopping)
+            return StoppingText;
+        if (v.CollectingAfterRestart)
+            return CollectingAfterRestartText;
+
+        var waiting = (v.Waves ?? new List<WaveProgress>())
+            .Where(w => w != null && w.BatchWaiting)
+            .OrderBy(w => w.Index)
+            .FirstOrDefault();
+        if (waiting == null)
+            return ProgressText(v);
+
+        var waveCount = v.StageWaveCount > 0 ? v.StageWaveCount : (v.Counts?.WaveCount ?? 0);
+        return ProgressBatchText(waiting, waveCount, SecondsUntil(waiting.BatchNextCheckUtc, nowUtc));
+    }
+
+    /// <summary>
+    /// "Wave {i} of {n} ({dates}): waiting on provider batch, ..." or "Non-relevant mail: waiting on provider batch, ...".
+    /// </summary>
+    public static string ProgressBatchText(WaveProgress row, int waveCount, int secondsToNextCheck)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var stage = row.RowKind switch
+        {
+            StageRowKind.NonRelevant => "Non-relevant mail",
+            StageRowKind.Attachments => "Attachments for written threads",
+            _ => $"Wave {row.Index} of {waveCount} ({WaveDates(row.Start, row.End)})"
+        };
+        return $"{stage}: waiting on provider batch, {N(row.BatchDone)} of {Plural(row.BatchTotal, "request", "requests")} done. Next check in {Math.Max(0, secondsToNextCheck).ToString(Invariant)} s.";
     }
 
     /// <summary>
@@ -634,6 +758,8 @@ public static class GenerationUiText
                 Emails = emails,
                 Waves = waves,
                 StoryCost = cost,
+                LiveTotal = cost,
+                BatchTotal = cost,
                 StoryModel = modelName,
                 VolumeModel = modelName
             })
@@ -655,11 +781,7 @@ public static class GenerationUiText
 
         var mediaPlanned = input.MediaPlanned > 0;
         var mediaCost = mediaPlanned ? input.MediaCost : 0m;
-        var total = input.StoryCost + input.VolumeCost + mediaCost;
-        var mediaClause = mediaPlanned ? $" · images and voicemail ≈{Money(mediaCost)}" : "";
-        var estimate = string.Equals(input.StoryModel, input.VolumeModel, StringComparison.Ordinal)
-            ? $"Estimated cost ≈{Money(total)} on {input.StoryModel}, ±50%{mediaClause}"
-            : $"Estimated cost ≈{Money(total)}, ±50%: {input.StoryModel} ≈{Money(input.StoryCost)} · {input.VolumeModel} ≈{Money(input.VolumeCost)}{mediaClause}";
+        var hint = BatchHint(input.Emails, input.BatchChecked, BatchRecommendThreshold);
 
         var notice = mediaPlanned && !input.MediaAvailable
             ? $"{Plural(input.MediaPlanned, "image or voicemail", "images and voicemails")} {(input.MediaPlanned == 1 ? "is" : "are")} planned, but no tested OpenAI key is set up this session, so they will be marked Skipped. Test an OpenAI key on the API Configuration step to include them."
@@ -670,9 +792,63 @@ public static class GenerationUiText
             Heading = "Ready to write the corpus",
             Body = $"Generate Emails writes the {order}: {Plural(input.Emails, "email", "emails")} in total{WithAttachments(input.Attachments)}. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later.",
             ButtonText = "Generate Emails",
-            EstimateLine = estimate,
+            EstimateLine = EstimateLine(input.LiveTotal, input.BatchTotal),
+            EstimateTooltip = EstimateTooltip(input, mediaPlanned, mediaCost),
+            BatchHint = hint.Text,
+            BatchHintTone = hint.Tone,
             MediaNotice = notice
         };
+    }
+
+    // --- Batch pricing (07-UI-SPEC S1 Ready card, D-08, D-17) ---
+
+    public const int BatchRecommendThreshold = 2_000; // [DEFAULT] UI-SPEC U28, research A8
+
+    public const string BatchCheckboxText = "Use batch pricing (slower, about half the cost)";
+
+    /// <summary>
+    /// Ready-card estimate line: the live and batch totals of the one estimate (D-17).
+    /// </summary>
+    public static string EstimateLine(decimal live, decimal batch) =>
+        $"Estimated cost ≈{Money(live)} at live prices or ≈{Money(batch)} with batch pricing, ±50%, including prompt caching.";
+
+    /// <summary>
+    /// Estimate-line tooltip: per-model live and batch costs (one model name when Story and Volume are the same) plus the
+    /// media clause when media is planned.
+    /// </summary>
+    public static string EstimateTooltip(GenerationReadyInput input, bool mediaPlanned, decimal mediaCost)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var mediaClause = mediaPlanned ? $" · images and voicemail ≈{Money(mediaCost)}" : "";
+        var sameModel = string.Equals(input.StoryModel, input.VolumeModel, StringComparison.Ordinal);
+        var live = sameModel
+            ? $"{input.StoryModel} ≈{Money(input.StoryCost + input.VolumeCost)}"
+            : $"{input.StoryModel} ≈{Money(input.StoryCost)} · {input.VolumeModel} ≈{Money(input.VolumeCost)}";
+        var batch = sameModel
+            ? $"{input.StoryModel} ≈{Money(input.BatchStoryCost + input.BatchVolumeCost)}"
+            : $"{input.StoryModel} ≈{Money(input.BatchStoryCost)} · {input.VolumeModel} ≈{Money(input.BatchVolumeCost)}";
+        return $"Live: {live}{mediaClause}. Batch: {batch}{mediaClause}. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings.";
+    }
+
+    /// <summary>
+    /// Hint under the batch checkbox: hidden below the threshold while unchecked, a Muted recommendation at or above it,
+    /// and the Warning duration caution whenever batch is checked.
+    /// </summary>
+    public static (string Text, SummaryTone Tone) BatchHint(int plannedEmails, bool batchChecked, int threshold)
+    {
+        if (batchChecked)
+        {
+            return ("Batch runs wait on the provider between waves and can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.",
+                SummaryTone.Warning);
+        }
+
+        if (plannedEmails >= threshold)
+        {
+            return ("Batch pricing is recommended for a corpus this size. It waits on the provider between waves, so the run can take several hours.",
+                SummaryTone.Muted);
+        }
+
+        return ("", SummaryTone.Muted);
     }
 
     // --- Partial-run and media banners ---
@@ -698,10 +874,15 @@ public static class GenerationUiText
     /// <summary>
     /// Partial-run banner body; <paramref name="failedItems"/> counts threads + attachments.
     /// </summary>
-    public static string BannerBody(int threadsDone, int threadsTotal, int attachmentsDone, int attachmentsTotal, int failedItems)
+    public static string BannerBody(int threadsDone, int threadsTotal, int attachmentsDone, int attachmentsTotal, int failedItems,
+        bool batchOn = false, int pendingBatches = 0)
     {
         var failedClause = failedItems > 0 ? $", and tries the {Plural(failedItems, "failed item", "failed items")} again" : "";
-        return $"{N(threadsDone)} of {Plural(threadsTotal, "thread", "threads")}{AttachmentProgress(attachmentsDone, attachmentsTotal)} are written and saved. Continue Generating writes the rest and keeps everything already saved{failedClause}.";
+        // D-09: batches pending from before the app closed win over the saved-choice clause
+        var batchClause = pendingBatches > 0
+            ? $" {Plural(pendingBatches, "provider batch", "provider batches")} submitted earlier will be collected first, without paying again."
+            : batchOn ? " Batch pricing stays on for this case." : "";
+        return $"{N(threadsDone)} of {Plural(threadsTotal, "thread", "threads")}{AttachmentProgress(attachmentsDone, attachmentsTotal)} are written and saved. Continue Generating writes the rest and keeps everything already saved{failedClause}.{batchClause}";
     }
 
     /// <summary>
@@ -732,21 +913,24 @@ public static class GenerationUiText
 
     // --- Confirmations (MessageBox, default button = the safe choice) ---
 
-    public static (string Title, string Text) CG1CancelGeneration(int threads, int attachments)
+    public static (string Title, string Text) CG1CancelGeneration(int threads, int attachments, bool batchesPending = false)
     {
         var written = Plural(threads, "thread", "threads") + (attachments > 0 ? " and " + Plural(attachments, "attachment", "attachments") : "");
         var verb = threads + attachments == 1 ? "stays" : "stay";
         return ("Cancel Generation",
-            $"Stop generating? The {written} already written {verb} saved. Items in progress are discarded and can be written later with Continue Generating.");
+            $"Stop generating? The {written} already written {verb} saved. Items in progress are discarded and can be written later with Continue Generating."
+            + (batchesPending ? " Provider batches already submitted keep running; Continue Generating collects their results without paying again." : ""));
     }
 
-    public static (string Title, string Text) CG2StartOver(int files) =>
+    public static (string Title, string Text) CG2StartOver(int files, bool batchesPending = false) =>
         ("Start Over",
-            $"Delete the {Plural(files, "generated EML file", "generated EML files")} (relevant and non-relevant, with their attachments), the narrative ledger and the side projects, and reset the answer key to Planned? This cannot be undone. The corpus plan and case guide are kept.");
+            $"Delete the {Plural(files, "generated EML file", "generated EML files")} (relevant and non-relevant, with their attachments), the narrative ledger and the side projects, and reset the answer key to Planned? This cannot be undone. The corpus plan and case guide are kept."
+            + (batchesPending ? " Pending provider batches are cancelled." : ""));
 
-    public static (string Title, string Text) CG3CloseDuringRun() =>
+    public static (string Title, string Text) CG3CloseDuringRun(bool batchesPending = false) =>
         ("Stop Generating?",
-            "Emails are still being written. Close and stop? Finished threads and attachments are saved; items in progress are discarded and can be written later with Continue Generating.");
+            "Emails are still being written. Close and stop? Finished threads and attachments are saved; items in progress are discarded and can be written later with Continue Generating."
+            + (batchesPending ? " Provider batches already submitted keep running and are collected the next time you click Continue Generating." : ""));
 
     // --- Case Summary rows (S2) ---
 

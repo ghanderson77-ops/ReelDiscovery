@@ -92,6 +92,10 @@ public class GenerationCounts
     // Media share of CostUsd (CostUsd already includes it)
     public decimal MediaCostUsd { get; set; }
 
+    // D-08/PROV-07 cost tile: the case's saved batch choice and what the batch discount took off so far
+    public bool BatchOn { get; set; }
+    public decimal BatchSavingsUsd { get; set; }
+
     public GenerationCounts Clone() => (GenerationCounts)MemberwiseClone();
 }
 

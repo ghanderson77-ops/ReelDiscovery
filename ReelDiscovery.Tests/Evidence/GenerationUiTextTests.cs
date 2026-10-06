@@ -2022,7 +2022,7 @@ public class GenerationUiTextTests
     [Fact]
     public void ProgressText_BatchWait_CountdownNeverNegative()
     {
-        var view = new GenerationView { Stage = GenerationStage.Writing, StageWave = 3, StageWaveCount = 14, Waves = { Waiting(total: 1) } };
+        var view = new GenerationView { Stage = GenerationStage.Writing, StageWave = 3, StageWaveCount = 14, Waves = { Waiting(done: 0, total: 1) } };
         Assert.EndsWith("0 of 1 request done. Next check in 0 s.", GenerationUiText.ProgressText(view, Today.ToUniversalTime().AddMinutes(5)));
     }
 

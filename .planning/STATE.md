@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-11-PLAN.md
-last_updated: "2026-10-06T23:24:52.422Z"
+stopped_at: Completed 07-13-PLAN.md
+last_updated: "2026-10-06T23:39:30.706Z"
 last_activity: 2026-10-06
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 120
-  percent: 94
+  completed_plans: 121
+  percent: 95
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 15 of 22
+Plan: 16 of 22
 Status: Ready to execute
 Last activity: 2026-10-06
 
@@ -171,6 +171,7 @@ Progress: [██████████] 99%
 | Phase 07 P16 | 7min | 2 tasks | 5 files |
 | Phase 07 P10 | 16min | 2 tasks | 9 files |
 | Phase 07 P11 | 20min | 3 tasks | 10 files |
+| Phase 07 P13 | 35 min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -496,6 +497,9 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-10]: D-05 parity compares EML bytes exactly except Office package internals (content XML compared with relationship ids masked; OpenXml output is non-deterministic)
 - [07-11]: Status strip priority is Stopping, Collecting after restart, lowest waiting stage row with countdown, then normal stage text; Start Over keeps the case's UseBatch and cancels pending provider batches best effort
 - [07-11]: Stages grid Dates cell shows the compact batch wait "Batch: {d} of {t} done" (GenerationUiText.BatchWaitCellText) so DPI rule 27 holds at Large; the full S1 sentence with the submission time stays in the row tooltip and status strip (07-UI-SPEC S1 amended)
+- [Phase 07]: [07-13]: ThreadInvalidated line carries the thread's full DeltasByThread entry (own + committed attachment deltas); the ledger is unchanged by invalidation and re-render
+- [Phase 07]: [07-13]: A ThreadDone with LateRepair contributes only its LedgerDelta to DeltasByThread; nested attachment deltas stay out
+- [Phase 07]: [07-13]: InvalidateAsync refuses when the thread's last record is not ThreadDone; locked copies reported as '{relative}: {reason}', line still appended, key re-projected (KeyError on failure)
 
 ### Pending Todos
 
@@ -517,6 +521,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T23:24:52.416Z
-Stopped at: Completed 07-11-PLAN.md
+Last session: 2026-10-06T23:39:30.700Z
+Stopped at: Completed 07-13-PLAN.md
 Resume file: None

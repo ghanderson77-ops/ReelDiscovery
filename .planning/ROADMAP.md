@@ -243,7 +243,7 @@ Plans:
 - [x] 07-10-PLAN.md — Runner batch integration, snapshot batch status, Start Over cleanup, D-05 parity proof (Wave 4)
 - [x] 07-11-PLAN.md — Generate Corpus UI: batch checkbox, live/batch estimate, batch wait rows and events (Wave 5)
 - [x] 07-12-PLAN.md — Model dialog cache/batch price columns and header cost tooltip (Wave 2)
-- [ ] 07-13-PLAN.md — Regenerate thread: ThreadInvalidated record, replay, consistent relevant re-render (Wave 5)
+- [x] 07-13-PLAN.md — Regenerate thread: ThreadInvalidated record, replay, consistent relevant re-render (Wave 5)
 - [x] 07-14-PLAN.md — QA report store and metadata-only leakage audit (Wave 2)
 - [ ] 07-15-PLAN.md — Timeline/value consistency scans and automatic end-of-run QA (Wave 6)
 - [x] 07-16-PLAN.md — Blind reviewer on the other provider: sample, prompts, estimate, resumable log (Wave 3)

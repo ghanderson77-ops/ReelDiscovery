@@ -3,6 +3,7 @@ using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Tests.Evidence;
@@ -163,11 +164,13 @@ public class GenerateCorpusRenderTests
             Assert.Equal(card.Body, step.StateBody);
             Assert.True(step.EstimateLabel.Visible);
             Assert.Equal(card.EstimateLine, step.EstimateLabel.Text);
-            Assert.Contains("· images and voicemail ≈$", step.EstimateLabel.Text);
+            Assert.Contains("· images and voicemail ≈$", step.EstimateTooltipText);
             Assert.Equal(Theme.TextMuted, step.EstimateLabel.ForeColor);
             Assert.False(step.MediaNoticeLabel.Visible);
-            // The last line carries the 20 bottom margin
-            Assert.Equal(step.LogicalToDeviceUnits(20), step.EstimateLabel.Margin.Bottom);
+            // 07 S1: the checkbox and the batch hint follow the estimate; the hint is last and carries the 20
+            Assert.Equal(step.LogicalToDeviceUnits(4), step.EstimateLabel.Margin.Bottom);
+            Assert.True(step.BatchHintLabel.Visible);
+            Assert.Equal(step.LogicalToDeviceUnits(20), step.BatchHintLabel.Margin.Bottom);
             Assert.Equal("Generate Emails", step.StateActionButton.Text);
         }, primary: 1, ready: ready);
     }
@@ -333,6 +336,195 @@ public class GenerateCorpusRenderTests
         }, primary: 1);
     }
 
+    // ----- Phase 7 render checks 1-4 (07-UI-SPEC S1, batch mode) -----
+
+    [Fact]
+    public void ReadyBatchRecommended()
+    {
+        // 2,500 planned emails, batch unchecked: Muted recommendation, then the Warning media notice
+        var ready = ReadyInput(mediaAvailable: false, emails: 2500);
+        var card = GenerationUiText.ReadyCard(ready);
+        RenderBoth("generate-corpus-ready-batch-recommended", GenerateCorpusRenderState.ReadyMediaUnavailable, null, (step, labels) =>
+        {
+            Assert.Equal(card.EstimateLine, step.EstimateLabel.Text);
+            Assert.Equal(card.EstimateTooltip, step.EstimateTooltipText);
+            Assert.True(step.UseBatchCheckBox.Visible);
+            Assert.False(step.UseBatchCheckBox.Checked);
+            Assert.Equal("Use batch pricing (slower, about half the cost)", step.UseBatchCheckBox.Text);
+            Assert.True(step.BatchHintLabel.Visible);
+            Assert.StartsWith("Batch pricing is recommended for a corpus this size.", step.BatchHintLabel.Text);
+            Assert.Equal(Theme.TextMuted, step.BatchHintLabel.ForeColor);
+            Assert.True(step.MediaNoticeLabel.Visible);
+            // Every line bottom 4 except the last (the media notice), which carries the 20
+            Assert.Equal(step.LogicalToDeviceUnits(4), step.EstimateLabel.Margin.Bottom);
+            Assert.Equal(step.LogicalToDeviceUnits(4), step.UseBatchCheckBox.Margin.Bottom);
+            Assert.Equal(step.LogicalToDeviceUnits(4), step.BatchHintLabel.Margin.Bottom);
+            Assert.Equal(step.LogicalToDeviceUnits(20), step.MediaNoticeLabel.Margin.Bottom);
+            AssertCheckBoxFits(step);
+        }, primary: 1, ready: ready);
+    }
+
+    [Fact]
+    public void ReadyBatchChecked()
+    {
+        var ready = ReadyInput(mediaAvailable: true, emails: 2500, mediaPlanned: 0, batchChecked: true);
+        RenderBoth("generate-corpus-ready-batch-checked", GenerateCorpusRenderState.Ready, null, (step, labels) =>
+        {
+            Assert.True(step.UseBatchCheckBox.Visible);
+            Assert.True(step.UseBatchCheckBox.Checked);
+            Assert.StartsWith("Batch runs wait on the provider between waves", step.BatchHintLabel.Text);
+            Assert.Equal(Theme.Warning, step.BatchHintLabel.ForeColor);
+            Assert.False(step.MediaNoticeLabel.Visible);
+            Assert.DoesNotContain("images and voicemail", step.EstimateTooltipText);
+            Assert.Equal(step.LogicalToDeviceUnits(20), step.BatchHintLabel.Margin.Bottom);
+            AssertCheckBoxFits(step);
+        }, primary: 1, ready: ready,
+            setup: f => f.Draft.Corpus!.Generation = new GenerationState { UseBatch = true });
+    }
+
+    [Fact]
+    public void RunningBatchWait()
+    {
+        var view = BatchWaitView();
+        RenderBoth("generate-corpus-running-batch-wait", GenerateCorpusRenderState.Running, view, (step, labels) =>
+        {
+            Assert.False(step.UseBatchCheckBox.Visible);
+            Assert.True(step.CancelButton.Visible);
+            var row = step.WavesGrid.Rows[2];
+            var wait = (string)row.Cells["Dates"].Value!;
+            Assert.StartsWith("Waiting on provider batch, submitted ", wait);
+            Assert.EndsWith("6 of 14 requests done", wait);
+            Assert.Contains("Next check in ", row.Cells["Dates"].ToolTipText);
+            Assert.StartsWith(GenerationUiText.WaveDates(view.Waves[2].Start, view.Waves[2].End) + ". ", row.Cells["Dates"].ToolTipText);
+            // Other rows keep their dates
+            Assert.Equal(GenerationUiText.WaveDates(view.Waves[0].Start, view.Waves[0].End), step.WavesGrid.Rows[0].Cells["Dates"].Value);
+            Assert.StartsWith("Wave 3 of 14 (", step.StatusLabel.Text);
+            Assert.Contains("): waiting on provider batch, 6 of 14 requests done. Next check in ", step.StatusLabel.Text);
+            Assert.Equal(Theme.Accent, step.StatusLabel.ForeColor);
+            var events = step.ActivityGrid.Rows.Cast<DataGridViewRow>().Select(r => (string)r.Cells["Event"].Value!).ToList();
+            Assert.Contains("Batch submitted: 14 requests to Anthropic for wave 3", events);
+            Assert.Contains("Batch failed at Anthropic: the batch expired before it finished. Its 4 requests run live at full price.", events);
+            Assert.Contains("Batch finished: 4 results collected after 38 min", events);
+            Assert.Contains("Batch finished: 3 succeeded, 1 failed or expired. The 1 request run live at full price.", events);
+            Assert.Contains("±50% at batch prices.", step.Tiles[6].TooltipText);
+        }, primary: 0, setup: f => f.Draft.Corpus!.Generation = new GenerationState { UseBatch = true });
+    }
+
+    [Fact]
+    public void PartialPendingBatches()
+    {
+        var view = FinishedView(done: 21, total: 60, warnings: 1, failed: 2, cancelled: true);
+        RenderBoth("generate-corpus-partial-pending-batches", GenerateCorpusRenderState.Partial, view, (step, labels) =>
+        {
+            Assert.Equal(1, step.PendingProviderBatches);
+            Assert.Equal(GenerationUiText.BannerBody(21, 60, 0, 0, 2, batchOn: true, pendingBatches: 1), step.BannerBodyText);
+            Assert.EndsWith(" 1 provider batch submitted earlier will be collected first, without paying again.", step.BannerBodyText);
+            Assert.True(step.ContinueButton.Visible);
+        }, primary: 1, setup: f =>
+        {
+            f.Draft.Corpus!.Generation = new GenerationState { UseBatch = true };
+            new BatchLedger(f.Folder).AppendAsync(new BatchLedgerRecord
+            {
+                Type = BatchLedgerRecordType.Submitted,
+                Utc = DateTime.UtcNow,
+                Provider = LlmProviderKind.Anthropic,
+                BatchId = "msgbatch_render",
+                PlanId = f.Plan.PlanId,
+                SubmittedUtc = DateTime.UtcNow.AddHours(-2),
+                StageLabel = "wave 6",
+                Total = 9
+            }).GetAwaiter().GetResult();
+        });
+    }
+
+    // DPI rule 26: the checkbox text never ellipsizes or clips
+    private static void AssertCheckBoxFits(StepGenerateCorpus step)
+    {
+        var box = step.UseBatchCheckBox;
+        var needed = TextRenderer.MeasureText(box.Text, box.Font).Width;
+        Assert.True(box.Width >= needed, $"checkbox {box.Width} < text {needed}");
+        var card = step.StateCardPanel;
+        Assert.True(Left(card, box) + box.Width <= card.ClientSize.Width, "checkbox runs past the card");
+    }
+
+    /// <summary>
+    /// Wave 3 of 14 waiting on its provider batch (6 of 14 requests done, submitted 12 minutes ago); waves 1-2 done, one
+    /// of them after a batch the provider let expire (its requests ran live).
+    /// </summary>
+    private static GenerationView BatchWaitView()
+    {
+        var waves = Waves(14, i => i switch
+        {
+            1 => (4, 0, 0, false),
+            2 => (4, 0, 0, false),
+            3 => (0, 0, 0, true),
+            _ => (0, 0, 0, false)
+        });
+        var now = DateTime.UtcNow;
+        waves[2].BatchWaiting = true;
+        waves[2].BatchCount = 1;
+        waves[2].BatchFirstSubmittedUtc = now.AddMinutes(-12);
+        waves[2].BatchDone = 6;
+        waves[2].BatchTotal = 14;
+        waves[2].BatchNextCheckUtc = now.AddSeconds(25);
+
+        var time = DateTime.Now.AddMinutes(-95);
+        var events = new List<GenerationEvent>();
+        GenerationEvent At(GenerationEvent e, int minutes)
+        {
+            time = time.AddMinutes(minutes);
+            e.LocalTime = time;
+            return e;
+        }
+
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.RunStarted, Threads = 60 }, 0));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.WaveStarted, WaveIndex = 1, WaveCount = 14, WaveStart = waves[0].Start, WaveEnd = waves[0].End, Threads = 4 }, 0));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.BatchSubmitted, BatchRequests = 4, BatchProvider = "Anthropic", BatchStage = "wave 1" }, 1));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.BatchFinished, BatchRequests = 4, BatchSucceeded = 4, BatchProvider = "Anthropic", BatchStage = "wave 1", BatchDuration = TimeSpan.FromMinutes(38.4) }, 38));
+        for (var t = 1; t <= 4; t++)
+            events.Add(At(new GenerationEvent { Kind = GenerationEventKind.ThreadWritten, ThreadId = $"T-{t:0000}", Subject = Subjects[t], Emails = 3, Details = 2, Relevant = true }, 0));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.WaveFinished, WaveIndex = 1, WaveCount = 14, Written = 4, LedgerTotal = 8 }, 0));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.WaveStarted, WaveIndex = 2, WaveCount = 14, WaveStart = waves[1].Start, WaveEnd = waves[1].End, Threads = 4 }, 0));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.BatchSubmitted, BatchRequests = 4, BatchProvider = "Anthropic", BatchStage = "wave 2" }, 1));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.BatchFailedAtProvider, BatchRequests = 4, BatchProvider = "Anthropic", BatchStage = "wave 2", BatchReason = "the batch expired before it finished" }, 20));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.BatchSubmitted, BatchRequests = 4, BatchProvider = "Anthropic", BatchStage = "wave 2" }, 1));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.BatchFinishedWithFailures, BatchRequests = 4, BatchSucceeded = 3, BatchFailed = 1, BatchProvider = "Anthropic", BatchStage = "wave 2" }, 15));
+        for (var t = 5; t <= 8; t++)
+            events.Add(At(new GenerationEvent { Kind = GenerationEventKind.ThreadWritten, ThreadId = $"T-{t:0000}", Subject = Subjects[t % Subjects.Length], Emails = 3, Details = 1, Relevant = true }, 0));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.WaveFinished, WaveIndex = 2, WaveCount = 14, Written = 4, LedgerTotal = 15 }, 0));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.WaveStarted, WaveIndex = 3, WaveCount = 14, WaveStart = waves[2].Start, WaveEnd = waves[2].End, Threads = 5 }, 0));
+        events.Add(At(new GenerationEvent { Kind = GenerationEventKind.BatchSubmitted, BatchRequests = 14, BatchProvider = "Anthropic", BatchStage = "wave 3" }, 1));
+
+        return new GenerationView
+        {
+            Counts = new GenerationCounts
+            {
+                TotalThreads = 60,
+                DoneThreads = 8,
+                WaveCount = 14,
+                RelevantTotal = 60,
+                RelevantDone = 8,
+                EmailsPlanned = 172,
+                EmailsWritten = 24,
+                FilesWritten = 70,
+                Mailboxes = 9,
+                LedgerEntries = 15,
+                CostUsd = 0.62m,
+                RemainingCostUsd = 2.41m,
+                Running = true
+            },
+            Waves = waves,
+            Events = events,
+            Stage = GenerationStage.Writing,
+            StageWave = 3,
+            StageWaveCount = 14,
+            StageWaveStart = waves[2].Start,
+            StageWaveEnd = waves[2].End,
+            StageCount = 5,
+            PendingProviderBatches = 1
+        };
+    }
+
     // ----- Harness -----
 
     private sealed class Measured
@@ -358,13 +550,15 @@ public class GenerateCorpusRenderTests
 
     private static void RenderBoth(string name, GenerateCorpusRenderState render, GenerationView? view,
         Action<StepGenerateCorpus, List<string>> verify, string reason = "", int earlierThreads = 0, int? primary = null,
-        GenerationReadyInput? ready = null, MediaBannerContent? media = null, bool runEnded = false)
+        GenerationReadyInput? ready = null, MediaBannerContent? media = null, bool runEnded = false,
+        Action<StepFixture>? setup = null)
     {
         RenderHarness.RunSta(() =>
         {
             foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
             {
                 using var fixture = new StepFixture(approved: render != GenerateCorpusRenderState.NotApproved);
+                setup?.Invoke(fixture);
                 StepGenerateCorpus? step = null;
                 var measured = new Measured();
                 var result = RenderHarness.RenderControl(() =>
@@ -680,21 +874,31 @@ public class GenerateCorpusRenderTests
 
     // ----- Phase 6 seeded views (counts up to 9,999 for DPI rule 21) -----
 
-    private static GenerationReadyInput ReadyInput(bool mediaAvailable) => new()
+    private static GenerationReadyInput ReadyInput(bool mediaAvailable, int emails = 9876, int mediaPlanned = 320,
+        bool batchChecked = false)
     {
-        RelevantThreads = 1240,
-        NonRelevantThreads = 3760,
-        Emails = 9876,
-        Waves = 14,
-        Attachments = 2140,
-        StoryCost = 182.40m,
-        VolumeCost = 96.10m,
-        MediaCost = 31.20m,
-        StoryModel = "Claude Sonnet 4.5",
-        VolumeModel = "Claude Haiku 4.5",
-        MediaPlanned = 320,
-        MediaAvailable = mediaAvailable
-    };
+        var media = mediaPlanned > 0 ? 31.20m : 0m;
+        return new GenerationReadyInput
+        {
+            RelevantThreads = 1240,
+            NonRelevantThreads = 3760,
+            Emails = emails,
+            Waves = 14,
+            Attachments = 2140,
+            StoryCost = 182.40m,
+            VolumeCost = 96.10m,
+            MediaCost = media,
+            StoryModel = "Claude Sonnet 4.5",
+            VolumeModel = "Claude Haiku 4.5",
+            MediaPlanned = mediaPlanned,
+            MediaAvailable = mediaAvailable,
+            LiveTotal = 182.40m + 96.10m + media,
+            BatchStoryCost = 91.20m,
+            BatchVolumeCost = 48.05m,
+            BatchTotal = 91.20m + 48.05m + media,
+            BatchChecked = batchChecked
+        };
+    }
 
     /// <summary>
     /// 14 relevant waves holding 1,240 threads (89 or 88 each), all finished; wave 4 kept 2 with warnings.

@@ -1299,6 +1299,8 @@ public partial class StepGenerateCorpus : UserControl
         SetNotice(plan == null || render == GenerateCorpusRenderState.NotApproved ? string.Empty : NoticeFor(plan));
         var counts = view?.Counts ?? new GenerationCounts();
         var failedItems = counts.FailedThreads + counts.AttachmentsFailed;
+        // The banner's pending-batches clause reads the case's batch ledger, as entering the step does
+        _pendingProviderBatches = plan == null ? 0 : Services.Ai.BatchLedger.PendingBatchCount(state.Case.FolderPath, plan.PlanId);
 
         switch (render)
         {

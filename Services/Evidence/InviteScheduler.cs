@@ -45,6 +45,9 @@ public class InviteRequest
 
     // 1-based wave of the thread (LedgerMerger.EntriesFor stamps it on the normalized entries)
     public int WaveIndex { get; set; }
+
+    /// <summary>D-24: zone every new meeting slot is derived in, so invites for one meeting agree across senders; empty = the sender's zone.</summary>
+    public string CanonicalTimeZoneId { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -98,6 +101,9 @@ public static partial class InviteScheduler
         var parentLocal = MessageTime.Local(parent);
         var notBefore = parentLocal.AddMinutes(15);
 
+        // D-24: new slots come from one case zone; notBefore stays in the sender zone (instants compare across zones)
+        var slotZone = BusinessCalendar.ResolveId(request.CanonicalTimeZoneId) ?? tz;
+
         var ordered = Candidates(request)
             .Select((c, i) => (Candidate: c, Index: i))
             .OrderBy(x => x.Candidate.Date)
@@ -116,7 +122,7 @@ public static partial class InviteScheduler
             }
             else
             {
-                var (start, end) = Derive(tz, candidate.Date, candidate.StatedTime, candidate.SlotSeed);
+                var (start, end) = Derive(slotZone, candidate.Date, candidate.StatedTime, candidate.SlotSeed);
                 slot = new InviteSlot { Start = start, End = end };
             }
 

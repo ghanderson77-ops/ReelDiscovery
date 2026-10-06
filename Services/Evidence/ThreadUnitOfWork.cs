@@ -508,13 +508,19 @@ public class ThreadUnitOfWork
                     LedgerView = ctx.LedgerView,
                     Guide = ctx.Guide,
                     KnownSlots = attachments?.InviteSlots,
-                    WaveIndex = ctx.WaveIndex
+                    WaveIndex = ctx.WaveIndex,
+                    // D-24: one deterministic zone per case; never the sender's
+                    CanonicalTimeZoneId = CanonicalZone(ctx.Guide)
                 })
                 : InviteScheduler.ForNonRelevant(parent, spec);
         }
 
         return actx;
     }
+
+    // D-24: the first organization (guide order) with a time zone; empty = each sender's own zone
+    private static string CanonicalZone(CaseGuide? guide) =>
+        guide?.Organizations?.FirstOrDefault(o => o != null && !string.IsNullOrWhiteSpace(o.TimeZoneId))?.TimeZoneId.Trim() ?? string.Empty;
 
     // Every planned attachment in seq then plan order; returns true when the user cancelled during the step
     private async Task<bool> RunAttachmentsAsync(ThreadRenderContext ctx, RenderProfile profile, RenderedThread best,

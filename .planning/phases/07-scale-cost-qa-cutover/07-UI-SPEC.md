@@ -151,7 +151,7 @@ Batch hint variants (`GenerationUiText.BatchHint(plannedEmails, batchChecked, th
 | Checked | `Batch runs wait on the provider between waves and can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.` | `Warning` |
 
 - **Estimate line tooltip** (new; carries the per-model breakdown that no longer fits on one line next to two totals [DEFAULT]):
-  `Live: {Story model} ≈${s} · {Volume model} ≈${v}{mediaClause}. Batch: {Story model} ≈${sb} · {Volume model} ≈${vb}{mediaClause}. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it.` One model name when Story and Volume are the same (`Live: {model} ≈${l}`). `{mediaClause}` = ` · images and voicemail ≈${m}` when media is planned.
+  `Live: {Story model} ≈${s} · {Volume model} ≈${v}{mediaClause}. Batch: {Story model} ≈${sb} · {Volume model} ≈${vb}{mediaClause}. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings.` One model name when Story and Volume are the same (`Live: {model} ≈${l}`). `{mediaClause}` = ` · images and voicemail ≈${m}` when media is planned.
 - Both totals come from the single `GenerationCostEstimator.PriceWork` path (D-17). The batch total assumes no cache reads (research Pattern 5, conservative).
 - The checkbox state is read from and saved to the case on change (`CheckedChanged` writes the case draft; D-08). Default unchecked. Continue Generating, Retry Failed Items and Create Skipped Media reuse the saved choice; they show no checkbox.
 - The card never shows the checkbox on the Not-approved, Plan-changed or Unreadable cards.
@@ -207,8 +207,8 @@ The `Quality checks` group sits between Corpus and Case guide because it reports
 
 **R1. `Generation cost` (new, Corpus group, no buttons).**
 - Line 2: `What this case has cost so far, across all sessions.`
-- Line 3 (`QaUiText`/`GenerationUiText.CostRow`): not generated → `Nothing spent yet` (Muted); otherwise `${total:0.00} spent · input ${i:0.00} · cache write ${w:0.00} · cache read ${r:0.00} · output ${o:0.00} · batch discount −${b:0.00} · images and voicemail ${m:0.00}` (Muted; zero clauses after the total are dropped).
-- Line 3 tooltip: the same breakdown, one item per line (format of S6). Values come from journal lines (`CostUsd`, optional `CacheWriteTokens`/`CacheReadTokens`/`BatchSavingsUsd`) so the row survives restarts.
+- Line 3 (`QaUiText`/`GenerationUiText.CostRow`): not generated → `Nothing spent yet` (Muted); otherwise `${total:0.00} spent · input ${i:0.00} · cache write ${w:0.00} · cache read ${r:0.00} · output ${o:0.00} · batch discount −${b:0.00} · images and voicemail ${m:0.00} · not itemized ${u:0.00}` (Muted; zero clauses after the total are dropped). `not itemized` is spend recorded without a breakdown (journal lines written before Phase 7); the listed items always add up to the total. [Amended in planning revision 1]
+- Line 3 tooltip: the same breakdown, one item per line (format of S6), including `Not itemized: ${u:0.00}` when non-zero. Values come from journal lines (`CostUsd`, optional `CacheWriteTokens`/`CacheReadTokens`/`BatchSavingsUsd`) so the row survives restarts.
 - Dot: `BorderStrong` when nothing spent, `Success` otherwise.
 
 **R2. `Consistency scans` (new; D-15, runs automatically at run end).**
@@ -238,7 +238,7 @@ The `Quality checks` group sits between Corpus and Case guide because it reports
 
 - Line 3 tooltip: `Balanced accuracy of a simple model trained on metadata only, tested on threads it did not see (5-fold). Pass is 60% or lower, Warning is above 60% up to 70%, Fail is above 70%. Some signal is normal: real custodians and the dispute dates also predict relevance.` Thresholds are research A4 [ASSUMED]; the copy reads them from the same constants the audit uses.
 - Buttons: `View Report` (Default; visible once run), `Run Audit` (Default; always visible when the corpus has generated emails). Run Audit shows `Running the leakage audit...` in the status strip (Accent) and needs no confirmation (free, read-only).
-- `{signal}` formats (`QaUiText.SignalText`): `{feature}: only on relevant mail`, `{feature}: never on relevant mail`, `{feature}: {p:0}% relevant vs {base:0}% overall`. Feature names in plain words: `privilege banner`, `privileged subject tag`, `sender {address}`, `{n} or more CC recipients`, `sent on {weekday}`, `sent {hour bucket}` (`before 8 AM`, `8 AM to 6 PM`, `after 6 PM`), `subject length {bucket}`, `{kind} attachment`, `thread depth {n}+`.
+- `{signal}` formats (`QaUiText.SignalText`): `{feature}: only on relevant mail`, `{feature}: never on relevant mail`, `{feature}: {p:0}% relevant vs {base:0}% overall`. Feature names in plain words: `privilege banner`, `privileged subject tag`, `sender {address}`, `recipient {address}` (To or Cc; top addresses only) [amended in planning revision 1], `{n} or more CC recipients`, `sent on {weekday}`, `sent {hour bucket}` (`before 8 AM`, `8 AM to 6 PM`, `after 6 PM`), `subject length {bucket}`, `{kind} attachment`, `thread depth {n}+`.
 
 **R4. `Blind review` (new; D-11, D-12).**
 - Line 2: `A second model labels a sample of emails without seeing the answer key. Disagreements are listed for you to check.`
@@ -284,7 +284,7 @@ Modes (`QaUiText.FindingsContent(mode, ...)`):
 - Status column: rows queued for regeneration show `Queued` appended to the `Check`/`Reviewer` cell as ` · queued` [DEFAULT: avoids a 7th column at the 640 minimum].
 - Buttons (scan and blind-review modes): `Open Email` (Default; opens the sender's copy through the shell, same rule as Activity double-click), `Regenerate Thread...` (**Primary**, enabled only with a selected row whose thread is not queued), `Close` (Default, `DialogResult.Cancel`, initial focus when the grid is empty, otherwise the grid has focus). Leakage mode: `Close` only.
 - Double-click / Enter on a row = `Open Email`.
-- Footer status after a regeneration is queued: `{Plural(q, "thread")} queued for regeneration. Go to Generate Corpus and click Continue Generating to write {q == 1 ? "it" : "them"}.` (`Theme.Success`). Missing EML copies that could not be deleted: `{Plural(n, "EML file")} could not be deleted because {reason}. Close any program that has them open and delete them by hand.` (`Theme.Warning`).
+- Footer status after a regeneration is queued: `{Plural(q, "thread")} queued for regeneration. Go to Generate Corpus and click Continue Generating to write {q == 1 ? "it" : "them"}.` (`Theme.Success`). Missing EML copies that could not be deleted: `{Plural(n, "EML file")} could not be deleted because {reason}. Close any program that has them open and delete them by hand.` (`Theme.Warning`). Answer key could not be rewritten after the invalidation: `The answer key could not be updated: {reason}. It is updated again when you click Continue Generating.` (`Theme.Warning`, own line after the not-deleted line) [amended in planning revision 2].
 - Empty grid (all findings resolved or none): grid hidden, summary line reads `No findings.` and `Close` has focus.
 - **Regenerate Thread...** asks C-Q1. On Yes: journal the invalidation, delete the thread's EML copies, mark the row ` · queued`, update the footer, and refresh the Case Summary rows on close (Mailboxes row becomes partial, so the Generate Corpus partial-run banner appears; 06 banner rule).
 
@@ -375,6 +375,7 @@ Zero lines after the first are dropped. With nothing spent: `Nothing spent this 
 | Error state (whole batch) | `Batch failed at {provider}: {reason}. Its {Plural(n, "request")} run live at full price.` |
 | Error state (blind review) | `Blind review stopped: {message}. Reviewed emails are kept; run it again to finish.` |
 | Error state (regenerate) | `{Plural(n, "EML file")} could not be deleted because {reason}. Close any program that has them open and delete them by hand.` |
+| Cost breakdown (R1 / S6) | `{total} spent · input · cache write · cache read · output · batch discount · images and voicemail · not itemized` (zero clauses dropped; `not itemized` only for pre-Phase-7 spend) |
 | Destructive confirmation | Regenerate Thread: C-Q1. Cancel Review: C-Q2. Leave during review: C-Q3. Cancel Generation / Start Over / Close during a run: C-G1..C-G3 with the batch clauses in S1 |
 
 New confirmations (MessageBox, default button = the safe choice, `Button2`):

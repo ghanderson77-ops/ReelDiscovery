@@ -645,19 +645,24 @@ var completion = ModelReaderWriter.Read<ChatCompletion>(BinaryData.FromString(bo
 | A8 | Batch recommendation threshold about 2,000 planned emails | D-08 discretion | Only affects hint text |
 | A9 | Typical batch round latency is minutes (Anthropic) to tens of minutes (OpenAI) | Pitfall 1 | Batch mode could be impractically slow for relevant waves |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does Chat Completions on GPT-6 bill implicit cache writes, and does it accept explicit cache options?** (A1, A2)
    - What we know: the GPT-5.6+ docs say implicit is the default and writes cost 1.25x. The controls are shown for the Responses API only.
    - What's unclear: Chat Completions behaviour and usage fields.
    - Recommendation: **Wave 0 live spike** (with user consent, a few cents). Make 2 identical and 2 different-suffix calls with gpt-6-luna on `/v1/chat/completions`. Log raw usage JSON. Try `prompt_cache_options: {"mode":"explicit"}` via `Patch`. Decide OpenAI caching mode from the results.
+   - **RESOLVED:** 07-22 runs the consented live spike (Tasks 1-3) and applies one recorded branch; until then 07-02 reads `cache_write_tokens` when present and sends no cache options (degrades safely).
 2. **Is "everything in batch, wave by wave" acceptable given about 60-90 serial batch rounds for relevant waves?**
    - What we know: waves are at most 12 threads (`WavePlanner`). Batches take "most less than 1 hour".
    - Recommendation: keep D-07 as locked. Measure one real round in the spike and surface the expected duration on the Ready card. If the user finds it too slow, the cheapest amendment is "relevant waves live, Stage B batched". About 2/3 of spend is Story-tier relevant work, so that amendment keeps roughly 1/6 of the savings. Flag it for discuss-phase rather than deciding here.
+   - **RESOLVED (planner default, user-overridable):** D-07 kept; the Ready-card hint warns batch runs can take several hours (07-11); real round latency recorded by the 07-22 spike.
 3. **Regenerate thread semantics for a relevant thread whose details later waves already used.**
    - Recommendation: Pattern 9 late-render rule (old deltas canonical, new deltas not merged). Confirm with the user that a regenerated relevant thread may not introduce new details.
+   - **RESOLVED (planner default, user-overridable):** a regenerated relevant thread keeps its prior established details and adds none (07-13).
 4. **Should edited prices persist across sessions?** Today the catalog and media prices are session-only. D-18 does not say. Recommend keeping them session-only (no new settings file, consistent with D-22's no-new-legacy-files spirit) unless the user asks.
+   - **RESOLVED:** prices stay session-only (07-12).
 5. **Reviewer tier:** the other provider's Volume model (cheap) versus Story (stronger judge). Recommend Volume by default with the model shown in the estimate line.
+   - **RESOLVED:** the reviewer uses the other provider's Volume model for both tiers (07-16).
 
 ## Environment Availability
 

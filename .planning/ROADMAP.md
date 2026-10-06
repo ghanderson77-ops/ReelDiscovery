@@ -228,7 +228,31 @@ Plans:
   3. A roughly 5,000-email run completes with the expected file and answer-key counts and without running out of memory.
   4. The user can run a blind-review pass that flags label disagreements for relabel or regeneration, a metadata-only leakage audit with a reported result, and timeline/value scans that flag future-fact references or canonical-value contradictions.
   5. The old topic/storyline wizard steps and their dead generation code are gone, and the app opens directly into the case-driven flow.
-**Plans**: TBD
+**Plans**: 22 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — TokenUsage/CostBreakdown, cache and batch prices per model, gateway billing and tracker breakdown (Wave 1)
+- [ ] 07-02-PLAN.md — Anthropic block-level cache marker, cache usage normalization on both providers (Wave 2)
+- [ ] 07-03-PLAN.md — Folded fixes: privilege parity (D-23), invite times across zones (D-24), Start Over delete retry (D-25) (Wave 1)
+- [ ] 07-04-PLAN.md — ThemeSanitizer moved out of ThemeGenerator; D-26 theme cleaning on the business HTML path (Wave 1)
+- [ ] 07-05-PLAN.md — Gateway cost through units and runner; journal cost detail and writer provider (Wave 2)
+- [ ] 07-06-PLAN.md — Live and batch totals from one PriceWork with the cache term (Wave 2)
+- [ ] 07-07-PLAN.md — Batch contracts, request identity, on-disk batch ledger, fake transport (Wave 2)
+- [ ] 07-08-PLAN.md — BatchingLlmProvider decorator (queue, flush, poll, live fallback, restart recovery) (Wave 3)
+- [ ] 07-09-PLAN.md — Anthropic and OpenAI batch transports with live-parity wire tests (Wave 3)
+- [ ] 07-10-PLAN.md — Runner batch integration, snapshot batch status, Start Over cleanup, D-05 parity proof (Wave 4)
+- [ ] 07-11-PLAN.md — Generate Corpus UI: batch checkbox, live/batch estimate, batch wait rows and events (Wave 5)
+- [ ] 07-12-PLAN.md — Model dialog cache/batch price columns and header cost tooltip (Wave 2)
+- [ ] 07-13-PLAN.md — Regenerate thread: ThreadInvalidated record, replay, consistent relevant re-render (Wave 5)
+- [ ] 07-14-PLAN.md — QA report store and metadata-only leakage audit (Wave 2)
+- [ ] 07-15-PLAN.md — Timeline/value consistency scans and automatic end-of-run QA (Wave 6)
+- [ ] 07-16-PLAN.md — Blind reviewer on the other provider: sample, prompts, estimate, resumable log (Wave 3)
+- [ ] 07-17-PLAN.md — QA copy, findings dialog with Regenerate Thread, blind review dialog (Wave 6)
+- [ ] 07-18-PLAN.md — Case Summary Quality checks group and Generation cost row (Wave 7)
+- [ ] 07-19-PLAN.md — Single case-driven flow, API step cleanup, no legacy key migration (Wave 6)
+- [ ] 07-20-PLAN.md — Delete the legacy wizard, generators, models and tests (Wave 7)
+- [ ] 07-21-PLAN.md — Adaptive key projection and 5K scale tests in live and batch modes (Wave 8)
+- [ ] 07-22-PLAN.md — Live provider spike, real batch round trip with restart, UAT at 150% (Wave 9, checkpoints)
 **UI hint**: yes
 
 ### Phase 8: Ancillary Discovery Documents

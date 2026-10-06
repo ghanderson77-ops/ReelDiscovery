@@ -48,8 +48,8 @@ public class OpenAITextProvider : ILlmProvider
         try
         {
             var chatClient = _chatClients.GetOrAdd(request.ModelId, id => _client.GetChatClient(id));
-            ChatCompletion completion = (await chatClient.CompleteChatAsync(BuildMessages(request), BuildOptions(request), ct)).Value;
-            return Classify(completion);
+            var result = await chatClient.CompleteChatAsync(BuildMessages(request), BuildOptions(request), ct);
+            return Classify(result.Value, result.GetRawResponse().Content);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -110,6 +110,7 @@ public class OpenAITextProvider : ILlmProvider
 
     internal static ChatCompletionOptions BuildOptions(LlmProviderRequest r)
     {
+        // No prompt cache options are sent: implicit caching stays the default until the 07-22 live spike (OQ1)
         // Sampling parameters (temperature/top_p) are never sent: reasoning models reject non-default values
         var options = new ChatCompletionOptions
         {
@@ -139,11 +140,18 @@ public class OpenAITextProvider : ILlmProvider
         new UserChatMessage(r.UserPrompt)
     };
 
-    internal static LlmProviderResponse Classify(ChatCompletion c)
+    internal static LlmProviderResponse Classify(ChatCompletion c, BinaryData? rawBody = null)
     {
+        // OpenAI prompt_tokens is inclusive; GPT-5.6+ implicit caching may bill writes at 1.25x and reports them
+        // only in the raw JSON (research A1; verified live in 07-22)
+        var prompt = Math.Max(0, c.Usage?.InputTokenCount ?? 0);
+        var cached = Math.Max(0, c.Usage?.InputTokenDetails?.CachedTokenCount ?? 0);
+        var write = ReadCacheWriteTokens(rawBody);
         var response = new LlmProviderResponse
         {
-            InputTokens = c.Usage?.InputTokenCount ?? 0,
+            InputTokens = Math.Max(0, prompt - cached - write),
+            CacheReadTokens = cached,
+            CacheWriteTokens = write,
             OutputTokens = c.Usage?.OutputTokenCount ?? 0
         };
 
@@ -177,6 +185,42 @@ public class OpenAITextProvider : ILlmProvider
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// Reads usage.prompt_tokens_details.cache_write_tokens from the raw response JSON (the SDK has no typed
+    /// property). Returns 0 when the body, any level or the value is missing, malformed or not a non-negative integer.
+    /// </summary>
+    internal static int ReadCacheWriteTokens(BinaryData? raw)
+    {
+        if (raw == null)
+            return 0;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw.ToMemory());
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("usage", out var usage)
+                && usage.ValueKind == JsonValueKind.Object
+                && usage.TryGetProperty("prompt_tokens_details", out var details)
+                && details.ValueKind == JsonValueKind.Object
+                && details.TryGetProperty("cache_write_tokens", out var write)
+                && write.ValueKind == JsonValueKind.Number
+                && write.TryGetInt32(out var tokens))
+            {
+                return Math.Max(0, tokens);
+            }
+        }
+        catch (JsonException)
+        {
+            // Usage detail is optional; a missing or odd field must never fail a paid call
+        }
+        catch (ArgumentException)
+        {
+            // Usage detail is optional; a missing or odd field must never fail a paid call
+        }
+
+        return 0;
     }
 
     /// <summary>

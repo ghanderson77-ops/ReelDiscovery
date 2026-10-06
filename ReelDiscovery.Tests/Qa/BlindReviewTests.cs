@@ -10,6 +10,7 @@ using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Services.Qa;
 using ReelDiscovery.Tests.Corpus;
+using ReelDiscovery.Tests.Evidence;
 using ReelDiscovery.Tests.Fakes;
 
 namespace ReelDiscovery.Tests.Qa;

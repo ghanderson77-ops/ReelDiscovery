@@ -2,6 +2,7 @@ using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Services.Qa;
 using ReelDiscovery.Tests.Fakes;
 
 namespace ReelDiscovery.Tests.Case;
@@ -29,6 +30,8 @@ public class CaseSchemaTests
             data.Add(nameof(CastVoiceBuilder), type);
         foreach (var type in FillerRenderer.SchemaTypes)
             data.Add(nameof(FillerRenderer), type);
+        foreach (var type in BlindReviewer.SchemaTypes)
+            data.Add(nameof(BlindReviewer), type);
         return data;
     }
 

@@ -278,6 +278,51 @@ public class GenerationJournalTests : IDisposable
         Assert.Empty(replay.LastByThread);
     }
 
+    // IN-06: a line past the stop line is refused, so the journal never grows past what replay reads
+    [Fact]
+    public async Task Append_PastStopLine_RefusedFileUnchanged_ReplayStaysReadable()
+    {
+        var journal = new GenerationJournal(_folder);
+        await journal.AppendAsync(Started());
+        await journal.AppendAsync(Done("T-0003"));
+        var path = GenerationJournal.PathFor(_folder);
+        var before = File.ReadAllBytes(path);
+        GenerationJournal.SizeCapOverride = before.Length + 40;
+
+        var ex = await Assert.ThrowsAsync<JournalFullException>(() => journal.AppendAsync(Done("T-0005")));
+
+        Assert.IsAssignableFrom<IOException>(ex);
+        Assert.Equal(GenerationJournal.FullMessage, ex.Message);
+        Assert.True(journal.IsFull);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        var replay = GenerationJournal.Replay(_folder, _plan);
+        Assert.True(replay.Readable);
+        Assert.Equal(new[] { "T-0003" }, replay.LastByThread.Keys);
+    }
+
+    [Fact]
+    public async Task Append_RunEnded_MayUseTheRestOfTheCap()
+    {
+        var ended = new JournalRecord { Type = JournalRecordType.RunEnded, PlanId = _plan.PlanId, Utc = DateTime.UtcNow };
+        var probeFolder = Path.Combine(_folder, "probe");
+        Directory.CreateDirectory(probeFolder);
+        await new GenerationJournal(probeFolder).AppendAsync(ended);
+        var endedLength = new FileInfo(GenerationJournal.PathFor(probeFolder)).Length;
+
+        var journal = new GenerationJournal(_folder);
+        await journal.AppendAsync(Started());
+        var length = new FileInfo(GenerationJournal.PathFor(_folder)).Length;
+
+        // Exactly room for the RunEnded line under the cap; a large thread line crosses the 90% stop line
+        GenerationJournal.SizeCapOverride = length + endedLength + 1;
+        var files = Enumerable.Range(1, 20).Select(i => $"Mailboxes/pat.lee/Inbox/PL-{i:000000}.eml").ToArray();
+        await Assert.ThrowsAsync<JournalFullException>(() => journal.AppendAsync(Done("T-0003", null, files)));
+        await journal.AppendAsync(ended);
+
+        GenerationJournal.SizeCapOverride = 0;
+        Assert.True(GenerationJournal.Replay(_folder, _plan).Readable);
+    }
+
     [Fact]
     public void Replay_Missing_NotExists()
     {

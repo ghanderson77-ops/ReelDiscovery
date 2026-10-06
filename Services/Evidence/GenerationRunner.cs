@@ -465,6 +465,12 @@ public class GenerationRunner
             outcome = GenerationOutcome.Cancelled;
             message = string.Empty;
         }
+        catch (JournalFullException ex)
+        {
+            // IN-06: the journal was already at its stop line (RunStarted refused): nothing was called or written
+            outcome = GenerationOutcome.Fatal;
+            message = ex.Message;
+        }
         catch (Exception ex)
         {
             outcome = GenerationOutcome.InternalError;
@@ -743,6 +749,7 @@ public class GenerationRunner
             started = true;
             var outcome = await ctx.Repair.RepairThreadAsync(render, profile, state.Records[threadId], state.AttachmentRecords, group,
                 actx, run).ConfigureAwait(false);
+            StopIfJournalFull(ctx, run);
 
             // Checker 06-19: tokens and dollars each counted exactly once
             if (outcome.Unjournaled)
@@ -792,6 +799,7 @@ public class GenerationRunner
             }
 
             outcome = await uow.RunAsync(render, profile, run, attachments).ConfigureAwait(false);
+            StopIfJournalFull(ctx, run);
         }
         catch (Exception)
         {
@@ -1086,6 +1094,13 @@ public class GenerationRunner
 
     private static decimal ModelCost(AIModelConfig? model, int inputTokens, int outputTokens) =>
         model?.CalculateTotalCost(inputTokens, outputTokens) ?? 0m;
+
+    // IN-06: once the journal refuses lines, every further call would be paid for and never saved; stop the run instead
+    private static void StopIfJournalFull(RunContext ctx, PlanCallRun run)
+    {
+        if (ctx.Journal.IsFull)
+            run.SetFatal(GenerationJournal.FullMessage);
+    }
 
     // CastVoices and SideWorld must be durable before anything uses them; the caller decides what a failure means
     private async Task AppendOwnRecordAsync(GenerationJournal journal, JournalRecord record)

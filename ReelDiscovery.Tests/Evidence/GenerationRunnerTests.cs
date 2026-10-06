@@ -423,6 +423,78 @@ public partial class GenerationRunnerTests : IDisposable
         Assert.False(snapshot.Peek().Counts.Finished);
     }
 
+    // IN-06: a thread line refused at the journal stop line ends the run as a fatal stop; the journal stays readable
+    [Fact]
+    public async Task JournalAtStopLine_StopsRunFatal_JournalStaysReadable()
+    {
+        _fake.Respond = Responder();
+        var snapshot = new GenerationSnapshot();
+
+        // Room for RunStarted and RunEnded only: the first ThreadDone line (message bodies) crosses the 90% stop line
+        var probeFolder = Path.Combine(_folder, "probe");
+        Directory.CreateDirectory(probeFolder);
+        var probe = new GenerationJournal(probeFolder);
+        await probe.AppendAsync(new JournalRecord { Type = JournalRecordType.RunStarted, PlanId = _plan.PlanId, Utc = DateTime.UtcNow });
+        await probe.AppendAsync(new JournalRecord
+        {
+            Type = JournalRecordType.RunEnded,
+            PlanId = _plan.PlanId,
+            Utc = DateTime.UtcNow,
+            Outcome = GenerationOutcome.Fatal,
+            Message = GenerationJournal.FullMessage,
+            InputTokens = 999_999,
+            OutputTokens = 999_999,
+            CostUsd = 99.999999m
+        });
+        var controlBytes = new FileInfo(GenerationJournal.PathFor(probeFolder)).Length;
+        Directory.Delete(probeFolder, recursive: true);
+        GenerationJournal.SizeCapOverride = controlBytes + 64;
+        GenerationRunResult result;
+        try
+        {
+            result = await new GenerationRunner(_gateway, 1).RunAsync(Input, snapshot, Persist);
+        }
+        finally
+        {
+            GenerationJournal.SizeCapOverride = 0;
+        }
+
+        Assert.Equal(GenerationOutcome.Fatal, result.Outcome);
+        Assert.Equal(GenerationJournal.FullMessage, result.Message);
+        Assert.Single(RequestedThreads().Distinct());
+        var replay = Replay();
+        Assert.True(replay.Readable);
+        Assert.Empty(replay.LastByThread);
+        Assert.Equal(new[] { JournalRecordType.RunStarted, JournalRecordType.RunEnded }, JournalRecords().Select(r => r.Type));
+        Assert.Contains(snapshot.Peek().Events, e => e.Kind == GenerationEventKind.NotSaved);
+        Assert.Empty(Directory.Exists(Path.Combine(_folder, "Mailboxes"))
+            ? Directory.GetFiles(Path.Combine(_folder, "Mailboxes"), "*.eml", SearchOption.AllDirectories)
+            : Array.Empty<string>());
+    }
+
+    [Fact]
+    public async Task JournalAlreadyPastStopLine_StopsBeforeAnyCall()
+    {
+        _fake.Respond = Responder();
+        var journal = new GenerationJournal(_folder);
+        await journal.AppendAsync(new JournalRecord { Type = JournalRecordType.RunStarted, PlanId = _plan.PlanId, Utc = DateTime.UtcNow });
+
+        GenerationJournal.SizeCapOverride = new FileInfo(GenerationJournal.PathFor(_folder)).Length + 10;
+        GenerationRunResult result;
+        try
+        {
+            result = await new GenerationRunner(_gateway, 1).RunAsync(Input, new GenerationSnapshot(), Persist);
+        }
+        finally
+        {
+            GenerationJournal.SizeCapOverride = 0;
+        }
+
+        Assert.Equal(GenerationOutcome.Fatal, result.Outcome);
+        Assert.Equal(GenerationJournal.FullMessage, result.Message);
+        Assert.Empty(RequestedThreads());
+    }
+
     [Fact]
     public async Task KilledRun_TornJournalAndOrphanFiles_ContinueRewritesThread()
     {

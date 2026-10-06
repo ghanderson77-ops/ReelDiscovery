@@ -78,6 +78,22 @@ public class GenerationJournal
 
     internal static long SizeCapOverride { get => _sizeCapOverride.Value; set => _sizeCapOverride.Value = value; }
 
+    /// <summary>
+    /// IN-06: appends stop at 90% of the replay cap so the journal never grows past what replay reads; the small RunEnded
+    /// audit line may still use the rest.
+    /// </summary>
+    public static long StopBytes => Cap * 9 / 10;
+
+    public static string FullMessage =>
+        $"The saved run is close to its {MaxJournalBytes / (1024 * 1024)} MB limit, so the run stopped to keep everything saved so far readable.";
+
+    private static long Cap => SizeCapOverride > 0 ? SizeCapOverride : MaxJournalBytes;
+
+    private volatile bool _isFull;
+
+    /// <summary>True once an append was refused because the journal reached <see cref="StopBytes"/> (IN-06).</summary>
+    public bool IsFull => _isFull;
+
     private static readonly JsonSerializerOptions LineOptions = new(CaseDraft.JsonOptions) { WriteIndented = false };
 
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -96,7 +112,9 @@ public class GenerationJournal
         !string.IsNullOrWhiteSpace(caseFolder) && File.Exists(PathFor(caseFolder));
 
     /// <summary>
-    /// Appends one record as a single line and flushes it to disk. IO failures propagate to the caller.
+    /// Appends one record as a single line and flushes it to disk. IO failures propagate to the caller. A line that would
+    /// take the journal past <see cref="StopBytes"/> (RunEnded: past the replay cap) is refused with a
+    /// <see cref="JournalFullException"/>, so the journal stays readable and the run can stop cleanly (IN-06).
     /// </summary>
     public async Task AppendAsync(JournalRecord record, CancellationToken ct = default)
     {
@@ -108,6 +126,14 @@ public class GenerationJournal
         {
             // One write per line + flush: a kill leaves at most a torn last line, which replay skips (RUN-01)
             await using var stream = new FileStream(FilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+
+            // + 1 for a newline that may be added after a torn last line
+            var limit = record.Type == JournalRecordType.RunEnded ? Cap : StopBytes;
+            if (stream.Length + bytes.Length + 1 > limit)
+            {
+                _isFull = true;
+                throw new JournalFullException(FullMessage);
+            }
 
             // A kill can leave a torn last line with no newline; start a fresh line so this record is not fused onto it
             if (stream.Length > 0)
@@ -352,11 +378,7 @@ public class GenerationJournal
             File.Delete(path);
     }
 
-    private static bool TooLarge(string path)
-    {
-        var cap = SizeCapOverride > 0 ? SizeCapOverride : MaxJournalBytes;
-        return new FileInfo(path).Length > cap;
-    }
+    private static bool TooLarge(string path) => new FileInfo(path).Length > Cap;
 
     // Parsed, normalized records with a defined Type; skipped lines are reported through onSkipped
     private static IEnumerable<JournalRecord> ReadRecords(string path, Action onSkipped)
@@ -405,5 +427,16 @@ public class GenerationJournal
 
             yield return record;
         }
+    }
+}
+
+/// <summary>
+/// An append was refused because the journal reached <see cref="GenerationJournal.StopBytes"/> (IN-06). An IOException,
+/// so every append caller treats it as a journal-save failure; the runner turns it into a fatal stop.
+/// </summary>
+public class JournalFullException : IOException
+{
+    public JournalFullException(string message) : base(message)
+    {
     }
 }

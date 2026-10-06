@@ -150,7 +150,7 @@ public partial class WizardForm : Form
         get
         {
             UpdateCostDisplay();
-            return _costToolTip.GetToolTip(_lblCostTracker);
+            return _costToolTip.GetToolTip(_lblCostTracker) ?? "";
         }
     }
 

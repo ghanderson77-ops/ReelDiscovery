@@ -1249,7 +1249,8 @@ public class GenerationUiTextTests
     private static GenerationReadyInput Ready(
         int relevant = 12, int nonRelevant = 30, int emails = 95, int waves = 4, int attachments = 9,
         decimal story = 3.2m, decimal volume = 0.7m, decimal media = 0.2m, string storyModel = "Claude Sonnet",
-        string volumeModel = "Claude Haiku", int mediaPlanned = 4, bool mediaAvailable = true) =>
+        string volumeModel = "Claude Haiku", int mediaPlanned = 4, bool mediaAvailable = true, decimal? live = null,
+        decimal batchStory = 1.6m, decimal batchVolume = 0.35m, decimal? batchTotal = null, bool batchChecked = false) =>
         new()
         {
             RelevantThreads = relevant,
@@ -1263,7 +1264,12 @@ public class GenerationUiTextTests
             StoryModel = storyModel,
             VolumeModel = volumeModel,
             MediaPlanned = mediaPlanned,
-            MediaAvailable = mediaAvailable
+            MediaAvailable = mediaAvailable,
+            LiveTotal = live ?? story + volume + (mediaPlanned > 0 ? media : 0m),
+            BatchStoryCost = batchStory,
+            BatchVolumeCost = batchVolume,
+            BatchTotal = batchTotal ?? batchStory + batchVolume + (mediaPlanned > 0 ? media : 0m),
+            BatchChecked = batchChecked
         };
 
     [Fact]
@@ -1275,7 +1281,11 @@ public class GenerationUiTextTests
         Assert.Equal(
             "Generate Emails writes the 12 relevant threads first, oldest first in 4 waves, then the 30 non-relevant threads: 95 emails in total, with 9 attachments. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later.",
             card.Body);
-        Assert.Equal("Estimated cost ≈$4.10, ±50%: Claude Sonnet ≈$3.20 · Claude Haiku ≈$0.70 · images and voicemail ≈$0.20", card.EstimateLine);
+        Assert.Equal("Estimated cost ≈$4.10 at live prices or ≈$2.15 with batch pricing, ±50%, including prompt caching.", card.EstimateLine);
+        Assert.Equal(
+            "Live: Claude Sonnet ≈$3.20 · Claude Haiku ≈$0.70 · images and voicemail ≈$0.20. Batch: Claude Sonnet ≈$1.60 · Claude Haiku ≈$0.35 · images and voicemail ≈$0.20. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings.",
+            card.EstimateTooltip);
+        Assert.Equal("", card.BatchHint);
         Assert.Equal("", card.MediaNotice);
         Assert.Equal("Generate Emails", card.ButtonText);
         Assert.False(card.Danger);
@@ -1285,10 +1295,14 @@ public class GenerationUiTextTests
     public void ReadyCard_SameModel_AndNoMedia()
     {
         var card = GenerationUiText.ReadyCard(Ready(volumeModel: "Claude Sonnet", mediaPlanned: 0, media: 0m));
-        Assert.Equal("Estimated cost ≈$3.90 on Claude Sonnet, ±50%", card.EstimateLine);
+        Assert.Equal("Estimated cost ≈$3.90 at live prices or ≈$1.95 with batch pricing, ±50%, including prompt caching.", card.EstimateLine);
+        Assert.Equal(
+            "Live: Claude Sonnet ≈$3.90. Batch: Claude Sonnet ≈$1.95. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings.",
+            card.EstimateTooltip);
 
         var withMedia = GenerationUiText.ReadyCard(Ready(volumeModel: "Claude Sonnet"));
-        Assert.Equal("Estimated cost ≈$4.10 on Claude Sonnet, ±50% · images and voicemail ≈$0.20", withMedia.EstimateLine);
+        Assert.Equal("Estimated cost ≈$4.10 at live prices or ≈$2.15 with batch pricing, ±50%, including prompt caching.", withMedia.EstimateLine);
+        Assert.StartsWith("Live: Claude Sonnet ≈$3.90 · images and voicemail ≈$0.20. Batch: Claude Sonnet ≈$1.95 · images and voicemail ≈$0.20. ", withMedia.EstimateTooltip);
     }
 
     [Fact]
@@ -1325,8 +1339,9 @@ public class GenerationUiTextTests
     [Fact]
     public void ReadyCard_LargeCost()
     {
-        var card = GenerationUiText.ReadyCard(Ready(story: 200m, volume: 50m, media: 0m, mediaPlanned: 0));
-        Assert.Equal("Estimated cost ≈$250, ±50%: Claude Sonnet ≈$200 · Claude Haiku ≈$50.00", card.EstimateLine);
+        var card = GenerationUiText.ReadyCard(Ready(story: 200m, volume: 50m, media: 0m, mediaPlanned: 0, batchStory: 100m, batchVolume: 25m));
+        Assert.Equal("Estimated cost ≈$250 at live prices or ≈$125 with batch pricing, ±50%, including prompt caching.", card.EstimateLine);
+        Assert.StartsWith("Live: Claude Sonnet ≈$200 · Claude Haiku ≈$50.00. Batch: Claude Sonnet ≈$100 · Claude Haiku ≈$25.00. ", card.EstimateTooltip);
     }
 
     [Fact]
@@ -1338,7 +1353,7 @@ public class GenerationUiTextTests
         Assert.Equal(
             "Generate Emails writes the 12 relevant threads, oldest first in 4 waves: 30 emails in total. Each finished thread is saved straight to the custodians' mailboxes, so you can stop at any time and continue later.",
             card.Body);
-        Assert.Equal("Estimated cost ≈$3.20 on Claude Sonnet, ±50%", card.EstimateLine);
+        Assert.StartsWith("Estimated cost ≈$3.20 at live prices", card.EstimateLine);
         Assert.Equal("Generate Emails", card.ButtonText);
         Assert.False(card.Danger);
     }
@@ -1870,5 +1885,294 @@ public class GenerationUiTextTests
         var row = GenerationUiText.CostRow(true, 2m, 0m, 0m, 0m, 0m, 0m, 0m, 2m);
         Assert.Equal("$2.00 spent · not itemized $2.00", row.Line3);
         Assert.Equal(SummaryTone.Success, row.DotTone);
+    }
+
+    // --- 07 S1: batch pricing and the live/batch estimate ---
+
+    [Fact]
+    public void EstimateLine_TwoTotals()
+    {
+        Assert.Equal("Estimated cost ≈$41.20 at live prices or ≈$21.70 with batch pricing, ±50%, including prompt caching.",
+            GenerationUiText.EstimateLine(41.2m, 21.7m));
+        Assert.Equal("Estimated cost ≈$412 at live prices or ≈$217 with batch pricing, ±50%, including prompt caching.",
+            GenerationUiText.EstimateLine(412m, 217m));
+    }
+
+    [Fact]
+    public void EstimateTooltip_NoMedia_DropsMediaClause()
+    {
+        var tooltip = GenerationUiText.EstimateTooltip(Ready(mediaPlanned: 0), false, 0m);
+        Assert.StartsWith("Live: Claude Sonnet ≈$3.20 · Claude Haiku ≈$0.70. Batch: Claude Sonnet ≈$1.60 · Claude Haiku ≈$0.35. Images and voicemail", tooltip);
+        AssertNoBannedWords(tooltip);
+    }
+
+    [Fact]
+    public void BatchCheckboxText_IsTheContractCopy()
+    {
+        Assert.Equal("Use batch pricing (slower, about half the cost)", GenerationUiText.BatchCheckboxText);
+        Assert.Equal(2_000, GenerationUiText.BatchRecommendThreshold);
+    }
+
+    [Fact]
+    public void BatchHint_Boundary_1999_2000()
+    {
+        Assert.Equal("", GenerationUiText.BatchHint(1999, false, 2000).Text);
+        var recommend = GenerationUiText.BatchHint(2000, false, 2000);
+        Assert.Equal("Batch pricing is recommended for a corpus this size. It waits on the provider between waves, so the run can take several hours.", recommend.Text);
+        Assert.Equal(SummaryTone.Muted, recommend.Tone);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1999)]
+    [InlineData(5000)]
+    public void BatchHint_Checked_IsWarning(int planned)
+    {
+        var hint = GenerationUiText.BatchHint(planned, true, 2000);
+        Assert.Equal("Batch runs wait on the provider between waves and can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.", hint.Text);
+        Assert.Equal(SummaryTone.Warning, hint.Tone);
+    }
+
+    [Fact]
+    public void ReadyCard_BatchHint_FollowsEmailsAndChoice()
+    {
+        Assert.Equal("", GenerationUiText.ReadyCard(Ready(emails: 1999)).BatchHint);
+        var recommend = GenerationUiText.ReadyCard(Ready(emails: 2500));
+        Assert.StartsWith("Batch pricing is recommended", recommend.BatchHint);
+        Assert.Equal(SummaryTone.Muted, recommend.BatchHintTone);
+        var checkedCard = GenerationUiText.ReadyCard(Ready(emails: 10, batchChecked: true));
+        Assert.StartsWith("Batch runs wait on the provider", checkedCard.BatchHint);
+        Assert.Equal(SummaryTone.Warning, checkedCard.BatchHintTone);
+    }
+
+    private static readonly DateTime Today = new(2026, 10, 6, 16, 0, 0, DateTimeKind.Local);
+
+    private static WaveProgress Waiting(int count = 1, int done = 3, int total = 5, DateTime? submittedLocal = null, StageRowKind kind = StageRowKind.Wave) => new()
+    {
+        Index = 3,
+        Start = new DateOnly(2024, 3, 4),
+        End = new DateOnly(2024, 3, 17),
+        RowKind = kind,
+        BatchWaiting = true,
+        BatchCount = count,
+        BatchDone = done,
+        BatchTotal = total,
+        BatchFirstSubmittedUtc = (submittedLocal ?? new DateTime(2026, 10, 6, 14, 14, 0, DateTimeKind.Local)).ToUniversalTime(),
+        BatchNextCheckUtc = Today.ToUniversalTime().AddSeconds(25)
+    };
+
+    [Fact]
+    public void BatchWaitText_OneBatch_Today()
+    {
+        Assert.Equal("Waiting on provider batch, submitted 2:14 PM, 3 of 5 requests done",
+            GenerationUiText.BatchWaitText(Waiting(), Today));
+    }
+
+    [Fact]
+    public void BatchWaitText_TwoBatches()
+    {
+        Assert.Equal("Waiting on 2 provider batches, first submitted 2:14 PM, 3 of 5 requests done",
+            GenerationUiText.BatchWaitText(Waiting(count: 2), Today));
+    }
+
+    [Fact]
+    public void BatchWaitText_Yesterday_ShowsDate()
+    {
+        Assert.Equal("Waiting on provider batch, submitted Oct 5, 2:14 PM, 3 of 5 requests done",
+            GenerationUiText.BatchWaitText(Waiting(submittedLocal: new DateTime(2026, 10, 5, 14, 14, 0, DateTimeKind.Local)), Today));
+    }
+
+    [Theory]
+    [InlineData(0, "0 of 0 requests done")]
+    [InlineData(1, "0 of 1 request done")]
+    [InlineData(2, "0 of 2 requests done")]
+    [InlineData(1000, "0 of 1,000 requests done")]
+    public void BatchWaitText_Plurals(int n, string expectedEnd)
+    {
+        Assert.EndsWith(expectedEnd, GenerationUiText.BatchWaitText(Waiting(done: 0, total: n), Today));
+    }
+
+    [Fact]
+    public void BatchWaitText_NotWaiting_IsEmpty()
+    {
+        var row = Waiting();
+        row.BatchWaiting = false;
+        Assert.Equal("", GenerationUiText.BatchWaitText(row, Today));
+    }
+
+    [Fact]
+    public void BatchWaitTooltip_HasCountdown()
+    {
+        Assert.Equal("Mar 4 – Mar 17, 2024. Waiting on provider batch, submitted 2:14 PM, 3 of 5 requests done. Next check in 25 s.",
+            GenerationUiText.BatchWaitTooltip("Mar 4 – Mar 17, 2024", GenerationUiText.BatchWaitText(Waiting(), Today), 25));
+    }
+
+    [Fact]
+    public void ProgressText_BatchWait_WaveAndNonRelevant()
+    {
+        var view = new GenerationView { Stage = GenerationStage.Writing, StageWave = 3, StageWaveCount = 14, Waves = { Waiting() } };
+        Assert.Equal("Wave 3 of 14 (Mar 4 – Mar 17, 2024): waiting on provider batch, 3 of 5 requests done. Next check in 25 s.",
+            GenerationUiText.ProgressText(view, Today.ToUniversalTime()));
+
+        var filler = new GenerationView { Stage = GenerationStage.NonRelevant, Waves = { Waiting(done: 1000, total: 2000, kind: StageRowKind.NonRelevant) } };
+        Assert.Equal("Non-relevant mail: waiting on provider batch, 1,000 of 2,000 requests done. Next check in 25 s.",
+            GenerationUiText.ProgressText(filler, Today.ToUniversalTime()));
+    }
+
+    [Fact]
+    public void ProgressText_BatchWait_CountdownNeverNegative()
+    {
+        var view = new GenerationView { Stage = GenerationStage.Writing, StageWave = 3, StageWaveCount = 14, Waves = { Waiting(total: 1) } };
+        Assert.EndsWith("0 of 1 request done. Next check in 0 s.", GenerationUiText.ProgressText(view, Today.ToUniversalTime().AddMinutes(5)));
+    }
+
+    [Fact]
+    public void ProgressText_CollectingAfterRestart()
+    {
+        var view = new GenerationView { Stage = GenerationStage.Writing, CollectingAfterRestart = true };
+        Assert.Equal("Collecting batches submitted before the app closed...", GenerationUiText.ProgressText(view, Today.ToUniversalTime()));
+    }
+
+    [Fact]
+    public void ProgressText_NoBatch_UnchangedAndStoppingWins()
+    {
+        var view = new GenerationView { Stage = GenerationStage.UpdatingKey };
+        Assert.Equal("Updating the answer key...", GenerationUiText.ProgressText(view, Today.ToUniversalTime()));
+
+        var stopping = new GenerationView { Stage = GenerationStage.Stopping, Waves = { Waiting() } };
+        Assert.Equal(GenerationUiText.StoppingText, GenerationUiText.ProgressText(stopping, Today.ToUniversalTime()));
+    }
+
+    private static GenerationEvent BatchEvent(GenerationEventKind kind, int requests = 40, string stage = "wave 3")
+    {
+        var e = Event(kind);
+        e.BatchRequests = requests;
+        e.BatchProvider = "Anthropic";
+        e.BatchStage = stage;
+        return e;
+    }
+
+    [Fact]
+    public void Activity_BatchSubmitted()
+    {
+        var line = GenerationUiText.ActivityText(BatchEvent(GenerationEventKind.BatchSubmitted));
+        Assert.Equal("Batch submitted: 40 requests to Anthropic for wave 3", line.Text);
+        Assert.Equal(ActivityTone.Accent, line.Tone);
+
+        Assert.Equal("Batch submitted: 1 request to Anthropic for non-relevant mail",
+            GenerationUiText.ActivityText(BatchEvent(GenerationEventKind.BatchSubmitted, 1, "non-relevant mail")).Text);
+    }
+
+    [Fact]
+    public void Activity_BatchFinished_Durations()
+    {
+        var e = BatchEvent(GenerationEventKind.BatchFinished);
+        e.BatchSucceeded = 40;
+        e.BatchDuration = TimeSpan.FromMinutes(42.5);
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Batch finished: 40 results collected after 42 min", line.Text);
+        Assert.Equal(ActivityTone.Success, line.Tone);
+
+        e.BatchDuration = TimeSpan.FromMinutes(135);
+        Assert.Equal("Batch finished: 40 results collected after 2 h 15 min", GenerationUiText.ActivityText(e).Text);
+    }
+
+    [Fact]
+    public void Activity_BatchFinishedWithFailures()
+    {
+        var e = BatchEvent(GenerationEventKind.BatchFinishedWithFailures);
+        e.BatchSucceeded = 1000;
+        e.BatchFailed = 1;
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Batch finished: 1,000 succeeded, 1 failed or expired. The 1 request run live at full price.", line.Text);
+        Assert.Equal(ActivityTone.Warning, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_BatchFailedAtProvider()
+    {
+        var e = BatchEvent(GenerationEventKind.BatchFailedAtProvider, 2);
+        e.BatchProvider = "OpenAI";
+        e.BatchReason = "the batch expired before it finished";
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Batch failed at OpenAI: the batch expired before it finished. Its 2 requests run live at full price.", line.Text);
+        Assert.Equal(ActivityTone.Warning, line.Tone);
+    }
+
+    [Fact]
+    public void Activity_BatchCollectedAfterRestart()
+    {
+        var e = BatchEvent(GenerationEventKind.BatchCollectedAfterRestart, 1);
+        e.BatchSucceeded = 1;
+        e.LocalTime = new DateTime(2026, 10, 6, 16, 0, 0, DateTimeKind.Local);
+        e.BatchSubmittedUtc = new DateTime(2026, 10, 6, 14, 14, 0, DateTimeKind.Local).ToUniversalTime();
+        var line = GenerationUiText.ActivityText(e);
+        Assert.Equal("Collected 1 result from a batch submitted at 2:14 PM before the app closed", line.Text);
+        Assert.Equal(ActivityTone.Success, line.Tone);
+    }
+
+    [Fact]
+    public void BannerBody_BatchClauses_PendingWins()
+    {
+        const string body = "4 of 10 threads are written and saved. Continue Generating writes the rest and keeps everything already saved.";
+        Assert.Equal(body, GenerationUiText.BannerBody(4, 10, 0, 0, 0, batchOn: false, pendingBatches: 0));
+        Assert.Equal(body + " Batch pricing stays on for this case.", GenerationUiText.BannerBody(4, 10, 0, 0, 0, batchOn: true, pendingBatches: 0));
+        Assert.Equal(body + " 2 provider batches submitted earlier will be collected first, without paying again.",
+            GenerationUiText.BannerBody(4, 10, 0, 0, 0, batchOn: true, pendingBatches: 2));
+        Assert.Equal(body + " 1 provider batch submitted earlier will be collected first, without paying again.",
+            GenerationUiText.BannerBody(4, 10, 0, 0, 0, batchOn: false, pendingBatches: 1));
+        Assert.EndsWith(" 1,000 provider batches submitted earlier will be collected first, without paying again.",
+            GenerationUiText.BannerBody(4, 10, 0, 0, 0, batchOn: false, pendingBatches: 1000));
+    }
+
+    [Fact]
+    public void Confirmations_BatchClauses_OnlyWhenPending()
+    {
+        Assert.Equal(GenerationUiText.CG1CancelGeneration(3, 2).Text, GenerationUiText.CG1CancelGeneration(3, 2, false).Text);
+        Assert.Equal(GenerationUiText.CG1CancelGeneration(3, 2).Text + " Provider batches already submitted keep running; Continue Generating collects their results without paying again.",
+            GenerationUiText.CG1CancelGeneration(3, 2, true).Text);
+
+        Assert.Equal(GenerationUiText.CG2StartOver(5).Text, GenerationUiText.CG2StartOver(5, false).Text);
+        Assert.Equal(GenerationUiText.CG2StartOver(5).Text + " Pending provider batches are cancelled.", GenerationUiText.CG2StartOver(5, true).Text);
+
+        Assert.Equal(GenerationUiText.CG3CloseDuringRun().Text, GenerationUiText.CG3CloseDuringRun(false).Text);
+        Assert.Equal(GenerationUiText.CG3CloseDuringRun().Text + " Provider batches already submitted keep running and are collected the next time you click Continue Generating.",
+            GenerationUiText.CG3CloseDuringRun(true).Text);
+    }
+
+    [Fact]
+    public void Tile_Cost_BatchClauses()
+    {
+        var c = Counts(cost: 12.345m, remaining: 40m, running: true);
+        c.BatchOn = true;
+        Assert.Equal(
+            "Spent on generation in this case: $12.35. Estimate for the remaining items: ≈$40.00, ±50% at batch prices. The cost ticker in the header shows the whole session.",
+            GenerationUiText.Tile(GenerationTileKind.Cost, c).Tooltip);
+
+        c.BatchSavingsUsd = 3.5m;
+        Assert.EndsWith("The cost ticker in the header shows the whole session. Batch pricing saved $3.50.",
+            GenerationUiText.Tile(GenerationTileKind.Cost, c).Tooltip);
+    }
+
+    [Fact]
+    public void BatchCopy_NoBannedWords()
+    {
+        var texts = new List<string>
+        {
+            GenerationUiText.EstimateLine(1m, 0.5m),
+            GenerationUiText.EstimateTooltip(Ready(), true, 0.2m),
+            GenerationUiText.BatchHint(2000, false, 2000).Text,
+            GenerationUiText.BatchHint(0, true, 2000).Text,
+            GenerationUiText.BatchWaitText(Waiting(count: 2), Today),
+            GenerationUiText.BannerBody(1, 2, 0, 0, 0, true, 3),
+            GenerationUiText.CG1CancelGeneration(1, 1, true).Text,
+            GenerationUiText.CG2StartOver(1, true).Text,
+            GenerationUiText.CG3CloseDuringRun(true).Text
+        };
+        foreach (var kind in new[] { GenerationEventKind.BatchSubmitted, GenerationEventKind.BatchFinished, GenerationEventKind.BatchFinishedWithFailures, GenerationEventKind.BatchFailedAtProvider, GenerationEventKind.BatchCollectedAfterRestart })
+            texts.Add(GenerationUiText.ActivityText(BatchEvent(kind)).Text);
+
+        foreach (var text in texts)
+            AssertNoBannedWords(text);
     }
 }

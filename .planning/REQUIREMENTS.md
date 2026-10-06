@@ -23,7 +23,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [x] **PROV-04**: Provider responses are classified (succeeded / refused / truncated / invalid / failed) so refusals and spend-limit errors are not blindly retried
 - [x] **PROV-05**: Image generation uses a current OpenAI image model (gpt-image family) instead of the retired dall-e-3
 - [x] **PROV-06**: When Claude is the text provider, images and voicemail use a configured OpenAI key; if none is configured those media types are disabled with a clear notice
-- [ ] **PROV-07**: Token usage and cost tracking accounts for cache writes, cache reads and batch discounts, with editable pricing per model
+- [x] **PROV-07**: Token usage and cost tracking accounts for cache writes, cache reads and batch discounts, with editable pricing per model
 
 ### Case Scenario & Core Document
 
@@ -183,7 +183,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROV-04 | Phase 1 | Complete |
 | PROV-05 | Phase 1 | Complete |
 | PROV-06 | Phase 1 | Complete |
-| PROV-07 | Phase 7 | Pending |
+| PROV-07 | Phase 7 | Complete |
 | CASE-01 | Phase 2 | Complete |
 | CASE-02 | Phase 2 | Complete |
 | CASE-03 | Phase 2 | Complete |

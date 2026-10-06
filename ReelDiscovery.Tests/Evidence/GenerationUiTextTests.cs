@@ -1788,4 +1788,87 @@ public class GenerationUiTextTests
     {
         Assert.Equal(expected, GenerationUiText.AnswerKeyRunTooltip(n));
     }
+
+    // --- Cost breakdown (07-UI-SPEC S6, S2 R1) ---
+
+    [Fact]
+    public void CostBreakdown_DropsZeroLines_UsesMinusSign()
+    {
+        var text = GenerationUiText.CostBreakdown(1.2345m, 0.5m, 0m, 0.0123m, 0.9m, 0.1778m, 0m);
+        Assert.Equal(
+            "Spent this session: $1.2345\nInput: $0.5000\nCached input, cache read: $0.0123\nOutput: $0.9000\nBatch discount: −$0.1778",
+            text);
+        AssertNoBannedWords(text);
+    }
+
+    [Fact]
+    public void CostBreakdown_AllLines()
+    {
+        Assert.Equal(
+            "Spent this session: $2.0000\nInput: $0.5000\nCached input, cache write: $0.2500\nCached input, cache read: $0.0100\nOutput: $1.0000\nBatch discount: −$0.0100\nImages and voicemail: $0.2500",
+            GenerationUiText.CostBreakdown(2m, 0.5m, 0.25m, 0.01m, 1m, 0.01m, 0.25m));
+    }
+
+    [Fact]
+    public void CostBreakdown_NothingSpent()
+    {
+        Assert.Equal("Nothing spent this session yet.", GenerationUiText.CostBreakdown(0m, 0m, 0m, 0m, 0m, 0m, 0m));
+    }
+
+    [Fact]
+    public void CostRow_NothingSpent_Muted()
+    {
+        var row = GenerationUiText.CostRow(false, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m);
+        Assert.Equal("What this case has cost so far, across all sessions.", row.Line2);
+        Assert.Equal("Nothing spent yet", row.Line3);
+        Assert.Equal(SummaryTone.Muted, row.Line3Tone);
+        Assert.Equal(SummaryTone.Muted, row.DotTone);
+        Assert.Equal("", row.Line3Tooltip);
+        Assert.False(row.ShowPrimary);
+        Assert.False(row.ShowSecondary);
+    }
+
+    [Fact]
+    public void CostRow_FullBreakdown_SuccessDot()
+    {
+        var row = GenerationUiText.CostRow(true, 12.34m, 3m, 0.5m, 0.25m, 9m, 1.41m, 1m, 0m);
+        Assert.Equal(
+            "$12.34 spent · input $3.00 · cache write $0.50 · cache read $0.25 · output $9.00 · batch discount −$1.41 · images and voicemail $1.00",
+            row.Line3);
+        Assert.Equal(SummaryTone.Muted, row.Line3Tone);
+        Assert.Equal(SummaryTone.Success, row.DotTone);
+        Assert.Equal(
+            "Spent so far: $12.34\nInput: $3.00\nCached input, cache write: $0.50\nCached input, cache read: $0.25\nOutput: $9.00\nBatch discount: −$1.41\nImages and voicemail: $1.00",
+            row.Line3Tooltip);
+        AssertNoBannedWords(row.Line3);
+        AssertNoBannedWords(row.Line3Tooltip);
+    }
+
+    [Fact]
+    public void CostRow_ZeroClausesDropped()
+    {
+        var row = GenerationUiText.CostRow(true, 4m, 1m, 0m, 0m, 3m, 0m, 0m, 0m);
+        Assert.Equal("$4.00 spent · input $1.00 · output $3.00", row.Line3);
+        Assert.Equal("Spent so far: $4.00\nInput: $1.00\nOutput: $3.00", row.Line3Tooltip);
+    }
+
+    [Fact]
+    public void CostRow_NotItemized_AddsUpToTotal()
+    {
+        decimal input = 3m, cw = 0.5m, cr = 0.25m, output = 9m, batch = 1.41m, media = 1m, unsplit = 2m;
+        var total = input + cw + cr + output - batch + media + unsplit;
+        var row = GenerationUiText.CostRow(true, total, input, cw, cr, output, batch, media, unsplit);
+        Assert.Equal(14.34m, total);
+        Assert.EndsWith(" · images and voicemail $1.00 · not itemized $2.00", row.Line3);
+        Assert.StartsWith("$14.34 spent", row.Line3);
+        Assert.EndsWith("\nNot itemized: $2.00", row.Line3Tooltip);
+    }
+
+    [Fact]
+    public void CostRow_OnlyNotItemized()
+    {
+        var row = GenerationUiText.CostRow(true, 2m, 0m, 0m, 0m, 0m, 0m, 0m, 2m);
+        Assert.Equal("$2.00 spent · not itemized $2.00", row.Line3);
+        Assert.Equal(SummaryTone.Success, row.DotTone);
+    }
 }

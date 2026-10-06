@@ -2755,3 +2755,104 @@ public partial class GenerationRunnerTests
         Assert.Equal("OpenAI", Replay().WriterProvider);
     }
 }
+
+// ---------- 07-13 "Regenerate thread" (D-13/D-15, OQ3) ----------
+
+public partial class GenerationRunnerTests
+{
+    [Fact]
+    public async Task RegeneratedRelevantThread_KeepsEstablishedDetails_LaterWavesUntouched()
+    {
+        _fake.Respond = Responder();
+        var first = await new GenerationRunner(_gateway).RunAsync(Input, new GenerationSnapshot(), Persist);
+        Assert.Equal(GenerationOutcome.Finished, first.Outcome);
+        var waveOf = WavePlanner.WaveIndexByThread(WavePlanner.Plan(_plan));
+        Assert.Contains(waveOf.Values, w => w > 1);
+        var target = Relevant.First(t => waveOf[t.Id] == 1);
+        var prior = Replay().LastByThread[target.Id].LedgerDelta.Select(d => d.Statement).ToList();
+        Assert.NotEmpty(prior);
+        var ledgerBefore = first.Ledger.Entries.Select(e => e.Statement).OrderBy(s => s, StringComparer.Ordinal).ToList();
+
+        var invalidated = await ThreadInvalidation.InvalidateAsync(_folder, _plan, _draft.Guide!, target.Id);
+        Assert.True(invalidated.Appended);
+
+        // Before Continue the key shows the thread Planned
+        var key = KeyStatuses();
+        Assert.All(target.Messages, m => Assert.Equal(AnswerKeyBuilder.StatusPlanned, key[m.DocId]));
+
+        // The model offers a new detail this time; it must be discarded
+        var inner = Responder();
+        _fake.Respond = request =>
+        {
+            var response = inner(request);
+            if (ThreadOf(request) == target.Id && response.Text != null)
+                response.Text = response.Text.Replace("a site walk", "a crane lift", StringComparison.Ordinal);
+            return response;
+        };
+        lock (_fake.Requests)
+            _fake.Requests.Clear();
+
+        var second = await new GenerationRunner(_gateway).RunAsync(Input, new GenerationSnapshot(), Persist);
+
+        Assert.Equal(GenerationOutcome.Finished, second.Outcome);
+        Assert.Equal(new[] { target.Id }, RequestedThreads());
+        string prompt;
+        lock (_fake.Requests)
+            prompt = _fake.Requests.Single().UserPrompt!;
+        Assert.Contains(EvidencePrompts.PriorDetailsHeader, prompt);
+        Assert.All(prior, s => Assert.Contains(s, prompt));
+
+        var record = Replay().LastByThread[target.Id];
+        Assert.Equal(JournalRecordType.ThreadDone, record.Type);
+        Assert.True(record.LateRepair);
+        Assert.Equal(prior, record.LedgerDelta.Select(d => d.Statement).ToList());
+        Assert.Equal(ledgerBefore, second.Ledger.Entries.Select(e => e.Statement).OrderBy(s => s, StringComparer.Ordinal).ToList());
+        Assert.Empty(Replay().InvalidatedThreadIds);
+
+        key = KeyStatuses();
+        Assert.All(target.Messages, m => Assert.Equal(AnswerKeyBuilder.StatusGenerated, key[m.DocId]));
+    }
+
+    [Fact]
+    public async Task ThreadsWithoutPriorDeltas_PromptHasNoEstablishedSection()
+    {
+        _fake.Respond = Responder();
+
+        await new GenerationRunner(_gateway).RunAsync(Input, new GenerationSnapshot(), Persist);
+
+        lock (_fake.Requests)
+            Assert.All(_fake.Requests, r => Assert.DoesNotContain(EvidencePrompts.PriorDetailsHeader, r.UserPrompt));
+    }
+}
+
+public partial class GenerationRunnerMixedTests
+{
+    [Fact]
+    public async Task RegeneratedNonRelevantThread_ReRendersAsFiller_NoEstablishedSection()
+    {
+        _fake.Respond = Responder();
+        var first = await Run(new GenerationRunner(_gateway), Input());
+        Assert.Equal(GenerationOutcome.Finished, first.Outcome);
+        var target = AttachmentTestData.Thread(_plan, AttachmentTestData.DailyBusinessThreadId);
+
+        var invalidated = await ThreadInvalidation.InvalidateAsync(_folder, _plan, Guide, target.Id);
+        Assert.True(invalidated.Appended);
+        Assert.Equal(AnswerKeyBuilder.StatusPlanned, KeyRows()[target.Messages[0].DocId].Status);
+        lock (_fake.Requests)
+            _fake.Requests.Clear();
+
+        var second = await Run(new GenerationRunner(_gateway), Input());
+
+        Assert.Equal(GenerationOutcome.Finished, second.Outcome);
+        var requests = Requests();
+        var filler = Assert.Single(requests, r => r.SchemaName == FillerSchema);
+        Assert.Equal(target.Id, ThreadOf(filler));
+        Assert.DoesNotContain(requests, r => r.SchemaName == RenderSchema);
+        Assert.All(requests, r => Assert.DoesNotContain(EvidencePrompts.PriorDetailsHeader, r.UserPrompt));
+
+        var record = Replay().LastByThread[target.Id];
+        Assert.Equal(JournalRecordType.ThreadDone, record.Type);
+        Assert.False(record.LateRepair);
+        Assert.Equal(AnswerKeyBuilder.StatusGenerated, KeyRows()[target.Messages[0].DocId].Status);
+    }
+}

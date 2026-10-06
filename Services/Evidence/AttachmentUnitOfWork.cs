@@ -139,6 +139,10 @@ public class AttachmentUnitOfWork
     public const string EmptyDocumentText = "the document was empty";
     public const string NoMediaKeyReason = "no tested OpenAI key this session";
 
+    // WR-03: chain order is SentAt (D-16) but generation order is thread rank, so a later version can be written first
+    public const string EarlierVersionMissingWarning =
+        "C1: earlier version not yet written; this version was drafted without its text, so its figures may not build on it";
+
     private const string TimeoutPrefix = "The request timed out";
 
     private readonly ILlmGateway _llm;
@@ -365,6 +369,10 @@ public class AttachmentUnitOfWork
                     kept.Add(new RenderViolation { Code = "I1", Seq = ctx.Parent.Seq, Text = text });
                 }
             }
+
+            // D-16: no retry can supply a predecessor that is generated later (or failed); the key shows the gap (WR-03)
+            if (ctx.Chain != null && ctx.Chain.Version > 1 && string.IsNullOrWhiteSpace(ctx.PriorVersionText))
+                kept.Add(new RenderViolation { Code = "C1", Seq = ctx.Parent.Seq, Text = EarlierVersionMissingWarning });
 
             BeforeBuild?.Invoke(best);
             var part = Build(ctx, best, outcome);

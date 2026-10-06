@@ -945,6 +945,13 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         var v3Prompt = expected.Split("\n----\n")[1];
         Assert.Contains(v1Text.Trim(), v2Prompt);
         Assert.Contains(AttachmentPrompts.EarlierDraftNotAvailable, v3Prompt);
+
+        // WR-03: the version written without its predecessor is flagged in the journal (and so in the key); v2 is not
+        var replay = GenerationJournal.Replay(Directory.GetDirectories(_folder)[0], _plan);
+        Assert.Contains(replay.LastByAttachment[v3].Violations, v => v.Contains(AttachmentUnitOfWork.EarlierVersionMissingWarning));
+        Assert.DoesNotContain(replay.LastByAttachment[v2].Violations, v => v.Contains("C1:"));
+        var state = GenerationRunState.From(_plan, replay);
+        Assert.Equal(AttachmentRunStatus.Warnings, AttachmentStatus(state, v3));
     }
 
     [Fact]

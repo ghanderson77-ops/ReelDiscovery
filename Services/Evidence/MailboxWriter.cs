@@ -149,6 +149,38 @@ public class MailboxWriter
         return written;
     }
 
+    /// <summary>
+    /// Best-effort removal of every custodian copy of an uncommitted message (WR-01): a thread that fails or cannot be
+    /// journaled after some copies were written must not leave EMLs its answer-key row calls Failed or Planned. Returns
+    /// the relative paths that still exist afterwards.
+    /// </summary>
+    public List<string> DeleteCopies(PlannedMessage message)
+    {
+        var left = new List<string>();
+        if (message == null)
+            return left;
+
+        foreach (var relative in CopyPathsFor(message, _custodianFolders))
+        {
+            var full = ResolveUnderCase(_caseFolder, relative);
+            if (full == null)
+                continue;
+
+            try
+            {
+                if (File.Exists(full))
+                    File.Delete(full);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A locked copy is reported to the caller, which names it in the failure reason
+                left.Add(relative);
+            }
+        }
+
+        return left;
+    }
+
     private static void AddAttachments(BodyBuilder builder, IEnumerable<ComposedAttachment> attachments)
     {
         foreach (var attachment in attachments)

@@ -125,6 +125,9 @@ public class ThreadUnitOfWork
         var committedTexts = new Dictionary<string, string>(StringComparer.Ordinal);
         var relevant = ctx.Thread.Relevance == ThreadRelevance.Relevant;
 
+        // WR-01: set once copies may be on disk, cleared again when the ThreadDone line is flushed
+        ComposedThread? uncommitted = null;
+
         try
         {
             try
@@ -239,6 +242,7 @@ public class ThreadUnitOfWork
                 // Once a thread passed checks, its few milliseconds of writes complete even after Cancel, so no thread is half-saved (RUN-01)
                 var files = new List<string>();
                 var filesByEmail = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+                uncommitted = composed;
                 foreach (var email in composed.Emails)
                 {
                     try
@@ -249,7 +253,9 @@ public class ThreadUnitOfWork
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
-                        return await FailAsync(ctx, profile, ThreadFailureKind.Write, $"Could not write {email.Planned.DocId}.eml: {ex.Message}",
+                        var writeReason = $"Could not write {email.Planned.DocId}.eml: {ex.Message}" + RemoveCopies(uncommitted);
+                        uncommitted = null;
+                        return await FailAsync(ctx, profile, ThreadFailureKind.Write, writeReason,
                             attempts, inputTokens, outputTokens, spend).ConfigureAwait(false);
                     }
                 }
@@ -310,12 +316,14 @@ public class ThreadUnitOfWork
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    // Files exist but are not journaled: the thread stays pending and Continue overwrites the same paths; the runner adds this spend to RunEnded
+                    // Not journaled: the thread stays pending, so its copies are removed (WR-01); the runner adds this spend to RunEnded
+                    var journalReason = $"Could not save the run journal: {ex.Message}" + RemoveCopies(uncommitted);
+                    uncommitted = null;
                     _snapshot.AddCost(cost + spend.TextCost, spend.MediaCost);
                     return new ThreadOutcome
                     {
                         Kind = ThreadOutcomeKind.Failed,
-                        Reason = $"Could not save the run journal: {ex.Message}",
+                        Reason = journalReason,
                         InputTokens = inputTokens + spend.InputTokens,
                         OutputTokens = outputTokens + spend.OutputTokens,
                         CostUsd = cost + spend.TextCost + spend.MediaCost,
@@ -324,6 +332,7 @@ public class ThreadUnitOfWork
                 }
 
                 // ----- committed: everything below reports what the journal now holds -----
+                uncommitted = null;
 
                 // Tiles update per thread, not per wave
                 var status = clean ? ThreadRunStatus.Written : ThreadRunStatus.Warnings;
@@ -388,17 +397,20 @@ public class ThreadUnitOfWork
             }
             catch (OperationCanceledException)
             {
+                RemoveCopies(uncommitted);
                 throw;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                return await FailAsync(ctx, profile, ThreadFailureKind.Write, $"Could not write thread {ctx.Thread.Id}: {ex.Message}",
+                var reason = $"Could not write thread {ctx.Thread.Id}: {ex.Message}" + RemoveCopies(uncommitted);
+                return await FailAsync(ctx, profile, ThreadFailureKind.Write, reason,
                     attempts, inputTokens, outputTokens, spend).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 // A MimeKit ParseException (malformed address) or a composer bug must fail only this thread, never escape Task.WhenAll and abort the run (RUN-02)
-                return await FailAsync(ctx, profile, ThreadFailureKind.Provider, $"Could not build thread {ctx.Thread.Id}: {ex.Message}",
+                var reason = $"Could not build thread {ctx.Thread.Id}: {ex.Message}" + RemoveCopies(uncommitted);
+                return await FailAsync(ctx, profile, ThreadFailureKind.Provider, reason,
                     attempts, inputTokens, outputTokens, spend).ConfigureAwait(false);
             }
         }
@@ -566,6 +578,19 @@ public class ThreadUnitOfWork
     /// Journals ThreadFailed with the tokens and cost spent so far (thread and every attachment attempt), counts it and
     /// adds an Activity row. Reports no attachment state. Never throws.
     /// </summary>
+    // WR-01: removes every copy of an uncommitted thread (only pending threads run, so no committed EML shares these
+    // paths); returns a reason suffix naming copies that could not be removed
+    private string RemoveCopies(ComposedThread? composed)
+    {
+        if (composed == null)
+            return string.Empty;
+
+        var left = composed.Emails.Where(e => e?.Planned != null).SelectMany(e => _mailbox.DeleteCopies(e.Planned)).ToList();
+        return left.Count == 0
+            ? string.Empty
+            : $" {left.Count} partial {(left.Count == 1 ? "copy" : "copies")} could not be removed: {string.Join(", ", left)}.";
+    }
+
     private async Task<ThreadOutcome> FailAsync(ThreadRenderContext ctx, RenderProfile profile, ThreadFailureKind kind, string reason,
         int attempts, int inputTokens, int outputTokens, AttachmentSpend spend)
     {

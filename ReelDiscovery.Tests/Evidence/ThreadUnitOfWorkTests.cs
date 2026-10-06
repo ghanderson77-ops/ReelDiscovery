@@ -1306,6 +1306,11 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         Assert.Equal(JournalRecordType.ThreadFailed, record.Type);
         Assert.Equal(ThreadFailureKind.Write, record.FailureKind);
         Assert.Equal(text, record.CostUsd);
+
+        // WR-01: the copy written before the failure is removed, so no EML contradicts the Failed key row
+        Assert.False(File.Exists(Path.Combine(_folder, copies[0])), copies[0]);
+        Assert.All(thread.Messages.SelectMany(m => MailboxWriter.CopyPathsFor(m, Folders)),
+            c => Assert.False(File.Exists(Path.Combine(_folder, c)), c));
         Assert.Equal(0.006m, record.MediaCostUsd);
         Assert.Equal(1800, record.InputTokens);
         Assert.Equal(700, record.OutputTokens);
@@ -1371,6 +1376,10 @@ public partial class ThreadUnitOfWorkTests : IDisposable
         Assert.True(outcome.Unjournaled);
         Assert.StartsWith("Could not save the run journal", outcome.Reason);
         Assert.Equal(spend, outcome.CostUsd);
+
+        // WR-01: an unjournaled thread stays pending, so none of its copies stay on disk
+        Assert.All(first.Messages.SelectMany(m => MailboxWriter.CopyPathsFor(m, Folders)),
+            c => Assert.False(File.Exists(Path.Combine(_folder, c)), c));
         Assert.Equal(1000 + 3 * 800, outcome.InputTokens);
         Assert.Equal(400 + 3 * 300, outcome.OutputTokens);
         Assert.Empty(outcome.AttachmentDeltas);

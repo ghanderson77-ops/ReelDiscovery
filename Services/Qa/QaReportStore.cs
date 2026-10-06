@@ -6,8 +6,8 @@ using ReelDiscovery.Models.Qa;
 namespace ReelDiscovery.Services.Qa;
 
 /// <summary>
-/// Reads and writes the QA reports in the case folder: qa-scans.json, qa-leakage.json (atomic whole-file writes) and
-/// qa-blind-review.jsonl (append-only header + verdict lines). Paths are the case folder plus a constant name only.
+/// Reads and writes the QA reports in the case folder: the scan and leakage reports (atomic whole-file writes) and the
+/// blind-review log (append-only header + verdict lines). Paths are the case folder plus a constant name only.
 /// Reads never throw: a missing or damaged report reads as null (Not run).
 /// </summary>
 public class QaReportStore

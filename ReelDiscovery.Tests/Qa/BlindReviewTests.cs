@@ -2,6 +2,8 @@ using System.Globalization;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Models.Qa;
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
@@ -273,5 +275,281 @@ public class BlindReviewTests
         var (gateway, _, _, _) = state.CreateReviewerGateway("OpenAI");
 
         Assert.Null(gateway);
+    }
+
+    // ----- BlindReviewer (Task 2) -----
+
+    private static AIModelConfig Haiku() =>
+        AIModelConfig.GetDefaultModels().Single(m => m.ModelId == "claude-haiku-4-5-20251001");
+
+    private static List<BlindReviewDocument> Docs(int count) =>
+        Enumerable.Range(1, count).Select(i => new BlindReviewDocument
+        {
+            DocId = $"RD-{i:000000}",
+            ThreadId = $"T-{i:0000}",
+            From = "Dana Whitfield <dana@brightline.com>",
+            To = "Raymond Harmon <raymond@harmon.com>",
+            DateSent = "2024-03-19 10:00 -05:00",
+            Subject = $"Subject number {i:000}",
+            Body = "Body text for the review.",
+            KeyRelevant = i % 2 == 0
+        }).ToList();
+
+    private static bool EvenRank(string docId) => RenderAssignments.StableRank(docId) % 2 == 0;
+
+    // Answers by the subject in the prompt (prompts carry no DocId)
+    private static Func<LlmProviderRequest, LlmProviderResponse> Responder(IEnumerable<BlindReviewDocument> docs, string? refuseDocId = null)
+    {
+        var bySubject = docs.ToDictionary(d => d.Subject, d => d.DocId, StringComparer.Ordinal);
+        return request =>
+        {
+            var line = request.UserPrompt.Split('\n').First(l => l.StartsWith("Subject: ", StringComparison.Ordinal));
+            var docId = bySubject[line["Subject: ".Length..]];
+            if (docId == refuseDocId)
+                return FakeLlmProvider.Refused("Cannot review");
+            var relevant = EvenRank(docId) ? "true" : "false";
+            return FakeLlmProvider.Ok($"{{\"relevant\":{relevant},\"issueCodes\":[\"ISS-01\"],\"reason\":\"Discusses the change order.\"}}");
+        };
+    }
+
+    private static (BlindReviewer Reviewer, FakeLlmProvider Fake, QaReportStore Store) Reviewer(string folder)
+    {
+        var fake = new FakeLlmProvider(LlmProviderKind.Anthropic);
+        var gateway = new LlmGateway(fake, Haiku(), Haiku());
+        var store = new QaReportStore(folder);
+        return (new BlindReviewer(gateway, store), fake, store);
+    }
+
+    private static BlindReviewHeader Header(Guid planId, int size) => new()
+    {
+        PlanId = planId,
+        ReviewerProvider = "Anthropic",
+        ReviewerModel = "claude-haiku-4-5-20251001",
+        SampleSize = size,
+        StartedUtc = DateTime.UtcNow
+    };
+
+    [Fact]
+    public async Task Run_AppendsVerdicts_AndListsDisagreements()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var docs = Docs(20);
+            var (reviewer, fake, store) = Reviewer(folder);
+            fake.Respond = Responder(docs);
+            var reports = new List<int>();
+            var progress = new SyncProgress(reports.Add);
+
+            var result = await reviewer.RunAsync(Header(Guid.NewGuid(), 20), docs, "protocol", progress);
+
+            var (_, verdicts) = store.LoadBlindReview();
+            Assert.Equal(20, verdicts.Count);
+            Assert.Equal(20, result.Reviewed);
+            Assert.Equal(0, result.Errors);
+            foreach (var v in verdicts)
+            {
+                Assert.Equal(EvenRank(v.DocId), v.ReviewerRelevant);
+                Assert.Equal(docs.Single(d => d.DocId == v.DocId).KeyRelevant, v.KeyRelevant);
+            }
+            var expected = verdicts.Where(v => v.KeyRelevant != v.ReviewerRelevant).Select(v => v.DocId).OrderBy(d => d, StringComparer.Ordinal).ToList();
+            Assert.Equal(expected, BlindReviewer.Disagreements(verdicts).Select(v => v.DocId).OrderBy(d => d, StringComparer.Ordinal));
+            Assert.Equal(expected, result.Disagreements.Select(v => v.DocId).OrderBy(d => d, StringComparer.Ordinal));
+            Assert.Equal(20, reports.Count);
+            Assert.Equal(20, reports.Max());
+            Assert.All(fake.Requests, r => Assert.Equal("protocol", r.SystemPrompt));
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task Run_CancelKeepsVerdicts_AndRerunSkipsReviewed()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var docs = Docs(20);
+            var planId = Guid.NewGuid();
+            var (reviewer, fake, store) = Reviewer(folder);
+            reviewer.MaxParallel = 1;
+            fake.Respond = Responder(docs);
+            using var cts = new CancellationTokenSource();
+            fake.OnSend = i =>
+            {
+                if (i == 7)
+                    cts.Cancel();
+            };
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                reviewer.RunAsync(Header(planId, 20), docs, "protocol", null, cts.Token));
+            Assert.Equal(7, store.LoadBlindReview().Verdicts.Count);
+
+            var (again, fake2, _) = Reviewer(folder);
+            fake2.Respond = Responder(docs);
+            var result = await again.RunAsync(Header(planId, 20), docs, "protocol");
+
+            Assert.Equal(13, fake2.Requests.Count);
+            Assert.Equal(20, store.LoadBlindReview().Verdicts.Count);
+            Assert.Equal(20, result.Reviewed);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task Run_RefusalCountsError_AndContinues()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var docs = Docs(20);
+            var (reviewer, fake, store) = Reviewer(folder);
+            fake.Respond = Responder(docs, refuseDocId: "RD-000005");
+
+            var result = await reviewer.RunAsync(Header(Guid.NewGuid(), 20), docs, "protocol");
+
+            Assert.Equal(1, result.Errors);
+            Assert.Equal(19, store.LoadBlindReview().Verdicts.Count);
+            Assert.DoesNotContain(store.LoadBlindReview().Verdicts, v => v.DocId == "RD-000005");
+            Assert.Equal(string.Empty, result.FatalMessage);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task Run_FatalStops_WithMessage()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var docs = Docs(20);
+            var (reviewer, fake, store) = Reviewer(folder);
+            fake.Respond = _ => FakeLlmProvider.Failed(LlmFailureKind.Auth, "The API key was rejected.");
+
+            var result = await reviewer.RunAsync(Header(Guid.NewGuid(), 20), docs, "protocol");
+
+            Assert.Contains("rejected", result.FatalMessage);
+            Assert.Empty(store.LoadBlindReview().Verdicts);
+            Assert.True(fake.Requests.Count < 20);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task Verdict_CostEqualsGatewayCost()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var docs = Docs(2);
+            var (reviewer, fake, store) = Reviewer(folder);
+            fake.Respond = Responder(docs);
+
+            var result = await reviewer.RunAsync(Header(Guid.NewGuid(), 2), docs, "protocol");
+
+            var expected = Haiku().CalculateCost(new TokenUsage { InputTokens = 10, OutputTokens = 5 }).TotalUsd;
+            Assert.True(expected > 0);
+            Assert.All(store.LoadBlindReview().Verdicts, v => Assert.Equal(expected, v.CostUsd));
+            Assert.Equal(2 * expected, result.CostUsd);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Theory]
+    [InlineData(5_000, true)]
+    [InlineData(3_000, false)]
+    public void Estimate_FollowsFormula(int protocolTokens, bool cached)
+    {
+        var model = Haiku();
+        var system = new string('a', protocolTokens * 4);
+        var docs = Docs(20);
+        var docTokens = docs.Sum(d => (BlindReviewPrompts.BuildUserPrompt(d).Length + 3) / 4);
+
+        var estimate = BlindReviewer.Estimate(model, system, docs);
+
+        var usage = new TokenUsage
+        {
+            InputTokens = docTokens + (cached ? 0 : 20 * protocolTokens),
+            CacheReadTokens = cached ? 20 * protocolTokens : 0,
+            CacheWriteTokens = cached ? protocolTokens : 0,
+            OutputTokens = 20 * 150
+        };
+        Assert.Equal(model.CalculateCost(usage).TotalUsd, estimate);
+    }
+
+    [Fact]
+    public void BuildDocuments_UsesKeyHeaderAndJournalText()
+    {
+        var guide = CorpusTestData.RichDraft().Guide!;
+        var plan = Plan(guide, 10, 3, 40, attachmentsOn: 0);
+        var replay = new JournalReplay();
+        replay.LastByThread["T-0001"] = new JournalRecord
+        {
+            Type = JournalRecordType.ThreadDone,
+            ThreadId = "T-0001",
+            Messages = new List<JournalMessage>
+            {
+                new() { DocId = "RD-000001", Subject = "Subject line T-0001", BodyPlain = "We need the revised change order.", SignOff = "Dana" }
+            }
+        };
+        replay.LastByAttachment["RD-000001.0001"] = new JournalRecord
+        {
+            Type = JournalRecordType.AttachmentDone,
+            AttachmentDocId = "RD-000001.0001",
+            ParentDocId = "RD-000001",
+            ThreadId = "T-0001",
+            Title = "Change Order 7",
+            FlattenedText = new string('z', 2_000)
+        };
+
+        var docs = BlindReviewer.BuildDocuments(plan, guide, replay, null, new[] { "RD-000001", "RD-000011" });
+        var rows = AnswerKeyBuilder.Build(plan, guide);
+
+        Assert.Equal(2, docs.Count);
+        var first = docs[0];
+        var row = rows.Single(r => r.DocId == "RD-000001");
+        Assert.Equal(row.From, first.From);
+        Assert.Equal(row.To, first.To);
+        Assert.Equal(row.Cc, first.Cc);
+        Assert.Equal(row.DateSent, first.DateSent);
+        Assert.Contains("We need the revised change order.", first.Body);
+        Assert.Contains("Dana", first.Body);
+        Assert.True(first.KeyRelevant);
+        Assert.Single(first.Attachments);
+        Assert.Equal("Change Order 7", first.Attachments[0].Title);
+        Assert.Equal(BlindReviewPrompts.AttachmentTextLimit, first.Attachments[0].Text.Length);
+        Assert.False(docs[1].KeyRelevant);
+        Assert.Equal(new[] { "RD-000001" }, BlindReviewer.GeneratedEmailDocIds(replay));
+    }
+
+    private sealed class SyncProgress : IProgress<int>
+    {
+        private readonly object _lock = new();
+        private readonly Action<int> _report;
+
+        public SyncProgress(Action<int> report)
+        {
+            _report = report;
+        }
+
+        public void Report(int value)
+        {
+            lock (_lock)
+                _report(value);
+        }
     }
 }

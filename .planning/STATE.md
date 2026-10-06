@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-03-PLAN.md
-last_updated: "2026-10-06T16:15:00.780Z"
+stopped_at: Completed 07-04-PLAN.md
+last_updated: "2026-10-06T16:21:59.247Z"
 last_activity: 2026-10-06
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 108
-  percent: 84
+  completed_plans: 109
+  percent: 85
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 3 of 22
+Plan: 4 of 22
 Status: Ready to execute
 Last activity: 2026-10-06
 
@@ -159,6 +159,7 @@ Progress: [██████████] 99%
 | Phase 06 P23 | 22min | 2 tasks | 6 files |
 | Phase 07 P01 | 7min | 2 tasks | 12 files |
 | Phase 07 P03 | 9min | 3 tasks | 7 files |
+| Phase 07 P04 | 6min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -454,6 +455,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [07-03]: Daily privileged target = max(2% rule, relevant privileged thread share), min 1 whenever relevant mail is privileged (D-23)
 - [Phase ?]: [07-03]: New invite slots derive in the first guide organization's time zone (InviteRequest.CanonicalTimeZoneId); KnownSlots still win; not-before compares instants (D-24)
 - [Phase ?]: [07-03]: Start Over TryDelete retries transient locks 5 attempts, 100 ms x attempt (D-25)
+- [Phase 07]: [07-04]: ThemeSanitizer.TemplateTheme keeps 6-hex colors (original case) and allowed fonts (original spelling); else SanitizeHexColor/SanitizeFont, else Default (D-26)
+- [Phase 07]: [07-04]: ThemeSanitizer test namespace is ReelDiscovery.Tests.HelperTests (Tests.Helpers would shadow ReelDiscovery.Helpers in render tests)
 
 ### Pending Todos
 
@@ -475,6 +478,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T16:15:00.771Z
-Stopped at: Completed 07-03-PLAN.md
+Last session: 2026-10-06T16:21:59.236Z
+Stopped at: Completed 07-04-PLAN.md
 Resume file: None

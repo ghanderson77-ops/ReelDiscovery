@@ -31,7 +31,10 @@ public enum GenerationEventKind
     AttachmentRegenerated,
 
     // WR-02: work that could not be journaled (or saved text too incomplete to repair); the item stays pending
-    NotSaved
+    NotSaved,
+
+    // D-09: provider batch activity (append-only: earlier members keep their values)
+    BatchSubmitted, BatchFinished, BatchFinishedWithFailures, BatchFailedAtProvider, BatchCollectedAfterRestart
 }
 
 /// <summary>
@@ -116,6 +119,22 @@ public class WaveProgress
     public int AttachmentsFailed { get; set; }
     public int AttachmentsSkipped { get; set; }
 
+    // D-09 batch wait of this stage: true while at least one provider batch of the row is not yet collected
+    public bool BatchWaiting { get; set; }
+
+    // Provider batches of the row still waiting
+    public int BatchCount { get; set; }
+
+    // Earliest submission time of the waiting batches ("submitted 2:14 PM")
+    public DateTime? BatchFirstSubmittedUtc { get; set; }
+
+    // Summed done/total requests of the waiting batches ("3 of 5 done")
+    public int BatchDone { get; set; }
+    public int BatchTotal { get; set; }
+
+    // When the decorator checks the provider next (the status strip countdown)
+    public DateTime? BatchNextCheckUtc { get; set; }
+
     public WaveProgress Clone() => (WaveProgress)MemberwiseClone();
 }
 
@@ -168,6 +187,16 @@ public class GenerationEvent
 
     // MediaStopped: media attachments left unrendered
     public int MediaRemaining { get; set; }
+
+    // Batch events (D-09): requests in the batch, collected outcome, provider, stage label, failure reason, time waited
+    public int BatchRequests { get; set; }
+    public int BatchSucceeded { get; set; }
+    public int BatchFailed { get; set; }
+    public string BatchProvider { get; set; } = string.Empty;
+    public string BatchStage { get; set; } = string.Empty;
+    public string BatchReason { get; set; } = string.Empty;
+    public TimeSpan BatchDuration { get; set; }
+    public DateTime? BatchSubmittedUtc { get; set; }
 }
 
 /// <summary>
@@ -187,4 +216,10 @@ public class GenerationView
 
     // Writing stage: attachments being written with the wave's threads (0 drops the progress clause)
     public int StageAttachments { get; set; }
+
+    // D-09: batches of an earlier session are being collected ("Collecting batches submitted before the app closed...")
+    public bool CollectingAfterRestart { get; set; }
+
+    // Provider batches submitted or resumed and not yet collected
+    public int PendingProviderBatches { get; set; }
 }

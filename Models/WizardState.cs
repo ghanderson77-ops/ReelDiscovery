@@ -94,6 +94,33 @@ public class WizardState
     }
 
     /// <summary>
+    /// Generation-run gateway (D-07). Live mode equals <see cref="CreateGateway"/> with Batch null; batch mode wraps the live
+    /// provider in a <see cref="BatchingLlmProvider"/> over the case folder's batch ledger and returns it so the runner can
+    /// subscribe to its status, resume pending batches and bill orphans. <paramref name="transport"/> and
+    /// <paramref name="timings"/> are test seams; null uses the text provider's batch transport and the default timings.
+    /// </summary>
+    public (ILlmGateway Gateway, BatchingLlmProvider? Batch) CreateRunGateway(bool useBatch, string caseFolder, Guid planId,
+        IBatchTransport? transport = null, BatchTimings? timings = null)
+    {
+        var key = GetApiKey(TextProvider);
+        var story = StoryModelConfig
+            ?? throw new InvalidOperationException($"No Story model selected for {TextProvider}");
+        var volume = VolumeModelConfig
+            ?? throw new InvalidOperationException($"No Volume model selected for {TextProvider}");
+
+        var live = LlmProviderFactory.Create(TextProvider, key);
+        if (!useBatch)
+            return (new LlmGateway(live, story, volume, UsageTracker), null);
+
+        // Orphans are priced with this provider's catalog models (tiers never mix providers, D-11)
+        var provider = TextProvider;
+        var batch = new BatchingLlmProvider(live, transport ?? LlmProviderFactory.CreateBatchTransport(provider, key),
+            new BatchLedger(caseFolder), planId,
+            id => AvailableModelConfigs.FirstOrDefault(m => m.ModelId == id && m.Provider == provider), timings);
+        return (new LlmGateway(batch, story, volume, UsageTracker), batch);
+    }
+
+    /// <summary>
     /// Blind-review gateway (D-12): the provider other than the corpus writer when its key is tested, else the writer's
     /// provider with SameProviderFallback true, else a null gateway. Both tiers use that provider's Volume default (OQ5).
     /// </summary>

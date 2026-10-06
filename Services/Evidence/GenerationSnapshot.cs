@@ -1,4 +1,5 @@
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Services.Evidence;
 
@@ -21,6 +22,12 @@ public class GenerationSnapshot
     private DateOnly _stageWaveStart;
     private DateOnly _stageWaveEnd;
     private int _stageCount;
+
+    // D-09: stage label -> stage row, and every provider batch not yet collected (batch id -> its row and progress)
+    private readonly Dictionary<string, int> _batchRows = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, BatchTrack> _batchTracks = new(StringComparer.Ordinal);
+    private bool _collectingAfterRestart;
+    private int _pendingProviderBatches;
 
     /// <summary>
     /// Starts a run view: replaces counts and stage rows and clears queued events and the stage.
@@ -55,6 +62,10 @@ public class GenerationSnapshot
             _stageWaveStart = default;
             _stageWaveEnd = default;
             _stageCount = 0;
+            _batchRows.Clear();
+            _batchTracks.Clear();
+            _collectingAfterRestart = false;
+            _pendingProviderBatches = 0;
         }
     }
 
@@ -227,13 +238,153 @@ public class GenerationSnapshot
             return;
 
         lock (_lock)
-        {
-            _events.Enqueue(e);
+            Enqueue(e);
+    }
 
-            // The Activity grid keeps 500 rows; the journal keeps everything (UI-SPEC S1)
-            while (_events.Count > MaxQueuedEvents)
-                _events.Dequeue();
+    // Caller holds _lock
+    private void Enqueue(GenerationEvent e)
+    {
+        _events.Enqueue(e);
+
+        // The Activity grid keeps 500 rows; the journal keeps everything (UI-SPEC S1)
+        while (_events.Count > MaxQueuedEvents)
+            _events.Dequeue();
+    }
+
+    /// <summary>
+    /// Routes provider batches of a stage label ("wave 3", "non-relevant mail") to a stage row (D-09).
+    /// </summary>
+    public void MapBatchStage(string label, int rowIndex)
+    {
+        if (string.IsNullOrEmpty(label))
+            return;
+
+        lock (_lock)
+            _batchRows[label] = rowIndex;
+    }
+
+    /// <summary>
+    /// Applies one provider batch status change (D-09). Raised on the decorator's poll threads, so everything happens under
+    /// the snapshot lock (T-07-33). The stage row aggregates its waiting batches (count, earliest submission, summed
+    /// done/total, soonest next check); Submitted and the four terminal kinds add an Activity row, Progress does not.
+    /// </summary>
+    public void RecordBatchStatus(BatchStatusEvent e)
+    {
+        if (e == null)
+            return;
+
+        lock (_lock)
+        {
+            var row = _batchRows.TryGetValue(e.StageLabel ?? string.Empty, out var mapped) ? mapped : (int?)null;
+            GenerationEventKind? kind = null;
+            var touchedRow = row;
+            switch (e.Kind)
+            {
+                case BatchStatusKind.Submitted:
+                    _batchTracks[e.BatchId] = new BatchTrack
+                    {
+                        Row = row,
+                        SubmittedUtc = e.SubmittedUtc,
+                        Done = e.Done,
+                        Total = e.Total,
+                        NextCheckUtc = e.NextCheckUtc == default ? null : e.NextCheckUtc
+                    };
+                    _pendingProviderBatches++;
+                    kind = GenerationEventKind.BatchSubmitted;
+                    break;
+                case BatchStatusKind.Progress:
+                    // A batch resumed after a restart never raised Submitted here; its first progress starts the track
+                    if (!_batchTracks.TryGetValue(e.BatchId, out var track))
+                    {
+                        track = new BatchTrack { Row = row, SubmittedUtc = e.SubmittedUtc };
+                        _batchTracks[e.BatchId] = track;
+                    }
+
+                    track.Done = e.Done;
+                    track.Total = e.Total;
+                    if (e.NextCheckUtc != default)
+                        track.NextCheckUtc = e.NextCheckUtc;
+                    touchedRow = track.Row;
+                    break;
+                default:
+                    if (_batchTracks.Remove(e.BatchId, out var ended))
+                        touchedRow = ended.Row;
+                    _pendingProviderBatches = Math.Max(0, _pendingProviderBatches - 1);
+
+                    // The strip's "Collecting batches..." line ends with the first collected batch
+                    _collectingAfterRestart = false;
+                    kind = e.Kind switch
+                    {
+                        BatchStatusKind.Finished => GenerationEventKind.BatchFinished,
+                        BatchStatusKind.FinishedWithFailures => GenerationEventKind.BatchFinishedWithFailures,
+                        BatchStatusKind.FailedAtProvider => GenerationEventKind.BatchFailedAtProvider,
+                        _ => GenerationEventKind.BatchCollectedAfterRestart
+                    };
+                    break;
+            }
+
+            if (touchedRow != null)
+                RefreshBatchRow(touchedRow.Value);
+
+            if (kind != null)
+            {
+                Enqueue(new GenerationEvent
+                {
+                    Kind = kind.Value,
+                    LocalTime = DateTime.Now,
+                    Done = e.Done,
+                    Total = e.Total,
+                    BatchRequests = e.Total,
+                    BatchSucceeded = e.Succeeded,
+                    BatchFailed = e.Failed,
+                    BatchProvider = e.Provider.ToString(),
+                    BatchStage = e.StageLabel ?? string.Empty,
+                    BatchReason = e.Reason ?? string.Empty,
+                    BatchDuration = e.Duration,
+                    BatchSubmittedUtc = e.SubmittedUtc == default ? null : e.SubmittedUtc
+                });
+            }
         }
+    }
+
+    /// <summary>
+    /// D-09: shows "Collecting batches submitted before the app closed..." until the first batch is collected.
+    /// </summary>
+    public void SetCollectingAfterRestart(bool value)
+    {
+        lock (_lock)
+            _collectingAfterRestart = value;
+    }
+
+    public void SetPendingProviderBatches(int count)
+    {
+        lock (_lock)
+            _pendingProviderBatches = Math.Max(0, count);
+    }
+
+    /// <summary>
+    /// Copy of the lowest stage row waiting on a provider batch (the status strip's countdown); null when none is.
+    /// </summary>
+    public WaveProgress? CurrentBatchWait()
+    {
+        lock (_lock)
+            return _waves.Where(w => w.BatchWaiting).OrderBy(w => w.Index).FirstOrDefault()?.Clone();
+    }
+
+    // Caller holds _lock. Recomputes the row's batch fields from its waiting batches.
+    private void RefreshBatchRow(int rowIndex)
+    {
+        var row = _waves.FirstOrDefault(w => w.Index == rowIndex);
+        if (row == null)
+            return;
+
+        var waiting = _batchTracks.Values.Where(t => t.Row == rowIndex).ToList();
+        row.BatchWaiting = waiting.Count > 0;
+        row.BatchCount = waiting.Count;
+        row.BatchFirstSubmittedUtc = waiting.Count > 0 ? waiting.Min(t => t.SubmittedUtc) : null;
+        row.BatchDone = waiting.Sum(t => t.Done);
+        row.BatchTotal = waiting.Sum(t => t.Total);
+        row.BatchNextCheckUtc = waiting.Select(t => t.NextCheckUtc).Where(t => t != null).Min();
     }
 
     /// <summary>
@@ -269,6 +420,18 @@ public class GenerationSnapshot
         StageWaveCount = _stageWaveCount,
         StageWaveStart = _stageWaveStart,
         StageWaveEnd = _stageWaveEnd,
-        StageCount = _stageCount
+        StageCount = _stageCount,
+        CollectingAfterRestart = _collectingAfterRestart,
+        PendingProviderBatches = _pendingProviderBatches
     };
+
+    // One provider batch not yet collected; guarded by _lock
+    private sealed class BatchTrack
+    {
+        public int? Row { get; set; }
+        public DateTime SubmittedUtc { get; set; }
+        public int Done { get; set; }
+        public int Total { get; set; }
+        public DateTime? NextCheckUtc { get; set; }
+    }
 }

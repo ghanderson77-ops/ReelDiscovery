@@ -164,4 +164,83 @@ public class AnthropicWireTests
         var (normal, _, _) = await SendAsync(CreateRequest(maxTokens: 16_000));
         Assert.Equal(16_000, normal["max_tokens"]!.GetValue<int>());
     }
+
+    [Fact]
+    public async Task Request_SystemBlockHasEphemeralCacheControl()
+    {
+        var (body, _, _) = await SendAsync(CreateRequest());
+
+        var system = body["system"]!.AsArray();
+        Assert.Single(system);
+        var cacheControl = system[0]!["cache_control"]!.AsObject();
+        Assert.Equal("ephemeral", cacheControl["type"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Request_NoTopLevelCacheControl()
+    {
+        // Top-level automatic caching would cache the unique per-thread user prompt (T-07-07)
+        var (body, _, _) = await SendAsync(CreateRequest());
+
+        Assert.False(body.ContainsKey("cache_control"));
+        var message = body["messages"]!.AsArray()[0]!;
+        Assert.Equal(JsonValueKind.String, message["content"]!.GetValueKind());
+    }
+
+    [Fact]
+    public async Task Request_EmptySystemPrompt_NoCacheControl()
+    {
+        var request = CreateRequest();
+        request.SystemPrompt = string.Empty;
+        var (body, _, handler) = await SendAsync(request);
+
+        Assert.DoesNotContain("cache_control", handler.LastRequestBody!);
+        var system = body["system"]!.AsArray();
+        Assert.Equal("text", system[0]!["type"]!.GetValue<string>());
+        Assert.Equal(string.Empty, system[0]!["text"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Response_CacheUsageNormalized()
+    {
+        var handler = new FakeHttpHandler
+        {
+            Body = SuccessBody.Replace(
+                "\"usage\":{\"input_tokens\":10,\"output_tokens\":5}",
+                "\"usage\":{\"input_tokens\":120,\"cache_creation_input_tokens\":600,\"cache_read_input_tokens\":0,\"output_tokens\":40}")
+        };
+        var response = await CreateProvider(handler).SendAsync(CreateRequest());
+
+        Assert.Equal(LlmOutcome.Succeeded, response.Outcome);
+        Assert.Equal(120, response.InputTokens);
+        Assert.Equal(600, response.CacheWriteTokens);
+        Assert.Equal(0, response.CacheReadTokens);
+        Assert.Equal(40, response.OutputTokens);
+    }
+
+    [Fact]
+    public async Task Response_CacheReadReported()
+    {
+        var handler = new FakeHttpHandler
+        {
+            Body = SuccessBody.Replace(
+                "\"usage\":{\"input_tokens\":10,\"output_tokens\":5}",
+                "\"usage\":{\"input_tokens\":120,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":600,\"output_tokens\":40}")
+        };
+        var response = await CreateProvider(handler).SendAsync(CreateRequest());
+
+        Assert.Equal(120, response.InputTokens);
+        Assert.Equal(0, response.CacheWriteTokens);
+        Assert.Equal(600, response.CacheReadTokens);
+    }
+
+    [Fact]
+    public async Task Response_MissingCacheFields_AreZero()
+    {
+        var (_, response, _) = await SendAsync(CreateRequest());
+
+        Assert.Equal(10, response.InputTokens);
+        Assert.Equal(0, response.CacheWriteTokens);
+        Assert.Equal(0, response.CacheReadTokens);
+    }
 }

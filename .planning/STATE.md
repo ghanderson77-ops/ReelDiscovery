@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-09-PLAN.md
-last_updated: "2026-10-06T22:39:13.156Z"
+stopped_at: Completed 07-16-PLAN.md
+last_updated: "2026-10-06T22:46:46.134Z"
 last_activity: 2026-10-06
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 117
-  percent: 91
+  completed_plans: 118
+  percent: 92
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 12 of 22
+Plan: 13 of 22
 Status: Ready to execute
 Last activity: 2026-10-06
 
@@ -168,6 +168,7 @@ Progress: [██████████] 99%
 | Phase 07 P14 | 7min | 2 tasks | 9 files |
 | Phase 07 P08 | 4h | 3 tasks | 11 files |
 | Phase 07 P09 | 25 min | 2 tasks | 7 files |
+| Phase 07 P16 | 7min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -486,6 +487,8 @@ Recent decisions affecting current work:
 - [Phase ?]: 07-09: OpenAI batch cancel uses CreateBatchOperation.RehydrateAsync + CancelAsync (BatchClient 2.14.0 has no CancelBatchAsync)
 - [Phase ?]: 07-09: OpenAI batch body = SDK-serialized live Chat Completions body captured in-process (parity by construction)
 - [Phase ?]: 07-09: Malformed OpenAI 200 output lines are skipped so the decorator re-runs them
+- [Phase 07]: [07-16]: Blind-review resized sample restates the header and re-appends kept verdicts; a new pass starts only on plan/provider/model change
+- [Phase 07]: [07-16]: Blind-review verdict appends are non-cancellable; Task.WhenAll drains in-flight calls before a cancel propagates
 
 ### Pending Todos
 
@@ -507,6 +510,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T22:39:13.150Z
-Stopped at: Completed 07-09-PLAN.md
+Last session: 2026-10-06T22:46:46.128Z
+Stopped at: Completed 07-16-PLAN.md
 Resume file: None

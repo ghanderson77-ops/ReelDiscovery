@@ -246,7 +246,7 @@ Plans:
 - [ ] 07-13-PLAN.md — Regenerate thread: ThreadInvalidated record, replay, consistent relevant re-render (Wave 5)
 - [x] 07-14-PLAN.md — QA report store and metadata-only leakage audit (Wave 2)
 - [ ] 07-15-PLAN.md — Timeline/value consistency scans and automatic end-of-run QA (Wave 6)
-- [ ] 07-16-PLAN.md — Blind reviewer on the other provider: sample, prompts, estimate, resumable log (Wave 3)
+- [x] 07-16-PLAN.md — Blind reviewer on the other provider: sample, prompts, estimate, resumable log (Wave 3)
 - [ ] 07-17-PLAN.md — QA copy, findings dialog with Regenerate Thread, blind review dialog (Wave 6)
 - [ ] 07-18-PLAN.md — Case Summary Quality checks group and Generation cost row (Wave 7)
 - [ ] 07-19-PLAN.md — Single case-driven flow, API step cleanup, no legacy key migration (Wave 6)

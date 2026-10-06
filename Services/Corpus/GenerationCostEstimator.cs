@@ -1,6 +1,7 @@
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Services.Ai;
 
 namespace ReelDiscovery.Services.Corpus;
 
@@ -32,7 +33,18 @@ public class CostEstimate
     // D-21: one Volume call invents the side projects before filler renders
     public decimal SideWorldCost { get; set; }
 
+    // Live total: text with the expected prompt-cache effect, plus media
     public decimal Total { get; set; }
+
+    // Story-model text at batch prices with no cache reads (D-17; conservative, research Pattern 5)
+    public decimal BatchStoryCost { get; set; }
+
+    // Volume-model text at batch prices with no cache reads, including the side-world and voice-cast calls
+    public decimal BatchVolumeCost { get; set; }
+
+    // Batch total: BatchStoryCost + BatchVolumeCost + MediaCost (media is always priced live)
+    public decimal BatchTotal { get; set; }
+
     public string ModelName { get; set; } = string.Empty;
     public string VolumeModelName { get; set; } = string.Empty;
 }
@@ -108,9 +120,12 @@ public static class GenerationCostEstimator
     public const int SideWorldInputTokens = 3_000;
     public const int SideWorldOutputTokens = 1_200;
 
+    // [ASSUMED] byte-stable system prompt (~330 tokens) + JSON schema (~270) per evidence call (research A3); re-measure from live usage in 07-22
+    public const int StablePrefixTokens = 600;
+
     // Phase 5 Review Plan estimate; D-29 overload below splits Story / Volume / media
     /// <summary>
-    /// count x model.CalculateTotalCost(typical in, typical out) x QaOverhead per group; a null model gives a zero estimate.
+    /// count x live price(typical in, typical out) x QaOverhead per group; a null model gives a zero estimate.
     /// </summary>
     public static CostEstimate Estimate(CorpusPlan plan, AIModelConfig? storyModel)
     {
@@ -143,10 +158,10 @@ public static class GenerationCostEstimator
         var estimate = new CostEstimate
         {
             ModelName = storyModel.DisplayName ?? string.Empty,
-            RelevantCost = relevant * storyModel.CalculateTotalCost(RelevantInputPerMessage, RelevantOutputPerMessage) * QaOverhead,
-            OtherCost = other * storyModel.CalculateTotalCost(OtherInputPerMessage, OtherOutputPerMessage) * QaOverhead,
-            AttachmentCost = (documents * storyModel.CalculateTotalCost(DocumentInput, DocumentOutput)
-                              + small * storyModel.CalculateTotalCost(SmallAttachmentInput, SmallAttachmentOutput)) * QaOverhead
+            RelevantCost = relevant * Price(storyModel, RelevantInputPerMessage, RelevantOutputPerMessage, false) * QaOverhead,
+            OtherCost = other * Price(storyModel, OtherInputPerMessage, OtherOutputPerMessage, false) * QaOverhead,
+            AttachmentCost = (documents * Price(storyModel, DocumentInput, DocumentOutput, false)
+                              + small * Price(storyModel, SmallAttachmentInput, SmallAttachmentOutput, false)) * QaOverhead
         };
         estimate.Total = estimate.RelevantCost + estimate.OtherCost + estimate.AttachmentCost;
         return estimate;
@@ -218,30 +233,48 @@ public static class GenerationCostEstimator
         var estimate = new CostEstimate
         {
             ModelName = story.DisplayName ?? string.Empty,
-            VolumeModelName = volume.DisplayName ?? string.Empty,
-            RelevantCost = storyMessages * story.CalculateTotalCost(RelevantInputPerMessage, RelevantOutputPerMessage) * QaOverhead,
-            OtherCost = volumeMessages * volume.CalculateTotalCost(OtherInputPerMessage, OtherOutputPerMessage) * QaOverhead
+            VolumeModelName = volume.DisplayName ?? string.Empty
         };
 
-        var storyAttachments = storyDocuments * story.CalculateTotalCost(DocumentInput, DocumentOutput) * QaOverhead
-                               + storySmall * story.CalculateTotalCost(SmallAttachmentInput, SmallAttachmentOutput) * QaOverhead;
-        var volumeAttachments = volumeSmall * volume.CalculateTotalCost(SmallAttachmentInput, SmallAttachmentOutput) * QaOverhead;
+        // D-17: every text line is priced live (with the cache term) and at batch prices (no cache reads)
+        decimal StoryText(bool batch) =>
+            storyMessages * Price(story, RelevantInputPerMessage, RelevantOutputPerMessage, batch) * QaOverhead
+            + storyDocuments * Price(story, DocumentInput, DocumentOutput, batch) * QaOverhead
+            + storySmall * Price(story, SmallAttachmentInput, SmallAttachmentOutput, batch) * QaOverhead;
+
+        decimal VolumeText(bool batch, bool voiceCast) =>
+            volumeMessages * Price(volume, OtherInputPerMessage, OtherOutputPerMessage, batch) * QaOverhead
+            + volumeSmall * Price(volume, SmallAttachmentInput, SmallAttachmentOutput, batch) * QaOverhead
+            + (work.IncludeSideWorld ? Price(volume, SideWorldInputTokens, SideWorldOutputTokens, batch) * QaOverhead : 0m)
+            + (voiceCast ? Price(volume, VoiceCastInputTokens, VoiceCastOutputTokens, batch) * QaOverhead : 0m);
+
+        estimate.RelevantCost = storyMessages * Price(story, RelevantInputPerMessage, RelevantOutputPerMessage, false) * QaOverhead;
+        estimate.OtherCost = volumeMessages * Price(volume, OtherInputPerMessage, OtherOutputPerMessage, false) * QaOverhead;
+
+        var storyAttachments = storyDocuments * Price(story, DocumentInput, DocumentOutput, false) * QaOverhead
+                               + storySmall * Price(story, SmallAttachmentInput, SmallAttachmentOutput, false) * QaOverhead;
+        var volumeAttachments = volumeSmall * Price(volume, SmallAttachmentInput, SmallAttachmentOutput, false) * QaOverhead;
         estimate.AttachmentCost = storyAttachments + volumeAttachments;
 
         if (work.IncludeSideWorld)
-            estimate.SideWorldCost = volume.CalculateTotalCost(SideWorldInputTokens, SideWorldOutputTokens) * QaOverhead;
+            estimate.SideWorldCost = Price(volume, SideWorldInputTokens, SideWorldOutputTokens, false) * QaOverhead;
 
+        var voiceCast = mediaAvailable && work.IncludeVoiceCast;
         if (mediaAvailable)
         {
-            // Media is priced per unit; QA overhead models text retries (review 06-15)
+            // Media is priced per unit and always live; QA overhead models text retries (review 06-15)
             estimate.MediaCost = images * prices.ImageCost() + voicemails * prices.SpeechCost(VoicemailCharacters);
-            if (work.IncludeVoiceCast)
-                estimate.VoiceCastCost = volume.CalculateTotalCost(VoiceCastInputTokens, VoiceCastOutputTokens) * QaOverhead;
+            if (voiceCast)
+                estimate.VoiceCastCost = Price(volume, VoiceCastInputTokens, VoiceCastOutputTokens, false) * QaOverhead;
         }
 
         estimate.StoryCost = estimate.RelevantCost + storyAttachments;
         estimate.VolumeCost = estimate.OtherCost + volumeAttachments + estimate.SideWorldCost + estimate.VoiceCastCost;
         estimate.Total = estimate.StoryCost + estimate.VolumeCost + estimate.MediaCost;
+
+        estimate.BatchStoryCost = StoryText(true);
+        estimate.BatchVolumeCost = VolumeText(true, voiceCast);
+        estimate.BatchTotal = estimate.BatchStoryCost + estimate.BatchVolumeCost + estimate.MediaCost;
         return estimate;
     }
 
@@ -264,6 +297,22 @@ public static class GenerationCostEstimator
             .Concat(thread.FactIds ?? new List<string>())
             .Select(id => guide.FindFact(id))
             .Any(f => f != null && f.Significance is FactSignificance.Hot or FactSignificance.Key);
+    }
+
+    /// <summary>
+    /// One call's text price through AIModelConfig.CalculateCost. Live calls read StablePrefixTokens from the prompt cache
+    /// only when the prefix meets the model's minimum (Pitfall 7; a minimum of 0 means the model is not cached); batch
+    /// calls assume no cache reads and take the batch discount.
+    /// </summary>
+    private static decimal Price(AIModelConfig model, int inputTokens, int outputTokens, bool batch)
+    {
+        // Cache writes are amortized: one write per 5-minute window across thousands of calls is ignored (Pitfall 7: never claim savings the provider cannot give)
+        var caches = !batch && model.MinCacheablePrefixTokens > 0 && StablePrefixTokens >= model.MinCacheablePrefixTokens
+                     && inputTokens > StablePrefixTokens;
+        var usage = caches
+            ? new TokenUsage { InputTokens = inputTokens - StablePrefixTokens, CacheReadTokens = StablePrefixTokens, OutputTokens = outputTokens }
+            : new TokenUsage { InputTokens = inputTokens, OutputTokens = outputTokens, IsBatch = batch };
+        return model.CalculateCost(usage).TotalUsd;
     }
 
     // Story tier: relevant threads and decoys (D-29); everything else is Volume

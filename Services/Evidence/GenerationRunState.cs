@@ -501,26 +501,31 @@ public partial class GenerationRunState
     }
 
     /// <summary>
-    /// Phase 5 heuristic: rough cost of the relevant messages still to write (Pending and Failed threads) on the Story
-    /// model. A null model gives 0.
+    /// Phase 5 heuristic: live cost of the relevant messages still to write (Pending and Failed threads) on the Story
+    /// model, through the same pricing path as the Ready card. A null model gives 0.
     /// </summary>
     public static decimal EstimateRemaining(CorpusPlan plan, GenerationRunState state, AIModelConfig? model)
     {
         if (model == null)
             return 0m;
 
-        var remaining = RelevantThreads(plan).Where(t => !state.IsDone(t.Id)).Sum(t => t.Messages.Count(m => m != null));
-        return remaining * model.CalculateTotalCost(GenerationCostEstimator.RelevantInputPerMessage,
-            GenerationCostEstimator.RelevantOutputPerMessage) * GenerationCostEstimator.QaOverhead;
+        var work = new PricedWork();
+        foreach (var thread in RelevantThreads(plan).Where(t => !state.IsDone(t.Id)))
+        {
+            foreach (var message in thread.Messages.Where(m => m != null))
+                work.Messages.Add((thread, message));
+        }
+
+        return GenerationCostEstimator.PriceWork(work, model, model, MediaPrices.Defaults(), false).Total;
     }
 
     /// <summary>
     /// Cost of the work still to do: messages and attachments of threads not yet written, attachments to repair, the
     /// side-world call while filler is pending and none is journaled, and the voice-cast call while a voicemail is pending,
-    /// media is available and no voice set is journaled.
+    /// media is available and no voice set is journaled. batch selects the batch total (D-17) instead of the live one.
     /// </summary>
     public static decimal EstimateRemaining(CorpusPlan plan, GenerationRunState state, AIModelConfig? story,
-        AIModelConfig? volume, MediaPrices prices, bool mediaAvailable, CaseGuide? guide = null)
+        AIModelConfig? volume, MediaPrices prices, bool mediaAvailable, CaseGuide? guide = null, bool batch = false)
     {
         var work = new PricedWork { Guide = guide };
         var repairs = new HashSet<string>(state.AttachmentsToRepair(plan, mediaAvailable), StringComparer.Ordinal);
@@ -548,7 +553,8 @@ public partial class GenerationRunState
         }
 
         // One pricing path with the Ready card (review 06-15)
-        return GenerationCostEstimator.PriceWork(work, story, volume, prices ?? MediaPrices.Defaults(), mediaAvailable).Total;
+        var estimate = GenerationCostEstimator.PriceWork(work, story, volume, prices ?? MediaPrices.Defaults(), mediaAvailable);
+        return batch ? estimate.BatchTotal : estimate.Total;
     }
 
     private static AttachmentRunStatus StatusOf(JournalRecord record) => record.Type switch

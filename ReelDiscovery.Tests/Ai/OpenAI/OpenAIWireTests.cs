@@ -102,6 +102,93 @@ public class OpenAIWireTests
         Assert.Equal(5, response.OutputTokens);
     }
 
+    private static string BodyWithUsage(string usage) =>
+        SuccessBody.Replace("\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}", "\"usage\":" + usage);
+
+    [Fact]
+    public async Task Response_CacheReadAndWrite_Normalized()
+    {
+        var handler = new FakeHttpHandler
+        {
+            Body = BodyWithUsage("{\"prompt_tokens\":2000,\"completion_tokens\":50,\"total_tokens\":2050," +
+                                 "\"prompt_tokens_details\":{\"cached_tokens\":1200,\"cache_write_tokens\":300}}")
+        };
+
+        var response = await CreateProvider(handler).SendAsync(CreateRequest());
+
+        Assert.Equal(LlmOutcome.Succeeded, response.Outcome);
+        Assert.Equal(500, response.InputTokens);
+        Assert.Equal(1200, response.CacheReadTokens);
+        Assert.Equal(300, response.CacheWriteTokens);
+        Assert.Equal(50, response.OutputTokens);
+    }
+
+    [Fact]
+    public async Task Response_CacheReadOnly_NoWriteField()
+    {
+        var handler = new FakeHttpHandler
+        {
+            Body = BodyWithUsage("{\"prompt_tokens\":2000,\"completion_tokens\":50,\"total_tokens\":2050," +
+                                 "\"prompt_tokens_details\":{\"cached_tokens\":1200}}")
+        };
+
+        var response = await CreateProvider(handler).SendAsync(CreateRequest());
+
+        Assert.Equal(800, response.InputTokens);
+        Assert.Equal(1200, response.CacheReadTokens);
+        Assert.Equal(0, response.CacheWriteTokens);
+    }
+
+    [Fact]
+    public async Task Response_NoPromptDetails_AllInputUncached()
+    {
+        var handler = new FakeHttpHandler
+        {
+            Body = BodyWithUsage("{\"prompt_tokens\":2000,\"completion_tokens\":50,\"total_tokens\":2050}")
+        };
+
+        var response = await CreateProvider(handler).SendAsync(CreateRequest());
+
+        Assert.Equal(2000, response.InputTokens);
+        Assert.Equal(0, response.CacheReadTokens);
+        Assert.Equal(0, response.CacheWriteTokens);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("[1,2,3]")]
+    [InlineData("{\"usage\":[]}")]
+    [InlineData("{\"usage\":{\"prompt_tokens_details\":\"x\"}}")]
+    [InlineData("{\"usage\":{\"prompt_tokens_details\":{\"cache_write_tokens\":\"300\"}}}")]
+    [InlineData("{\"usage\":{\"prompt_tokens_details\":{\"cache_write_tokens\":-5}}}")]
+    [InlineData("{\"usage\":{\"prompt_tokens_details\":{\"cache_write_tokens\":1.5}}}")]
+    public void ReadCacheWriteTokens_MalformedOrMissing_IsZero(string? raw)
+    {
+        var data = raw == null ? null : BinaryData.FromString(raw);
+
+        Assert.Equal(0, OpenAITextProvider.ReadCacheWriteTokens(data));
+    }
+
+    [Fact]
+    public void ReadCacheWriteTokens_ReadsNestedValue()
+    {
+        var data = BinaryData.FromString("{\"usage\":{\"prompt_tokens_details\":{\"cache_write_tokens\":300}}}");
+
+        Assert.Equal(300, OpenAITextProvider.ReadCacheWriteTokens(data));
+    }
+
+    [Fact]
+    public async Task Request_SendsNoPromptCacheOptions()
+    {
+        var handler = new FakeHttpHandler { Body = SuccessBody };
+        await CreateProvider(handler).SendAsync(CreateRequest(effort: "low"));
+
+        Assert.DoesNotContain("prompt_cache_options", handler.LastRequestBody!);
+        Assert.DoesNotContain("prompt_cache_breakpoint", handler.LastRequestBody!);
+    }
+
     private static string MessageText(JsonNode message)
     {
         // The SDK may serialize content as a plain string or as a list of text parts

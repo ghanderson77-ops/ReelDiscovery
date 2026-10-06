@@ -143,6 +143,11 @@ public class AttachmentUnitOfWork
     public const string EarlierVersionMissingWarning =
         "C1: earlier version not yet written; this version was drafted without its text, so its figures may not build on it";
 
+    // IN-04: tts-1 rejects input above 4,096 chars; the prompt alone does not bound the transcript
+    public const int MaxSpeechChars = 4_000;
+    public const string SpeechClippedWarning =
+        "S1: the transcript was longer than the speech limit, so the audio stops before the end of the written text";
+
     private const string TimeoutPrefix = "The request timed out";
 
     private readonly ILlmGateway _llm;
@@ -200,9 +205,10 @@ public class AttachmentUnitOfWork
                 return Skip(outcome, _gate.Reason);
 
             var isImage = ctx.Spec.Kind == AttachmentType.Image;
+            var (speech, clipped) = isImage ? (string.Empty, false) : SpeechText(ctx.ParentBody);
             var result = isImage
                 ? await _media.GenerateImageAsync(AttachmentPrompts.ImagePrompt(ctx), ctx.FileName, run.UserToken).ConfigureAwait(false)
-                : await _media.GenerateSpeechAsync(ctx.ParentBody, VoiceAssignments.For(ctx.Parent.FromId, CastVoices), ctx.FileName,
+                : await _media.GenerateSpeechAsync(speech, VoiceAssignments.For(ctx.Parent.FromId, CastVoices), ctx.FileName,
                     run.UserToken).ConfigureAwait(false);
             outcome.Attempts = 1;
             outcome.MediaCostUsd = result?.CostUsd ?? 0m;
@@ -254,6 +260,14 @@ public class AttachmentUnitOfWork
                 IsInline = inline,
                 ContentId = inline ? AttachmentNaming.ContentIdFor(outcome.DocId, sender?.Domain) : string.Empty
             };
+            if (clipped)
+            {
+                // A Retry reuses the same journaled transcript, so the clip is a warning, never a failure (IN-04)
+                outcome.Violations = new List<string> { Describe(new RenderViolation { Code = "S1", Seq = ctx.Parent.Seq, Text = SpeechClippedWarning }) };
+                outcome.Kind = AttachmentOutcomeKind.Warnings;
+                return outcome;
+            }
+
             outcome.Kind = AttachmentOutcomeKind.Written;
             return outcome;
         }
@@ -596,6 +610,25 @@ public class AttachmentUnitOfWork
         AttachmentType.Voicemail => "audio/mpeg",
         _ => "application/octet-stream"
     };
+
+    /// <summary>
+    /// The voicemail text sent to speech: unchanged up to <see cref="MaxSpeechChars"/>, else cut at the last sentence end
+    /// in the second half of the window (else the last space), never inside a surrogate pair (IN-04).
+    /// </summary>
+    internal static (string Text, bool Clipped) SpeechText(string? body)
+    {
+        var text = body ?? string.Empty;
+        if (text.Length <= MaxSpeechChars)
+            return (text, false);
+
+        var window = text[..(char.IsHighSurrogate(text[MaxSpeechChars - 1]) ? MaxSpeechChars - 1 : MaxSpeechChars)];
+        var sentence = window.LastIndexOfAny(new[] { '.', '!', '?' });
+        if (sentence >= MaxSpeechChars / 2)
+            return (window[..(sentence + 1)].TrimEnd(), true);
+
+        var space = window.LastIndexOf(' ');
+        return ((space >= MaxSpeechChars / 2 ? window[..space] : window).TrimEnd(), true);
+    }
 
     private static string Describe(RenderViolation violation) =>
         violation.Seq > 0 ? $"msg {violation.Seq}: {violation.Text}" : violation.Text;

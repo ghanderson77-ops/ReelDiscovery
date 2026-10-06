@@ -644,6 +644,44 @@ public class AttachmentUnitOfWorkTests
         Assert.Equal(0.001m, outcome.MediaCostUsd);
     }
 
+    // IN-04: a transcript past the tts-1 limit is clipped at a sentence end and kept with a warning
+    [Fact]
+    public async Task Voicemail_OverlongTranscript_ClippedAtSentence_KeptWithWarning()
+    {
+        var ctx = Ctx(AttachmentTestData.RelevantVoicemailThreadId, AttachmentType.Voicemail);
+        var sentence = "Hi, it is Raymond calling about the invoice again. ";
+        ctx.ParentBody = string.Concat(Enumerable.Repeat(sentence, 120));
+        var media = new FakeMediaGenerator();
+        var unit = Unit(media);
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await unit.RunAsync(ctx, run);
+
+        var request = Assert.Single(media.Requests);
+        Assert.True(request.Input.Length <= AttachmentUnitOfWork.MaxSpeechChars);
+        Assert.EndsWith("again.", request.Input);
+        Assert.StartsWith(request.Input, ctx.ParentBody);
+        Assert.Equal(AttachmentOutcomeKind.Warnings, outcome.Kind);
+        Assert.Contains(outcome.Violations, v => v.Contains(AttachmentUnitOfWork.SpeechClippedWarning));
+        Assert.NotNull(outcome.Part);
+    }
+
+    [Fact]
+    public void SpeechText_ShortUnchanged_NoSentenceCutsAtSpace_NeverSplitsPair()
+    {
+        Assert.Equal(("Call me back.", false), AttachmentUnitOfWork.SpeechText("Call me back."));
+
+        var words = string.Concat(Enumerable.Repeat("word ", 1000));
+        var (atSpace, clipped) = AttachmentUnitOfWork.SpeechText(words);
+        Assert.True(clipped);
+        Assert.EndsWith("word", atSpace);
+
+        var noBreaks = new string('a', AttachmentUnitOfWork.MaxSpeechChars - 1) + "\U0001F600" + "tail";
+        var (cut, _) = AttachmentUnitOfWork.SpeechText(noBreaks);
+        Assert.False(char.IsHighSurrogate(cut[^1]));
+    }
+
     [Fact]
     public async Task Voicemail_WithoutVoiceForCaller_UsesFallback()
     {

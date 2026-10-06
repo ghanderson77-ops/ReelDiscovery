@@ -498,4 +498,278 @@ public class BatchingLlmProviderTests : IDisposable
         var response = await task.WaitAsync(Wait);
         Assert.True(response.IsBatch);
     }
+
+    // ----- Consumed bookkeeping, restart recovery, orphans, Start Over (Task 2) -----
+
+    [Fact]
+    public async Task DeliveredItems_ConsumedLineWrittenBeforeWaiterCompletes()
+    {
+        var transport = Transport();
+        var provider = Create(Live(), transport);
+
+        var tasks = SendAll(provider, "wave 1", 3);
+        var first = await tasks[0].WaitAsync(Wait);
+        Assert.True(first.IsBatch);
+
+        // Consumed is appended before the waiter completes, so it is already on disk
+        Assert.Contains(IdOf(Req("r0")), new BatchLedger(_folder).Replay().ConsumedCustomIds);
+
+        await Task.WhenAll(tasks).WaitAsync(Wait);
+        var lines = File.ReadAllLines(BatchLedger.PathFor(_folder));
+        Assert.Equal(3, lines.Count(l => l.Contains("\"Consumed\"")));
+        Assert.Equal(new[] { "r0", "r1", "r2" }.Select(u => IdOf(Req(u))).OrderBy(x => x, StringComparer.Ordinal),
+            new BatchLedger(_folder).Replay().ConsumedCustomIds.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Restart_PendingBatch_AttachesAndNeverResubmits()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var a = Create(Live(), transport);
+        var aEvents = new EventLog();
+        aEvents.Attach(a);
+
+        using (var cts = new CancellationTokenSource())
+        {
+            Task<LlmProviderResponse> task;
+            using (BatchStage.Enter("wave 1"))
+                task = a.SendAsync(Req("a"), cts.Token);
+
+            await aEvents.WaitFor(BatchStatusKind.Submitted);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task.WaitAsync(Wait));
+        }
+
+        a.Detach();
+        transport.PollsUntilEnded = 0;
+
+        var live = Live();
+        var b = Create(live, transport);
+        var bEvents = new EventLog();
+        bEvents.Attach(b);
+        Assert.Equal(1, b.PendingBatchCount);
+
+        // Sent before resuming: attaches to the seeded in-flight item
+        Task<LlmProviderResponse> again;
+        using (BatchStage.Enter("wave 1 (continued)"))
+            again = b.SendAsync(Req("a"));
+
+        Assert.Equal(1, b.ResumePending());
+        var response = await again.WaitAsync(Wait);
+
+        Assert.Equal("batch:a", response.Text);
+        Assert.True(response.IsBatch);
+        Assert.Single(transport.Submissions);
+        Assert.Empty(live.Requests);
+        await bEvents.WaitFor(BatchStatusKind.CollectedAfterRestart);
+        Assert.Equal(0, b.PendingBatchCount);
+    }
+
+    [Fact]
+    public async Task Restart_CollectedNotConsumed_ServedFromResultsFile()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var a = Create(Live(), transport);
+        var aEvents = new EventLog();
+        aEvents.Attach(a);
+
+        using (var cts = new CancellationTokenSource())
+        {
+            Task<LlmProviderResponse> task;
+            using (BatchStage.Enter("wave 1"))
+                task = a.SendAsync(Req("a"), cts.Token);
+
+            await aEvents.WaitFor(BatchStatusKind.Submitted);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task.WaitAsync(Wait));
+        }
+
+        // A collects with nobody waiting: the result is cached, not consumed
+        transport.PollsUntilEnded = 0;
+        await aEvents.WaitFor(BatchStatusKind.Finished);
+        a.Detach();
+        Assert.Empty(new BatchLedger(_folder).Replay().ConsumedCustomIds);
+
+        var statusCalls = transport.StatusCalls;
+        var live = Live();
+        var b = Create(live, transport);
+        Assert.Equal(0, b.PendingBatchCount);
+        Assert.Equal(0, b.ResumePending());
+
+        LlmProviderResponse response;
+        using (BatchStage.Enter("wave 1"))
+            response = await b.SendAsync(Req("a")).WaitAsync(Wait);
+
+        Assert.Equal("batch:a", response.Text);
+        Assert.True(response.IsBatch);
+        Assert.Single(transport.Submissions);
+        Assert.Equal(statusCalls, transport.StatusCalls);
+        Assert.Empty(live.Requests);
+        Assert.Contains(IdOf(Req("a")), new BatchLedger(_folder).Replay().ConsumedCustomIds);
+    }
+
+    [Fact]
+    public async Task ConsumedResult_NeverServedTwice_InSessionOrAfterRestart()
+    {
+        var transport = Transport();
+        var a = Create(Live(), transport);
+
+        using (BatchStage.Enter("wave 1"))
+            await a.SendAsync(Req("a")).WaitAsync(Wait);
+        Assert.Single(transport.Submissions);
+
+        // Regenerate in the same session: a new submission
+        using (BatchStage.Enter("wave 1"))
+            await a.SendAsync(Req("a")).WaitAsync(Wait);
+        Assert.Equal(2, transport.Submissions.Count);
+        a.Detach();
+
+        // Continue after a restart: the consumed result is not reused either
+        var b = Create(Live(), transport);
+        using (BatchStage.Enter("wave 1"))
+        {
+            var response = await b.SendAsync(Req("a")).WaitAsync(Wait);
+            Assert.True(response.IsBatch);
+        }
+
+        Assert.Equal(3, transport.Submissions.Count);
+    }
+
+    [Fact]
+    public async Task ResumePending_IgnoresBatchesOfAnotherProvider()
+    {
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = LlmProviderKind.Anthropic,
+            BatchId = "msgbatch_1",
+            PlanId = _plan,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "wave 1",
+            Items = new List<BatchLedgerItem> { new() { CustomId = IdOf(Req("a")), Operation = "Thread", ModelId = "claude" } }
+        });
+
+        var transport = Transport();
+        var provider = Create(Live(), transport);
+
+        Assert.Equal(0, provider.PendingBatchCount);
+        Assert.Equal(0, provider.ResumePending());
+        Assert.Equal(0, transport.StatusCalls);
+
+        // Not attached to the other provider's batch: a fresh submission
+        using (BatchStage.Enter("wave 1"))
+            await provider.SendAsync(Req("a")).WaitAsync(Wait);
+        Assert.Single(transport.Submissions);
+    }
+
+    [Fact]
+    public async Task ResumePending_IgnoresOtherPlans()
+    {
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = LlmProviderKind.OpenAI,
+            BatchId = "batch_other",
+            PlanId = Guid.NewGuid(),
+            SubmittedUtc = DateTime.UtcNow,
+            Items = new List<BatchLedgerItem> { new() { CustomId = IdOf(Req("a")), Operation = "Thread", ModelId = "gpt-test" } }
+        });
+
+        var provider = Create(Live(), Transport());
+
+        Assert.Equal(0, provider.PendingBatchCount);
+        Assert.Equal(0, provider.ResumePending());
+    }
+
+    [Fact]
+    public async Task BillOrphans_PricesUnconsumedItemsOnce()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var model = new AIModelConfig
+        {
+            ModelId = "gpt-test",
+            InputTokenPricePerMillion = 2m,
+            OutputTokenPricePerMillion = 8m,
+            BatchDiscountPercent = 50m
+        };
+        var provider = Create(Live(), transport, priceLookup: id => id == "gpt-test" ? model : null);
+        var events = new EventLog();
+        events.Attach(provider);
+
+        using var cts = new CancellationTokenSource();
+        Task<LlmProviderResponse> kept, abandoned;
+        using (BatchStage.Enter("wave 1"))
+        {
+            kept = provider.SendAsync(Req("kept"));
+            abandoned = provider.SendAsync(Req("abandoned"), cts.Token);
+        }
+
+        await events.WaitFor(BatchStatusKind.Submitted);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned.WaitAsync(Wait));
+        transport.PollsUntilEnded = 0;
+        await kept.WaitAsync(Wait);
+        var finished = await events.WaitFor(BatchStatusKind.Finished);
+
+        var (cost, input, output) = await provider.BillOrphansAsync().WaitAsync(Wait);
+
+        var expected = model.CalculateCost(new TokenUsage { InputTokens = 1000, OutputTokens = 500, IsBatch = true });
+        Assert.Equal(expected.TotalUsd, cost.TotalUsd);
+        Assert.True(cost.BatchSavingsUsd > 0);
+        Assert.Equal(1000, input);
+        Assert.Equal(500, output);
+        Assert.Contains(finished.BatchId, new BatchLedger(_folder).Replay().OrphansBilledIds);
+
+        var (again, againIn, againOut) = await provider.BillOrphansAsync().WaitAsync(Wait);
+        Assert.Equal(0m, again.TotalUsd);
+        Assert.Equal(0, againIn);
+        Assert.Equal(0, againOut);
+
+        // A restart does not bill (or serve) the billed orphan again
+        provider.Detach();
+        var b = Create(Live(), transport, priceLookup: _ => model);
+        var (afterRestart, _, _) = await b.BillOrphansAsync().WaitAsync(Wait);
+        Assert.Equal(0m, afterRestart.TotalUsd);
+    }
+
+    [Fact]
+    public async Task CancelPending_CancelsPendingBatchesAndDeletesFiles()
+    {
+        var ledger = new BatchLedger(_folder);
+        BatchLedgerRecord Submitted(string id, LlmProviderKind kind, string inputFile, Guid plan) => new()
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = kind,
+            BatchId = id,
+            PlanId = plan,
+            SubmittedUtc = DateTime.UtcNow,
+            InputFileId = inputFile,
+            Items = new List<BatchLedgerItem> { new() { CustomId = "q" + id, Operation = "Thread", ModelId = "m" } }
+        };
+
+        await ledger.AppendAsync(Submitted("batch_open", LlmProviderKind.OpenAI, "file_in_1", _plan));
+        await ledger.AppendAsync(Submitted("batch_done", LlmProviderKind.OpenAI, "file_in_2", _plan));
+        await ledger.AppendAsync(new BatchLedgerRecord { Type = BatchLedgerRecordType.Collected, Utc = DateTime.UtcNow, BatchId = "batch_done" });
+        await ledger.AppendAsync(Submitted("msgbatch_open", LlmProviderKind.Anthropic, string.Empty, _plan));
+        await ledger.AppendAsync(Submitted("batch_other_plan", LlmProviderKind.OpenAI, "file_in_3", Guid.NewGuid()));
+
+        var openAi = new FakeBatchTransport();
+        await BatchingLlmProvider.CancelPendingAsync(ledger,
+            kind => kind == LlmProviderKind.OpenAI ? openAi : null, _plan).WaitAsync(Wait);
+
+        Assert.Equal(new[] { "batch_open" }, openAi.CancelledIds);
+        var state = new BatchLedger(_folder).Replay();
+        Assert.Contains("batch_open", state.CancelledIds);
+        Assert.DoesNotContain("msgbatch_open", state.CancelledIds);
+        Assert.DoesNotContain("batch_other_plan", state.CancelledIds);
+        Assert.Equal(new[] { "file_in_1", "file_in_2" }, openAi.DeletedFiles.Select(f => f.Item1).OrderBy(f => f, StringComparer.Ordinal));
+    }
 }

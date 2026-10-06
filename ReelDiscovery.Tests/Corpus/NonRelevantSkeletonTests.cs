@@ -155,13 +155,18 @@ public class NonRelevantSkeletonTests
     [InlineData(2024)]
     public void Daily_SomeThreadsArePrivilegedInsideCounselOrganization(int seed)
     {
-        var (ctx, _, skeleton) = Build(Mix(daily: 400), seed: seed);
+        var (ctx, relevant, skeleton) = Build(Mix(daily: 400), seed: seed);
         var daily = Of(skeleton, NonRelevantCategory.DailyBusiness);
         Assert.True(daily.Count >= 50);
 
         var privileged = daily.Where(t => t.IsPrivileged).ToList();
         Assert.NotEmpty(privileged);
-        Assert.True(privileged.Count <= Math.Max(1, (int)Math.Round(daily.Count * 0.05)));
+        // D-23: the cap follows the relevant privileged rate (8% default) instead of a flat 5%
+        var relevantShare = relevant.Count(t => t.IsPrivileged) / (double)relevant.Count;
+        var expected = Math.Max(
+            (int)Math.Round(daily.Count * NonRelevantSkeletonBuilder.PrivilegedDailyShare, MidpointRounding.AwayFromZero),
+            (int)Math.Round(daily.Count * relevantShare, MidpointRounding.AwayFromZero));
+        Assert.True(privileged.Count <= Math.Max(1, expected));
 
         Assert.All(privileged, t =>
         {

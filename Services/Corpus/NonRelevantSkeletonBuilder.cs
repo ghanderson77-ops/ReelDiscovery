@@ -163,6 +163,10 @@ public static class NonRelevantSkeletonBuilder
             .SelectMany(t => t.Messages.Where(m => m != null))
             .GroupBy(m => m.FromId ?? string.Empty)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
+        // D-23: share of relevant threads that are privileged, matched by daily business below
+        var relevantList = (relevantThreads ?? Array.Empty<PlannedThread>()).Where(t => t != null).ToList();
+        var relevantPrivilegedShare = relevantList.Count == 0 ? 0.0 : relevantList.Count(t => t.IsPrivileged) / (double)relevantList.Count;
         var senders = ActiveSenders(run);
         var weights = senders.Select(id => 1 + (sent.TryGetValue(id, out var n) ? n : 0)).ToList();
 
@@ -195,15 +199,16 @@ public static class NonRelevantSkeletonBuilder
             specs.Add(spec);
         }
 
-        AssignDailyPrivilege(ctx, specs);
+        AssignDailyPrivilege(ctx, specs, relevantPrivilegedShare);
         return specs.Select(s => BuildThread(run, s)).ToList();
     }
 
     /// <summary>
-    /// About 2% of daily threads copy the sender organization's in-house counsel and are privileged but not relevant.
-    /// Every participant stays inside that organization (validator rule 12); cross-organization threads are never picked.
+    /// About 2% of daily threads, or the relevant privileged rate, whichever is higher, copy the sender organization's
+    /// in-house counsel and are privileged but not relevant (D-23). Every participant stays inside that organization
+    /// (validator rule 12); cross-organization threads are never picked.
     /// </summary>
-    private static void AssignDailyPrivilege(SkeletonContext ctx, List<Spec> specs)
+    private static void AssignDailyPrivilege(SkeletonContext ctx, List<Spec> specs, double relevantPrivilegedShare)
     {
         var candidates = new List<(Spec Spec, string Counsel)>();
         foreach (var spec in specs.Where(s => !s.IsCrossOrganization))
@@ -221,8 +226,11 @@ public static class NonRelevantSkeletonBuilder
         if (candidates.Count == 0)
             return;
 
-        var target = (int)Math.Round(specs.Count * PrivilegedDailyShare, MidpointRounding.AwayFromZero);
-        if (target == 0 && specs.Count >= MinDailyThreadsForPrivileged)
+        // D-23: match the relevant privileged rate at every size so the privilege banner never predicts relevance
+        var target = Math.Max(
+            (int)Math.Round(specs.Count * PrivilegedDailyShare, MidpointRounding.AwayFromZero),
+            (int)Math.Round(specs.Count * relevantPrivilegedShare, MidpointRounding.AwayFromZero));
+        if (target == 0 && (relevantPrivilegedShare > 0 || specs.Count >= MinDailyThreadsForPrivileged))
             target = 1;
         Shuffle(candidates, ctx.Random);
         foreach (var (spec, counsel) in candidates.Take(Math.Min(target, candidates.Count)))

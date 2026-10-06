@@ -311,6 +311,71 @@ public partial class AttachmentRepairTests : IDisposable
         Assert.DoesNotContain(GenerationRunState.From(_plan, replay).RepairGroups(_plan, mediaAvailable: false), g => g.ThreadId == thread.Id);
     }
 
+    // IN-02: Normalize blanks an unsafe journaled name; the rewrite must keep the reused part under its planned name
+    [Fact]
+    public async Task Repair_UnsafeJournaledFileName_ReusedPartKeptUnderPlannedName()
+    {
+        var thread = AttachmentTestData.Thread(_plan, AttachmentTestData.RelevantDocThreadId);
+        var root = thread.Messages.Single(m => m.Seq == 1);
+        var word = Spec(thread, 1, AttachmentType.Word).DocId;
+        var excel = Spec(thread, 1, AttachmentType.Excel).DocId;
+        await Write(thread, Refuse(excel));
+        var wordBytes = Copies(root).Select(c => PartBytes(Load(c), word)).ToList();
+        var wordName = ((MimePart)DocParts(Load(Copies(root)[0])).Single(p => p.Headers[MailboxWriter.DocIdHeader] == word)).FileName;
+        await RewriteJournal(r =>
+        {
+            foreach (var nested in r.Attachments ?? new List<JournalRecord>())
+            {
+                if (nested.AttachmentDocId == word)
+                    nested.FileName = "..\\escape.docx";
+            }
+        });
+        var before = Requests().Count;
+
+        var outcome = await Repair(thread);
+
+        Assert.Equal(excel, AttachmentIdOf(Assert.Single(Requests().Skip(before))));
+        Assert.Equal(1, outcome.Added);
+        foreach (var (copy, i) in Copies(root).Select((c, i) => (c, i)))
+        {
+            var eml = Load(copy);
+            Assert.Contains(word, PartIds(eml));
+            Assert.Contains(excel, PartIds(eml));
+            Assert.Equal(wordBytes[i], PartBytes(eml, word));
+            Assert.Equal(wordName, ((MimePart)DocParts(eml).Single(p => p.Headers[MailboxWriter.DocIdHeader] == word)).FileName);
+        }
+    }
+
+    [Fact]
+    public void CanCarry_RejectsEmptyBytesAndUnsafeNames()
+    {
+        var ok = new ComposedAttachment { DocId = "D1", Kind = AttachmentType.Word, FileName = "Memo.docx", Bytes = new byte[] { 1 } };
+        Assert.True(MailboxWriter.CanCarry(ok));
+        Assert.False(MailboxWriter.CanCarry(null));
+        Assert.False(MailboxWriter.CanCarry(new ComposedAttachment { FileName = "Memo.docx", Bytes = Array.Empty<byte>() }));
+        Assert.False(MailboxWriter.CanCarry(new ComposedAttachment { FileName = string.Empty, Bytes = new byte[] { 1 } }));
+        Assert.False(MailboxWriter.CanCarry(new ComposedAttachment { FileName = "a..b.docx", Bytes = new byte[] { 1 } }));
+    }
+
+    [Fact]
+    public void FailUncarriable_MarksWriteFailure_DropsPartKeepsSpend()
+    {
+        var outcome = new AttachmentOutcome
+        {
+            Kind = AttachmentOutcomeKind.Written,
+            CostUsd = 0.25m,
+            Part = new ComposedAttachment { FileName = "Memo.docx", Bytes = Array.Empty<byte>() }
+        };
+
+        ThreadUnitOfWork.FailUncarriable(outcome);
+
+        Assert.Equal(AttachmentOutcomeKind.Failed, outcome.Kind);
+        Assert.Equal(ThreadFailureKind.Write, outcome.FailureKind);
+        Assert.Equal(ThreadUnitOfWork.UncarriableReason, outcome.Reason);
+        Assert.Null(outcome.Part);
+        Assert.Equal(0.25m, outcome.CostUsd);
+    }
+
     [Fact]
     public async Task Repair_MultiMessage_ReusesPartsOnEveryMessage()
     {

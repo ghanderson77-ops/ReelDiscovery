@@ -181,17 +181,23 @@ public class MailboxWriter
         return left;
     }
 
+    /// <summary>
+    /// True when <see cref="BuildMime"/> will carry the part: it has bytes and a safe bare file name. Callers fail a part
+    /// that cannot be carried before journaling it, so the key never calls a part Generated that the EML lacks (IN-02).
+    /// </summary>
+    public static bool CanCarry(ComposedAttachment? attachment) =>
+        attachment?.Bytes != null && attachment.Bytes.Length > 0
+        && CorpusPlan.IsSafeFileName(Path.GetFileName(attachment.FileName ?? string.Empty));
+
     private static void AddAttachments(BodyBuilder builder, IEnumerable<ComposedAttachment> attachments)
     {
         foreach (var attachment in attachments)
         {
-            if (attachment == null || attachment.Bytes == null || attachment.Bytes.Length == 0)
+            // T-06-30: names may come from model titles; keep only a safe bare file name
+            if (attachment == null || !CanCarry(attachment))
                 continue;
 
-            // T-06-30: names may come from model titles; keep only a safe bare file name
             var name = Path.GetFileName(attachment.FileName ?? string.Empty);
-            if (!CorpusPlan.IsSafeFileName(name))
-                continue;
 
             if (attachment.Kind == AttachmentType.Image && attachment.IsInline && !string.IsNullOrEmpty(attachment.ContentId))
             {

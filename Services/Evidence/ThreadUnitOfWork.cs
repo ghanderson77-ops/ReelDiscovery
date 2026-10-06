@@ -247,6 +247,10 @@ public class ThreadUnitOfWork
                 if (_attachments != null && attachments != null)
                     cancelled = await RunAttachmentsAsync(ctx, profile, best, attachments, run, outcomes, slots, spend).ConfigureAwait(false);
 
+                // IN-02: a part the writer would drop is journaled Failed, never Generated
+                foreach (var done in outcomes.Where(o => IsCommitted(o) && o.Part != null && !MailboxWriter.CanCarry(o.Part)))
+                    FailUncarriable(done);
+
                 // D-26: a failed or skipped attachment never holds back its email
                 var parts = new Dictionary<string, ComposedAttachment>(StringComparer.Ordinal);
                 foreach (var done in outcomes.Where(o => IsCommitted(o) && o.Part != null))
@@ -720,6 +724,20 @@ public class ThreadUnitOfWork
 
     private static bool IsCommitted(AttachmentOutcome outcome) =>
         outcome.Kind is AttachmentOutcomeKind.Written or AttachmentOutcomeKind.Warnings;
+
+    internal const string UncarriableReason = "The attachment could not be added to its email (no content or an unsafe file name).";
+
+    /// <summary>
+    /// Marks a committed outcome whose part <see cref="MailboxWriter.CanCarry"/> rejects as a Write failure; its spend stays (IN-02).
+    /// </summary>
+    internal static void FailUncarriable(AttachmentOutcome outcome)
+    {
+        outcome.Kind = AttachmentOutcomeKind.Failed;
+        outcome.FailureKind = ThreadFailureKind.Write;
+        outcome.Reason = UncarriableReason;
+        outcome.Part = null;
+        outcome.NewDetails = new List<LedgerDelta>();
+    }
 
     private static AttachmentRunStatus StatusOf(AttachmentOutcomeKind kind) => kind switch
     {

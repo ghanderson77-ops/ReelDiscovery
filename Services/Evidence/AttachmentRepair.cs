@@ -102,6 +102,12 @@ public class AttachmentRepair
                 var wanted = new HashSet<string>(group?.AttachmentDocIds ?? new List<string>(), StringComparer.Ordinal);
                 var records = attachmentRecords ?? new Dictionary<string, JournalRecord>(StringComparer.Ordinal);
 
+                var links = actx?.Chains?.Links ?? new Dictionary<string, AttachmentChainLink>(StringComparer.Ordinal);
+                var titlesByDocId = (threadDone.Messages ?? new List<JournalMessage>())
+                    .Where(m => m != null && !string.IsNullOrEmpty(m.DocId))
+                    .GroupBy(m => m.DocId, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.First().AttachmentTitles ?? new List<string>(), StringComparer.Ordinal);
+
                 // 2. Committed parts per parent message, read back from any copy that has them (review concern 3)
                 var reused = new Dictionary<string, ComposedAttachment>(StringComparer.Ordinal);
                 var regenerate = new HashSet<string>(StringComparer.Ordinal);
@@ -118,10 +124,18 @@ public class AttachmentRepair
 
                     var harvested = AttachmentHarvester.HarvestMessage(_caseFolder, MailboxWriter.CopyPathsFor(message, _custodianFolders), committed);
                     var domain = ctx.People.Find(message.FromId)?.Domain;
+
+                    // IN-02: Normalize blanks an unsafe journaled name; the planned name keeps the reused part in the EML
+                    var planned = AttachmentNaming.NamesFor(message,
+                        titlesByDocId.TryGetValue(message.DocId ?? string.Empty, out var savedTitles) && savedTitles.Count > 0 ? savedTitles : null,
+                        links);
                     foreach (var spec in Specs(message).Where(a => committed.Contains(a.DocId)))
                     {
-                        if (harvested.TryGetValue(spec.DocId, out var part) && part.Bytes.Length > 0)
-                            reused[spec.DocId] = Rebuilt(spec, records[spec.DocId], part, domain);
+                        var rebuilt = harvested.TryGetValue(spec.DocId, out var part) && part.Bytes.Length > 0
+                            ? Rebuilt(spec, records[spec.DocId], part, domain, planned.GetValueOrDefault(spec.DocId))
+                            : null;
+                        if (rebuilt != null && MailboxWriter.CanCarry(rebuilt))
+                            reused[spec.DocId] = rebuilt;
                         else
                             regenerate.Add(spec.DocId);
                     }
@@ -139,11 +153,6 @@ public class AttachmentRepair
                 var ownDocIds = new HashSet<string>(messages.SelectMany(Specs).Select(a => a.DocId), StringComparer.Ordinal);
                 var repairTexts = new Dictionary<string, string>(StringComparer.Ordinal);
                 var slots = new Dictionary<string, InviteSlot>(StringComparer.Ordinal);
-                var links = actx?.Chains?.Links ?? new Dictionary<string, AttachmentChainLink>(StringComparer.Ordinal);
-                var titlesByDocId = (threadDone.Messages ?? new List<JournalMessage>())
-                    .Where(m => m != null && !string.IsNullOrEmpty(m.DocId))
-                    .GroupBy(m => m.DocId, StringComparer.Ordinal)
-                    .ToDictionary(g => g.Key, g => g.First().AttachmentTitles ?? new List<string>(), StringComparer.Ordinal);
 
                 foreach (var message in messages)
                 {
@@ -223,6 +232,10 @@ public class AttachmentRepair
                             break;
                     }
                 }
+
+                // IN-02: a created part the writer would drop is Failed, and the no-loss rule below sees it as not created
+                foreach (var outcome in outcomes.Where(o => IsCommitted(o) && o.Part != null && !MailboxWriter.CanCarry(o.Part)))
+                    ThreadUnitOfWork.FailUncarriable(outcome);
 
                 // 4. No-loss rule per message
                 var excluded = new Dictionary<int, string>();
@@ -477,7 +490,8 @@ public class AttachmentRepair
     }
 
     // A committed part rebuilt from its record and the harvested bytes; an inline image keeps its own Content-Id
-    private static ComposedAttachment Rebuilt(PlannedAttachment spec, JournalRecord record, HarvestedPart part, string? senderDomain)
+    private static ComposedAttachment Rebuilt(PlannedAttachment spec, JournalRecord record, HarvestedPart part, string? senderDomain,
+        string? plannedName)
     {
         var kind = spec.Kind;
         var inline = kind == AttachmentType.Image && spec.IsInline;
@@ -485,7 +499,7 @@ public class AttachmentRepair
         {
             DocId = spec.DocId,
             Kind = kind,
-            FileName = record.FileName ?? string.Empty,
+            FileName = CorpusPlan.IsSafeFileName(record.FileName) ? record.FileName : plannedName ?? string.Empty,
             Title = record.Title ?? string.Empty,
             MimeType = MimeTypeFor(kind),
             Bytes = part.Bytes,

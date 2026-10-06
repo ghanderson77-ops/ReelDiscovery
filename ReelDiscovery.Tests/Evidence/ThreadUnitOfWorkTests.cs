@@ -193,6 +193,48 @@ public partial class ThreadUnitOfWorkTests : IDisposable
     }
 
     [Fact]
+    public async Task Retry_CostDetailIsTheGatewaySumOfBothAttempts()
+    {
+        // PROV-07: the record carries the gateway's cost, cache parts included, summed over every attempt
+        _story.CacheWriteTokenPricePerMillion = 3.75m;
+        _story.CacheReadTokenPricePerMillion = 0.30m;
+        var inner = Mutating((n, dto) =>
+        {
+            if (n == 1)
+                NameStrangers(dto, "Harlan Voss");
+            return null;
+        });
+        var calls = 0;
+        _fake.Respond = request =>
+        {
+            var response = inner(request);
+            var n = Interlocked.Increment(ref calls);
+            response.CacheReadTokens = 100 * n;
+            response.CacheWriteTokens = n == 1 ? 50 : 0;
+            return response;
+        };
+        var ctx = Context("F-003");
+        using var cts = new CancellationTokenSource();
+        using var run = Run(cts);
+
+        var outcome = await Unit().RunAsync(ctx, run);
+
+        Assert.Equal(ThreadOutcomeKind.Written, outcome.Kind);
+        var record = SingleRecord(ctx.Thread);
+        Assert.Equal(2, record.Attempts);
+        Assert.NotNull(record.CostDetail);
+        Assert.Equal(300, record.CacheReadTokens);
+        Assert.Equal(50, record.CacheWriteTokens);
+        var uncached = record.InputTokens - 300 - 50;
+        Assert.Equal(uncached * 3m / 1_000_000m, record.CostDetail!.InputUsd);
+        Assert.Equal(50 * 3.75m / 1_000_000m, record.CostDetail.CacheWriteUsd);
+        Assert.Equal(300 * 0.30m / 1_000_000m, record.CostDetail.CacheReadUsd);
+        Assert.Equal(record.OutputTokens * 15m / 1_000_000m, record.CostDetail.OutputUsd);
+        Assert.Equal(record.CostDetail.TotalUsd, record.CostUsd);
+        Assert.Equal(record.CostUsd, _snapshot.Peek().Counts.CostUsd);
+    }
+
+    [Fact]
     public async Task AlwaysViolating_KeepsFewestViolations_AsWarnings()
     {
         _fake.Respond = Mutating((n, dto) =>

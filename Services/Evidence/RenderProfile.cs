@@ -18,6 +18,11 @@ public class RenderAttempt
     public string RefusalMessage { get; set; } = string.Empty;
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
+    public int CacheWriteTokens { get; set; }
+    public int CacheReadTokens { get; set; }
+
+    // Gateway cost of this call (PROV-07)
+    public CostBreakdown Cost { get; set; } = new();
 }
 
 /// <summary>
@@ -44,7 +49,7 @@ public class RenderProfile
     // D-13: only relevant threads write ledger deltas
     public bool UsesLedger { get; private set; }
 
-    // The tier's model, so each call is priced at its own rate (D-29); null when the gateway has none
+    // The tier's model (D-29); null when the gateway has none. Cost itself comes from the gateway result (PROV-07)
     public AIModelConfig? Model { get; private set; }
 
     // Filler and decoys only: the sender organization's other work (NOISE-01)
@@ -113,7 +118,10 @@ public class RenderProfile
         Refused = outcome.Refused,
         RefusalMessage = outcome.RefusalMessage ?? string.Empty,
         InputTokens = outcome.InputTokens,
-        OutputTokens = outcome.OutputTokens
+        OutputTokens = outcome.OutputTokens,
+        CacheWriteTokens = outcome.CacheWriteTokens,
+        CacheReadTokens = outcome.CacheReadTokens,
+        Cost = outcome.Cost.Clone()
     };
 
     private static AIModelConfig? ModelFor(ILlmGateway llm, LlmTier tier)

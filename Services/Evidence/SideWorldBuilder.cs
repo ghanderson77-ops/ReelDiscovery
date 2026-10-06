@@ -15,6 +15,9 @@ public class SideWorldOutcome
     public SideWorld? World { get; set; }
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
+
+    // Gateway cost of the call (PROV-07); the runner journals it as is
+    public CostBreakdown Cost { get; set; } = new();
 }
 
 /// <summary>
@@ -142,7 +145,12 @@ internal static class SideWorldBuilder
     public static async Task<SideWorldOutcome> BuildAsync(ILlmGateway llm, CaseDraft draft, CaseGuide guide, PlanCallRun run)
     {
         var outcome = await PlanCallRunner.RunAsync<SideWorldDto>(llm, BuildRequest(draft, guide), run);
-        var result = new SideWorldOutcome { InputTokens = outcome.InputTokens, OutputTokens = outcome.OutputTokens };
+        var result = new SideWorldOutcome
+        {
+            InputTokens = outcome.InputTokens,
+            OutputTokens = outcome.OutputTokens,
+            Cost = outcome.Cost.Clone()
+        };
 
         // Fatal stop: leave the side world unset so the run ends without a fallback record
         if (run.IsFatal && outcome.Value == null)

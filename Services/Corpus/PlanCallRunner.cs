@@ -72,6 +72,13 @@ internal sealed class PlanCallOutcome<T> where T : class
 
     /// <summary>Output tokens billed for this call, including failed attempts.</summary>
     public int OutputTokens { get; set; }
+
+    // Cache parts of InputTokens
+    public int CacheWriteTokens { get; set; }
+    public int CacheReadTokens { get; set; }
+
+    /// <summary>Gateway cost of every billed attempt (PROV-07: copied, never recomputed from tokens).</summary>
+    public CostBreakdown Cost { get; set; } = new();
 }
 
 internal static class PlanCallRunner
@@ -100,7 +107,15 @@ internal static class PlanCallRunner
             onStart?.Invoke();
             var result = await llm.GenerateAsync<T>(request, run.Cts.Token);
             var value = result.GetValueOrThrow();
-            return new PlanCallOutcome<T> { Value = value, InputTokens = result.InputTokens, OutputTokens = result.OutputTokens };
+            return new PlanCallOutcome<T>
+            {
+                Value = value,
+                InputTokens = result.InputTokens,
+                OutputTokens = result.OutputTokens,
+                CacheWriteTokens = result.CacheWriteTokens,
+                CacheReadTokens = result.CacheReadTokens,
+                Cost = result.Cost.Clone()
+            };
         }
         catch (OperationCanceledException) when (run.UserToken.IsCancellationRequested)
         {
@@ -120,7 +135,14 @@ internal static class PlanCallRunner
         {
             // Bad key or exhausted spend limit: stop all further calls, keep completed units
             run.SetFatal(ex.Result.Message ?? ex.Message);
-            return new PlanCallOutcome<T> { InputTokens = ex.Result.InputTokens, OutputTokens = ex.Result.OutputTokens };
+            return new PlanCallOutcome<T>
+            {
+                InputTokens = ex.Result.InputTokens,
+                OutputTokens = ex.Result.OutputTokens,
+                CacheWriteTokens = ex.Result.CacheWriteTokens,
+                CacheReadTokens = ex.Result.CacheReadTokens,
+                Cost = ex.Result.Cost.Clone()
+            };
         }
         catch (LlmCallException ex)
         {
@@ -131,7 +153,10 @@ internal static class PlanCallRunner
                 Refused = refused,
                 RefusalMessage = refused ? ex.Result.Message ?? string.Empty : string.Empty,
                 InputTokens = ex.Result.InputTokens,
-                OutputTokens = ex.Result.OutputTokens
+                OutputTokens = ex.Result.OutputTokens,
+                CacheWriteTokens = ex.Result.CacheWriteTokens,
+                CacheReadTokens = ex.Result.CacheReadTokens,
+                Cost = ex.Result.Cost.Clone()
             };
         }
         catch (Exception ex)

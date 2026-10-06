@@ -434,7 +434,11 @@ public partial class GenerationRunnerTests : IDisposable
         var probeFolder = Path.Combine(_folder, "probe");
         Directory.CreateDirectory(probeFolder);
         var probe = new GenerationJournal(probeFolder);
-        await probe.AppendAsync(new JournalRecord { Type = JournalRecordType.RunStarted, PlanId = _plan.PlanId, Utc = DateTime.UtcNow });
+        await probe.AppendAsync(new JournalRecord
+        {
+            Type = JournalRecordType.RunStarted, PlanId = _plan.PlanId, Utc = DateTime.UtcNow, Provider = _gateway.Provider.ToString()
+        });
+        // 07-05: RunEnded is fully itemized (CostDetail + media), so the probe carries the same fields
         await probe.AppendAsync(new JournalRecord
         {
             Type = JournalRecordType.RunEnded,
@@ -444,7 +448,13 @@ public partial class GenerationRunnerTests : IDisposable
             Message = GenerationJournal.FullMessage,
             InputTokens = 999_999,
             OutputTokens = 999_999,
-            CostUsd = 99.999999m
+            CostUsd = 99.999999m,
+            MediaCostUsd = 99.999999m,
+            CostDetail = new CostBreakdown
+            {
+                InputUsd = 99.999999m, CacheWriteUsd = 99.999999m, CacheReadUsd = 99.999999m, OutputUsd = 99.999999m,
+                BatchSavingsUsd = 99.999999m
+            }
         });
         var controlBytes = new FileInfo(GenerationJournal.PathFor(probeFolder)).Length;
         Directory.Delete(probeFolder, recursive: true);
@@ -2608,5 +2618,140 @@ public partial class GenerationRunnerMixedTests
         var replay = Replay(folder);
         Assert.Equal(JournalRecordType.AttachmentDone, replay.LastByAttachment[firstDoc].Type);
         Assert.Equal(JournalRecordType.AttachmentFailed, replay.LastByAttachment[secondDoc].Type);
+    }
+}
+
+// ---------- PROV-07: gateway cost reaches the journal unchanged (07-05) ----------
+
+public partial class GenerationRunnerMixedTests
+{
+    // Every successful response also reports cache reads (and the first one a cache write)
+    private Func<LlmProviderRequest, LlmProviderResponse> Cached(Func<LlmProviderRequest, LlmProviderResponse> inner)
+    {
+        var calls = 0;
+        return request =>
+        {
+            var response = inner(request);
+            if (response.Outcome != LlmOutcome.Succeeded)
+                return response;
+
+            response.CacheReadTokens = 400;
+            if (Interlocked.Increment(ref calls) == 1)
+                response.CacheWriteTokens = 120;
+            return response;
+        };
+    }
+
+    private void PriceCache()
+    {
+        _story.CacheWriteTokenPricePerMillion = 3.75m;
+        _story.CacheReadTokenPricePerMillion = 0.30m;
+        _volume.CacheWriteTokenPricePerMillion = 1.25m;
+        _volume.CacheReadTokenPricePerMillion = 0.10m;
+    }
+
+    private static void AssertItemsAddUp(JournalReplay replay) =>
+        Assert.Equal(replay.SpentCostUsd, replay.SpentDetail.TotalUsd + replay.MediaSpentCostUsd + replay.UnsplitSpentUsd);
+
+    [Fact]
+    public async Task CacheReads_ReachThreadDoneCostDetail_SnapshotEqualsJournal()
+    {
+        PriceCache();
+        _fake.Respond = Cached(Responder());
+        var snapshot = new GenerationSnapshot();
+
+        var result = await Run(new GenerationRunner(_gateway), Input(new FakeMediaGenerator()), snapshot);
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        var records = JournalRecords();
+        var started = Assert.Single(records, r => r.Type == JournalRecordType.RunStarted);
+        Assert.Equal(_gateway.Provider.ToString(), started.Provider);
+
+        var done = records.Where(r => r.Type == JournalRecordType.ThreadDone).ToList();
+        Assert.NotEmpty(done);
+        foreach (var record in done)
+        {
+            Assert.NotNull(record.CostDetail);
+            Assert.True(record.CostDetail!.CacheReadUsd > 0m);
+            Assert.True(record.CacheReadTokens > 0);
+            Assert.Equal(record.CostDetail.TotalUsd, record.CostUsd);
+            foreach (var attachment in record.Attachments)
+            {
+                Assert.NotNull(attachment.CostDetail);
+                Assert.Equal(attachment.CostDetail!.TotalUsd, attachment.CostUsd);
+            }
+        }
+
+        foreach (var own in records.Where(r => r.Type is JournalRecordType.SideWorld or JournalRecordType.CastVoices))
+        {
+            Assert.NotNull(own.CostDetail);
+            Assert.True(own.CostDetail!.CacheReadUsd > 0m);
+            Assert.Equal(own.CostDetail.TotalUsd, own.CostUsd);
+        }
+
+        var ended = records.Last();
+        Assert.Equal(JournalRecordType.RunEnded, ended.Type);
+        Assert.NotNull(ended.CostDetail);
+        Assert.Equal(ended.CostDetail!.TotalUsd, ended.CostUsd);
+
+        var replay = Replay();
+        Assert.Equal(0m, replay.UnsplitSpentUsd);
+        Assert.True(replay.SpentDetail.CacheReadUsd > 0m);
+        Assert.True(replay.SpentDetail.CacheWriteUsd > 0m);
+        AssertItemsAddUp(replay);
+        Assert.Equal(replay.SpentCostUsd, snapshot.Peek().Counts.CostUsd);
+    }
+
+    [Fact]
+    public async Task NotRunThreadAndVoiceCast_RunEndedFullyItemized()
+    {
+        // The voice call is paid and journaled; the first thread render is paid, then a fatal stop leaves it NotRun
+        PriceCache();
+        var renders = 0;
+        _fake.Respond = Cached(Responder(r =>
+            r.SchemaName == RenderSchema && Interlocked.Increment(ref renders) == 1 ? Fatal(900, 350) : null));
+        var snapshot = new GenerationSnapshot();
+
+        var result = await Run(new GenerationRunner(_gateway, 1), Input(new FakeMediaGenerator()), snapshot);
+
+        Assert.Equal(GenerationOutcome.Fatal, result.Outcome);
+        var records = JournalRecords();
+        var voices = Assert.Single(records, r => r.Type == JournalRecordType.CastVoices);
+        Assert.NotNull(voices.CostDetail);
+        Assert.Equal(voices.CostDetail!.TotalUsd, voices.CostUsd);
+        Assert.True(voices.CostUsd > 0m);
+
+        var ended = records.Last();
+        Assert.Equal(JournalRecordType.RunEnded, ended.Type);
+        Assert.NotNull(ended.CostDetail);
+        Assert.Equal(ended.CostDetail!.TotalUsd, ended.CostUsd);
+        Assert.Equal(900, ended.InputTokens);
+        Assert.Equal(350, ended.OutputTokens);
+        Assert.Equal(_story.CalculateTotalCost(900, 350), ended.CostUsd);
+
+        var replay = Replay();
+        Assert.Equal(0m, replay.UnsplitSpentUsd);
+        AssertItemsAddUp(replay);
+        Assert.Equal(replay.SpentCostUsd, snapshot.Peek().Counts.CostUsd);
+    }
+}
+
+public partial class GenerationRunnerTests
+{
+    [Fact]
+    public async Task RunStarted_RecordsTheWritingProvider()
+    {
+        var fake = new FakeLlmProvider(LlmProviderKind.OpenAI) { Respond = Responder() };
+        var story = ReelDiscovery.Tests.Case.CaseTestData.StoryModel();
+        var volume = ReelDiscovery.Tests.Case.CaseTestData.VolumeModel();
+        story.Provider = LlmProviderKind.OpenAI;
+        volume.Provider = LlmProviderKind.OpenAI;
+
+        var result = await new GenerationRunner(new LlmGateway(fake, story, volume), 1).RunAsync(Input, new GenerationSnapshot(), Persist);
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        var started = Assert.Single(JournalRecords(), r => r.Type == JournalRecordType.RunStarted);
+        Assert.Equal("OpenAI", started.Provider);
+        Assert.Equal("OpenAI", Replay().WriterProvider);
     }
 }

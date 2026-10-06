@@ -32,16 +32,24 @@ public class AttachmentUnitOfWorkTests
     private readonly FakeLlmProvider _fake;
     private readonly GenerationSnapshot _snapshot;
 
-    // Priced so story and volume spend can be told apart
-    private readonly AIModelConfig _story = new() { ModelId = "claude-story", InputTokenPricePerMillion = 3m, OutputTokenPricePerMillion = 15m };
-    private readonly AIModelConfig _volume = new() { ModelId = "claude-volume", InputTokenPricePerMillion = 1m, OutputTokenPricePerMillion = 5m };
+    // Priced so story and volume spend can be told apart; the gateway prices every call (PROV-07)
+    private readonly AIModelConfig _story = Priced(ReelDiscovery.Tests.Case.CaseTestData.StoryModel(), 3m, 15m);
+    private readonly AIModelConfig _volume = Priced(ReelDiscovery.Tests.Case.CaseTestData.VolumeModel(), 1m, 5m);
 
     public AttachmentUnitOfWorkTests()
     {
-        (_gateway, _fake) = CorpusTestData.CreateGateway();
+        _fake = new FakeLlmProvider(LlmProviderKind.Anthropic);
+        _gateway = new LlmGateway(_fake, _story, _volume);
         _snapshot = new GenerationSnapshot();
         _snapshot.Reset(new GenerationCounts { TotalThreads = 15, WaveCount = 1 },
             new[] { new WaveProgress { Index = 1, Threads = 15 } });
+    }
+
+    private static AIModelConfig Priced(AIModelConfig model, decimal input, decimal output)
+    {
+        model.InputTokenPricePerMillion = input;
+        model.OutputTokenPricePerMillion = output;
+        return model;
     }
 
     private AttachmentUnitOfWork Unit(IMediaGenerator? media = null, MediaRunGate? gate = null) =>

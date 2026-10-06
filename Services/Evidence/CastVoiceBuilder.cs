@@ -15,6 +15,9 @@ public class CastVoiceOutcome
     public CastVoiceSet? Voices { get; set; }
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
+
+    // Gateway cost of the call (PROV-07); the runner journals it as is
+    public CostBreakdown Cost { get; set; } = new();
 }
 
 /// <summary>
@@ -76,7 +79,12 @@ internal static class CastVoiceBuilder
     public static async Task<CastVoiceOutcome> BuildAsync(ILlmGateway llm, CaseDraft draft, CaseGuide guide, PlanCallRun run)
     {
         var outcome = await PlanCallRunner.RunAsync<CastVoiceDto>(llm, BuildRequest(draft, guide), run);
-        var result = new CastVoiceOutcome { InputTokens = outcome.InputTokens, OutputTokens = outcome.OutputTokens };
+        var result = new CastVoiceOutcome
+        {
+            InputTokens = outcome.InputTokens,
+            OutputTokens = outcome.OutputTokens,
+            Cost = outcome.Cost.Clone()
+        };
 
         // Fatal stop: leave the voice set unset so no fallback record is journaled
         if (run.IsFatal && outcome.Value == null)

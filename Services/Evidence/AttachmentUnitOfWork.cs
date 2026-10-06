@@ -45,7 +45,11 @@ public class AttachmentOutcome
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
 
-    // Text spend on the attachment's tier model; media spend comes from the media result (D-29)
+    public int CacheWriteTokens { get; set; }
+    public int CacheReadTokens { get; set; }
+
+    // Text spend from the gateway (CostUsd = Cost.TotalUsd, PROV-07); media spend comes from the media result (D-29)
+    public CostBreakdown Cost { get; set; } = new();
     public decimal CostUsd { get; set; }
     public decimal MediaCostUsd { get; set; }
 
@@ -110,7 +114,10 @@ public class AttachmentOutcome
             LedgerDelta = NewDetails.ToList(),
             InputTokens = InputTokens,
             OutputTokens = OutputTokens,
+            CacheWriteTokens = CacheWriteTokens,
+            CacheReadTokens = CacheReadTokens,
             CostUsd = CostUsd,
+            CostDetail = Cost.Clone(),
             MediaCostUsd = MediaCostUsd,
             FailureKind = FailureKind,
             Reason = Reason,
@@ -154,11 +161,10 @@ public class AttachmentUnitOfWork
     private readonly GenerationSnapshot _snapshot;
     private readonly IMediaGenerator? _media;
     private readonly MediaRunGate _gate;
-    private readonly AIModelConfig? _storyModel;
-    private readonly AIModelConfig? _volumeModel;
     private readonly OfficeDocumentService _office = new();
     private readonly CalendarService _calendar = new();
 
+    // storyModel / volumeModel are kept for existing callers; text cost now comes from the gateway result (PROV-07)
     public AttachmentUnitOfWork(ILlmGateway llm, GenerationSnapshot snapshot, IMediaGenerator? media, MediaRunGate gate,
         AIModelConfig? storyModel, AIModelConfig? volumeModel)
     {
@@ -166,8 +172,6 @@ public class AttachmentUnitOfWork
         _snapshot = snapshot;
         _media = media;
         _gate = gate ?? new MediaRunGate();
-        _storyModel = storyModel;
-        _volumeModel = volumeModel;
     }
 
     // D-28: set by the runner from the CastVoices journal record before any voicemail is spoken
@@ -300,6 +304,9 @@ public class AttachmentUnitOfWork
                 var call = await CallAsync(ctx, attempt, feedback, run).ConfigureAwait(false);
                 outcome.InputTokens += call.InputTokens;
                 outcome.OutputTokens += call.OutputTokens;
+                outcome.CacheWriteTokens += call.CacheWriteTokens;
+                outcome.CacheReadTokens += call.CacheReadTokens;
+                outcome.Cost.Add(call.Cost);
                 outcome.Attempts = attempt;
 
                 // Left pending: the caller accounts for the spend and Continue writes it later (D-06)
@@ -307,7 +314,7 @@ public class AttachmentUnitOfWork
                 {
                     outcome.Kind = AttachmentOutcomeKind.NotRun;
                     outcome.Reason = run.FatalError;
-                    outcome.CostUsd = Cost(ctx, outcome);
+                    outcome.CostUsd = outcome.Cost.TotalUsd;
                     return outcome;
                 }
 
@@ -398,7 +405,7 @@ public class AttachmentUnitOfWork
             outcome.NewDetails = ctx.Relevant ? best.NewDetails.ToList() : new List<LedgerDelta>();
             outcome.Violations = kept.Select(Describe).ToList();
             outcome.Kind = kept.Count == 0 ? AttachmentOutcomeKind.Written : AttachmentOutcomeKind.Warnings;
-            outcome.CostUsd = Cost(ctx, outcome);
+            outcome.CostUsd = outcome.Cost.TotalUsd;
             return outcome;
         }
         catch (OperationCanceledException)
@@ -571,7 +578,10 @@ public class AttachmentUnitOfWork
         Refused = outcome.Refused,
         Error = outcome.Error ?? string.Empty,
         InputTokens = outcome.InputTokens,
-        OutputTokens = outcome.OutputTokens
+        OutputTokens = outcome.OutputTokens,
+        CacheWriteTokens = outcome.CacheWriteTokens,
+        CacheReadTokens = outcome.CacheReadTokens,
+        Cost = outcome.Cost.Clone()
     };
 
     private AttachmentOutcome Fail(AttachmentRenderContext ctx, AttachmentOutcome outcome, ThreadFailureKind kind, string reason)
@@ -581,7 +591,7 @@ public class AttachmentUnitOfWork
         outcome.Reason = reason;
         outcome.Part = null;
         outcome.NewDetails = new List<LedgerDelta>();
-        outcome.CostUsd = Cost(ctx, outcome);
+        outcome.CostUsd = outcome.Cost.TotalUsd;
         return outcome;
     }
 
@@ -591,13 +601,6 @@ public class AttachmentUnitOfWork
         outcome.Reason = reason;
         outcome.Part = null;
         return outcome;
-    }
-
-    // Text cost uses the attachment's tier model (D-29)
-    private decimal Cost(AttachmentRenderContext ctx, AttachmentOutcome outcome)
-    {
-        var model = ctx.Tier == LlmTier.Story ? _storyModel : _volumeModel;
-        return model?.CalculateTotalCost(outcome.InputTokens, outcome.OutputTokens) ?? 0m;
     }
 
     private static string MimeTypeFor(AttachmentType kind) => kind switch
@@ -640,5 +643,8 @@ public class AttachmentUnitOfWork
         public string Error { get; set; } = string.Empty;
         public int InputTokens { get; set; }
         public int OutputTokens { get; set; }
+        public int CacheWriteTokens { get; set; }
+        public int CacheReadTokens { get; set; }
+        public CostBreakdown Cost { get; set; } = new();
     }
 }

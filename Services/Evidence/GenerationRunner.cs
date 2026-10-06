@@ -251,7 +251,9 @@ public class GenerationRunner
             {
                 Type = JournalRecordType.RunStarted,
                 Utc = DateTime.UtcNow,
-                PlanId = plan.PlanId
+                PlanId = plan.PlanId,
+                // D-12: the provider writing the corpus (input for the reviewer choice)
+                Provider = _llm.Provider.ToString()
             }, CancellationToken.None).ConfigureAwait(false);
 
             // D-28: one voice set for every voicemail of every stage, chosen before the first one is spoken
@@ -262,11 +264,11 @@ public class GenerationRunner
                 if (voices == null)
                 {
                     var vo = await CastVoiceBuilder.BuildAsync(_llm, input.Draft, guide, run).ConfigureAwait(false);
-                    var voiceCost = ModelCost(ctx.VolumeModel, vo.InputTokens, vo.OutputTokens);
+                    var voiceCost = vo.Cost.TotalUsd;
                     snapshot.AddCost(voiceCost);
                     if (run.IsFatal && vo.Voices == null)
                     {
-                        ctx.AddUnjournaledSpend(vo.InputTokens, vo.OutputTokens, voiceCost);
+                        ctx.AddUnjournaledSpend(vo.Cost, 0m, vo.InputTokens, vo.OutputTokens);
                         outcome = GenerationOutcome.Fatal;
                         message = run.FatalError;
                         proceed = false;
@@ -282,7 +284,8 @@ public class GenerationRunner
                             CastVoices = voices,
                             InputTokens = vo.InputTokens,
                             OutputTokens = vo.OutputTokens,
-                            CostUsd = voiceCost
+                            CostUsd = voiceCost,
+                            CostDetail = vo.Cost.Clone()
                         };
                         try
                         {
@@ -291,7 +294,7 @@ public class GenerationRunner
                         catch (Exception ex)
                         {
                             // Review 06-19: Continue promises the same voices; never use a choice the journal does not hold
-                            ctx.AddUnjournaledSpend(vo.InputTokens, vo.OutputTokens, voiceCost);
+                            ctx.AddUnjournaledSpend(vo.Cost, 0m, vo.InputTokens, vo.OutputTokens);
                             outcome = GenerationOutcome.InternalError;
                             message = $"Could not save the voicemail voices: {ex.Message}";
                             proceed = false;
@@ -534,11 +537,11 @@ public class GenerationRunner
         {
             snapshot.SetStage(GenerationStage.SideProjects, count: SideWorldBuilder.CoveredOrganizations(ctx.Guide).Count);
             var so = await SideWorldBuilder.BuildAsync(_llm, input.Draft, ctx.Guide, run).ConfigureAwait(false);
-            var cost = ModelCost(ctx.VolumeModel, so.InputTokens, so.OutputTokens);
+            var cost = so.Cost.TotalUsd;
             snapshot.AddCost(cost);
             if (run.IsFatal && so.World == null)
             {
-                ctx.AddUnjournaledSpend(so.InputTokens, so.OutputTokens, cost);
+                ctx.AddUnjournaledSpend(so.Cost, 0m, so.InputTokens, so.OutputTokens);
                 return (GenerationOutcome.Fatal, run.FatalError);
             }
 
@@ -553,13 +556,14 @@ public class GenerationRunner
                     SideWorld = sideWorld,
                     InputTokens = so.InputTokens,
                     OutputTokens = so.OutputTokens,
-                    CostUsd = cost
+                    CostUsd = cost,
+                    CostDetail = so.Cost.Clone()
                 }).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 // Review 06-19: Continue promises the same side projects; never use a choice the journal does not hold
-                ctx.AddUnjournaledSpend(so.InputTokens, so.OutputTokens, cost);
+                ctx.AddUnjournaledSpend(so.Cost, 0m, so.InputTokens, so.OutputTokens);
                 return (GenerationOutcome.InternalError, $"Could not save the side projects: {ex.Message}");
             }
 
@@ -753,9 +757,10 @@ public class GenerationRunner
 
             // Checker 06-19: tokens and dollars each counted exactly once
             if (outcome.Unjournaled)
-                ctx.AddUnjournaledSpend(outcome.InputTokens, outcome.OutputTokens, outcome.CostUsd + outcome.MediaCostUsd);
+                ctx.AddUnjournaledSpend(outcome.Cost, outcome.MediaCostUsd, outcome.InputTokens, outcome.OutputTokens);
             else
-                ctx.AddUnjournaledSpend(outcome.NotRunInputTokens, outcome.NotRunOutputTokens, outcome.NotRunCostUsd);
+                ctx.AddUnjournaledSpend(outcome.NotRunCost, outcome.NotRunMediaCostUsd, outcome.NotRunInputTokens,
+                    outcome.NotRunOutputTokens);
 
             if (!outcome.Unjournaled)
                 await MaybeProjectAsync(ctx).ConfigureAwait(false);
@@ -811,7 +816,8 @@ public class GenerationRunner
         if (outcome.Kind != ThreadOutcomeKind.NotRun)
             await MaybeProjectAsync(ctx).ConfigureAwait(false);
         else
-            ctx.AddUnjournaledSpend(outcome.InputTokens, outcome.OutputTokens, outcome.CostUsd);
+            ctx.AddUnjournaledSpend(outcome.UnjournaledCost, outcome.UnjournaledMediaCostUsd, outcome.InputTokens,
+                outcome.OutputTokens);
 
         AddUnjournaled(ctx, outcome);
         return outcome;
@@ -822,11 +828,12 @@ public class GenerationRunner
     {
         // A NotRun thread has no attachments and Unjournaled false (counted above); a Failed thread's line already carries its spend
         if (result.Unjournaled)
-            ctx.AddUnjournaledSpend(result.InputTokens, result.OutputTokens, result.CostUsd);
+            ctx.AddUnjournaledSpend(result.UnjournaledCost, result.UnjournaledMediaCostUsd, result.InputTokens, result.OutputTokens);
         else if (result.NotRunCostUsd > 0 || result.NotRunInputTokens > 0 || result.NotRunOutputTokens > 0)
         {
             // Checker 06-19: NotRun attachments have no record; the Unjournaled totals already include them
-            ctx.AddUnjournaledSpend(result.NotRunInputTokens, result.NotRunOutputTokens, result.NotRunCostUsd);
+            ctx.AddUnjournaledSpend(result.NotRunCost, result.NotRunMediaCostUsd, result.NotRunInputTokens,
+                result.NotRunOutputTokens);
         }
     }
 
@@ -1007,7 +1014,7 @@ public class GenerationRunner
     private static async Task AppendRunEndedAsync(RunContext ctx, GenerationOutcome outcome, string? message)
     {
         // Calls a fatal stop left without a thread record are still spend (WR-02)
-        var (inputTokens, outputTokens, cost) = ctx.ReadUnjournaledSpend();
+        var (inputTokens, outputTokens, detail, media) = ctx.ReadUnjournaledSpend();
         try
         {
             await ctx.Journal.AppendAsync(new JournalRecord
@@ -1019,7 +1026,10 @@ public class GenerationRunner
                 Message = message ?? string.Empty,
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
-                CostUsd = cost
+                // Fully itemized (revision 1): text = CostDetail, media apart; replay counts CostUsd + MediaCostUsd
+                CostUsd = detail.TotalUsd,
+                MediaCostUsd = media,
+                CostDetail = detail
             }, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception)
@@ -1091,9 +1101,6 @@ public class GenerationRunner
         threads.SelectMany(PlannedAttachments)
             .Where(a => a.Kind == AttachmentType.Voicemail)
             .Any(a => !state.StatusByAttachment.TryGetValue(a.DocId, out var status) || !IsCommitted(status));
-
-    private static decimal ModelCost(AIModelConfig? model, int inputTokens, int outputTokens) =>
-        model?.CalculateTotalCost(inputTokens, outputTokens) ?? 0m;
 
     // IN-06: once the journal refuses lines, every further call would be paid for and never saved; stop the run instead
     private static void StopIfJournalFull(RunContext ctx, PlanCallRun run)
@@ -1226,7 +1233,8 @@ public class GenerationRunner
         private DateTime _lastProjectionUtc;
         private int _unjournaledInput;
         private int _unjournaledOutput;
-        private decimal _unjournaledCost;
+        private readonly CostBreakdown _unjournaledDetail = new();
+        private decimal _unjournaledMedia;
 
         public GenerationRunInput Input { get; init; } = new();
         public CaseGuide Guide { get; init; } = new();
@@ -1287,20 +1295,22 @@ public class GenerationRunner
                 _lastProjectionUtc = utc;
         }
 
-        public void AddUnjournaledSpend(int inputTokens, int outputTokens, decimal cost)
+        // PROV-07: text spend arrives itemized from the gateway, media apart, so RunEnded is fully itemized
+        public void AddUnjournaledSpend(CostBreakdown text, decimal media, int inputTokens, int outputTokens)
         {
             lock (_lock)
             {
                 _unjournaledInput += inputTokens;
                 _unjournaledOutput += outputTokens;
-                _unjournaledCost += cost;
+                _unjournaledDetail.Add(text);
+                _unjournaledMedia += Math.Max(0m, media);
             }
         }
 
-        public (int InputTokens, int OutputTokens, decimal CostUsd) ReadUnjournaledSpend()
+        public (int InputTokens, int OutputTokens, CostBreakdown Text, decimal Media) ReadUnjournaledSpend()
         {
             lock (_lock)
-                return (_unjournaledInput, _unjournaledOutput, _unjournaledCost);
+                return (_unjournaledInput, _unjournaledOutput, _unjournaledDetail.Clone(), _unjournaledMedia);
         }
     }
 }

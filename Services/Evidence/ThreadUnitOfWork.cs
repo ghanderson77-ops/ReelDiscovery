@@ -28,6 +28,11 @@ public class ThreadOutcome
     public int OutputTokens { get; set; }
     public decimal CostUsd { get; set; }
 
+    // PROV-07: gateway detail of the whole-thread text spend (thread + attachments) and its media share, for a thread that
+    // is NotRun as a whole or Unjournaled; the runner itemizes them in RunEnded
+    public CostBreakdown UnjournaledCost { get; set; } = new();
+    public decimal UnjournaledMediaCostUsd { get; set; }
+
     // Committed attachment records nested in the ThreadDone line, in plan order
     public List<JournalRecord> AttachmentRecords { get; set; } = new();
 
@@ -40,6 +45,10 @@ public class ThreadOutcome
     public int NotRunInputTokens { get; set; }
     public int NotRunOutputTokens { get; set; }
     public decimal NotRunCostUsd { get; set; }
+
+    // PROV-07: text detail and media share of NotRunCostUsd (NotRunCostUsd = NotRunCost.TotalUsd + NotRunMediaCostUsd)
+    public CostBreakdown NotRunCost { get; set; } = new();
+    public decimal NotRunMediaCostUsd { get; set; }
 }
 
 /// <summary>
@@ -94,7 +103,6 @@ public class ThreadUnitOfWork
     private readonly GenerationJournal _journal;
     private readonly MailboxWriter _mailbox;
     private readonly GenerationSnapshot _snapshot;
-    private readonly AIModelConfig? _storyModel;
     private readonly AttachmentUnitOfWork? _attachments;
 
     public ThreadUnitOfWork(ILlmGateway llm, GenerationJournal journal, MailboxWriter mailbox, GenerationSnapshot snapshot,
@@ -103,6 +111,7 @@ public class ThreadUnitOfWork
     {
     }
 
+    // storyModel is kept for existing callers; cost now comes from the gateway result (PROV-07)
     public ThreadUnitOfWork(ILlmGateway llm, GenerationJournal journal, MailboxWriter mailbox, GenerationSnapshot snapshot,
         AIModelConfig? storyModel, AttachmentUnitOfWork? attachments)
     {
@@ -110,7 +119,6 @@ public class ThreadUnitOfWork
         _journal = journal;
         _mailbox = mailbox;
         _snapshot = snapshot;
-        _storyModel = storyModel;
         _attachments = attachments;
     }
 
@@ -135,6 +143,9 @@ public class ThreadUnitOfWork
         profile ??= RenderProfile.Relevant(_llm);
         var inputTokens = 0;
         var outputTokens = 0;
+
+        // PROV-07: the gateway's cost of every render attempt, never recomputed from tokens
+        var usage = new RenderUsage();
         var attempts = 0;
         var spend = new AttachmentSpend();
         var committedTexts = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -156,12 +167,13 @@ public class ThreadUnitOfWork
                     var outcome = await profile.RenderAsync(ctx, attempt, feedback, run).ConfigureAwait(false);
                     inputTokens += outcome.InputTokens;
                     outputTokens += outcome.OutputTokens;
+                    usage.Add(outcome);
                     attempts = attempt;
 
                     // Left pending: Continue writes it later (D-06)
                     if (run.IsFatal)
                     {
-                        var spent = Cost(inputTokens, outputTokens, profile);
+                        var spent = usage.Cost.TotalUsd;
                         _snapshot.RecordThread(ctx.WaveIndex, ThreadRunStatus.Pending, 0, 0, spent, relevant: relevant);
                         return new ThreadOutcome
                         {
@@ -169,7 +181,8 @@ public class ThreadUnitOfWork
                             Reason = run.FatalError,
                             InputTokens = inputTokens,
                             OutputTokens = outputTokens,
-                            CostUsd = spent
+                            CostUsd = spent,
+                            UnjournaledCost = usage.Cost.Clone()
                         };
                     }
 
@@ -186,7 +199,7 @@ public class ThreadUnitOfWork
                         var reason = outcome.Refused
                             ? $"The model declined: {outcome.RefusalMessage}"
                             : outcome.Error.Length > 0 ? outcome.Error : "The model returned no thread.";
-                        return await FailAsync(ctx, profile, kind, reason, attempts, inputTokens, outputTokens, spend).ConfigureAwait(false);
+                        return await FailAsync(ctx, profile, kind, reason, attempts, inputTokens, outputTokens, usage, spend).ConfigureAwait(false);
                     }
 
                     var rendered = outcome.Rendered;
@@ -229,14 +242,14 @@ public class ThreadUnitOfWork
 
                 if (best == null)
                     return await FailAsync(ctx, profile, ThreadFailureKind.Provider, "The model returned no thread.", attempts,
-                        inputTokens, outputTokens, spend).ConfigureAwait(false);
+                        inputTokens, outputTokens, usage, spend).ConfigureAwait(false);
 
                 // A missing or empty message cannot be composed into a believable thread
                 var structural = bestViolations.FirstOrDefault(v => v.Code is "V1" or "V5");
                 if (structural != null)
                 {
                     return await FailAsync(ctx, profile, ThreadFailureKind.Provider,
-                        $"The model did not return a usable thread: {structural.Text}", attempts, inputTokens, outputTokens, spend)
+                        $"The model did not return a usable thread: {structural.Text}", attempts, inputTokens, outputTokens, usage, spend)
                         .ConfigureAwait(false);
                 }
 
@@ -275,11 +288,11 @@ public class ThreadUnitOfWork
                         var writeReason = $"Could not write {email.Planned.DocId}.eml: {ex.Message}" + RemoveCopies(uncommitted);
                         uncommitted = null;
                         return await FailAsync(ctx, profile, ThreadFailureKind.Write, writeReason,
-                            attempts, inputTokens, outputTokens, spend).ConfigureAwait(false);
+                            attempts, inputTokens, outputTokens, usage, spend).ConfigureAwait(false);
                     }
                 }
 
-                var cost = Cost(inputTokens, outputTokens, profile);
+                var cost = usage.Cost.TotalUsd;
                 var clean = bestViolations.Count == 0;
                 var utc = DateTime.UtcNow;
                 var attachmentRecords = new List<JournalRecord>();
@@ -324,7 +337,10 @@ public class ThreadUnitOfWork
                     Attachments = attachmentRecords,
                     InputTokens = inputTokens,
                     OutputTokens = outputTokens,
-                    CostUsd = cost
+                    CacheWriteTokens = usage.CacheWriteTokens,
+                    CacheReadTokens = usage.CacheReadTokens,
+                    CostUsd = cost,
+                    CostDetail = usage.Cost.Clone()
                 };
 
                 try
@@ -359,6 +375,8 @@ public class ThreadUnitOfWork
                         InputTokens = inputTokens + spend.InputTokens,
                         OutputTokens = outputTokens + spend.OutputTokens,
                         CostUsd = cost + spend.TextCost + spend.MediaCost,
+                        UnjournaledCost = Combined(usage.Cost, spend.TextDetail),
+                        UnjournaledMediaCostUsd = spend.MediaCost,
                         Unjournaled = true
                     };
                 }
@@ -424,7 +442,9 @@ public class ThreadUnitOfWork
                     // Checker 06-19: NotRun outcomes have no record, so the runner journals these tokens and this spend in RunEnded
                     NotRunInputTokens = spend.NotRunInput,
                     NotRunOutputTokens = spend.NotRunOutput,
-                    NotRunCostUsd = spend.NotRunCost + spend.NotRunMediaCost
+                    NotRunCostUsd = spend.NotRunCost + spend.NotRunMediaCost,
+                    NotRunCost = spend.NotRunDetail.Clone(),
+                    NotRunMediaCostUsd = spend.NotRunMediaCost
                 };
             }
             catch (OperationCanceledException)
@@ -436,14 +456,14 @@ public class ThreadUnitOfWork
             {
                 var reason = $"Could not write thread {ctx.Thread.Id}: {ex.Message}" + RemoveCopies(uncommitted);
                 return await FailAsync(ctx, profile, ThreadFailureKind.Write, reason,
-                    attempts, inputTokens, outputTokens, spend).ConfigureAwait(false);
+                    attempts, inputTokens, outputTokens, usage, spend).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 // A MimeKit ParseException (malformed address) or a composer bug must fail only this thread, never escape Task.WhenAll and abort the run (RUN-02)
                 var reason = $"Could not build thread {ctx.Thread.Id}: {ex.Message}" + RemoveCopies(uncommitted);
                 return await FailAsync(ctx, profile, ThreadFailureKind.Provider, reason,
-                    attempts, inputTokens, outputTokens, spend).ConfigureAwait(false);
+                    attempts, inputTokens, outputTokens, usage, spend).ConfigureAwait(false);
             }
         }
         finally
@@ -643,10 +663,11 @@ public class ThreadUnitOfWork
     }
 
     private async Task<ThreadOutcome> FailAsync(ThreadRenderContext ctx, RenderProfile profile, ThreadFailureKind kind, string reason,
-        int attempts, int inputTokens, int outputTokens, AttachmentSpend spend)
+        int attempts, int inputTokens, int outputTokens, RenderUsage usage, AttachmentSpend spend)
     {
         // JournalReplay sums cost over every ThreadDone and ThreadFailed record, so failures carry their spend too
-        var cost = Cost(inputTokens, outputTokens, profile) + spend.TextCost;
+        var detail = Combined(usage.Cost, spend.TextDetail);
+        var cost = detail.TotalUsd;
         var media = spend.MediaCost;
         var record = new JournalRecord
         {
@@ -659,7 +680,10 @@ public class ThreadUnitOfWork
             Reason = reason,
             InputTokens = inputTokens + spend.InputTokens,
             OutputTokens = outputTokens + spend.OutputTokens,
+            CacheWriteTokens = usage.CacheWriteTokens + spend.CacheWriteTokens,
+            CacheReadTokens = usage.CacheReadTokens + spend.CacheReadTokens,
             CostUsd = cost,
+            CostDetail = detail,
             MediaCostUsd = media
         };
 
@@ -757,9 +781,12 @@ public class ThreadUnitOfWork
     // A missing or empty message (V1, V5) cannot be composed into a thread
     private static bool IsStructural(List<RenderViolation> violations) => violations.Any(v => v.Code is "V1" or "V5");
 
-    // D-29: priced on the profile tier's model, so Volume filler is not billed at Story rates
-    private decimal Cost(int inputTokens, int outputTokens, RenderProfile profile) =>
-        (profile.Model ?? _storyModel)?.CalculateTotalCost(inputTokens, outputTokens) ?? 0m;
+    private static CostBreakdown Combined(CostBreakdown first, CostBreakdown second)
+    {
+        var sum = first.Clone();
+        sum.Add(second);
+        return sum;
+    }
 
     private static string DisplayAddress(EmailAddressPart? address)
     {
@@ -786,23 +813,45 @@ public class ThreadUnitOfWork
 
     private static string LastFilePath(ThreadRenderContext ctx) => Ordered(ctx).LastOrDefault()?.FilePath ?? string.Empty;
 
+    // Gateway usage and cost summed over a thread's render attempts (PROV-07)
+    internal sealed class RenderUsage
+    {
+        public int CacheWriteTokens { get; private set; }
+        public int CacheReadTokens { get; private set; }
+        public CostBreakdown Cost { get; } = new();
+
+        public void Add(RenderAttempt attempt)
+        {
+            CacheWriteTokens += attempt.CacheWriteTokens;
+            CacheReadTokens += attempt.CacheReadTokens;
+            Cost.Add(attempt.Cost);
+        }
+    }
+
     // Spend of every attachment outcome of one unit; NotRun outcomes are also kept apart (they have no record)
     private sealed class AttachmentSpend
     {
         public int InputTokens { get; private set; }
         public int OutputTokens { get; private set; }
+        public int CacheWriteTokens { get; private set; }
+        public int CacheReadTokens { get; private set; }
         public decimal TextCost { get; private set; }
+        public CostBreakdown TextDetail { get; } = new();
         public decimal MediaCost { get; private set; }
         public int NotRunInput { get; private set; }
         public int NotRunOutput { get; private set; }
         public decimal NotRunCost { get; private set; }
+        public CostBreakdown NotRunDetail { get; } = new();
         public decimal NotRunMediaCost { get; private set; }
 
         public void Add(AttachmentOutcome outcome)
         {
             InputTokens += outcome.InputTokens;
             OutputTokens += outcome.OutputTokens;
+            CacheWriteTokens += outcome.CacheWriteTokens;
+            CacheReadTokens += outcome.CacheReadTokens;
             TextCost += outcome.CostUsd;
+            TextDetail.Add(outcome.Cost);
             MediaCost += outcome.MediaCostUsd;
             if (outcome.Kind != AttachmentOutcomeKind.NotRun)
                 return;
@@ -810,6 +859,7 @@ public class ThreadUnitOfWork
             NotRunInput += outcome.InputTokens;
             NotRunOutput += outcome.OutputTokens;
             NotRunCost += outcome.CostUsd;
+            NotRunDetail.Add(outcome.Cost);
             NotRunMediaCost += outcome.MediaCostUsd;
         }
     }

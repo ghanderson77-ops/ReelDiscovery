@@ -1,6 +1,7 @@
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Corpus;
 
 namespace ReelDiscovery.Services.Evidence;
@@ -28,6 +29,9 @@ public class AttachmentRepairOutcome
     public decimal CostUsd { get; set; }
     public decimal MediaCostUsd { get; set; }
 
+    // PROV-07: gateway detail of CostUsd (text of every call)
+    public CostBreakdown Cost { get; set; } = new();
+
     public bool Unjournaled { get; set; }
     public string Reason { get; set; } = string.Empty;
 
@@ -35,6 +39,10 @@ public class AttachmentRepairOutcome
     public int NotRunInputTokens { get; set; }
     public int NotRunOutputTokens { get; set; }
     public decimal NotRunCostUsd { get; set; }
+
+    // PROV-07: text detail and media share of NotRunCostUsd
+    public CostBreakdown NotRunCost { get; set; } = new();
+    public decimal NotRunMediaCostUsd { get; set; }
 }
 
 /// <summary>
@@ -543,10 +551,13 @@ public class AttachmentRepair
         result.OutputTokens = 0;
         result.CostUsd = 0m;
         result.MediaCostUsd = 0m;
+        result.Cost = new CostBreakdown();
         AddSpend(result, outcomes);
         result.NotRunInputTokens = 0;
         result.NotRunOutputTokens = 0;
         result.NotRunCostUsd = 0m;
+        result.NotRunCost = new CostBreakdown();
+        result.NotRunMediaCostUsd = 0m;
         result.Records.Clear();
         result.Deltas.Clear();
         result.Unjournaled = true;
@@ -579,6 +590,7 @@ public class AttachmentRepair
             result.InputTokens += outcome.InputTokens;
             result.OutputTokens += outcome.OutputTokens;
             result.CostUsd += outcome.CostUsd;
+            result.Cost.Add(outcome.Cost);
             result.MediaCostUsd += outcome.MediaCostUsd;
         }
     }
@@ -590,6 +602,10 @@ public class AttachmentRepair
         result.NotRunInputTokens = notRun.Sum(o => o.InputTokens);
         result.NotRunOutputTokens = notRun.Sum(o => o.OutputTokens);
         result.NotRunCostUsd = notRun.Sum(o => o.CostUsd + o.MediaCostUsd);
+        result.NotRunCost = new CostBreakdown();
+        foreach (var outcome in notRun)
+            result.NotRunCost.Add(outcome.Cost);
+        result.NotRunMediaCostUsd = notRun.Sum(o => o.MediaCostUsd);
     }
 
     private static decimal NotRunText(List<AttachmentOutcome> outcomes) =>

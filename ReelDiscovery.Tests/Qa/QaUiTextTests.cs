@@ -353,6 +353,11 @@ public class QaUiTextTests
         Assert.Equal("The answer key could not be updated: the file is locked. It is updated again when you click Continue Generating.",
             QaUiText.FooterKeyNotUpdated("the file is locked."));
 
+    [Fact]
+    public void RegenerateFailed() =>
+        Assert.Equal("Could not queue the thread for regeneration: This thread has not been written yet.",
+            QaUiText.RegenerateFailed("This thread has not been written yet."));
+
     // --- Confirmations ---
 
     [Fact]

@@ -23,7 +23,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [x] **PROV-04**: Provider responses are classified (succeeded / refused / truncated / invalid / failed) so refusals and spend-limit errors are not blindly retried
 - [x] **PROV-05**: Image generation uses a current OpenAI image model (gpt-image family) instead of the retired dall-e-3
 - [x] **PROV-06**: When Claude is the text provider, images and voicemail use a configured OpenAI key; if none is configured those media types are disabled with a clear notice
-- [ ] **PROV-07**: Token usage and cost tracking accounts for cache writes, cache reads and batch discounts, with editable pricing per model
+- [x] **PROV-07**: Token usage and cost tracking accounts for cache writes, cache reads and batch discounts, with editable pricing per model
 
 ### Case Scenario & Core Document
 
@@ -106,9 +106,9 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Corpus QA
 
-- [ ] **QA-01**: A blind-review pass classifies a sample (or all) documents without seeing labels; disagreements are flagged and can be relabeled or regenerated
-- [ ] **QA-02**: A label-leakage audit checks that metadata alone cannot predict relevance and reports the result
-- [ ] **QA-03**: Timeline and value scans flag emails that reference future facts or contradict canonical values
+- [x] **QA-01**: A blind-review pass classifies a sample (or all) documents without seeing labels; disagreements are flagged and can be relabeled or regenerated
+- [x] **QA-02**: A label-leakage audit checks that metadata alone cannot predict relevance and reports the result
+- [x] **QA-03**: Timeline and value scans flag emails that reference future facts or contradict canonical values
 
 ### Run Reliability & Cost
 
@@ -183,7 +183,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROV-04 | Phase 1 | Complete |
 | PROV-05 | Phase 1 | Complete |
 | PROV-06 | Phase 1 | Complete |
-| PROV-07 | Phase 7 | Pending |
+| PROV-07 | Phase 7 | Complete |
 | CASE-01 | Phase 2 | Complete |
 | CASE-02 | Phase 2 | Complete |
 | CASE-03 | Phase 2 | Complete |
@@ -239,9 +239,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | KEY-03 | Phase 4 | Complete |
 | KEY-04 | Phase 4 | Complete |
 | KEY-05 | Phase 4 | Complete |
-| QA-01 | Phase 7 | Pending |
-| QA-02 | Phase 7 | Pending |
-| QA-03 | Phase 7 | Pending |
+| QA-01 | Phase 7 | Complete |
+| QA-02 | Phase 7 | Complete |
+| QA-03 | Phase 7 | Complete |
 | RUN-01 | Phase 5 | Complete |
 | RUN-02 | Phase 5, 6 | Partial (emails done in Phase 5; attachments, images, invites, voicemails in Phase 6) |
 | RUN-03 | Phase 7 | Pending |

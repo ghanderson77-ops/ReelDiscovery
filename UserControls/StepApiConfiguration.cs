@@ -65,11 +65,11 @@ public class StepApiConfiguration : UserControl, IWizardStep
 
         mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(150)));
         mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));  // 0: OpenAI header
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(28)));  // 0: OpenAI header
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 1: OpenAI key + Test + Clear
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 2: OpenAI status
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 3: Media status
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));  // 4: Anthropic header
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(28)));  // 4: Anthropic header
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 5: Anthropic key + Test + Clear
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 6: Anthropic status
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));  // 7: Text provider
@@ -77,7 +77,7 @@ public class StepApiConfiguration : UserControl, IWizardStep
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 9: Volume model + Configure Models
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 10: Pricing
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 11: Instructions
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));  // 12: Disclaimer (last row)
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 12: Disclaimer (last row, two lines at 150%)
 
         // OpenAI section
         var openAIHeader = CreateSectionHeader("OpenAI");

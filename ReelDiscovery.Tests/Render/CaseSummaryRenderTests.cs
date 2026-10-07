@@ -1,12 +1,17 @@
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Models.Qa;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Services.Qa;
 using ReelDiscovery.Tests.Case;
 using ReelDiscovery.Tests.Corpus;
+using ReelDiscovery.Tests.Qa;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Render;
@@ -364,6 +369,281 @@ public class CaseSummaryRenderTests
                 Assert.Equal("2 skipped", keyTooltip);
             }
         });
+    }
+
+    // ----- Render checks 5-6 (07-UI-SPEC S2, DPI rule 28): Generation cost row and the Quality checks group -----
+
+    [Fact]
+    public void QualityChecks_NotRun()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                using var fixture = new SummaryFixture(CorpusTestData.RichDraft());
+                SeedApprovedCorpus(fixture);
+
+                QaCapture capture = null!;
+                var result = Render(fixture, "case-summary-qa-not-run", size, control => capture = CaptureQa((StepCaseSummary)control));
+
+                AssertRendered(result);
+                AssertQaRowsFit(capture);
+                Assert.Equal("Nothing spent yet", capture.Lines[0]);
+                Assert.Equal("Not run yet. They run when the emails are generated.", capture.Lines[1]);
+                Assert.Equal("Not run yet.", capture.Lines[2]);
+                Assert.Equal(QaUiText.BlindReviewNotRunNoEmails, capture.Lines[3]);
+                // Run Audit and Run Blind Review... stay hidden until an email is generated
+                Assert.Empty(capture.VisibleButtons);
+                Assert.Equal(Helpers.Theme.BorderStrong, capture.Dots[1]);
+            }
+        });
+    }
+
+    [Fact]
+    public void QualityChecks_Done_EveryCostClause()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                using var fixture = new SummaryFixture(CorpusTestData.RichDraft());
+                var plan = SeedApprovedCorpus(fixture);
+                SeedQaDone(fixture, plan);
+
+                QaCapture capture = null!;
+                var result = Render(fixture, "case-summary-qa-done", size, control => capture = CaptureQa((StepCaseSummary)control));
+
+                AssertRendered(result);
+                AssertQaRowsFit(capture);
+                foreach (var clause in new[] { " spent · input $", " · cache write $", " · cache read $", " · output $", " · batch discount −$", " · images and voicemail $1.24", " · not itemized $0.37" })
+                    Assert.Contains(clause, capture.Lines[0]);
+                Assert.Contains("Not itemized: $0.37", capture.Tooltips[0]);
+                Assert.Equal("2 flagged emails in 2 threads: 1 timeline, 1 value, 1 story-detail, 1 attachment", capture.Lines[1]);
+                Assert.Equal(Helpers.Theme.Warning, capture.Dots[1]);
+                Assert.StartsWith("Warning: metadata alone predicts relevance 66% of the time. Top signal: sender ", capture.Lines[2]);
+                Assert.Contains("Pass is 60% or lower", capture.Tooltips[2]);
+                Assert.Contains("2 disagreements", capture.Lines[3]);
+                Assert.EndsWith(QaUiText.FallbackClause, capture.Lines[3]);
+                Assert.Contains(QaUiText.FallbackTooltip, capture.Tooltips[3]);
+                Assert.Equal(new[] { "View Findings", "View Report", "Run Audit", "View Findings", "Run Blind Review..." }, capture.VisibleButtons);
+            }
+        });
+    }
+
+    [Fact]
+    public void QualityChecks_BlindReviewRunning()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            // The review's awaits resume through the WinForms context; the harness pumps with Application.DoEvents, which
+            // would otherwise swap that context out and strand the continuations (same setup as GenerateCorpusStepTests)
+            WindowsFormsSynchronizationContext.AutoInstall = false;
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                using var fixture = new SummaryFixture(CorpusTestData.RichDraft());
+                var plan = SeedApprovedCorpus(fixture);
+                SeedRun(fixture, plan, RunSeed.Complete);
+                CaseSummaryQaTests.WriteJournal(fixture.State.Case.FolderPath, plan, "OpenAI");
+                var reviewer = new CaseSummaryQaTests.GatedReviewer();
+                var model = CaseSummaryQaTests.Haiku();
+                ButtonStyle? cancelStyle = null;
+
+                QaCapture capture = null!;
+                var result = Render(fixture, "case-summary-qa-review-running", size, control =>
+                {
+                    var step = (StepCaseSummary)control;
+                    step.ReviewerGatewayFactory = () => (new LlmGateway(reviewer, model, model), LlmProviderKind.Anthropic, false, model);
+                    step.ShowDialogOverride = dialog =>
+                    {
+                        dialog.SampleInput.Value = 12;
+                        return DialogResult.OK;
+                    };
+                    _ = step.RunBlindReviewAsync();
+                    CaseSummaryQaTests.PumpUntil(() => step.IsReviewRunning, "review running");
+                    reviewer.Release(3);
+                    CaseSummaryQaTests.PumpUntil(() => step.BlindReviewLine3.Text == "Reviewing: 3 of 12 emails...", "3 of 12");
+                    cancelStyle = (step.CancelReviewButton as ThemedButton)?.Variant;
+                    capture = CaptureQa(step);
+                });
+
+                AssertRendered(result);
+                AssertQaRowsFit(capture);
+                Assert.Equal("Reviewing: 3 of 12 emails...", capture.Lines[3]);
+                Assert.Equal(Helpers.Theme.Accent, capture.Colors[3]);
+                Assert.Equal(Helpers.Theme.Accent, capture.Dots[3]);
+                Assert.Equal(QaUiText.BlindReviewProgress(3, 12), capture.Status);
+                Assert.Equal(ButtonStyle.Danger, cancelStyle);
+                // Cancel Review replaces Run Blind Review...; View Findings is hidden while running
+                Assert.Equal("Cancel Review", capture.VisibleButtons.Last());
+                Assert.DoesNotContain("Run Blind Review...", capture.VisibleButtons);
+            }
+        });
+    }
+
+    /// <summary>
+    /// What the four new rows show (Generation cost, Consistency scans, Leakage audit, Blind review): line 3 text, color,
+    /// dot and tooltip; the visible QA buttons; and the layout facts DPI rule 28 checks.
+    /// </summary>
+    private sealed class QaCapture
+    {
+        public List<string> Lines = new();
+        public List<Color> Colors = new();
+        public List<Color> Dots = new();
+        public List<string> Tooltips = new();
+        public List<string> VisibleButtons = new();
+        public string Status = string.Empty;
+
+        // (line 3 text, single-line text height, label height, label right edge, button column left edge or -1)
+        public List<(string Text, int LineHeight, int Height, int Right, int ButtonsLeft)> Line3Layout = new();
+
+        // (caption, preferred width, actual width)
+        public List<(string Caption, int Preferred, int Width)> Buttons = new();
+    }
+
+    private static QaCapture CaptureQa(StepCaseSummary step)
+    {
+        // The Quality checks group is below the Corpus group; bring the last QA row into view
+        RowsHost(step).ScrollControlIntoView(step.BlindReviewLine3.Parent!);
+        Application.DoEvents();
+
+        var capture = new QaCapture { Status = step.StatusLabel.Text };
+        var labels = new[] { step.GenerationCostLine3, step.ScansLine3, step.LeakageLine3, step.BlindReviewLine3 };
+        var dots = new[] { step.GenerationCostDotColor, step.ScansDotColor, step.LeakageDotColor, step.BlindReviewDotColor };
+        for (var i = 0; i < labels.Length; i++)
+        {
+            var label = labels[i];
+            capture.Lines.Add(label.Text);
+            capture.Colors.Add(label.ForeColor);
+            capture.Dots.Add(dots[i]);
+            capture.Tooltips.Add(step.TooltipOf(label));
+            var row = (TableLayoutPanel)label.Parent!;
+            var buttons = row.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
+            var anyButton = buttons != null && buttons.Controls.OfType<Button>().Any(b => b.Visible);
+            capture.Line3Layout.Add((label.Text, TextRenderer.MeasureText("Ag", label.Font).Height, label.Height, label.Right,
+                anyButton ? buttons!.Left : -1));
+        }
+
+        foreach (var button in new[] { step.ViewScansButton, step.ViewLeakageButton, step.RunAuditButton, step.ViewBlindReviewButton, step.RunBlindReviewButton, step.CancelReviewButton })
+        {
+            if (!button.Visible)
+                continue;
+            capture.VisibleButtons.Add(button.Text);
+            capture.Buttons.Add((button.Text, button.GetPreferredSize(Size.Empty).Width, button.Width));
+        }
+        return capture;
+    }
+
+    // DPI rule 28: line 3 is one line with the full text in its tooltip, buttons never ellipsize, and the button column
+    // never overlaps line 3
+    private static void AssertQaRowsFit(QaCapture capture)
+    {
+        for (var i = 0; i < capture.Line3Layout.Count; i++)
+        {
+            var (text, lineHeight, height, right, buttonsLeft) = capture.Line3Layout[i];
+            Assert.True(height < 2 * lineHeight, $"line 3 '{text}' is {height}px, more than one line ({lineHeight}px)");
+            if (buttonsLeft >= 0)
+                Assert.True(right <= buttonsLeft, $"line 3 '{text}' ends at {right}, past the button column at {buttonsLeft}");
+            // Generation cost carries its breakdown; the QA rows start with the full line
+            if (i == 0)
+                Assert.NotEmpty(capture.Tooltips[i]);
+            else
+                Assert.StartsWith(text, capture.Tooltips[i]);
+        }
+
+        foreach (var (caption, preferred, width) in capture.Buttons)
+            Assert.True(width >= preferred, $"'{caption}' is {width}px, needs {preferred}px");
+    }
+
+    /// <summary>
+    /// A finished run with every QA report: itemized spend, a pre-Phase-7 (not itemized) line and media at run end, scans
+    /// with findings, a leakage Warning, and a same-provider blind review with two disagreements.
+    /// </summary>
+    private static void SeedQaDone(SummaryFixture fixture, CorpusPlan plan)
+    {
+        var draft = fixture.State.Case;
+        var folder = draft.FolderPath;
+        var guide = draft.Guide!;
+        SeedRun(fixture, plan, RunSeed.Complete);
+        CaseSummaryQaTests.WriteJournal(folder, plan, "Anthropic");
+        new GenerationJournal(folder).AppendAsync(new JournalRecord
+        {
+            Type = JournalRecordType.RunEnded,
+            PlanId = plan.PlanId,
+            Outcome = GenerationOutcome.Finished,
+            CostUsd = 0.37m,
+            MediaCostUsd = 1.24m,
+            Utc = DateTime.UtcNow
+        }).GetAwaiter().GetResult();
+
+        var store = new QaReportStore(folder);
+        var threads = plan.Threads.Where(t => t.Messages.Count > 0).Take(2).ToList();
+        ScanFinding Finding(PlannedThread thread, ScanCheck check, string text) => new()
+        {
+            ThreadId = thread.Id,
+            DocId = thread.Messages[0].DocId,
+            Subject = thread.Subject,
+            DateSent = thread.Messages[0].SentAt.DateTime,
+            Check = check,
+            Text = text,
+            Relevant = thread.Relevance == ThreadRelevance.Relevant
+        };
+        store.SaveScans(new ScanReport
+        {
+            PlanId = plan.PlanId,
+            CreatedUtc = DateTime.UtcNow,
+            JournalUtc = File.GetLastWriteTimeUtc(GenerationJournal.PathFor(folder)),
+            ScannedEmails = plan.Threads.Sum(t => t.Messages.Count),
+            Findings = new List<ScanFinding>
+            {
+                Finding(threads[0], ScanCheck.Timeline, "Mentions the March 9 site meeting before it happened"),
+                Finding(threads[0], ScanCheck.Value, "States $18,000 where the case guide says $18,425"),
+                Finding(threads[1], ScanCheck.StoryDetail, "Moves the meeting to the west entrance"),
+                Finding(threads[1], ScanCheck.Attachment, "The attached change order is dated after the email")
+            }
+        });
+        store.SaveLeakage(new LeakageReport
+        {
+            PlanId = plan.PlanId,
+            CreatedUtc = DateTime.UtcNow,
+            Verdict = LeakageVerdict.Warning,
+            BalancedAccuracy = 0.66,
+            Auc = 0.71,
+            Folds = LeakageAudit.Folds,
+            RelevantEmails = 120,
+            NonRelevantEmails = 380,
+            Signals = new List<LeakageSignal>
+            {
+                new() { Feature = "sender raymond.harmon@harmonbuilders.com", Kind = LeakageSignalKind.Lift, RelevantShare = 0.71, BaseRate = 0.24, Support = 64, Lift = 0.47 }
+            }
+        });
+
+        var generated = BlindReviewer.GeneratedEmailDocIds(GenerationJournal.Replay(folder, plan));
+        var sample = BlindReviewPrompts.Sample(plan, guide, generated, Math.Min(10, generated.Count));
+        store.AppendBlindReviewHeaderAsync(new BlindReviewHeader
+        {
+            PlanId = plan.PlanId,
+            ReviewerProvider = "Anthropic",
+            ReviewerModel = "claude-haiku-4-5-20251001",
+            SameProviderFallback = true,
+            SampleSize = sample.Count,
+            StartedUtc = DateTime.UtcNow
+        }).GetAwaiter().GetResult();
+        for (var i = 0; i < sample.Count; i++)
+        {
+            var thread = plan.Threads.First(t => t.Messages.Any(m => m.DocId == sample[i]));
+            var relevant = thread.Relevance == ThreadRelevance.Relevant;
+            store.AppendBlindReviewVerdictAsync(new BlindReviewVerdict
+            {
+                DocId = sample[i],
+                ThreadId = thread.Id,
+                KeyRelevant = relevant,
+                // Two disagreements: the first two emails of the sample
+                ReviewerRelevant = i < 2 ? !relevant : relevant,
+                Reason = "Only arranges a site visit; no defect or payment is discussed.",
+                Utc = DateTime.UtcNow
+            }).GetAwaiter().GetResult();
+        }
     }
 
     // Phase 6 run over relevant + non-relevant threads and attachments (cached counts as GenerationStateApplier writes them)

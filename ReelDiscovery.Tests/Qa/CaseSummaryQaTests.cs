@@ -86,7 +86,7 @@ public class CaseSummaryQaTests
         return step;
     }
 
-    private static void PumpUntil(Func<bool> condition, string what)
+    internal static void PumpUntil(Func<bool> condition, string what)
     {
         var clock = Stopwatch.StartNew();
         while (!condition() && clock.Elapsed < TimeSpan.FromSeconds(30))
@@ -98,14 +98,14 @@ public class CaseSummaryQaTests
         Assert.True(condition(), "timed out waiting for: " + what);
     }
 
-    private static AIModelConfig Haiku() =>
+    internal static AIModelConfig Haiku() =>
         AIModelConfig.GetDefaultModels().Single(m => m.ModelId == "claude-haiku-4-5-20251001");
 
     /// <summary>
     /// Answers each review once a permit is released (or at once when Open); relevant = the DocId's last digit is even.
     /// Calls are asynchronous so the step's UI thread keeps pumping.
     /// </summary>
-    private sealed class GatedReviewer : ILlmProvider
+    internal sealed class GatedReviewer : ILlmProvider
     {
         private readonly SemaphoreSlim _permits = new(0);
         public volatile bool Open;

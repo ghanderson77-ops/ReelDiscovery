@@ -2318,12 +2318,15 @@ public class StepCaseSummary : UserControl, IWizardStep
     internal Label BlindReviewLine3 => _rowBlindReview.Line3!;
     internal Color ScansDotColor => _rowScans.DotColor;
     internal Color BlindReviewDotColor => _rowBlindReview.DotColor;
+    internal Color GenerationCostDotColor => _rowGenerationCost.DotColor;
+    internal Color LeakageDotColor => _rowLeakage.DotColor;
     internal Button ViewScansButton => _btnViewScans;
     internal Button ViewLeakageButton => _btnViewLeakage;
     internal Button RunAuditButton => _btnRunAudit;
     internal Button ViewBlindReviewButton => _btnViewBlindReview;
     internal Button RunBlindReviewButton => _btnRunBlindReview;
     internal Button CancelReviewButton => _btnCancelReview;
+    internal string TooltipOf(Control control) => _toolTip.GetToolTip(control) ?? string.Empty;
 
     protected override void Dispose(bool disposing)
     {

@@ -47,7 +47,7 @@ public class WizardState
     public bool IsMediaAvailable => !string.IsNullOrWhiteSpace(OpenAIApiKey) && OpenAIKeyTested;
 
     public string MediaUnavailableNotice =>
-        "Images and voicemail need a tested OpenAI key. Add one on the API Keys step to enable them.";
+        "Images and voicemail need a tested OpenAI key. Add one on the API Configuration step to enable them.";
 
     /// <summary>Forces image/voicemail options off when no tested OpenAI key is configured (PROV-06).</summary>
     public void ApplyMediaAvailability()

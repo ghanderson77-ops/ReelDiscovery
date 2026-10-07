@@ -26,7 +26,7 @@ public class MediaGatingTests
 
         Assert.Null(state.CreateMediaClient());
         Assert.Equal(
-            "Images and voicemail need a tested OpenAI key. Add one on the API Keys step to enable them.",
+            "Images and voicemail need a tested OpenAI key. Add one on the API Configuration step to enable them.",
             state.MediaUnavailableNotice);
     }
 

@@ -220,7 +220,7 @@ The `Quality checks` group sits between Corpus and Case guide because it reports
 |-------|--------|------------|
 | No run yet | `Not run yet. They run when the emails are generated.` | Muted / BorderStrong |
 | Clean | `No problems in {Plural(n, "scanned email")}` | Success |
-| Findings | `{Plural(f, "flagged email")} in {Plural(t, "thread")}: {x:N0} timeline, {y:N0} value, {z:N0} story-detail` (zero clauses dropped) | Warning |
+| Findings | `{Plural(f, "flagged email")} in {Plural(t, "thread")}: {x:N0} timeline, {y:N0} value, {z:N0} story-detail, {w:N0} attachment` (zero clauses dropped; `attachment` added in execution 07-17 because the scans also flag attachments) | Warning |
 | Out of date (corpus changed since the scan) | `Last scan is older than the corpus. It runs again at the end of the next run.` | Muted / BorderStrong |
 
 - Button: `View Findings` (Default; visible when findings exist). Opens S3 in scan mode.
@@ -285,7 +285,7 @@ Modes (`QaUiText.FindingsContent(mode, ...)`):
 - Status column: rows queued for regeneration show `Queued` appended to the `Check`/`Reviewer` cell as ` · queued` [DEFAULT: avoids a 7th column at the 640 minimum].
 - Buttons (scan and blind-review modes): `Open Email` (Default; opens the sender's copy through the shell, same rule as Activity double-click), `Regenerate Thread...` (**Primary**, enabled only with a selected row whose thread is not queued), `Close` (Default, `DialogResult.Cancel`, initial focus when the grid is empty, otherwise the grid has focus). Leakage mode: `Close` only.
 - Double-click / Enter on a row = `Open Email`.
-- Footer status after a regeneration is queued: `{Plural(q, "thread")} queued for regeneration. Go to Generate Corpus and click Continue Generating to write {q == 1 ? "it" : "them"}.` (`Theme.Success`). Missing EML copies that could not be deleted: `{Plural(n, "EML file")} could not be deleted because {reason}. Close any program that has them open and delete them by hand.` (`Theme.Warning`). Answer key could not be rewritten after the invalidation: `The answer key could not be updated: {reason}. It is updated again when you click Continue Generating.` (`Theme.Warning`, own line after the not-deleted line) [amended in planning revision 2].
+- Footer status after a regeneration is queued: `{Plural(q, "thread")} queued for regeneration. Go to Generate Corpus and click Continue Generating to write {q == 1 ? "it" : "them"}.` (`Theme.Success`). Missing EML copies that could not be deleted: `{Plural(n, "EML file")} could not be deleted because {reason}. Close any program that has them open and delete them by hand.` (`Theme.Warning`). With one file it reads `has it open and delete it by hand` [amended in execution 07-17]. Answer key could not be rewritten after the invalidation: `The answer key could not be updated: {reason}. It is updated again when you click Continue Generating.` (`Theme.Warning`, own line after the not-deleted line) [amended in planning revision 2].
 - Empty grid (all findings resolved or none): grid hidden, summary line reads `No findings.` and `Close` has focus.
 - **Regenerate Thread...** asks C-Q1. On Yes: journal the invalidation, delete the thread's EML copies, mark the row ` · queued`, update the footer, and refresh the Case Summary rows on close (Mailboxes row becomes partial, so the Generate Corpus partial-run banner appears; 06 banner rule).
 
@@ -299,7 +299,7 @@ Modes (`QaUiText.FindingsContent(mode, ...)`):
 | 1a | Fallback sentence (only when D-12 fallback applies) | `Only one provider key is tested, so the reviewer comes from the same provider that wrote the corpus. Test a key for the other provider on the API Configuration step for a more independent review.` | `BodyFont`, `Theme.Warning`, wraps, bottom 16 |
 | 2 | Sample row | label `Emails to review:` + `NumericUpDown` (width 96, 0 decimals, min 1, max = generated emails, increment 50, `ThousandsSeparator = true`) + label `of {total:N0}` | `FlowLayoutPanel` LeftToRight, `WrapContents = true`, label-to-field gap 8, `BodyFont` |
 | 3 | Default rule | `Default: all {r:N0} relevant emails and the same number of non-relevant ones, near-miss decoys first.` | `SmallFont`, `TextMuted`, top 4, bottom 8 |
-| 4 | Estimate | `Estimated cost ≈${c}, ±50%{resumeClause}.` with `{resumeClause}` = ` for the {Plural(n, "email")} not yet reviewed; {d:N0} already reviewed are kept` when a stopped review exists | `SmallFont`, `TextMuted`, bottom 16; updates on every value change |
+| 4 | Estimate | `Estimated cost ≈${c}, ±50%{resumeClause}.` with `{resumeClause}` = ` for the {Plural(n, "email")} not yet reviewed; {d:N0} already reviewed are kept` (`is kept` when d = 1) when a stopped review exists | `SmallFont`, `TextMuted`, bottom 16; updates on every value change |
 | 5 | Buttons | `Cancel` (Default, initial focus) · `Start Review` (Primary) | `AddButtons` |
 
 - Default value: `min(2 × relevant emails, total)` (D-11). Resizing never reorders the sample: the sample is the first N in the deterministic stratified order.
@@ -383,8 +383,8 @@ New confirmations (MessageBox, default button = the safe choice, `Button2`):
 
 | # | Action | Title | Copy | Buttons / icon |
 |---|--------|-------|------|----------------|
-| C-Q1 | Regenerate Thread... | `Regenerate Thread` | `Regenerate "{subject}"? Its {Plural(f, "EML file")}{attClause} are deleted now and the answer key marks the thread Planned. Continue Generating on the Generate Corpus step writes it again{relevantClause}.` with `{attClause}` = ` and {Plural(a, "attachment")}` when a > 0 and `{relevantClause}` = `, keeping the story details it already established so later threads stay consistent` for a relevant thread | Yes / No, **Warning** |
-| C-Q2 | Cancel Review | `Cancel Review` | `Stop the blind review? The {Plural(d, "email")} already reviewed are kept, and Run Blind Review finishes the rest later.` | Yes / No, Question |
+| C-Q1 | Regenerate Thread... | `Regenerate Thread` | `Regenerate "{subject}"? Its {Plural(f, "EML file")}{attClause} are deleted now and the answer key marks the thread Planned. Continue Generating on the Generate Corpus step writes it again{relevantClause}.` with `{attClause}` = ` and {Plural(a, "attachment")}` when a > 0 and `{relevantClause}` = `, keeping the story details it already established so later threads stay consistent` for a relevant thread (the verb is `is` for a single EML file without attachments) [amended in execution 07-17] | Yes / No, **Warning** |
+| C-Q2 | Cancel Review | `Cancel Review` | `Stop the blind review? The {Plural(d, "email")} already reviewed are kept, and Run Blind Review finishes the rest later.` (`is kept` when d = 1) [amended in execution 07-17] | Yes / No, Question |
 | C-Q3 | Leave Case Summary or close the app during a review | `Stop Blind Review?` | `The blind review is still running. Leave and stop it? Reviewed emails are kept.` | Yes / No, Question |
 
 **Counts and plurals.** Every count uses `Plural(n, singular, plural)`. New templates: `{n} requests`, `{n} results`, `{b} provider batches`, `{f} flagged emails`, `{n} scanned emails`, `{k} disagreements`, `{q} threads`, `{n} EML files`, `{a} attachments`, `{n} emails`. `GenerationUiTextTests` and `QaUiTextTests` cover n = 0, 1, 2 and 1,000 for each, every dropped-clause variant (no media, no batch savings, no fallback, Story = Volume model), the three leakage verdicts plus Not enough data at the exact 60% and 70% boundaries, and the batch hint at 1,999 / 2,000 planned emails.

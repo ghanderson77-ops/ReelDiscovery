@@ -57,6 +57,7 @@ public class QaFindingsDialog : Form
     private readonly Func<string, Task<ThreadInvalidationResult>>? _regenerate;
     private readonly Action<string>? _openEmail;
     private bool _busy;
+    private ToolTip? _toolTip;
 
     private Label _lblHeadline = null!;
     private Label _lblSummary = null!;
@@ -151,6 +152,12 @@ public class QaFindingsDialog : Form
         _lblSummary = CreateLabel(content.Summary, Theme.SmallFont(), Theme.TextMuted);
         _lblSummary.Margin = new Padding(0, 0, 0, LogicalToDeviceUnits(16));
         root.Controls.Add(_lblSummary, 0, 1);
+        var summaryTip = QaUiText.FindingsSummaryTooltip(_mode);
+        if (summaryTip.Length > 0 && _rows.Count > 0)
+        {
+            _toolTip = new ToolTip();
+            _toolTip.SetToolTip(_lblSummary, summaryTip);
+        }
 
         _grid = new DataGridView
         {
@@ -191,10 +198,11 @@ public class QaFindingsDialog : Form
             Margin = new Padding(0, LogicalToDeviceUnits(16), 0, 0),
             Padding = Padding.Empty
         };
-        // RightToLeft flow: the row reads Open Email, Regenerate Thread..., Close left to right
-        _btnClose.Margin = Padding.Empty;
+        // RightToLeft flow: the row reads Open Email, Regenerate Thread..., Close left to right; every button but the
+        // leftmost visible one keeps the 8 px gap on its left
+        _btnClose.Margin = ListMode ? new Padding(LogicalToDeviceUnits(Theme.SmallGap), 0, 0, 0) : Padding.Empty;
         _btnRegenerate.Margin = new Padding(LogicalToDeviceUnits(Theme.SmallGap), 0, 0, 0);
-        _btnOpen.Margin = new Padding(LogicalToDeviceUnits(Theme.SmallGap), 0, 0, 0);
+        _btnOpen.Margin = Padding.Empty;
         buttons.Controls.Add(_btnClose);
         buttons.Controls.Add(_btnRegenerate);
         buttons.Controls.Add(_btnOpen);
@@ -270,29 +278,31 @@ public class QaFindingsDialog : Form
     private void AddListColumns()
     {
         GridStyle.AddDotColumn(_grid, this);
-        AddColumn("DocId", "Doc ID", 120);
-        var date = AddColumn("Date", "Date", 96);
+        // Widths amended in execution 07-17 (UI-SPEC S3): Date fits "Mar 12, 2024" and the status columns fit
+        // "Not relevant · queued" / "Story detail · queued" next to the sort glyph
+        AddColumn("DocId", "Doc ID", 112);
+        var date = AddColumn("Date", "Date", 108);
         date.ValueType = typeof(DateTime);
         date.DefaultCellStyle.Format = "MMM d, yyyy";
         date.DefaultCellStyle.FormatProvider = CultureInfo.InvariantCulture;
-        AddColumn("Subject", "Subject", 160, fill: true, fillWeight: 100);
+        AddColumn("Subject", "Subject", 140, fill: true, fillWeight: 100);
         if (_mode == QaFindingsMode.Scans)
         {
-            AddColumn(Col1Name, "Check", 96);
-            AddColumn("Text", "What was found", 200, fill: true, fillWeight: 150);
+            AddColumn(Col1Name, "Check", 144);
+            AddColumn("Text", "What was found", 160, fill: true, fillWeight: 150);
         }
         else
         {
-            AddColumn(Col1Name, "Answer key", 96);
-            AddColumn(Col2Name, "Reviewer", 96);
-            AddColumn("Text", "Reviewer's reason", 200, fill: true, fillWeight: 150);
+            AddColumn(Col1Name, "Answer key", 104);
+            AddColumn(Col2Name, "Reviewer", 144);
+            AddColumn("Text", "Reviewer's reason", 160, fill: true, fillWeight: 150);
         }
     }
 
     private void AddLeakageColumns()
     {
         AddColumn("Signal", "Signal", 200, fill: true);
-        var share = AddColumn("Share", "Relevant share", 104);
+        var share = AddColumn("Share", "Relevant share", 120);
         share.ValueType = typeof(double);
         share.DefaultCellStyle.Format = "0%";
         share.DefaultCellStyle.FormatProvider = CultureInfo.InvariantCulture;
@@ -300,7 +310,7 @@ public class QaFindingsDialog : Form
         emails.ValueType = typeof(int);
         emails.DefaultCellStyle.Format = "N0";
         emails.DefaultCellStyle.FormatProvider = CultureInfo.InvariantCulture;
-        var lift = AddColumn("Lift", "Lift", 64);
+        var lift = AddColumn("Lift", "Lift", 80);
         lift.ValueType = typeof(double);
         _grid.CellFormatting += (s, e) =>
         {
@@ -330,7 +340,8 @@ public class QaFindingsDialog : Form
         // Date ascending by default; ordinal Doc ID keeps same-day rows stable
         foreach (var finding in _rows.OrderBy(r => r.DateSent).ThenBy(r => r.DocId, StringComparer.Ordinal))
         {
-            var row = new DataGridViewRow();
+            // From the row template so the GridStyle 32 px row height applies (a bare DataGridViewRow is ~22 px)
+            var row = (DataGridViewRow)_grid.RowTemplate.Clone();
             row.CreateCells(_grid);
             row.Tag = finding;
             row.Cells[_grid.Columns["DocId"]!.Index].Value = finding.DocId;
@@ -480,6 +491,13 @@ public class QaFindingsDialog : Form
         e.Handled = true;
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _toolTip?.Dispose();
+        base.Dispose(disposing);
+    }
+
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
@@ -494,8 +512,9 @@ public class QaFindingsDialog : Form
     {
         base.OnShown(e);
 
-        // Regenerate Thread... needs a row the user picked, not the grid's automatic first row
-        if (ListMode && _grid.Rows.Count > 0)
+        // Regenerate Thread... needs a row the user picked, not the grid's automatic first row (the leakage table has
+        // no row actions, so it starts unselected too)
+        if (_grid.Rows.Count > 0)
         {
             _grid.ClearSelection();
             _grid.CurrentCell = null;

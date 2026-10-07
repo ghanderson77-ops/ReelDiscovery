@@ -167,14 +167,14 @@ public static class QaUiText
     /// <summary>
     /// Verdict line (R3 table). The verdict is recomputed from the stored accuracy and counts with the audit's own rule.
     /// </summary>
-    public static (string Text, SummaryTone Tone) LeakageLine(LeakageReport? report)
+    public static (string Text, SummaryTone Tone) LeakageLine(LeakageReport? report, bool topSignal = true)
     {
         if (report == null || report.Verdict == LeakageVerdict.NotRun)
             return ("Not run yet.", SummaryTone.Muted);
 
         var verdict = LeakageAudit.VerdictFor(report.BalancedAccuracy, report.RelevantEmails, report.NonRelevantEmails);
         var ba = Percent(report.BalancedAccuracy);
-        var top = report.Signals.Count > 0 ? $" Top signal: {SignalText(report.Signals[0])}." : "";
+        var top = topSignal && report.Signals.Count > 0 ? $" Top signal: {SignalText(report.Signals[0])}." : "";
         return verdict switch
         {
             LeakageVerdict.Pass => ($"Pass: metadata alone predicts relevance {ba}% of the time (50% is a coin flip).", SummaryTone.Success),
@@ -262,17 +262,29 @@ public static class QaUiText
         switch (mode)
         {
             case QaFindingsMode.Leakage:
-                return ("Leakage Audit Report", LeakageLine(leakage).Text, LeakageTooltip);
+                // The report headline omits the top signal: it is the first row of the signal table (amended S3)
+                return ("Leakage Audit Report", LeakageLine(leakage, topSignal: false).Text, LeakageTooltip);
             case QaFindingsMode.BlindReview:
                 return ("Blind Review Disagreements", "Blind review disagreements", flaggedEmails == 0
                     ? NoFindings
-                    : $"{reviewerModel} disagreed with the answer key on {Plural(flaggedEmails, "email", "emails")}. Check each one: edit the answer key spreadsheet to relabel it, or regenerate its thread.");
+                    : $"{reviewerModel} disagreed with the answer key on {Plural(flaggedEmails, "email", "emails")}. Relabel or regenerate each one.");
             default:
                 return ("Consistency Scan Findings", "Consistency scan findings", flaggedEmails == 0
                     ? NoFindings
-                    : $"{Plural(flaggedEmails, "flagged email", "flagged emails")} in {Plural(threads, "thread", "threads")}. Each row names the check and what it found. Nothing in the corpus has changed.");
+                    : $"{Plural(flaggedEmails, "flagged email", "flagged emails")} in {Plural(threads, "thread", "threads")}, one row per finding. Nothing in the corpus has changed.");
         }
     }
+
+    /// <summary>
+    /// Summary-line tooltip: the full guidance the one-line summary leaves out (amended S3: the summary fits one line at
+    /// the 640 minimum so the grid keeps 4 rows; DPI rule 29). Empty for the leakage report.
+    /// </summary>
+    public static string FindingsSummaryTooltip(QaFindingsMode mode) => mode switch
+    {
+        QaFindingsMode.Scans => "Each row names the check and what it found. Open Email shows the email; Regenerate Thread... writes its thread again.",
+        QaFindingsMode.BlindReview => "Check each one: edit the answer key spreadsheet to relabel it, or click Regenerate Thread... to write its thread again.",
+        _ => ""
+    };
 
     public static string CheckText(ScanCheck check) => check switch
     {

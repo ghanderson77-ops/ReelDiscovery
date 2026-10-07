@@ -321,7 +321,7 @@ public class QaFindingsDialogTests
             Assert.False(dialog.RegenerateButton.Visible);
             Assert.False(dialog.OpenButton.Visible);
             Assert.True(dialog.CloseButton.Visible);
-            Assert.Equal(dialog.HeadlineLabel.Text, QaUiText.LeakageLine(report).Text);
+            Assert.Equal(QaUiText.LeakageLine(report, topSignal: false).Text, dialog.HeadlineLabel.Text);
         });
     }
 

@@ -293,7 +293,8 @@ public class QaUiTextTests
         var c = QaUiText.FindingsContent(QaFindingsMode.Scans, flaggedEmails: 3, threads: 2, reviewerModel: "", leakage: null);
         Assert.Equal("Consistency Scan Findings", c.Title);
         Assert.Equal("Consistency scan findings", c.Headline);
-        Assert.Equal("3 flagged emails in 2 threads. Each row names the check and what it found. Nothing in the corpus has changed.", c.Summary);
+        Assert.Equal("3 flagged emails in 2 threads, one row per finding. Nothing in the corpus has changed.", c.Summary);
+        Assert.StartsWith("Each row names the check and what it found.", QaUiText.FindingsSummaryTooltip(QaFindingsMode.Scans));
     }
 
     [Fact]
@@ -302,7 +303,8 @@ public class QaUiTextTests
         var c = QaUiText.FindingsContent(QaFindingsMode.BlindReview, flaggedEmails: 1, threads: 1, reviewerModel: "m", leakage: null);
         Assert.Equal("Blind Review Disagreements", c.Title);
         Assert.Equal("Blind review disagreements", c.Headline);
-        Assert.Equal("m disagreed with the answer key on 1 email. Check each one: edit the answer key spreadsheet to relabel it, or regenerate its thread.", c.Summary);
+        Assert.Equal("m disagreed with the answer key on 1 email. Relabel or regenerate each one.", c.Summary);
+        Assert.StartsWith("Check each one: edit the answer key spreadsheet to relabel it, or click Regenerate Thread...", QaUiText.FindingsSummaryTooltip(QaFindingsMode.BlindReview));
     }
 
     [Fact]
@@ -310,7 +312,7 @@ public class QaUiTextTests
     {
         var c = QaUiText.FindingsContent(QaFindingsMode.Leakage, 0, 0, "", Leakage(0.65, signals: Signal("privilege banner", LeakageSignalKind.OnlyOnRelevant)));
         Assert.Equal("Leakage Audit Report", c.Title);
-        Assert.Equal("Warning: metadata alone predicts relevance 65% of the time. Top signal: privilege banner: only on relevant mail.", c.Headline);
+        Assert.Equal("Warning: metadata alone predicts relevance 65% of the time.", c.Headline);
         Assert.Equal(QaUiText.LeakageTooltip, c.Summary);
     }
 

@@ -14,7 +14,6 @@ namespace ReelDiscovery.Services;
 public class ApiKeyStore
 {
     private const string KeysFileName = "keys.dat";
-    private const string LegacySettingsFileName = "reeldiscovery.settings";
     private static readonly byte[] Entropy = "ReelDiscovery.ApiKeys.v1"u8.ToArray();
 
     private readonly string _folder;
@@ -27,8 +26,6 @@ public class ApiKeyStore
     }
 
     internal string KeysFilePath => Path.Combine(_folder, KeysFileName);
-
-    internal string LegacySettingsPath => Path.Combine(_folder, LegacySettingsFileName);
 
     public string? GetKey(LlmProviderKind provider)
     {
@@ -95,44 +92,6 @@ public class ApiKeyStore
         }
 
         SaveDto(dto);
-    }
-
-    /// <summary>
-    /// Imports the legacy Base64 reeldiscovery.settings key as the OpenAI key, then overwrites
-    /// and deletes the legacy file. Idempotent; never overwrites an existing DPAPI OpenAI key.
-    /// An undecodable legacy file is left in place and nothing is imported.
-    /// </summary>
-    /// <returns>True when a legacy key was imported into the store.</returns>
-    public bool MigrateLegacyKey()
-    {
-        var path = LegacySettingsPath;
-        if (!File.Exists(path))
-        {
-            return false;
-        }
-
-        string legacyKey;
-        try
-        {
-            legacyKey = Encoding.UTF8.GetString(Convert.FromBase64String(File.ReadAllText(path).Trim())).Trim();
-        }
-        catch (FormatException)
-        {
-            // Not a usable Base64 key file: leave it untouched rather than destroy unknown data
-            return false;
-        }
-
-        var imported = false;
-        if (!string.IsNullOrEmpty(legacyKey) && GetKey(LlmProviderKind.OpenAI) == null)
-        {
-            SetKey(LlmProviderKind.OpenAI, legacyKey);
-            imported = true;
-        }
-
-        // D-09: overwrite the plaintext-equivalent file, then remove it
-        File.WriteAllText(path, string.Empty);
-        File.Delete(path);
-        return imported;
     }
 
     private KeyFileDto LoadDto()

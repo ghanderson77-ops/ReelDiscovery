@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-13-PLAN.md
-last_updated: "2026-10-06T23:39:30.706Z"
-last_activity: 2026-10-06
+stopped_at: Completed 07-15-PLAN.md
+last_updated: "2026-10-07T00:02:06.300Z"
+last_activity: 2026-10-07
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 121
+  completed_plans: 122
   percent: 95
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 16 of 22
+Plan: 17 of 22
 Status: Ready to execute
-Last activity: 2026-10-06
+Last activity: 2026-10-07
 
 Progress: [██████████] 99%
 
@@ -172,6 +172,7 @@ Progress: [██████████] 99%
 | Phase 07 P10 | 16min | 2 tasks | 9 files |
 | Phase 07 P11 | 20min | 3 tasks | 10 files |
 | Phase 07 P13 | 35 min | 2 tasks | 10 files |
+| Phase 07 P15 | 25min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -500,6 +501,9 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-13]: ThreadInvalidated line carries the thread's full DeltasByThread entry (own + committed attachment deltas); the ledger is unchanged by invalidation and re-render
 - [Phase 07]: [07-13]: A ThreadDone with LateRepair contributes only its LedgerDelta to DeltasByThread; nested attachment deltas stay out
 - [Phase 07]: [07-13]: InvalidateAsync refuses when the thread's last record is not ThreadDone; locked copies reported as '{relative}: {reason}', line still appended, key re-projected (KeyError on failure)
+- [Phase 07]: [07-15]: Journaled violations are classified into scan checks by RenderValidator wording (they carry no code); people/length/legal-wording rules are not scan findings
+- [Phase 07]: [07-15]: Excel attachments get an empty VariantText in the scans so flattened line items never trip V3 or the V6 near-amount scan
+- [Phase 07]: [07-15]: The end-of-run QA pass runs after every started run, fire-and-forget after the UI is restored; QaRunner rebuilds the overlay with BuildFullOverlay off the UI thread
 
 ### Pending Todos
 
@@ -521,6 +525,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-06T23:39:30.700Z
-Stopped at: Completed 07-13-PLAN.md
+Last session: 2026-10-07T00:02:06.294Z
+Stopped at: Completed 07-15-PLAN.md
 Resume file: None

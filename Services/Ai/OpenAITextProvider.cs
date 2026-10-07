@@ -110,7 +110,10 @@ public class OpenAITextProvider : ILlmProvider
 
     internal static ChatCompletionOptions BuildOptions(LlmProviderRequest r)
     {
-        // No prompt cache options are sent: implicit caching stays the default until the 07-22 live spike (OQ1)
+        // No prompt cache options are sent: implicit caching stays on (07-22 live spike, 2026-10-07, gpt-6-luna OQ1).
+        // Implicit mode billed one prefix write (1826 tokens) on the first call, then read 1816 cached tokens per call;
+        // prompt_cache_options {"mode":"explicit"} was accepted (HTTP 200) but disabled caching entirely (0 write, 0 read),
+        // which costs more from the second call on, so it is deliberately not sent. Writes are billed via ReadCacheWriteTokens.
         // Sampling parameters (temperature/top_p) are never sent: reasoning models reject non-default values
         var options = new ChatCompletionOptions
         {
@@ -143,7 +146,7 @@ public class OpenAITextProvider : ILlmProvider
     internal static LlmProviderResponse Classify(ChatCompletion c, BinaryData? rawBody = null)
     {
         // OpenAI prompt_tokens is inclusive; GPT-5.6+ implicit caching may bill writes at 1.25x and reports them
-        // only in the raw JSON (research A1; verified live in 07-22)
+        // only in the raw JSON (research A1; confirmed live 2026-10-07 in 07-22: usage.prompt_tokens_details.cache_write_tokens)
         var prompt = Math.Max(0, c.Usage?.InputTokenCount ?? 0);
         var cached = Math.Max(0, c.Usage?.InputTokenDetails?.CachedTokenCount ?? 0);
         var write = ReadCacheWriteTokens(rawBody);

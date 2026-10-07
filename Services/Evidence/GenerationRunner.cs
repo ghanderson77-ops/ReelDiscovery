@@ -80,6 +80,9 @@ public class GenerationRunner
     // Debounced so a burst of finishing threads writes the key at most every 2 s; wave and run end always write it
     public static readonly TimeSpan KeyProjectionInterval = TimeSpan.FromSeconds(2);
 
+    // Upper bound of the adaptive interval: a long run still refreshes the key at least once a minute
+    public static readonly TimeSpan MaxKeyProjectionInterval = TimeSpan.FromSeconds(60);
+
     private const string PlanChangedMessage =
         "The plan changed after this run started. Start over to generate emails for the current plan.";
 
@@ -895,12 +898,24 @@ public class GenerationRunner
     }
 
     /// <summary>
-    /// Re-projects the key and checkpoints after a thread finishes, at most every <see cref="KeyProjectionInterval"/> and
-    /// never twice at once. Never throws: a locked key is reported in the checkpoint and the thread stays finished.
+    /// Minimum time between per-thread projections: ten times the last one's duration, never under
+    /// <see cref="KeyProjectionInterval"/> and never over <see cref="MaxKeyProjectionInterval"/>.
+    /// </summary>
+    internal static TimeSpan ProjectionIntervalFor(TimeSpan lastDuration)
+    {
+        // Pattern 12: at 5K emails one projection (replay + key CSV/XLSX + case.json) takes seconds; never spend most of the run re-projecting
+        return TimeSpan.FromTicks(Math.Min(MaxKeyProjectionInterval.Ticks,
+            Math.Max(KeyProjectionInterval.Ticks, lastDuration.Ticks * 10)));
+    }
+
+    /// <summary>
+    /// Re-projects the key and checkpoints after a thread finishes, at most every <see cref="ProjectionIntervalFor"/> of the
+    /// last projection's duration and never twice at once. Never throws: a locked key is reported in the checkpoint and the
+    /// thread stays finished.
     /// </summary>
     private static async Task MaybeProjectAsync(RunContext ctx)
     {
-        if (DateTime.UtcNow - ctx.ReadLastProjection() < KeyProjectionInterval)
+        if (DateTime.UtcNow - ctx.ReadLastProjection() < ProjectionIntervalFor(ctx.ReadProjectionDuration()))
             return;
 
         // Skip when a projection is already running; the next finishing thread or the wave end catches up
@@ -909,10 +924,18 @@ public class GenerationRunner
 
         try
         {
-            if (DateTime.UtcNow - ctx.ReadLastProjection() < KeyProjectionInterval)
+            if (DateTime.UtcNow - ctx.ReadLastProjection() < ProjectionIntervalFor(ctx.ReadProjectionDuration()))
                 return;
 
-            await CheckpointCoreAsync(ctx, final: false, GenerationOutcome.None, string.Empty).ConfigureAwait(false);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                await CheckpointCoreAsync(ctx, final: false, GenerationOutcome.None, string.Empty).ConfigureAwait(false);
+            }
+            finally
+            {
+                ctx.RecordProjectionDuration(watch.Elapsed);
+            }
         }
         catch (Exception)
         {
@@ -1329,6 +1352,7 @@ public class GenerationRunner
     {
         private readonly object _lock = new();
         private DateTime _lastProjectionUtc;
+        private TimeSpan _lastProjectionDuration;
         private int _unjournaledInput;
         private int _unjournaledOutput;
         private readonly CostBreakdown _unjournaledDetail = new();
@@ -1391,6 +1415,19 @@ public class GenerationRunner
         {
             lock (_lock)
                 _lastProjectionUtc = utc;
+        }
+
+        // Duration of the last per-thread projection; drives the adaptive interval (Pattern 12)
+        public TimeSpan ReadProjectionDuration()
+        {
+            lock (_lock)
+                return _lastProjectionDuration;
+        }
+
+        public void RecordProjectionDuration(TimeSpan duration)
+        {
+            lock (_lock)
+                _lastProjectionDuration = duration;
         }
 
         // PROV-07: text spend arrives itemized from the gateway, media apart, so RunEnded is fully itemized

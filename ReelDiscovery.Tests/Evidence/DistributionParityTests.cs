@@ -338,7 +338,7 @@ public partial class DistributionParityTests : IClassFixture<ParityRuns>
     }
 
     // AttachmentResponder (renders, filler, attachments, voices) plus a deterministic side world
-    private static Func<LlmProviderRequest, LlmProviderResponse> Responder(CorpusPlan plan, CaseGuide guide,
+    internal static Func<LlmProviderRequest, LlmProviderResponse> Responder(CorpusPlan plan, CaseGuide guide,
         Func<string, int, string?>? overrideJson)
     {
         var inner = AttachmentResponder.Create(plan, guide, overrideJson);

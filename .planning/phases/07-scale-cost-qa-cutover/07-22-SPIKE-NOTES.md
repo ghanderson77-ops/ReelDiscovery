@@ -38,3 +38,20 @@ A3 stays unverified; `StablePrefixTokens = 600` left `[ASSUMED]`.
 ## Branch applied
 
 Literal branch A trigger was met (writes > 0, explicit HTTP 200, explicit removes writes), but explicit mode also removes all cache reads. At catalog prices (input 0.10, write 0.125, read 0.01 per M) implicit costs ~1.25x on the first call and ~0.1x thereafter; explicit costs 1.0x every call, so it is more expensive from the second call. Applied: no request change (behaves as branch B/C: implicit caching kept, honest write accounting already in place). Comment in `OpenAITextProvider.BuildOptions` records the spike; existing wire test asserts `prompt_cache_options` is absent.
+
+## Deviations so far
+
+- [Rule 1/3 - DPI bug, blocked Task 4 gate] Render suite failed 2/135 (WizardShellRenderTests API step) once the machine ran at 150%: section header rows (28 raw px; text needs 30) clipped, and the NOTICE disclaimer row (44 raw px) showed only its first line. Fixed with LogicalToDeviceUnits on rows 0, 4, 12 of StepApiConfiguration. Commit 12e866b.
+- OpenAI branch A deliberately not applied (see "Branch applied").
+
+## Pre-handover suites (Task 4 action), after 12e866b
+
+- Non-render `Category!=Render&Category!=Scale`: 3719/3719 passed (includes 5 LiveSpike early-return tests)
+- Render: 135/135 passed
+- Scale: 2/2 passed (run before the UI-only fix)
+
+## Commits
+
+- 1f621e6 test(07-22): opt-in live provider spike tests (Task 1)
+- aa8dc7a fix(07-22): record live cache spike result; keep OpenAI implicit caching (Task 3)
+- 12e866b fix(07-22): scale API step header and disclaimer rows for 150% DPI (deviation)

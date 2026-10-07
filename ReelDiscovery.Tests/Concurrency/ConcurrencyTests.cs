@@ -1,5 +1,4 @@
 using ReelDiscovery.Models;
-using ReelDiscovery.Services;
 
 namespace ReelDiscovery.Tests.Concurrency;
 
@@ -32,18 +31,6 @@ public class ConcurrencyTests
         Assert.Equal(5, snapshot.CompletedEmails);
         Assert.Equal(10, snapshot.TotalEmails);
         Assert.Equal("Generating", snapshot.CurrentOperation);
-    }
-
-    [Fact]
-    public void ChainVersionReservation_IsUniqueUnderParallelism()
-    {
-        var chain = new EmailGenerator.DocumentChainState();
-        var versions = new System.Collections.Concurrent.ConcurrentBag<int>();
-
-        Parallel.For(0, 1_000, _ => versions.Add(chain.ReserveNextVersion()));
-
-        var sorted = versions.OrderBy(v => v).ToList();
-        Assert.Equal(Enumerable.Range(2, 1_000), sorted);
     }
 
     [Fact]

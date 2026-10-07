@@ -3,7 +3,10 @@ using DocumentFormat.OpenXml.Validation;
 using MimeKit;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
+using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services;
+using ReelDiscovery.Services.Evidence;
 
 namespace ReelDiscovery.Tests.Documents;
 
@@ -65,52 +68,88 @@ public class DocumentRegressionTests
     [Fact]
     public async Task Eml_ThreadRoundTrip()
     {
-        var alice = new Character { FirstName = "Alice", LastName = "Smith", Email = "alice@example.com" };
-        var bob = new Character { FirstName = "Bob", LastName = "Jones", Email = "bob@example.com" };
-
-        var thread = new EmailThread { Subject = "Window spec" };
-        var first = new EmailMessage
+        // Case-flow path: composed root + reply written by MailboxWriter, the reply carrying a Word attachment
+        var folders = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            From = alice,
-            To = new List<Character> { bob },
-            Subject = "Window spec",
-            BodyPlain = "Please review the window spec.",
-            SentDate = new DateTime(2024, 3, 1, 9, 0, 0),
-            SequenceInThread = 0
+            ["CH-001"] = "alice.smith",
+            ["CH-002"] = "bob.jones"
         };
-        var reply = new EmailMessage
+        var alice = new EmailAddressPart { Name = "Alice Smith", Email = "alice@example.com" };
+        var bob = new EmailAddressPart { Name = "Bob Jones", Email = "bob@example.com" };
+        var rootId = ThreadingHelper.GenerateMessageId("example.com").Trim('<', '>');
+
+        var first = new ComposedEmail
         {
+            Planned = new PlannedMessage
+            {
+                Id = "T-0001-M01",
+                DocId = "RD-000001",
+                Seq = 1,
+                FromId = "CH-001",
+                ToIds = new List<string> { "CH-002" },
+                CustodianIds = new List<string> { "CH-001", "CH-002" },
+                SentAt = new DateTimeOffset(2024, 3, 1, 9, 0, 0, TimeSpan.FromHours(-5)),
+                FilePath = "Mailboxes/alice.smith/Sent Items/RD-000001.eml"
+            },
+            ThreadId = "T-0001",
+            MessageId = rootId,
+            Subject = "Window spec",
+            From = alice,
+            To = new List<EmailAddressPart> { bob },
+            Date = new DateTimeOffset(2024, 3, 1, 9, 0, 0, TimeSpan.FromHours(-5)),
+            PlainText = "Please review the window spec.",
+            Html = "<html><body><p>Please review the window spec.</p></body></html>"
+        };
+        var reply = new ComposedEmail
+        {
+            Planned = new PlannedMessage
+            {
+                Id = "T-0001-M02",
+                DocId = "RD-000002",
+                Seq = 2,
+                FromId = "CH-002",
+                ToIds = new List<string> { "CH-001" },
+                CustodianIds = new List<string> { "CH-001", "CH-002" },
+                SentAt = new DateTimeOffset(2024, 3, 1, 11, 30, 0, TimeSpan.FromHours(-5)),
+                FilePath = "Mailboxes/bob.jones/Sent Items/RD-000002.eml"
+            },
+            ThreadId = "T-0001",
+            MessageId = ThreadingHelper.GenerateMessageId("example.com").Trim('<', '>'),
+            InReplyTo = rootId,
+            References = new List<string> { rootId },
+            Subject = ThreadingHelper.AddReplyPrefix("Window spec"),
             From = bob,
-            To = new List<Character> { alice },
-            Subject = "RE: Window spec",
-            BodyPlain = "Attached is the marked-up spec.",
-            SentDate = new DateTime(2024, 3, 1, 11, 30, 0),
-            SequenceInThread = 1,
-            Attachments = new List<Attachment>
+            To = new List<EmailAddressPart> { alice },
+            Date = new DateTimeOffset(2024, 3, 1, 11, 30, 0, TimeSpan.FromHours(-5)),
+            PlainText = "Attached is the marked-up spec.",
+            Html = "<html><body><p>Attached is the marked-up spec.</p></body></html>",
+            Attachments = new List<ComposedAttachment>
             {
                 new()
                 {
-                    Type = AttachmentType.Word,
+                    DocId = "RD-000002.0001",
+                    Kind = AttachmentType.Word,
                     FileName = "Spec.docx",
-                    Content = _office.CreateWordDocument("Spec", "Body")
+                    Title = "Spec",
+                    MimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    Bytes = _office.CreateWordDocument("Spec", "Body")
                 }
             }
         };
-        thread.Messages.Add(first);
-        thread.Messages.Add(reply);
-
-        ThreadingHelper.SetupThreading(thread, "example.com");
 
         var folder = Path.Combine(Path.GetTempPath(), "ReelDiscoveryTests", Guid.NewGuid().ToString("N"));
         try
         {
-            await new EmlFileService().SaveAllEmailsAsync(new List<EmailThread> { thread }, folder);
+            var writer = new MailboxWriter(folder, folders);
+            await writer.WriteAsync(first);
+            var written = await writer.WriteAsync(reply);
 
-            var files = Directory.GetFiles(folder, "*.eml");
-            Assert.Equal(2, files.Length);
+            var files = Directory.GetFiles(folder, "*.eml", SearchOption.AllDirectories);
+            Assert.Equal(4, files.Length);
 
-            var loaded = MimeMessage.Load(Path.Combine(folder, reply.GeneratedFileName!));
-            Assert.Equal(first.MessageId.Trim('<', '>'), loaded.InReplyTo?.Trim('<', '>'));
+            var loaded = MimeMessage.Load(Path.Combine(folder, written[0].Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Equal(rootId, loaded.InReplyTo?.Trim('<', '>'));
+            Assert.Equal("RE: Window spec", loaded.Subject);
 
             var wordPart = loaded.Attachments.OfType<MimePart>().SingleOrDefault(p => p.FileName == "Spec.docx");
             Assert.NotNull(wordPart);

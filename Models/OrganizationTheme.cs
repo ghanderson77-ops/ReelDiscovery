@@ -73,6 +73,3 @@ public class OrganizationTheme
         BodyFont = "Segoe UI"
     };
 }
-
-// Backward compatibility alias
-public class PresentationTheme : OrganizationTheme { }

@@ -49,16 +49,6 @@ public class WizardState
     public string MediaUnavailableNotice =>
         "Images and voicemail need a tested OpenAI key. Add one on the API Configuration step to enable them.";
 
-    /// <summary>Forces image/voicemail options off when no tested OpenAI key is configured (PROV-06).</summary>
-    public void ApplyMediaAvailability()
-    {
-        if (IsMediaAvailable) return;
-        WantsImages = false;
-        WantsVoicemails = false;
-        Config.IncludeImages = false;
-        Config.IncludeVoicemails = false;
-    }
-
     /// <summary>
     /// Next is allowed once the selected text provider's key has passed its test (D-06).
     /// </summary>
@@ -158,7 +148,10 @@ public class WizardState
         && !string.IsNullOrWhiteSpace(GetApiKey(provider));
 
     public OpenAIMediaClient? CreateMediaClient() =>
-        IsMediaAvailable ? new OpenAIMediaClient(OpenAIApiKey, Config.ImageModel, Config.ImageQuality) : null;
+        IsMediaAvailable ? new OpenAIMediaClient(OpenAIApiKey, MediaSettings.ImageModel, MediaSettings.ImageQuality) : null;
+
+    /// <summary>Image model and quality used by every media client (moved out of the deleted legacy generation settings, D-20).</summary>
+    public MediaSettings MediaSettings { get; set; } = new();
 
     /// <summary>Editable per-unit media prices (D-29); cloned into each media generator.</summary>
     public MediaPrices MediaPrices { get; set; } = MediaPrices.Defaults();
@@ -166,7 +159,7 @@ public class WizardState
     /// <summary>Media seam for the evidence pipeline; null without a tested OpenAI key (PROV-06).</summary>
     public IMediaGenerator? CreateMediaGenerator() =>
         IsMediaAvailable
-            ? new OpenAIMediaGenerator(new OpenAIMediaClient(OpenAIApiKey, Config.ImageModel, Config.ImageQuality), MediaPrices.Clone(), UsageTracker)
+            ? new OpenAIMediaGenerator(new OpenAIMediaClient(OpenAIApiKey, MediaSettings.ImageModel, MediaSettings.ImageQuality), MediaPrices.Clone(), UsageTracker)
             : null;
 
     // Model Configurations
@@ -190,34 +183,4 @@ public class WizardState
 
     /// <summary>Set when a case is opened from disk (04-19) so Review Plan shows No corpus plan yet instead of auto-planning; cleared by Next on Corpus Settings or by Plan Corpus on Review Plan.</summary>
     public bool SuppressAutoPlanOnce { get; set; }
-
-    // Step 2 - Topic Input
-    public string Topic { get; set; } = string.Empty;
-    public string AdditionalInstructions { get; set; } = string.Empty;
-    public int StorylineCount { get; set; } = 10;
-
-    // Media type hints (inform storyline generation)
-    public bool WantsDocuments { get; set; } = true;
-    public bool WantsImages { get; set; } = false;
-    public bool WantsVoicemails { get; set; } = false;
-
-    // Step 3 - Storylines
-    public List<Storyline> Storylines { get; set; } = new();
-    public DateTime? AISuggestedStartDate { get; set; }
-    public DateTime? AISuggestedEndDate { get; set; }
-    public string? AISuggestedDateReasoning { get; set; }
-
-    // Step 4 - Characters
-    public List<Character> Characters { get; set; } = new();
-    public string CompanyDomain { get; set; } = string.Empty;
-
-    // Organization themes by domain (used for emails and documents)
-    public Dictionary<string, OrganizationTheme> DomainThemes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    // Step 5 - Generation Config
-    public GenerationConfig Config { get; set; } = new();
-
-    // Step 6-7 - Results
-    public List<EmailThread> GeneratedThreads { get; set; } = new();
-    public GenerationResult? Result { get; set; }
 }

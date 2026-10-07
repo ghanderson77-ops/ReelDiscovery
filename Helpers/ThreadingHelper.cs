@@ -1,5 +1,3 @@
-using ReelDiscovery.Models;
-
 namespace ReelDiscovery.Helpers;
 
 public static class ThreadingHelper
@@ -8,29 +6,6 @@ public static class ThreadingHelper
     {
         var uniquePart = $"{Guid.NewGuid():N}.{DateTime.UtcNow.Ticks}";
         return $"<{uniquePart}@{domain}>";
-    }
-
-    public static void SetupThreading(EmailThread thread, string domain)
-    {
-        string? previousMessageId = null;
-        var references = new List<string>();
-
-        foreach (var email in thread.Messages.OrderBy(m => m.SequenceInThread))
-        {
-            // Generate unique Message-ID
-            email.MessageId = GenerateMessageId(domain);
-
-            if (previousMessageId != null)
-            {
-                // This is a reply
-                email.InReplyTo = previousMessageId;
-                email.References = new List<string>(references);
-            }
-
-            // Add current message to references for future replies
-            references.Add(email.MessageId);
-            previousMessageId = email.MessageId;
-        }
     }
 
     public static string AddReplyPrefix(string subject)
@@ -72,38 +47,6 @@ public static class ThreadingHelper
                 break;
         }
         return cleaned.Trim();
-    }
-
-    /// <summary>
-    /// Formats quoted content for a reply email
-    /// </summary>
-    public static string FormatQuotedReply(EmailMessage originalEmail)
-    {
-        var header = $"On {originalEmail.SentDate:ddd, MMM d, yyyy} at {originalEmail.SentDate:h:mm tt}, {originalEmail.From.FullName} <{originalEmail.From.Email}> wrote:";
-        var quotedBody = QuoteText(originalEmail.BodyPlain);
-        return $"\n\n{header}\n{quotedBody}";
-    }
-
-    /// <summary>
-    /// Formats forwarded content for a forward email
-    /// </summary>
-    public static string FormatForwardedContent(EmailMessage originalEmail)
-    {
-        var toList = string.Join("; ", originalEmail.To.Select(c => $"{c.FullName} <{c.Email}>"));
-        var ccList = originalEmail.Cc.Count > 0
-            ? $"\nCc: {string.Join("; ", originalEmail.Cc.Select(c => $"{c.FullName} <{c.Email}>"))}"
-            : "";
-
-        var header = $@"
-
----------- Forwarded message ---------
-From: {originalEmail.From.FullName} <{originalEmail.From.Email}>
-Date: {originalEmail.SentDate:ddd, MMM d, yyyy} at {originalEmail.SentDate:h:mm tt}
-Subject: {originalEmail.Subject}
-To: {toList}{ccList}
-
-";
-        return header + originalEmail.BodyPlain;
     }
 
     /// <summary>

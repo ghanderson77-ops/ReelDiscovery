@@ -82,6 +82,57 @@ public class PlatformTests
         Assert.Contains("Application.Run(new WizardForm())", program);
     }
 
+    // D-20/PLAT-05: the legacy generation path is deleted, not just unreachable
+    [Theory]
+    [InlineData("ReelDiscovery.Services.EmailGenerator")]
+    [InlineData("ReelDiscovery.Services.StorylineGenerator")]
+    [InlineData("ReelDiscovery.Services.CharacterGenerator")]
+    [InlineData("ReelDiscovery.Services.ThemeGenerator")]
+    [InlineData("ReelDiscovery.Services.EmlFileService")]
+    [InlineData("ReelDiscovery.UserControls.StepTopicInput")]
+    [InlineData("ReelDiscovery.UserControls.StepStorylines")]
+    [InlineData("ReelDiscovery.UserControls.StepCharacters")]
+    [InlineData("ReelDiscovery.UserControls.StepGenerationConfig")]
+    [InlineData("ReelDiscovery.UserControls.StepGeneration")]
+    [InlineData("ReelDiscovery.UserControls.StepComplete")]
+    [InlineData("ReelDiscovery.Models.Storyline")]
+    [InlineData("ReelDiscovery.Models.Character")]
+    [InlineData("ReelDiscovery.Models.EmailThread")]
+    [InlineData("ReelDiscovery.Models.EmailMessage")]
+    [InlineData("ReelDiscovery.Models.GenerationResult")]
+    [InlineData("ReelDiscovery.Models.GenerationProgress")]
+    [InlineData("ReelDiscovery.Models.GenerationConfig")]
+    [InlineData("ReelDiscovery.Models.PresentationTheme")]
+    [InlineData("ReelDiscovery.Models.WizardFlow")]
+    [InlineData("ReelDiscovery.Helpers.DateHelper")]
+    public void LegacyType_IsDeleted(string typeName)
+    {
+        Assert.Null(typeof(WizardState).Assembly.GetType(typeName));
+    }
+
+    [Fact]
+    public void WizardState_HasNoLegacyMembers()
+    {
+        foreach (var name in new[]
+        {
+            "Topic", "AdditionalInstructions", "StorylineCount", "WantsDocuments", "WantsImages", "WantsVoicemails",
+            "Storylines", "AISuggestedStartDate", "AISuggestedEndDate", "AISuggestedDateReasoning", "Characters",
+            "CompanyDomain", "DomainThemes", "Config", "GeneratedThreads", "Result", "ApplyMediaAvailability"
+        })
+        {
+            Assert.Empty(typeof(WizardState).GetMember(name));
+        }
+    }
+
+    [Fact]
+    public void MediaSettings_KeepsImageDefaults()
+    {
+        var settings = new WizardState().MediaSettings;
+
+        Assert.Equal("gpt-image-2.5-flare", settings.ImageModel);
+        Assert.Equal("low", settings.ImageQuality);
+    }
+
     private static bool IsExcluded(string relativePath)
     {
         var parts = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

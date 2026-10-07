@@ -127,34 +127,30 @@ public class WizardState
     /// <param name="writerProvider">JournalReplay.WriterProvider; empty or unknown means the current text provider.</param>
     public (ILlmGateway? Gateway, LlmProviderKind Provider, bool SameProviderFallback, AIModelConfig? Model) CreateReviewerGateway(string writerProvider)
     {
+        var (provider, fallback, model, hasKey) = ChooseReviewer(writerProvider);
+        if (!hasKey || model == null)
+            return (null, provider, hasKey && fallback, null);
+
+        var gateway = new LlmGateway(LlmProviderFactory.Create(provider, GetApiKey(provider)), model, model, UsageTracker);
+        return (gateway, provider, fallback, model);
+    }
+
+    /// <summary>
+    /// The reviewer CreateReviewerGateway would use, without creating a client (Case Summary's not-run estimate). With no
+    /// tested key, HasKey is false and Model is the writer provider's Volume default, so an estimate can still be shown.
+    /// </summary>
+    public (LlmProviderKind Provider, bool SameProviderFallback, AIModelConfig? Model, bool HasKey) ChooseReviewer(string writerProvider)
+    {
         var writer = Enum.TryParse<LlmProviderKind>(writerProvider?.Trim(), ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
             ? parsed
             : TextProvider;
         var other = writer == LlmProviderKind.OpenAI ? LlmProviderKind.Anthropic : LlmProviderKind.OpenAI;
 
-        LlmProviderKind provider;
-        bool fallback;
         if (IsKeyReady(other))
-        {
-            provider = other;
-            fallback = false;
-        }
-        else if (IsKeyReady(writer))
-        {
-            provider = writer;
-            fallback = true;
-        }
-        else
-        {
-            return (null, writer, false, null);
-        }
-
-        var model = AIModelConfig.GetTierDefault(AvailableModelConfigs, provider, LlmTier.Volume);
-        if (model == null)
-            return (null, provider, fallback, null);
-
-        var gateway = new LlmGateway(LlmProviderFactory.Create(provider, GetApiKey(provider)), model, model, UsageTracker);
-        return (gateway, provider, fallback, model);
+            return (other, false, AIModelConfig.GetTierDefault(AvailableModelConfigs, other, LlmTier.Volume), true);
+        if (IsKeyReady(writer))
+            return (writer, true, AIModelConfig.GetTierDefault(AvailableModelConfigs, writer, LlmTier.Volume), true);
+        return (writer, false, AIModelConfig.GetTierDefault(AvailableModelConfigs, writer, LlmTier.Volume), false);
     }
 
     private bool IsKeyReady(LlmProviderKind provider) =>

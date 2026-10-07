@@ -151,7 +151,7 @@ public class CaseSummaryQaTests
             Assert.Equal("Nothing spent yet", step.GenerationCostLine3.Text);
             Assert.Equal(NotRunScans, step.ScansLine3.Text);
             Assert.Equal("Not run yet.", step.LeakageLine3.Text);
-            Assert.StartsWith("Not run yet. ", step.BlindReviewLine3.Text);
+            Assert.Equal(QaUiText.BlindReviewNotRunNoEmails, step.BlindReviewLine3.Text);
             Assert.False(step.ViewScansButton.Visible);
             Assert.False(step.ViewLeakageButton.Visible);
             Assert.False(step.RunAuditButton.Visible);
@@ -380,13 +380,14 @@ public class CaseSummaryQaTests
     {
         using var fixture = new GenerateCorpusRenderTests.StepFixture();
         SeedGenerated(fixture);
-        var thread = fixture.Plan.Threads.First(t => t.Relevance == ThreadRelevance.Relevant);
-        var docId = thread.Messages[0].DocId;
         var store = new QaReportStore(fixture.Folder);
         var generated = BlindReviewer.GeneratedEmailDocIds(GenerationJournal.Replay(fixture.Folder, fixture.Plan));
         var size = 4;
         var sample = BlindReviewPrompts.Sample(fixture.Plan, fixture.Draft.Guide!, generated, size);
-        Assert.Contains(docId, sample);
+        // The sample starts with a relevant email
+        var docId = sample[0];
+        var thread = fixture.Plan.Threads.Single(t => t.Messages.Any(m => m.DocId == docId));
+        Assert.Equal(ThreadRelevance.Relevant, thread.Relevance);
         store.AppendBlindReviewHeaderAsync(new BlindReviewHeader
         {
             PlanId = fixture.Plan.PlanId,
@@ -416,7 +417,8 @@ public class CaseSummaryQaTests
             Assert.Contains(" · same provider as the corpus", step.BlindReviewLine3.Text);
             Assert.Contains("1 disagreement", step.BlindReviewLine3.Text);
             Assert.True(step.ViewBlindReviewButton.Visible);
-            Assert.Equal(Theme.Success, step.MailboxesDotColor);
+            // Planned attachments were never journaled, so the row may already be partial; the relevant count drops below
+            var mailboxesBefore = step.MailboxesLine3Tooltip;
 
             QaFindingRow[] rows = Array.Empty<QaFindingRow>();
             string? confirmTitle = null;
@@ -457,6 +459,9 @@ public class CaseSummaryQaTests
             Assert.Contains(thread.Id, replay.InvalidatedThreadIds);
             Assert.Equal(Theme.Warning, step.MailboxesDotColor);
             Assert.Contains(" of ", step.MailboxesLine3.Text);
+            Assert.NotEqual(mailboxesBefore, step.MailboxesLine3Tooltip);
+            var relevant = fixture.Plan.Threads.Count(t => t.Relevance == ThreadRelevance.Relevant);
+            Assert.Equal(relevant - 1, fixture.Draft.Corpus!.Generation!.ThreadsWritten);
         });
     }
 

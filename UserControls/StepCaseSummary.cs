@@ -6,9 +6,12 @@ using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
+using ReelDiscovery.Models.Qa;
+using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Services.Qa;
 
 namespace ReelDiscovery.UserControls;
 
@@ -51,6 +54,16 @@ public class StepCaseSummary : UserControl, IWizardStep
     private Button _btnGenerateEmails = null!;
     private Button _btnOpenStory = null!;
     private Button _btnExportStory = null!;
+    private ContentRow _rowGenerationCost = null!;
+    private ContentRow _rowScans = null!;
+    private ContentRow _rowLeakage = null!;
+    private ContentRow _rowBlindReview = null!;
+    private Button _btnViewScans = null!;
+    private Button _btnViewLeakage = null!;
+    private Button _btnRunAudit = null!;
+    private Button _btnViewBlindReview = null!;
+    private Button _btnRunBlindReview = null!;
+    private Button _btnCancelReview = null!;
     private readonly Dictionary<CaseExportKind, ContentRow> _exportRows = new();
     private readonly HashSet<CaseExportKind> _failedExports = new();
 
@@ -412,6 +425,20 @@ public class StepCaseSummary : UserControl, IWizardStep
         _rowProtocol = CreateRow("Review protocol", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open in Word" });
         _rowMailboxes = CreateRow("Mailboxes", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open Mailboxes Folder", "Generate Emails" });
         _rowStory = CreateRow("Story so far", hasLine3: true, hasButtons: true, buttonHeight, new[] { "Open in Word", "Export Story So Far" });
+        _rowGenerationCost = CreateRow("Generation cost", hasLine3: true, hasButtons: false, buttonHeight);
+        _rowScans = CreateRow("Consistency scans", hasLine3: true, hasButtons: true, buttonHeight, new[] { "View Findings" });
+        _rowLeakage = CreateRow("Leakage audit", hasLine3: true, hasButtons: true, buttonHeight, new[] { "View Report", "Run Audit" });
+        _rowBlindReview = CreateRow("Blind review", hasLine3: true, hasButtons: true, buttonHeight,
+            new[] { "View Findings", "Run Blind Review...", "Cancel Review" });
+        _btnViewScans = _rowScans.Buttons[0];
+        _btnViewLeakage = _rowLeakage.Buttons[0];
+        _btnRunAudit = _rowLeakage.Buttons[1];
+        _btnViewBlindReview = _rowBlindReview.Buttons[0];
+        _btnRunBlindReview = _rowBlindReview.Buttons[1];
+        _btnCancelReview = _rowBlindReview.Buttons[2];
+        // Destructive like Cancel Generation; shown only while a review runs (07-UI-SPEC S2 R4)
+        ButtonHelper.StyleButton(_btnCancelReview, ButtonStyle.Danger);
+        _btnCancelReview.Visible = false;
         _btnOpenMailboxes = _rowMailboxes.Buttons[0];
         _btnGenerateEmails = _rowMailboxes.Buttons[1];
         _btnOpenStory = _rowStory.Buttons[0];
@@ -423,7 +450,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         _btnOpenProtocol = _rowProtocol.Buttons[0];
         _rowCaseFile.Line2.Text = CaseGuideUiText.CaseFileDescription;
 
-        // Case file (ungrouped) · Corpus group · Case guide group (UI-SPEC S3); null = group heading
+        // Case file (ungrouped) · Corpus group · Quality checks group (07-UI-SPEC S2) · Case guide group; null = group heading
         var items = new (ContentRow? Row, string Heading)[]
         {
             (_rowCaseFile, ""),
@@ -433,6 +460,11 @@ public class StepCaseSummary : UserControl, IWizardStep
             (_rowProtocol, ""),
             (_rowMailboxes, ""),
             (_rowStory, ""),
+            (_rowGenerationCost, ""),
+            (null, "Quality checks"),
+            (_rowScans, ""),
+            (_rowLeakage, ""),
+            (_rowBlindReview, ""),
             (null, "Case guide"),
             (_exportRows[CaseExportKind.CoreDocument], ""),
             (_exportRows[CaseExportKind.Cast], ""),
@@ -506,6 +538,12 @@ public class StepCaseSummary : UserControl, IWizardStep
         _btnGenerateEmails.Click += (s, e) => (FindForm() as WizardForm)?.NavigateToStage(CaseStage.Generation);
         _btnOpenStory.Click += (s, e) => OpenStory();
         _btnExportStory.Click += async (s, e) => await ExportStoryAsync();
+        _btnViewScans.Click += async (s, e) => await ViewFindingsAsync(QaFindingsMode.Scans);
+        _btnViewLeakage.Click += async (s, e) => await ViewFindingsAsync(QaFindingsMode.Leakage);
+        _btnRunAudit.Click += async (s, e) => await RunAuditAsync();
+        _btnViewBlindReview.Click += async (s, e) => await ViewFindingsAsync(QaFindingsMode.BlindReview);
+        _btnRunBlindReview.Click += async (s, e) => await RunBlindReviewAsync();
+        _btnCancelReview.Click += (s, e) => CancelReview();
         foreach (var kind in ExportKinds)
         {
             var row = _exportRows[kind];
@@ -727,6 +765,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         SetDot(_rowChecks, checksColor);
 
         RefreshCorpusRows(folder, guide);
+        ApplyQaRows();
         UpdateButtons();
     }
 
@@ -957,7 +996,8 @@ public class StepCaseSummary : UserControl, IWizardStep
         var hasFolder = CaseFolder.Length > 0;
         _btnExportAll.Enabled = !_busy && draft.CoreDocument != null;
         _btnOpenFolder.Enabled = !_busy && hasFolder;
-        _btnMoveFolder.Enabled = !_busy && hasFolder;
+        // The review appends to the case folder while it runs
+        _btnMoveFolder.Enabled = !_busy && hasFolder && !_reviewRunning;
         foreach (var kind in ExportKinds)
         {
             var row = _exportRows[kind];
@@ -966,8 +1006,11 @@ public class StepCaseSummary : UserControl, IWizardStep
             row.Open!.Enabled = !_busy;
         }
         foreach (var button in _rowPlan.Buttons.Concat(_rowAnswerKey.Buttons).Concat(_rowProtocol.Buttons)
-                     .Concat(_rowMailboxes.Buttons).Concat(_rowStory.Buttons))
+                     .Concat(_rowMailboxes.Buttons).Concat(_rowStory.Buttons).Concat(_rowScans.Buttons).Concat(_rowLeakage.Buttons)
+                     .Concat(_rowBlindReview.Buttons))
             button.Enabled = !_busy;
+        // Cancel Review is never gated: a running review can always be stopped
+        _btnCancelReview.Enabled = true;
     }
 
     /// <summary>
@@ -1005,6 +1048,8 @@ public class StepCaseSummary : UserControl, IWizardStep
     internal void LoadForRender(WizardState state)
     {
         BindState(state);
+        var inputs = QaInputs();
+        _qa = LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor);
         RefreshAll();
     }
 
@@ -1034,6 +1079,7 @@ public class StepCaseSummary : UserControl, IWizardStep
         }
 
         RefreshAll();
+        await RefreshQaAsync();
     }
 
     public Task OnLeaveStepAsync() => Task.CompletedTask;
@@ -1482,10 +1528,811 @@ public class StepCaseSummary : UserControl, IWizardStep
         }
     }
 
+    // ----- Generation cost and Quality checks (07-UI-SPEC S2 R1-R4) -----
+
+    /// <summary>
+    /// What the cost row and the QA rows show, read off the UI thread from the journal and the QA reports.
+    /// </summary>
+    internal sealed class QaSnapshot
+    {
+        public CorpusPlan? Plan;
+        public JournalReplay? Replay;
+        public AnswerKeyOverlay? Overlay;
+        public SummaryRowContent Cost = GenerationUiText.CostRow(false, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m);
+        public List<string> Generated = new();
+        public ScanReport? Scans;
+        public bool ScansOutOfDate;
+        public LeakageReport? Leakage;
+
+        // Latest blind-review pass for this plan; verdicts are those inside its sample
+        public BlindReviewHeader? ReviewHeader;
+        public List<BlindReviewVerdict> ReviewVerdicts = new();
+        public int ReviewSampleSize;
+
+        public HashSet<string> Queued = new(StringComparer.Ordinal);
+        public string WriterProvider = string.Empty;
+        public List<string> SampleOrder = new();
+        public int DefaultSampleSize;
+        public int RelevantEmails;
+        public string SystemPrompt = string.Empty;
+        public AIModelConfig? NotRunModel;
+        public decimal NotRunEstimate;
+        public Dictionary<string, AnswerKeyRow> EmailRows = new(StringComparer.Ordinal);
+
+        public bool HasEmails => Generated.Count > 0;
+    }
+
+    private QaSnapshot _qa = new();
+    private int _qaVersion;
+    private bool _auditRunning;
+
+    // Blind review run state (step-owned token, D-13)
+    private bool _reviewRunning;
+    private bool _reviewStarting;
+    private CancellationTokenSource? _reviewCts;
+    private int _reviewDone;
+    private int _reviewTotal;
+    private string _reviewModel = string.Empty;
+    private SynchronizationContext? _uiContext;
+    private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
+
+    /// <summary>
+    /// Confirmation seam (C-Q2, C-Q3): (title, text) → Yes. Defaults to a Question MessageBox with No as the default.
+    /// </summary>
+    internal Func<string, string, bool>? Confirm;
+
+    /// <summary>
+    /// Reviewer gateway seam; defaults to WizardState.CreateReviewerGateway(journal writer provider).
+    /// </summary>
+    internal Func<(ILlmGateway? Gateway, LlmProviderKind Provider, bool SameProviderFallback, AIModelConfig? Model)>? ReviewerGatewayFactory;
+
+    /// <summary>
+    /// BlindReviewDialog seam; defaults to ShowDialog over the wizard.
+    /// </summary>
+    internal Func<BlindReviewDialog, DialogResult>? ShowDialogOverride;
+
+    /// <summary>
+    /// QaFindingsDialog seam; defaults to ShowDialog over the wizard.
+    /// </summary>
+    internal Func<QaFindingsDialog, DialogResult>? ShowFindingsOverride;
+
+    /// <summary>
+    /// True while a blind review runs; the shell asks C-Q3 before leaving the step or closing the app.
+    /// </summary>
+    internal bool IsReviewRunning => _reviewRunning;
+
+    /// <summary>
+    /// The cost row and QA rows' data: one journal replay, the three QA reports, the blind-review sample order and the
+    /// not-run estimate. Never throws for unreadable files: a report is a convenience view and reads as Not run.
+    /// </summary>
+    internal static QaSnapshot LoadQa(string folder, CorpusPlan? plan, CaseGuide guide, ReviewProtocolProse prose,
+        Func<string, AIModelConfig?> reviewerModelFor)
+    {
+        var qa = new QaSnapshot { Plan = plan };
+        if (string.IsNullOrEmpty(folder) || plan == null)
+            return qa;
+
+        try
+        {
+            var replay = GenerationJournal.Replay(folder, plan);
+            qa.Replay = replay;
+            var detail = replay.SpentDetail ?? new CostBreakdown();
+            qa.Cost = GenerationUiText.CostRow(replay.SpentCostUsd > 0m, replay.SpentCostUsd, detail.InputUsd, detail.CacheWriteUsd,
+                detail.CacheReadUsd, detail.OutputUsd, detail.BatchSavingsUsd, replay.MediaSpentCostUsd, replay.UnsplitSpentUsd);
+            qa.WriterProvider = replay.WriterProvider ?? string.Empty;
+            qa.Queued = new HashSet<string>(replay.InvalidatedThreadIds, StringComparer.Ordinal);
+            qa.NotRunModel = reviewerModelFor(qa.WriterProvider);
+
+            if (replay.Readable && !replay.PlanChanged)
+                qa.Generated = BlindReviewer.GeneratedEmailDocIds(replay);
+
+            if (qa.HasEmails)
+            {
+                qa.Overlay = GenerationRunState.From(plan, replay).BuildFullOverlay(plan, guide);
+                foreach (var row in AnswerKeyBuilder.Build(plan, guide, qa.Overlay).Where(r => r.DocType == AnswerKeyBuilder.DocTypeEmail))
+                    qa.EmailRows.TryAdd(row.DocId, row);
+
+                var generated = new HashSet<string>(qa.Generated, StringComparer.Ordinal);
+                qa.RelevantEmails = qa.EmailRows.Values.Count(r => generated.Contains(r.DocId) && r.Relevance == AnswerKeyBuilder.RelevantLabel);
+                qa.SampleOrder = BlindReviewPrompts.SampleOrder(plan, guide, qa.Generated);
+                qa.DefaultSampleSize = BlindReviewPrompts.DefaultSampleSize(plan, guide, qa.Generated);
+                qa.SystemPrompt = BlindReviewPrompts.BuildSystemPrompt(guide, prose);
+                if (qa.NotRunModel != null && qa.DefaultSampleSize > 0)
+                {
+                    var docs = BlindReviewer.BuildDocuments(plan, guide, replay, qa.Overlay, qa.SampleOrder.Take(qa.DefaultSampleSize).ToList());
+                    qa.NotRunEstimate = BlindReviewer.Estimate(qa.NotRunModel, qa.SystemPrompt, docs);
+                }
+            }
+
+            var store = new QaReportStore(folder);
+            var scans = store.LoadScans();
+            if (scans != null)
+            {
+                qa.Scans = scans;
+                // A scan of another plan, or older than the journal, no longer describes the corpus
+                qa.ScansOutOfDate = scans.PlanId != plan.PlanId
+                                    || (scans.JournalUtc.HasValue && replay.Exists && scans.JournalUtc.Value < replay.LastWriteUtc);
+            }
+
+            var leakage = store.LoadLeakage();
+            qa.Leakage = leakage != null && leakage.PlanId == plan.PlanId ? leakage : null;
+
+            var (header, verdicts) = store.LoadBlindReview();
+            if (header != null && header.PlanId == plan.PlanId && qa.HasEmails)
+            {
+                var sample = new HashSet<string>(qa.SampleOrder.Take(Math.Max(0, header.SampleSize)), StringComparer.Ordinal);
+                qa.ReviewHeader = header;
+                qa.ReviewSampleSize = sample.Count;
+                qa.ReviewVerdicts = verdicts.Where(v => sample.Contains(v.DocId)).ToList();
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+                                       or ArgumentException or NotSupportedException)
+        {
+            // The QA rows are a report view: whatever was read so far is shown, the rest reads as Not run
+        }
+
+        return qa;
+    }
+
+    // Inputs for LoadQa, gathered on the UI thread (EnsureLoaded caches the plan on the draft)
+    private (string Folder, CorpusPlan? Plan, CaseGuide Guide, ReviewProtocolProse Prose, Func<string, AIModelConfig?> ModelFor) QaInputs()
+    {
+        var draft = Draft;
+        var plan = CorpusPlanStore.EnsureLoaded(draft).Plan;
+        var prose = plan?.Protocol;
+        // A plan approved without generated protocol prose reviews against the deterministic fallback (as the .docx does)
+        if (prose == null || (string.IsNullOrWhiteSpace(prose.Purpose) && prose.Issues.Count == 0))
+            prose = ReviewProtocolBuilder.FallbackProse(draft);
+        var state = _state;
+        return (CaseFolder, plan, draft.Guide ?? new CaseGuide(), prose, writer => state.ChooseReviewer(writer).Model);
+    }
+
+    /// <summary>
+    /// Re-reads the journal and the QA reports off the UI thread, then applies the rows. A newer refresh wins.
+    /// </summary>
+    internal async Task RefreshQaAsync()
+    {
+        if (_state == null || IsDisposed)
+            return;
+
+        var version = ++_qaVersion;
+        var inputs = QaInputs();
+        var qa = await Task.Run(() => LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor));
+        if (IsDisposed || version != _qaVersion)
+            return;
+
+        _qa = qa;
+        ApplyQaRows();
+        UpdateButtons();
+    }
+
+    private string ModelName(string modelId)
+    {
+        var model = _state?.AvailableModelConfigs.FirstOrDefault(m => string.Equals(m.ModelId, modelId, StringComparison.Ordinal));
+        return model != null && !string.IsNullOrWhiteSpace(model.DisplayName) ? model.DisplayName : modelId ?? string.Empty;
+    }
+
+    private void ApplyQaRows()
+    {
+        var qa = _qa;
+
+        // R1: no buttons; the tooltip carries the breakdown one item per line
+        ApplySummaryRow(_rowGenerationCost, qa.Cost);
+        _toolTip.SetToolTip(_rowGenerationCost.Line3!, qa.Cost.Line3Tooltip.Length > 0 ? qa.Cost.Line3Tooltip : qa.Cost.Line3);
+
+        var scans = QaUiText.ScansRow(qa.Scans, qa.ScansOutOfDate);
+        ApplyQaRow(_rowScans, scans);
+        _btnViewScans.Visible = scans.ShowPrimary;
+
+        var leakage = QaUiText.LeakageRow(qa.Leakage);
+        ApplyQaRow(_rowLeakage, leakage);
+        _btnViewLeakage.Visible = leakage.ShowPrimary;
+        // Hidden until at least one email is generated (row empty state rule)
+        _btnRunAudit.Visible = qa.HasEmails;
+
+        var blind = QaUiText.BlindReviewRow(BlindReviewInput());
+        if (!qa.HasEmails && !_reviewRunning && qa.ReviewHeader == null)
+            blind.Line3 = QaUiText.BlindReviewNotRunNoEmails;
+        ApplyQaRow(_rowBlindReview, blind);
+        // While running, Run Blind Review... is replaced by Cancel Review and View Findings is hidden
+        _btnViewBlindReview.Visible = !_reviewRunning && blind.ShowPrimary;
+        _btnRunBlindReview.Visible = !_reviewRunning && qa.HasEmails;
+        _btnCancelReview.Visible = _reviewRunning;
+    }
+
+    private void ApplyQaRow(ContentRow row, SummaryRowContent content)
+    {
+        ApplySummaryRow(row, content);
+        if (content is QaRowContent { InProgress: true })
+        {
+            row.Line3!.ForeColor = Theme.Accent;
+            SetDot(row, Theme.Accent);
+        }
+
+        // Line 3 is one line with an ellipsis (DPI rule 28): the tooltip always carries the full line, then any extra text
+        var tooltip = content.Line3Tooltip.Length == 0 || content.Line3Tooltip == content.Line3
+            ? content.Line3
+            : content.Line3 + Environment.NewLine + Environment.NewLine + content.Line3Tooltip;
+        _toolTip.SetToolTip(row.Line3!, tooltip);
+    }
+
+    private BlindReviewRowInput BlindReviewInput()
+    {
+        var qa = _qa;
+        if (_reviewRunning)
+        {
+            return new BlindReviewRowInput
+            {
+                State = BlindReviewState.Running,
+                Model = _reviewModel,
+                SampleSize = _reviewTotal,
+                Reviewed = _reviewDone
+            };
+        }
+
+        var header = qa.ReviewHeader;
+        if (header != null && qa.ReviewSampleSize > 0)
+        {
+            var reviewed = qa.ReviewVerdicts.Count;
+            return new BlindReviewRowInput
+            {
+                State = reviewed >= qa.ReviewSampleSize ? BlindReviewState.Done : BlindReviewState.Stopped,
+                Model = ModelName(header.ReviewerModel),
+                SampleSize = qa.ReviewSampleSize,
+                Reviewed = reviewed,
+                Disagreements = BlindReviewer.Disagreements(qa.ReviewVerdicts).Count,
+                Fallback = header.SameProviderFallback
+            };
+        }
+
+        return new BlindReviewRowInput
+        {
+            State = BlindReviewState.NotRun,
+            Model = qa.NotRunModel != null ? ModelName(qa.NotRunModel.ModelId) : string.Empty,
+            SampleSize = qa.DefaultSampleSize,
+            EstimateCost = qa.NotRunEstimate
+        };
+    }
+
+    private bool AskYesNo(string title, string text) =>
+        Confirm != null
+            ? Confirm(title, text)
+            : MessageBox.Show(this, text, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+
+    /// <summary>
+    /// Run Audit (R3): the leakage audit off the UI thread, saved to qa-leakage.json. Free and read-only, so no confirmation.
+    /// </summary>
+    internal async Task RunAuditAsync()
+    {
+        if (_busy || _auditRunning)
+            return;
+
+        var folder = CaseFolder;
+        var plan = _qa.Plan;
+        if (folder.Length == 0 || plan == null || !_qa.HasEmails)
+        {
+            RefreshAll();
+            return;
+        }
+
+        var guide = Draft.Guide ?? new CaseGuide();
+        _auditRunning = true;
+        SetBusy(true);
+        SetStatus(QaUiText.LeakageRunningText, Theme.Accent);
+        try
+        {
+            // The same overlay the answer-key projection uses, rebuilt from the journal (as QaRunner does)
+            await Task.Run(() =>
+            {
+                var replay = GenerationJournal.Replay(folder, plan);
+                var overlay = GenerationRunState.From(plan, replay).BuildFullOverlay(plan, guide);
+                new QaReportStore(folder).SaveLeakage(LeakageAudit.Run(plan, guide, overlay));
+            });
+            if (!IsDisposed)
+                SetStatus(string.Empty, Theme.TextMuted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // UI boundary: the audit is report-only; a failure is shown and the previous report stays
+            if (!IsDisposed)
+                SetStatus(QaUiText.LeakageFailedText(ex.InnerException?.Message ?? ex.Message), Theme.Danger);
+        }
+        finally
+        {
+            _auditRunning = false;
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+                await RefreshQaAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Run Blind Review... (R4, D-11..D-13): the reviewer gateway (no tested key: a Warning and no dialog), the setup dialog
+    /// with the estimate (T-07-61), then the review on this step with progress in line 3 and the status strip.
+    /// </summary>
+    internal async Task RunBlindReviewAsync()
+    {
+        if (_busy || _reviewRunning || _reviewStarting || _state == null)
+            return;
+
+        var qa = _qa;
+        var folder = CaseFolder;
+        var plan = qa.Plan;
+        if (folder.Length == 0 || plan == null || !qa.HasEmails || qa.Replay == null)
+        {
+            RefreshAll();
+            return;
+        }
+
+        var (gateway, provider, fallback, model) = ReviewerGatewayFactory != null
+            ? ReviewerGatewayFactory()
+            : _state.CreateReviewerGateway(qa.WriterProvider);
+        if (gateway == null || model == null)
+        {
+            SetStatus(QaUiText.NoReviewerKeyText, Theme.Warning);
+            return;
+        }
+
+        var guide = Draft.Guide ?? new CaseGuide();
+        var providerName = provider.ToString();
+        List<BlindReviewDocument> docs;
+        _reviewStarting = true;
+        try
+        {
+            // Every generated email in sample order, as the reviewer sees it (off the UI thread: thousands of rows)
+            docs = await Task.Run(() => BlindReviewer.BuildDocuments(plan, guide, qa.Replay, qa.Overlay, qa.SampleOrder));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (!IsDisposed)
+                SetStatus(QaUiText.BlindReviewStopped(ex.Message), Theme.Danger);
+            return;
+        }
+        finally
+        {
+            _reviewStarting = false;
+        }
+
+        if (IsDisposed || docs.Count == 0)
+            return;
+
+        // Verdicts of the same pass (plan, provider, model) are kept and never paid for again (D-13)
+        var header = qa.ReviewHeader;
+        var samePass = header != null
+                       && string.Equals(header.ReviewerProvider, providerName, StringComparison.Ordinal)
+                       && string.Equals(header.ReviewerModel, model.ModelId, StringComparison.Ordinal);
+        var reviewedIds = samePass
+            ? new HashSet<string>(qa.ReviewVerdicts.Select(v => v.DocId), StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+        var stopped = samePass && reviewedIds.Count < qa.ReviewSampleSize;
+        var defaultSize = Math.Max(1, stopped ? qa.ReviewSampleSize : qa.DefaultSampleSize);
+        var systemPrompt = qa.SystemPrompt;
+
+        int size;
+        using (var dialog = new BlindReviewDialog(ModelName(model.ModelId), providerName, fallback, docs.Count, qa.RelevantEmails,
+                   defaultSize, reviewedIds.Count,
+                   n => BlindReviewer.Estimate(model, systemPrompt, docs.Take(n).Where(d => !reviewedIds.Contains(d.DocId)).ToList())))
+        {
+            var result = ShowDialogOverride != null ? ShowDialogOverride(dialog) : dialog.ShowDialog(FindForm());
+            if (result != DialogResult.OK || IsDisposed)
+                return;
+            size = dialog.SampleSize;
+        }
+
+        var sample = docs.Take(size).ToList();
+        var runHeader = new BlindReviewHeader
+        {
+            PlanId = plan.PlanId,
+            ReviewerProvider = providerName,
+            ReviewerModel = model.ModelId,
+            SameProviderFallback = fallback,
+            SampleSize = sample.Count,
+            StartedUtc = DateTime.UtcNow
+        };
+
+        _uiContext = SynchronizationContext.Current;
+        _reviewCts = new CancellationTokenSource();
+        _reviewTotal = sample.Count;
+        _reviewDone = sample.Count(d => reviewedIds.Contains(d.DocId));
+        _reviewModel = ModelName(model.ModelId);
+        _reviewRunning = true;
+        ApplyQaRows();
+        UpdateButtons();
+        SetStatus(QaUiText.BlindReviewProgress(_reviewDone, _reviewTotal), Theme.Accent);
+        StateChanged?.Invoke(this, EventArgs.Empty);
+
+        try
+        {
+            var reviewer = new BlindReviewer(gateway, new QaReportStore(folder));
+            var result = await reviewer.RunAsync(runHeader, sample, systemPrompt, new ReviewProgress(this), _reviewCts.Token);
+            if (!IsDisposed)
+            {
+                if (result.FatalMessage.Length > 0)
+                    SetStatus(QaUiText.BlindReviewStopped(result.FatalMessage), Theme.Danger);
+                else if (result.Errors > 0)
+                    SetStatus(QaUiText.BlindReviewStopped(result.ErrorMessages.FirstOrDefault() ?? string.Empty), Theme.Danger);
+                else
+                {
+                    var (text, tone) = QaUiText.BlindReviewFinished(result.Disagreements.Count);
+                    SetStatus(text, ToneColor(tone, Theme.TextMuted));
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancel Review or leaving the step: finished verdicts are on disk; line 3 shows the stopped state
+            if (!IsDisposed)
+                SetStatus(string.Empty, Theme.TextMuted);
+        }
+        catch (Exception ex)
+        {
+            // UI boundary: reviewed emails are kept; a rerun finishes the rest
+            if (!IsDisposed)
+                SetStatus(QaUiText.BlindReviewStopped(ex.InnerException?.Message ?? ex.Message), Theme.Danger);
+        }
+        finally
+        {
+            _reviewRunning = false;
+            var cts = _reviewCts;
+            _reviewCts = null;
+            cts?.Dispose();
+            if (!IsDisposed)
+            {
+                ApplyQaRows();
+                UpdateButtons();
+                StateChanged?.Invoke(this, EventArgs.Empty);
+                await RefreshQaAsync();
+            }
+        }
+    }
+
+    // Verdicts arrive on pool threads: marshal to the UI thread (T-07-62)
+    private void ReportReviewProgress(int done)
+    {
+        if (IsDisposed)
+            return;
+
+        if (IsHandleCreated && InvokeRequired)
+        {
+            try
+            {
+                BeginInvoke(new Action(() => ApplyReviewProgress(done)));
+            }
+            catch (InvalidOperationException)
+            {
+                // The handle is being destroyed (step closing); the stopped state is read from disk next time
+            }
+            return;
+        }
+
+        if (Environment.CurrentManagedThreadId != _uiThreadId)
+        {
+            // No window handle yet (never shown): post to the context the review started on
+            _uiContext?.Post(_ => ApplyReviewProgress(done), null);
+            return;
+        }
+
+        ApplyReviewProgress(done);
+    }
+
+    private void ApplyReviewProgress(int done)
+    {
+        // Reports can arrive out of order across parallel calls; the count only grows
+        if (IsDisposed || !_reviewRunning || done <= _reviewDone)
+            return;
+
+        _reviewDone = Math.Min(done, _reviewTotal);
+        ApplyQaRows();
+        SetStatus(QaUiText.BlindReviewProgress(_reviewDone, _reviewTotal), Theme.Accent);
+    }
+
+    private sealed class ReviewProgress : IProgress<int>
+    {
+        private readonly StepCaseSummary _owner;
+
+        public ReviewProgress(StepCaseSummary owner)
+        {
+            _owner = owner;
+        }
+
+        public void Report(int value) => _owner.ReportReviewProgress(value);
+    }
+
+    /// <summary>
+    /// Cancel Review: asks C-Q2 (No is the default), then stops the review. Reviewed emails are kept.
+    /// </summary>
+    internal void CancelReview()
+    {
+        if (!_reviewRunning)
+            return;
+
+        var (title, text) = QaUiText.CQ2CancelReview(_reviewDone);
+        if (AskYesNo(title, text))
+            StopReview();
+    }
+
+    private void StopReview()
+    {
+        try
+        {
+            _reviewCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The review released its token source while finishing; it is unwinding already
+        }
+    }
+
+    /// <summary>
+    /// Leaving the step during a review asks C-Q3: No keeps the user here, Yes stops the review and leaves.
+    /// </summary>
+    internal bool ConfirmLeave()
+    {
+        if (!_reviewRunning)
+            return true;
+
+        var (title, text) = QaUiText.CQ3LeaveDuringReview();
+        if (!AskYesNo(title, text))
+            return false;
+
+        StopReview();
+        return true;
+    }
+
+    /// <summary>
+    /// Closing the app after C-Q3: cancels the review and pumps messages until it unwinds (verdicts are on disk).
+    /// </summary>
+    internal bool CancelAndWaitForReview(TimeSpan timeout)
+    {
+        if (!_reviewRunning)
+            return true;
+
+        StopReview();
+        var clock = Stopwatch.StartNew();
+        while (_reviewRunning && clock.Elapsed < timeout)
+        {
+            Application.DoEvents();
+            if (_reviewRunning)
+                Thread.Sleep(15);
+        }
+        return !_reviewRunning;
+    }
+
+    /// <summary>
+    /// View Findings (scans, blind review) and View Report (leakage): opens QaFindingsDialog. Regenerate Thread... goes
+    /// through ThreadInvalidation (C-Q1 in the dialog, T-07-64); when a thread was queued the run counts are re-projected.
+    /// </summary>
+    internal async Task ViewFindingsAsync(QaFindingsMode mode)
+    {
+        if (_busy || _state == null)
+            return;
+
+        var qa = _qa;
+        var folder = CaseFolder;
+        var plan = qa.Plan;
+        if (folder.Length == 0 || plan == null)
+        {
+            RefreshAll();
+            return;
+        }
+
+        var guide = Draft.Guide ?? new CaseGuide();
+        var rows = mode switch
+        {
+            QaFindingsMode.Scans => ScanRows(qa, plan, guide),
+            QaFindingsMode.BlindReview => DisagreementRows(qa, plan, guide),
+            _ => new List<QaFindingRow>()
+        };
+        var listMode = mode != QaFindingsMode.Leakage;
+        var reviewerModel = qa.ReviewHeader != null ? ModelName(qa.ReviewHeader.ReviewerModel) : string.Empty;
+
+        bool queued;
+        using (var dialog = new QaFindingsDialog(mode, rows, listMode ? null : qa.Leakage, reviewerModel, qa.Queued,
+                   listMode ? id => ThreadInvalidation.InvalidateAsync(folder, plan, guide, id) : null,
+                   listMode ? OpenEmail : null))
+        {
+            if (ShowFindingsOverride != null)
+                ShowFindingsOverride(dialog);
+            else
+                dialog.ShowDialog(FindForm());
+            queued = dialog.QueuedAny;
+        }
+
+        if (IsDisposed)
+            return;
+        if (queued)
+            await ReprojectAfterRegenerateAsync(folder, plan, guide);
+        else
+            await RefreshQaAsync();
+    }
+
+    private static Dictionary<string, PlannedThread> ThreadsById(CorpusPlan plan)
+    {
+        var map = new Dictionary<string, PlannedThread>(StringComparer.Ordinal);
+        foreach (var thread in plan.Threads.Where(t => t != null && !string.IsNullOrEmpty(t.Id)))
+            map.TryAdd(thread.Id, thread);
+        return map;
+    }
+
+    // C-Q1 states the thread subject, its EML copies and its attachments
+    private static void DescribeThread(QaFindingRow row, PlannedThread? thread, QaSnapshot qa, IReadOnlyDictionary<string, string> folders)
+    {
+        if (thread == null)
+        {
+            row.RegenerateSubject = row.Subject;
+            return;
+        }
+
+        var first = thread.Messages.FirstOrDefault(m => m != null);
+        row.RegenerateSubject = first != null && qa.EmailRows.TryGetValue(first.DocId, out var key) && key.Subject.Length > 0
+            ? key.Subject
+            : thread.Subject;
+        row.EmlCount = thread.Messages.Where(m => m != null).Sum(m => MailboxWriter.CopyPathsFor(m, folders).Count);
+        row.AttachmentCount = thread.Messages.Where(m => m != null).Sum(m => m.Attachments?.Count ?? 0);
+    }
+
+    private static List<QaFindingRow> ScanRows(QaSnapshot qa, CorpusPlan plan, CaseGuide guide)
+    {
+        var threads = ThreadsById(plan);
+        var folders = PlanNumbering.CustodianFolders(guide);
+        var rows = new List<QaFindingRow>();
+        foreach (var finding in qa.Scans?.Findings ?? new List<ScanFinding>())
+        {
+            if (finding == null)
+                continue;
+            var row = new QaFindingRow
+            {
+                ThreadId = finding.ThreadId,
+                DocId = finding.DocId,
+                DateSent = finding.DateSent,
+                Subject = qa.EmailRows.TryGetValue(finding.DocId, out var key) && key.Subject.Length > 0 ? key.Subject : finding.Subject,
+                Col1 = QaUiText.CheckText(finding.Check),
+                Text = finding.Text,
+                Relevant = finding.Relevant
+            };
+            DescribeThread(row, threads.GetValueOrDefault(finding.ThreadId), qa, folders);
+            rows.Add(row);
+        }
+        return rows;
+    }
+
+    private static List<QaFindingRow> DisagreementRows(QaSnapshot qa, CorpusPlan plan, CaseGuide guide)
+    {
+        var threads = ThreadsById(plan);
+        var folders = PlanNumbering.CustodianFolders(guide);
+        var messages = new Dictionary<string, PlannedMessage>(StringComparer.Ordinal);
+        foreach (var message in plan.Threads.Where(t => t != null).SelectMany(t => t.Messages).Where(m => m != null))
+            messages.TryAdd(message.DocId, message);
+
+        var rows = new List<QaFindingRow>();
+        foreach (var verdict in BlindReviewer.Disagreements(qa.ReviewVerdicts))
+        {
+            messages.TryGetValue(verdict.DocId, out var message);
+            var row = new QaFindingRow
+            {
+                ThreadId = verdict.ThreadId,
+                DocId = verdict.DocId,
+                DateSent = message?.SentAt.DateTime ?? default,
+                Subject = qa.EmailRows.TryGetValue(verdict.DocId, out var key) ? key.Subject : string.Empty,
+                Col1 = QaUiText.LabelText(verdict.KeyRelevant),
+                Col2 = QaUiText.LabelText(verdict.ReviewerRelevant),
+                Text = verdict.Reason,
+                Relevant = verdict.KeyRelevant
+            };
+            DescribeThread(row, threads.GetValueOrDefault(verdict.ThreadId), qa, folders);
+            rows.Add(row);
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// After Regenerate Thread...: re-projects case.json's cached run counts and ledger from the journal (the thread is
+    /// Planned again), saves, and refreshes, so the Mailboxes row shows the partial corpus.
+    /// </summary>
+    private async Task ReprojectAfterRegenerateAsync(string folder, CorpusPlan plan, CaseGuide guide)
+    {
+        SetBusy(true);
+        try
+        {
+            var (state, ledger) = await Task.Run(() =>
+            {
+                var replay = GenerationJournal.Replay(folder, plan);
+                var runState = GenerationRunState.From(plan, replay);
+                var merged = LedgerMerger.Build(plan, guide, WavePlanner.WaveIndexByThread(WavePlanner.Plan(plan)), runState.DeltasByThread);
+                return (runState, merged);
+            });
+            if (IsDisposed)
+                return;
+
+            var generation = Draft.Corpus?.Generation;
+            if (generation != null && generation.RunPlanId == plan.PlanId)
+            {
+                GenerationStateApplier.Apply(Draft, plan, state, ledger, new List<WrittenCorpusFile>(), GenerationOutcome.None,
+                    string.Empty, DateTime.UtcNow, final: false);
+                if (CaseStore.CanSave(Draft))
+                {
+                    var saved = await _state.CaseStore.SaveAsync(Draft);
+                    if (IsDisposed)
+                        return;
+                    if (!saved)
+                        SetStatus(CaseGuideUiText.SaveFailedText(_state.CaseStore.LastSaveError), Theme.Danger);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // The journal already records the invalidation; Generate Corpus re-projects on entry
+            if (!IsDisposed)
+                SetStatus(CaseGuideUiText.SaveFailedText(ex.Message), Theme.Danger);
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                SetBusy(false);
+                RefreshAll();
+                await RefreshQaAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Open Email: the sender's copy of a generated email (first copy path, as the Activity double-click), only when it
+    /// resolves under the verified case folder and exists (T-07-60). Opens nothing otherwise.
+    /// </summary>
+    internal void OpenEmail(string docId)
+    {
+        var folder = CaseFolder;
+        var plan = _qa.Plan ?? CorpusPlanStore.EnsureLoaded(Draft).Plan;
+        if (folder.Length == 0 || plan == null || string.IsNullOrWhiteSpace(docId))
+            return;
+
+        var message = plan.Threads.Where(t => t != null).SelectMany(t => t.Messages)
+            .FirstOrDefault(m => m != null && string.Equals(m.DocId, docId, StringComparison.Ordinal));
+        if (message == null)
+            return;
+
+        var relative = MailboxWriter.CopyPathsFor(message, PlanNumbering.CustodianFolders(Draft.Guide ?? new CaseGuide())).FirstOrDefault();
+        var path = relative == null ? null : MailboxWriter.ResolveUnderCase(folder, relative);
+        if (path == null || !File.Exists(path))
+            return;
+
+        try
+        {
+            OpenFile(path);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            SetStatus($"Could not open the email: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
+        }
+    }
+
+    // QA test accessors
+    internal Label GenerationCostLine3 => _rowGenerationCost.Line3!;
+    internal string GenerationCostTooltip => _toolTip.GetToolTip(_rowGenerationCost.Line3!) ?? string.Empty;
+    internal Label ScansLine3 => _rowScans.Line3!;
+    internal Label LeakageLine3 => _rowLeakage.Line3!;
+    internal Label BlindReviewLine3 => _rowBlindReview.Line3!;
+    internal Color ScansDotColor => _rowScans.DotColor;
+    internal Color BlindReviewDotColor => _rowBlindReview.DotColor;
+    internal Button ViewScansButton => _btnViewScans;
+    internal Button ViewLeakageButton => _btnViewLeakage;
+    internal Button RunAuditButton => _btnRunAudit;
+    internal Button ViewBlindReviewButton => _btnViewBlindReview;
+    internal Button RunBlindReviewButton => _btnRunBlindReview;
+    internal Button CancelReviewButton => _btnCancelReview;
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
+            // A review never outlives the step: no further calls are billed (verdicts already paid for are kept)
+            StopReview();
             _toolTip?.Dispose();
+        }
         base.Dispose(disposing);
     }
 

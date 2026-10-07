@@ -80,6 +80,17 @@ public static class QaUiText
     public const string NoReviewerKeyText = "Test an API key on the API Configuration step first.";
 
     /// <summary>
+    /// Blind review line 3 before any email is generated (no sample, so no estimate; amended R4 in execution 07-18).
+    /// </summary>
+    public const string BlindReviewNotRunNoEmails = "Not run yet.";
+
+    /// <summary>
+    /// Status strip when Run Audit fails (amended R3 in execution 07-18).
+    /// </summary>
+    public static string LeakageFailedText(string message) =>
+        $"Could not run the leakage audit: {TrimMessage(message)}.";
+
+    /// <summary>
     /// Consistency scans row (R2). ShowPrimary = View Findings (findings exist and the scan is current).
     /// </summary>
     public static SummaryRowContent ScansRow(ScanReport? report, bool outOfDate)

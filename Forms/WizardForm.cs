@@ -359,6 +359,11 @@ public partial class WizardForm : Form
     {
         if (index < 0 || index >= _steps.Count) return;
 
+        // Leaving Case Summary during a blind review asks C-Q3; No stays on the step (07-UI-SPEC S2 R4)
+        if (index != _currentStepIndex && _currentStepIndex >= 0 && _currentStepIndex < _steps.Count
+            && _steps[_currentStepIndex] is StepCaseSummary summary && !summary.ConfirmLeave())
+            return;
+
         // Hide current step
         if (_currentStepIndex >= 0 && _currentStepIndex < _steps.Count)
         {
@@ -521,7 +526,8 @@ public partial class WizardForm : Form
             return false;
 
         return _steps[_currentStepIndex] is StepCoreDocument { IsGenerating: true } or StepCaseGuide { IsGenerating: true }
-            or StepReviewPlan { IsPlanning: true } or StepGenerateCorpus { IsGenerating: true };
+            or StepReviewPlan { IsPlanning: true } or StepGenerateCorpus { IsGenerating: true }
+            or StepCaseSummary { IsReviewRunning: true };
     }
 
     // Disposing the running step cancels its token, so no further calls are billed (WR-07, T-03-61).
@@ -540,6 +546,9 @@ public partial class WizardForm : Form
         else if (step is StepGenerateCorpus generate)
             // In-flight threads are discarded; finished ones are already journaled and saved (RUN-06)
             WaitWhileStopping(() => generate.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
+        else if (step is StepCaseSummary summary)
+            // Verdicts already paid for are on disk; no further review calls are billed (D-13)
+            WaitWhileStopping(() => summary.CancelAndWaitForReview(TimeSpan.FromSeconds(10)));
 
         step.Dispose();
     }
@@ -580,6 +589,8 @@ public partial class WizardForm : Form
                     {
                         StepReviewPlan => CorpusUiText.CP2ClosePlanning(),
                         StepGenerateCorpus s => GenerationUiText.CG3CloseDuringRun(s.PendingProviderBatches > 0),
+                        // C-Q3: closing the app during a blind review
+                        StepCaseSummary => QaUiText.CQ3LeaveDuringReview(),
                         _ => CaseGuideUiText.C12CloseDuringRun()
                     };
                     if (MessageBox.Show(this, runText, runTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question,

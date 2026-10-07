@@ -238,7 +238,7 @@ The `Quality checks` group sits between Corpus and Case guide because it reports
 | Not enough data | `Not enough data: the audit needs 40 relevant and 40 non-relevant emails; this corpus has {r:N0} and {n:N0}.` | BorderStrong |
 
 - Line 3 tooltip: `Balanced accuracy of a simple model trained on metadata only, tested on threads it did not see (5-fold). Pass is 60% or lower, Warning is above 60% up to 70%, Fail is above 70%. Some signal is normal: real custodians and the dispute dates also predict relevance.` Thresholds are research A4 [ASSUMED]; the copy reads them from the same constants the audit uses.
-- Buttons: `View Report` (Default; visible once run), `Run Audit` (Default; always visible when the corpus has generated emails). Run Audit shows `Running the leakage audit...` in the status strip (Accent) and needs no confirmation (free, read-only).
+- Buttons: `View Report` (Default; visible once run), `Run Audit` (Default; always visible when the corpus has generated emails). Run Audit shows `Running the leakage audit...` in the status strip (Accent) and needs no confirmation (free, read-only). When it ends the status strip clears; a failure shows `Could not run the leakage audit: {message}.` (Danger) and the previous report stays [amended in execution 07-18].
 - `{signal}` formats (`QaUiText.SignalText`): `{feature}: only on relevant mail`, `{feature}: never on relevant mail`, `{feature}: {p:0}% relevant vs {base:0}% overall`. Feature names in plain words: `privilege banner`, `privileged subject tag`, `sender {address}`, `recipient {address}` (To or Cc; top addresses only) [amended in planning revision 1], `{n} or more CC recipients`, `sent on {weekday}`, `sent {hour bucket}` (`before 8 AM`, `8 AM to 6 PM`, `after 6 PM`), `subject length {bucket}`, `{kind} attachment`, `thread depth {n}+`.
 
 **R4. `Blind review` (new; D-11, D-12).**
@@ -247,7 +247,7 @@ The `Quality checks` group sits between Corpus and Case guide because it reports
 
 | State | Line 3 | Tone / dot |
 |-------|--------|------------|
-| Not run | `Not run yet. ≈${c} to review {Plural(n, "email")} with {model}.` | Muted / BorderStrong |
+| Not run | `Not run yet. ≈${c} to review {Plural(n, "email")} with {model}.` (before any email is generated: `Not run yet.`, no sample to price; amended in execution 07-18) | Muted / BorderStrong |
 | Running | `Reviewing: {d:N0} of {Plural(n, "email")}...` | Accent / Accent |
 | Stopped part way | `{d:N0} of {Plural(n, "email")} reviewed; the review stopped. Run Blind Review again to finish the rest.` | Warning |
 | Done, agreement | `{Plural(n, "email")} reviewed by {model}: all agree with the answer key{fallback}` | Success (Warning when `{fallback}` shows) |
@@ -256,6 +256,8 @@ The `Quality checks` group sits between Corpus and Case guide because it reports
 `{fallback}` = ` · same provider as the corpus` when the reviewer fell back (D-12); its tooltip: `Only one provider key was tested, so the reviewer came from the provider that wrote the corpus and is less likely to notice its writing habits.`
 - Buttons: `View Findings` (Default; visible when disagreements exist), `Run Blind Review...` (Default; opens S4). While running, `Run Blind Review...` is replaced by `Cancel Review` (**Danger**) and `View Findings` is hidden; Next/Back stay enabled but leaving the step asks C-Q3.
 - Progress also shows in the status strip: `Blind review: {d:N0} of {Plural(n, "email")} reviewed...` (Accent). Done: `Blind review finished: {Plural(k, "disagreement")}.` (Success when 0, else Warning). Error: `Blind review stopped: {message}. Reviewed emails are kept; run it again to finish.` (Danger).
+
+**Line 3 tooltips (amended in execution 07-18).** Every QA row's line 3 tooltip starts with the full line 3 text (it may ellipsize, rule 28), followed by a blank line and the row's extra tooltip (leakage thresholds, same-provider fallback) when there is one. `Generation cost` keeps the R1 breakdown tooltip. Cancel by the user clears the status strip; line 3 shows the Stopped state.
 
 **Row empty state rule.** Before any email is generated, all three QA rows show their Not run line; `Run Blind Review...` and `Run Audit` are hidden until at least one email is generated.
 

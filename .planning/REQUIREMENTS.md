@@ -124,7 +124,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 - [ ] **OUT-01**: EML files are organized per custodian mailbox; an email appears in each participating custodian's folder (sent and received), as in a real collection
 - [x] **OUT-02**: Each EML carries its DocID in a custom header (X-ReelDiscovery-DocID) traceable to the answer key
-- [ ] **OUT-03**: The case-driven flow replaces the old topic/storyline wizard flow
+- [x] **OUT-03**: The case-driven flow replaces the old topic/storyline wizard flow
 
 ## v2 Requirements
 
@@ -251,7 +251,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RUN-07 | Phase 5 | Complete |
 | OUT-01 | Phase 5, 6 | Partial (relevant mail in Phase 5; non-relevant mail in Phase 6) |
 | OUT-02 | Phase 5 | Complete |
-| OUT-03 | Phase 7 | Pending |
+| OUT-03 | Phase 7 | Complete |
 
 **Coverage:**
 - v1 requirements: 80 total

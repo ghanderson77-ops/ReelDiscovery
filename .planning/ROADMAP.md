@@ -249,7 +249,7 @@ Plans:
 - [x] 07-16-PLAN.md — Blind reviewer on the other provider: sample, prompts, estimate, resumable log (Wave 3)
 - [x] 07-17-PLAN.md — QA copy, findings dialog with Regenerate Thread, blind review dialog (Wave 6)
 - [ ] 07-18-PLAN.md — Case Summary Quality checks group and Generation cost row (Wave 7)
-- [ ] 07-19-PLAN.md — Single case-driven flow, API step cleanup, no legacy key migration (Wave 6)
+- [x] 07-19-PLAN.md — Single case-driven flow, API step cleanup, no legacy key migration (Wave 6)
 - [ ] 07-20-PLAN.md — Delete the legacy wizard, generators, models and tests (Wave 7)
 - [ ] 07-21-PLAN.md — Adaptive key projection and 5K scale tests in live and batch modes (Wave 8)
 - [ ] 07-22-PLAN.md — Live provider spike, real batch round trip with restart, UAT at 150% (Wave 9, checkpoints)

@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 07-17-PLAN.md
-last_updated: "2026-10-07T00:18:37.665Z"
+last_updated: "2026-10-07T00:26:38.658Z"
 last_activity: 2026-10-07
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 123
-  percent: 96
+  completed_plans: 124
+  percent: 97
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 18 of 22
+Plan: 19 of 22
 Status: Ready to execute
 Last activity: 2026-10-07
 
@@ -174,6 +174,7 @@ Progress: [██████████] 99%
 | Phase 07 P13 | 35 min | 2 tasks | 10 files |
 | Phase 07 P15 | 25min | 2 tasks | 8 files |
 | Phase 07 P17 | 15min | 3 tasks | 7 files |
+| Phase 07 P19 | 9min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -508,6 +509,8 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-17]: Leakage copy recomputes the verdict with LeakageAudit.VerdictFor; every threshold in QA copy is read from LeakageAudit constants
 - [Phase 07]: [07-17]: Findings dialog summaries are one line at 640 x 400 (full guidance in a tooltip) and the leakage headline drops the top-signal sentence so rule 29's 4 rows hold
 - [Phase 07]: [07-17]: Findings footer is one label: queued line, then not-deleted and KeyError lines; Warning when any warning line, Danger RegenerateFailed when the invalidation is refused
+- [Phase 07]: [07-19]: WizardForm builds all steps from the static StepTypes list; the flow rebuild and the legacy cancel prompt are gone
+- [Phase 07]: [07-19]: OUT-03 complete (the case flow is the only flow); PLAT-05 stays pending until 07-20 deletes the legacy code
 
 ### Pending Todos
 
@@ -529,6 +532,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-07T00:18:37.660Z
+Last session: 2026-10-07T00:26:32.457Z
 Stopped at: Completed 07-17-PLAN.md
 Resume file: None

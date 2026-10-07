@@ -12,7 +12,6 @@ public partial class WizardForm : Form
     private readonly WizardState _state;
     private readonly List<UserControl> _steps = new();
     private int _currentStepIndex = 0;
-    private WizardFlow _builtFlow;
     private bool _closeConfirmed;
 
     private Panel _contentPanel = null!;
@@ -46,12 +45,11 @@ public partial class WizardForm : Form
     }
 
     /// <summary>
-    /// Test-only: a case-flow wizard over the given state with its steps built but none entered,
+    /// Test-only: a wizard over the given state with its steps built but none entered,
     /// so no saved API keys are loaded. Closing it never prompts.
     /// </summary>
     internal static WizardForm CreateForRender(WizardState state)
     {
-        state.Flow = WizardFlow.CaseDriven;
         var form = new WizardForm(state, forRender: true);
         form._currentStepIndex = -1;
         // Render tests close the form programmatically; a prompt would block the test thread
@@ -298,20 +296,13 @@ public partial class WizardForm : Form
     }
 
     /// <summary>
-    /// Steps for each flow. Index 0 (API configuration) is shared and never rebuilt.
+    /// The one case-driven step list (D-21): API Configuration, then Case Scenario.
     /// </summary>
-    internal static IReadOnlyList<Type> StepTypesFor(WizardFlow flow) =>
-        flow == WizardFlow.CaseDriven
-            ? new[]
-            {
-                typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
-                typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepCaseSummary)
-            }
-            : new[]
-            {
-                typeof(StepApiConfiguration), typeof(StepTopicInput), typeof(StepStorylines), typeof(StepCharacters),
-                typeof(StepGenerationConfig), typeof(StepGeneration), typeof(StepComplete)
-            };
+    internal static IReadOnlyList<Type> StepTypes { get; } = new[]
+    {
+        typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
+        typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepCaseSummary)
+    };
 
     /// <summary>
     /// The step that shows a case at the given stage. Unknown values (a hand-edited case.json) open the scenario (T-03-60).
@@ -328,7 +319,7 @@ public partial class WizardForm : Form
     };
 
     /// <summary>
-    /// Opens the step for a case stage (D-11). Does nothing when that step is not in the current flow.
+    /// Opens the step for a case stage (D-11). Does nothing for the API step.
     /// </summary>
     public void NavigateToStage(CaseStage stage)
     {
@@ -341,9 +332,13 @@ public partial class WizardForm : Form
 
     private void LoadSteps(bool showFirstStep)
     {
-        _steps.Add(new StepApiConfiguration());
-        WireStep(_steps[0]);
-        BuildSteps(_state.Flow);
+        foreach (var type in StepTypes)
+        {
+            var step = (UserControl)Activator.CreateInstance(type)!;
+            _steps.Add(step);
+            WireStep(step);
+        }
+
         if (showFirstStep)
             ShowStep(0);
     }
@@ -358,27 +353,6 @@ public partial class WizardForm : Form
         step.Dock = DockStyle.Fill;
         step.Visible = false;
         _contentPanel.Controls.Add(step);
-    }
-
-    private void BuildSteps(WizardFlow flow)
-    {
-        // Legacy flow stays selectable until Phase 7 (PROJECT.md).
-        // Drop every step after the shared API step before creating the new list
-        for (var i = _steps.Count - 1; i >= 1; i--)
-        {
-            _contentPanel.Controls.Remove(_steps[i]);
-            _steps[i].Dispose();
-            _steps.RemoveAt(i);
-        }
-
-        foreach (var type in StepTypesFor(flow).Skip(1))
-        {
-            var step = (UserControl)Activator.CreateInstance(type)!;
-            _steps.Add(step);
-            WireStep(step);
-        }
-
-        _builtFlow = flow;
     }
 
     private async void ShowStep(int index)
@@ -426,7 +400,7 @@ public partial class WizardForm : Form
             _btnNext.Enabled = wizard.CanMoveNext;
         }
 
-        // Last step shows "Finish" (handled by StepComplete)
+        // Last step shows "Finish"
         if (_currentStepIndex == _steps.Count - 1)
         {
             _btnNext.Text = "Finish";
@@ -462,10 +436,6 @@ public partial class WizardForm : Form
             return;
         }
 
-        // Leaving the API step: rebuild the step list when the workflow choice changed
-        if (_currentStepIndex == 0 && _state.Flow != _builtFlow)
-            BuildSteps(_state.Flow);
-
         ShowStep(_currentStepIndex + 1);
     }
 
@@ -479,18 +449,8 @@ public partial class WizardForm : Form
 
     private void BtnCancel_Click(object? sender, EventArgs e)
     {
-        // Case flow: OnFormClosing saves and asks only when something would be lost (D-10)
-        if (_state.Flow == WizardFlow.CaseDriven)
-        {
-            this.Close();
-            return;
-        }
-
-        if (MessageBox.Show("Are you sure you want to cancel?", "Confirm",
-            MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-        {
-            this.Close();
-        }
+        // OnFormClosing saves and asks only when something would be lost (D-10)
+        this.Close();
     }
 
     public void NavigateToStep(int stepIndex)
@@ -521,9 +481,9 @@ public partial class WizardForm : Form
     /// A running generation asks first; a typed scenario with no core document yet asks (it has no folder);
     /// a failed save asks; everything else closes without a prompt.
     /// </summary>
-    internal static CloseDecision DecideClose(WizardFlow flow, CaseDraft draft, bool runActive, bool saveSucceeded)
+    internal static CloseDecision DecideClose(CaseDraft draft, bool runActive, bool saveSucceeded)
     {
-        if (flow != WizardFlow.CaseDriven || draft == null)
+        if (draft == null)
             return CloseDecision.CloseNow;
         if (runActive)
             return CloseDecision.AskDuringRun;
@@ -540,9 +500,6 @@ public partial class WizardForm : Form
     /// </summary>
     private bool FlushCurrentCaseStep()
     {
-        if (_state.Flow != WizardFlow.CaseDriven)
-            return true;
-
         // Every case step commits its pending edits synchronously before its first await
         if (_currentStepIndex >= 0 && _currentStepIndex < _steps.Count
             && _steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument or StepCaseGuide or StepCorpusSettings or StepReviewPlan or StepGenerateCorpus
@@ -607,11 +564,11 @@ public partial class WizardForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         // Closing never discards a saved case: flush and save, and ask only when work would be lost (D-10, T-03-59)
-        if (!_closeConfirmed && _state.Flow == WizardFlow.CaseDriven)
+        if (!_closeConfirmed)
         {
             var runActive = IsRunActive();
             var saveOk = FlushCurrentCaseStep();
-            var decision = DecideClose(_state.Flow, _state.Case, runActive, saveOk);
+            var decision = DecideClose(_state.Case, runActive, saveOk);
 
             if (e.CloseReason == CloseReason.UserClosing)
             {
@@ -635,7 +592,7 @@ public partial class WizardForm : Form
 
                     StopActiveRun();
                     saveOk = !CaseStore.CanSave(_state.Case) || _state.CaseStore.SaveNow(_state.Case);
-                    decision = DecideClose(_state.Flow, _state.Case, runActive: false, saveOk);
+                    decision = DecideClose(_state.Case, runActive: false, saveOk);
                 }
 
                 if (decision == CloseDecision.AskUnsavedScenario)

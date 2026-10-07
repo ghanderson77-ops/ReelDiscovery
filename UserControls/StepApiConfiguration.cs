@@ -33,10 +33,6 @@ public class StepApiConfiguration : UserControl, IWizardStep
     private Label _lblPricing = null!;
     private Button _btnConfigureModels = null!;
 
-    // Workflow
-    private RadioButton _rbCaseDriven = null!;
-    private RadioButton _rbLegacy = null!;
-
     private bool _keysLoaded;
     private bool _suppressEvents;
 
@@ -61,11 +57,10 @@ public class StepApiConfiguration : UserControl, IWizardStep
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 15,
+            RowCount = 13,
             Padding = new Padding(5),
             // Keeps every row reachable (via the control's scrollbar) on small windows
-            // +60 keeps the workflow rows reachable via AutoScroll
-            MinimumSize = new Size(0, 580)
+            MinimumSize = new Size(0, 520)
         };
 
         mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(150)));
@@ -82,9 +77,7 @@ public class StepApiConfiguration : UserControl, IWizardStep
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 9: Volume model + Configure Models
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 10: Pricing
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 11: Instructions
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));  // 12: Disclaimer
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 13: Workflow header
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));      // 14: Workflow radios
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));  // 12: Disclaimer (last row)
 
         // OpenAI section
         var openAIHeader = CreateSectionHeader("OpenAI");
@@ -204,51 +197,7 @@ public class StepApiConfiguration : UserControl, IWizardStep
         mainLayout.Controls.Add(lblDisclaimer, 0, 12);
         mainLayout.SetColumnSpan(lblDisclaimer, 2);
 
-        // Row 13: Workflow header
-        var workflowHeader = CreateSectionHeader("Workflow");
-        mainLayout.Controls.Add(workflowHeader, 0, 13);
-        mainLayout.SetColumnSpan(workflowHeader, 2);
-
-        // Row 14: Workflow radios (case-driven is the default, research A2)
-        var workflowPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink
-        };
-        _rbCaseDriven = new RadioButton
-        {
-            Text = "Case-driven (new)",
-            AutoSize = true,
-            Checked = true,
-            Font = new Font("Segoe UI", 9F),
-            Margin = new Padding(0, 4, 16, 0)
-        };
-        _rbLegacy = new RadioButton
-        {
-            Text = "Legacy topic wizard",
-            AutoSize = true,
-            Font = new Font("Segoe UI", 9F),
-            Margin = new Padding(0, 4, 16, 0)
-        };
-        _rbCaseDriven.CheckedChanged += WorkflowRadio_CheckedChanged;
-        _rbLegacy.CheckedChanged += WorkflowRadio_CheckedChanged;
-        workflowPanel.Controls.Add(_rbCaseDriven);
-        workflowPanel.Controls.Add(_rbLegacy);
-        mainLayout.Controls.Add(workflowPanel, 0, 14);
-        mainLayout.SetColumnSpan(workflowPanel, 2);
-
         this.Controls.Add(mainLayout);
-    }
-
-    private void WorkflowRadio_CheckedChanged(object? sender, EventArgs e)
-    {
-        if (_suppressEvents || _state == null)
-            return;
-
-        _state.Flow = _rbLegacy.Checked ? WizardFlow.Legacy : WizardFlow.CaseDriven;
     }
 
     private Label CreateSectionHeader(string text) => new()
@@ -646,8 +595,6 @@ public class StepApiConfiguration : UserControl, IWizardStep
             _txtOpenAIKey.Text = _state.OpenAIApiKey;
             _txtAnthropicKey.Text = _state.AnthropicApiKey;
             _cboProvider.SelectedIndex = _state.TextProvider == LlmProviderKind.Anthropic ? 1 : 0;
-            _rbCaseDriven.Checked = _state.Flow == WizardFlow.CaseDriven;
-            _rbLegacy.Checked = _state.Flow == WizardFlow.Legacy;
         }
         finally
         {
@@ -699,7 +646,6 @@ public class StepApiConfiguration : UserControl, IWizardStep
             return Task.FromResult(false);
         }
 
-        _state.Flow = _rbLegacy.Checked ? WizardFlow.Legacy : WizardFlow.CaseDriven;
         return Task.FromResult(true);
     }
 }

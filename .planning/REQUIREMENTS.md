@@ -13,7 +13,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 - [x] **PLAT-02**: API keys are stored encrypted with Windows DPAPI (existing Base64 key file migrated)
 - [x] **PLAT-03**: A test project exists and runs unit tests for planner, validators, answer-key writer and EML output
 - [x] **PLAT-04**: Known concurrency bugs are fixed (shared `System.Random`, non-thread-safe mutation in parallel sections)
-- [ ] **PLAT-05**: Dead code in the old generation path is removed as it is replaced
+- [x] **PLAT-05**: Dead code in the old generation path is removed as it is replaced
 
 ### AI Providers
 
@@ -176,7 +176,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAT-02 | Phase 1 | Complete |
 | PLAT-03 | Phase 1, Phase 4 | Complete |
 | PLAT-04 | Phase 1 | Complete |
-| PLAT-05 | Phase 7 | Pending |
+| PLAT-05 | Phase 7 | Complete |
 | PROV-01 | Phase 1 | Complete |
 | PROV-02 | Phase 1 | Complete |
 | PROV-03 | Phase 1 | Complete |

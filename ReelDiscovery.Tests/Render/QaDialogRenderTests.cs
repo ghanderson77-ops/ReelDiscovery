@@ -124,7 +124,7 @@ public class QaDialogRenderTests
                         grid.CurrentCell = grid.Rows[0].Cells[grid.Columns.Count - 1];
                         grid.Rows[0].Selected = true;
                         dialog.RegenerateSelectedAsync().GetAwaiter().GetResult();
-                        queuedCell = (string)grid.Rows[0].Cells["Col2"].Value;
+                        queuedCell = grid.Rows[0].Cells["Col2"].Value as string ?? string.Empty;
                         // Keep a not-queued row selected so Regenerate Thread... shows enabled
                         grid.ClearSelection();
                         grid.CurrentCell = grid.Rows[1].Cells[grid.Columns.Count - 1];

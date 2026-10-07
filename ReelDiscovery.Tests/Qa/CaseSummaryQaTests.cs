@@ -375,6 +375,8 @@ public class CaseSummaryQaTests
         });
     }
 
+    // Seeds the journal synchronously: the test drives WinForms controls on the test thread
+    #pragma warning disable xUnit1031
     [Fact]
     public void Disagreements_ViewFindingsListsThem_RegenerateQueuesTheThread_MailboxesTurnPartial()
     {
@@ -464,6 +466,7 @@ public class CaseSummaryQaTests
             Assert.Equal(relevant - 1, fixture.Draft.Corpus!.Generation!.ThreadsWritten);
         });
     }
+    #pragma warning restore xUnit1031
 
     [Fact]
     public void OpenEmail_OpensTheSenderCopyUnderTheCaseFolder()

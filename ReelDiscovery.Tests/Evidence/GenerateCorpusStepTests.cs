@@ -444,6 +444,8 @@ public class GenerateCorpusStepTests
         });
     }
 
+    // Seeds the journal synchronously: the test drives WinForms controls on the test thread
+    #pragma warning disable xUnit1031
     [Fact]
     public void Reopen_JournalNewerThanCaseJson_MaterializesLedgerCountsAndKey_WithoutProviderCalls()
     {
@@ -482,6 +484,7 @@ public class GenerateCorpusStepTests
 
         Assert.Empty(h.Fake.Requests);
     }
+    #pragma warning restore xUnit1031
 
     [Fact]
     public void OpenEml_OnlyOpensExistingFilesUnderTheCaseFolder()

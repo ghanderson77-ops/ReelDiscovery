@@ -29,6 +29,15 @@ public class QaFindingsDialogTests
             ExceptionDispatchInfo.Capture(error).Throw();
     }
 
+    // Visible is only true on a shown form; the window is transparent and off the taskbar
+    private static T Shown<T>(T form) where T : Form
+    {
+        form.Opacity = 0;
+        form.StartPosition = FormStartPosition.Manual;
+        form.Show();
+        return form;
+    }
+
     internal static QaFindingRow Row(string thread, string doc, int day, string col1 = "Timeline", string col2 = "",
         bool relevant = true) => new()
     {
@@ -54,7 +63,7 @@ public class QaFindingsDialogTests
 
     private static QaFindingsDialog Scans(List<QaFindingRow> rows, ISet<string>? queued = null,
         Func<string, Task<ThreadInvalidationResult>>? regenerate = null, Action<string>? open = null) =>
-        new(QaFindingsMode.Scans, rows, null, "", queued ?? new HashSet<string>(), regenerate, open);
+        Shown(new QaFindingsDialog(QaFindingsMode.Scans, rows, null, "", queued ?? new HashSet<string>(), regenerate, open));
 
     private static void Select(QaFindingsDialog dialog, int index)
     {
@@ -263,8 +272,8 @@ public class QaFindingsDialogTests
         RunSta(() =>
         {
             var rows = new List<QaFindingRow> { Row("T1", "RD-000001", 3, "Relevant", "Not relevant") };
-            using var dialog = new QaFindingsDialog(QaFindingsMode.BlindReview, rows, null, "claude-haiku",
-                new HashSet<string>(), _ => Task.FromResult(new ThreadInvalidationResult()), _ => { });
+            using var dialog = Shown(new QaFindingsDialog(QaFindingsMode.BlindReview, rows, null, "claude-haiku",
+                new HashSet<string>(), _ => Task.FromResult(new ThreadInvalidationResult()), _ => { }));
             Assert.Equal(new[] { "", "Doc ID", "Date", "Subject", "Answer key", "Reviewer", "Reviewer's reason" },
                 dialog.FindingsGrid.Columns.Cast<DataGridViewColumn>().Select(c => c.HeaderText));
             Assert.Equal("Blind Review Disagreements", dialog.Text);
@@ -278,8 +287,8 @@ public class QaFindingsDialogTests
         RunSta(() =>
         {
             var rows = new List<QaFindingRow> { Row("T1", "RD-000001", 3, "Relevant", "Not relevant") };
-            using var dialog = new QaFindingsDialog(QaFindingsMode.BlindReview, rows, null, "m",
-                new HashSet<string> { "T1" }, null, null);
+            using var dialog = Shown(new QaFindingsDialog(QaFindingsMode.BlindReview, rows, null, "m",
+                new HashSet<string> { "T1" }, null, null));
             Assert.Equal("Not relevant · queued", dialog.FindingsGrid.Rows[0].Cells["Col2"].Value);
             Assert.Equal("Relevant", dialog.FindingsGrid.Rows[0].Cells["Col1"].Value);
         });
@@ -301,8 +310,8 @@ public class QaFindingsDialogTests
                     new() { Feature = "sent on Sunday", Kind = ReelDiscovery.Models.Qa.LeakageSignalKind.Lift, RelevantShare = 0.83, BaseRate = 0.2, Support = 12, Lift = 0.63 }
                 }
             };
-            using var dialog = new QaFindingsDialog(QaFindingsMode.Leakage, new List<QaFindingRow>(), report, "",
-                new HashSet<string>(), null, null);
+            using var dialog = Shown(new QaFindingsDialog(QaFindingsMode.Leakage, new List<QaFindingRow>(), report, "",
+                new HashSet<string>(), null, null));
             Assert.DoesNotContain(dialog.FindingsGrid.Columns.Cast<DataGridViewColumn>(), c => c.Name == GridStyle.DotColumnName);
             Assert.Equal(new[] { "Signal", "Relevant share", "Emails", "Lift" },
                 dialog.FindingsGrid.Columns.Cast<DataGridViewColumn>().Select(c => c.HeaderText));
@@ -349,11 +358,11 @@ public class QaFindingsDialogTests
         RunSta(() =>
         {
             var asked = new List<int>();
-            using var dialog = new BlindReviewDialog("gpt-5-mini", "OpenAI", false, 3000, 400, 800, 0, n =>
+            using var dialog = Shown(new BlindReviewDialog("gpt-5-mini", "OpenAI", false, 3000, 400, 800, 0, n =>
             {
                 asked.Add(n);
                 return n / 100m;
-            });
+            }));
             var input = dialog.SampleInput;
             Assert.Equal(1, input.Minimum);
             Assert.Equal(3000, input.Maximum);
@@ -378,7 +387,7 @@ public class QaFindingsDialogTests
     {
         RunSta(() =>
         {
-            using var dialog = new BlindReviewDialog("claude-haiku", "Anthropic", true, 500, 100, 200, 50, n => 1m);
+            using var dialog = Shown(new BlindReviewDialog("claude-haiku", "Anthropic", true, 500, 100, 200, 50, n => 1m));
             Assert.NotNull(dialog.FallbackLabel);
             Assert.Equal(QaUiText.FallbackSentence, dialog.FallbackLabel!.Text);
             Assert.Equal(Theme.Warning, dialog.FallbackLabel.ForeColor);
@@ -391,7 +400,7 @@ public class QaFindingsDialogTests
     {
         RunSta(() =>
         {
-            using var dialog = new BlindReviewDialog("m", "p", false, 120, 100, 200, 0, n => 0m);
+            using var dialog = Shown(new BlindReviewDialog("m", "p", false, 120, 100, 200, 0, n => 0m));
             Assert.Equal(120, dialog.SampleInput.Value);
             Assert.Equal(DialogResult.OK, dialog.StartButton.DialogResult);
             Assert.Equal(ButtonStyle.Primary, ((ThemedButton)dialog.StartButton).Variant);

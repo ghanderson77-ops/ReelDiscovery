@@ -301,6 +301,12 @@ public static class QaUiText
     public static string FooterKeyNotUpdated(string reason) =>
         $"The answer key could not be updated: {TrimMessage(reason)}. It is updated again when you click Continue Generating.";
 
+    /// <summary>
+    /// The invalidation was refused (thread not written, journal unreadable) or the regenerate call failed.
+    /// </summary>
+    public static string RegenerateFailed(string reason) =>
+        $"Could not queue the thread for regeneration: {TrimMessage(reason)}.";
+
     // --- Confirmations (MessageBox, default button = the safe choice) ---
 
     public static (string Title, string Text) CQ1RegenerateThread(string subject, int emlFiles, int attachments, bool relevant)

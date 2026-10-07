@@ -73,48 +73,25 @@ public class ApiKeyStoreTests : IDisposable
         Assert.Equal("sk-o", store.GetKey(LlmProviderKind.OpenAI));
     }
 
+    // D-22: the legacy Base64 key file is neither read, migrated nor deleted; the user simply sees no saved key
     [Fact]
-    public void Migrate_ImportsAndDeletesLegacyFile()
+    public void LegacySettingsFile_IgnoredAndUntouched()
     {
         WriteLegacy(B64("sk-legacy"));
+        var legacyPath = Path.Combine(_folder, "reeldiscovery.settings");
+        var before = File.ReadAllBytes(legacyPath);
+        var writtenAt = File.GetLastWriteTimeUtc(legacyPath);
+
         var store = new ApiKeyStore(_folder);
 
-        Assert.True(store.MigrateLegacyKey());
-        Assert.Equal("sk-legacy", store.GetKey(LlmProviderKind.OpenAI));
-        Assert.False(File.Exists(store.LegacySettingsPath));
-    }
+        Assert.Null(store.GetKey(LlmProviderKind.OpenAI));
+        Assert.Null(store.GetKey(LlmProviderKind.Anthropic));
+        store.SetKey(LlmProviderKind.Anthropic, "sk-a");
+        store.ClearKey(LlmProviderKind.Anthropic);
 
-    [Fact]
-    public void Migrate_IsIdempotent()
-    {
-        WriteLegacy(B64("sk-legacy"));
-        var store = new ApiKeyStore(_folder);
-
-        Assert.True(store.MigrateLegacyKey());
-        Assert.False(store.MigrateLegacyKey());
-        Assert.Equal("sk-legacy", store.GetKey(LlmProviderKind.OpenAI));
-    }
-
-    [Fact]
-    public void Migrate_DoesNotOverwriteExistingKey()
-    {
-        var store = new ApiKeyStore(_folder);
-        store.SetKey(LlmProviderKind.OpenAI, "sk-new");
-        WriteLegacy(B64("sk-old"));
-
-        Assert.False(store.MigrateLegacyKey());
-        Assert.Equal("sk-new", store.GetKey(LlmProviderKind.OpenAI));
-        Assert.False(File.Exists(store.LegacySettingsPath));
-    }
-
-    [Fact]
-    public void Migrate_InvalidBase64_LeavesFileAndReturnsFalse()
-    {
-        WriteLegacy("this is not base64 !!!");
-        var store = new ApiKeyStore(_folder);
-
-        Assert.False(store.MigrateLegacyKey());
-        Assert.True(File.Exists(store.LegacySettingsPath));
+        Assert.True(File.Exists(legacyPath));
+        Assert.Equal(before, File.ReadAllBytes(legacyPath));
+        Assert.Equal(writtenAt, File.GetLastWriteTimeUtc(legacyPath));
         Assert.Null(store.GetKey(LlmProviderKind.OpenAI));
     }
 
@@ -141,7 +118,6 @@ public class ApiKeyStoreTests : IDisposable
 
         WriteLegacy(B64("sk-legacy"));
         var store = new ApiKeyStore(_folder);
-        store.MigrateLegacyKey();
         store.SetKey(LlmProviderKind.Anthropic, "sk-a");
         store.ClearKey(LlmProviderKind.Anthropic);
 

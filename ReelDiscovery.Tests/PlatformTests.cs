@@ -58,6 +58,30 @@ public class PlatformTests
         Assert.True(offenders.Count == 0, "Provider SDKs referenced outside Services/Ai: " + string.Join(", ", offenders));
     }
 
+    // D-22: no legacy key migration remains, so startup cannot call it
+    [Fact]
+    public void ApiKeyStore_HasNoLegacyMigration()
+    {
+        var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+        var storeType = typeof(ReelDiscovery.Services.ApiKeyStore);
+
+        Assert.Empty(storeType.GetMember("MigrateLegacyKey", flags));
+        Assert.Empty(storeType.GetMember("LegacySettingsPath", flags));
+        Assert.Empty(storeType.GetMember("LegacySettingsFileName", flags));
+    }
+
+    [Fact]
+    public void Program_DoesNotMigrateLegacyKey()
+    {
+        var globalJson = FindGlobalJson();
+        Assert.NotNull(globalJson);
+        var program = File.ReadAllText(Path.Combine(Path.GetDirectoryName(globalJson!)!, "Program.cs"));
+
+        Assert.DoesNotContain("MigrateLegacyKey", program);
+        Assert.DoesNotContain("reeldiscovery.settings", program);
+        Assert.Contains("Application.Run(new WizardForm())", program);
+    }
+
     private static bool IsExcluded(string relativePath)
     {
         var parts = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

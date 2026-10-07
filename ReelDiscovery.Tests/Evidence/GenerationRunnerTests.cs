@@ -206,6 +206,17 @@ public partial class GenerationRunnerTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(0, 2_000)]
+    [InlineData(100, 2_000)]
+    [InlineData(300, 3_000)]
+    [InlineData(10_000, 60_000)]
+    public void ProjectionIntervalFor_IsTenTimesLastDuration_ClampedTo2And60Seconds(int lastMs, int expectedMs)
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(expectedMs),
+            GenerationRunner.ProjectionIntervalFor(TimeSpan.FromMilliseconds(lastMs)));
+    }
+
     [Fact]
     public async Task FullRun_WritesEveryCopy_KeyStoryJournalAndCheckpoints()
     {

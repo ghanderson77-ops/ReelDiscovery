@@ -144,6 +144,38 @@ public class GenerateCorpusStepTests
     }
 
     [Fact]
+    public void RunEnd_WritesQaReportsAfterNavigationIsBack()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Assert.Null(step.QaRun);
+
+            Pump(step.ClickStateActionAsync());
+
+            // Navigation is back before the QA pass is awaited (D-15: QA never blocks the user)
+            Assert.False(step.IsGenerating);
+            Assert.True(step.CanMoveNext);
+            Assert.NotNull(step.QaRun);
+
+            var changes = 0;
+            step.StateChanged += (s, e) => changes++;
+            Pump(step.QaRun!);
+
+            var store = new ReelDiscovery.Services.Qa.QaReportStore(h.Folder);
+            var scans = store.LoadScans();
+            Assert.NotNull(scans);
+            Assert.Equal(h.Plan.PlanId, scans!.PlanId);
+            Assert.True(scans.ScannedEmails > 0);
+            Assert.NotNull(store.LoadLeakage());
+            Assert.True(changes >= 1);
+        });
+    }
+
+    [Fact]
     public void Cancel_KeepsFinishedThreads_BannerOffersContinue_ContinueFinishes()
     {
         using var h = new Harness();

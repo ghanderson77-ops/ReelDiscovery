@@ -10,6 +10,7 @@ using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Services.Qa;
 
 namespace ReelDiscovery.UserControls;
 
@@ -481,6 +482,50 @@ public partial class StepGenerateCorpus : IWizardStep
             ShowDashboardFromDraft();
         RefreshHeader();
         RaiseStateChanged();
+
+        // D-15 / UI-SPEC U33: fresh QA reports after every run that started, fired after the UI is back so navigation and
+        // export never wait for them
+        if (result == null || result.Outcome != GenerationOutcome.None)
+            _ = RunQaAfterRunAsync(plan, folder);
+    }
+
+    /// <summary>
+    /// The end-of-run QA pass in flight (scans + leakage audit), or null before the first run end. Test seam.
+    /// </summary>
+    internal Task? QaRun { get; private set; }
+
+    // Cancelled when the step closes, so a QA pass never outlives the wizard
+    private readonly CancellationTokenSource _qaCts = new();
+
+    private Task RunQaAfterRunAsync(CorpusPlan plan, string folder)
+    {
+        var run = RunQaCoreAsync(plan, folder);
+        QaRun = run;
+        return run;
+    }
+
+    private async Task RunQaCoreAsync(CorpusPlan plan, string folder)
+    {
+        try
+        {
+            // Null overlay: QaRunner rebuilds it from the journal exactly as the answer-key projection does
+            // (GenerationRunState.BuildFullOverlay), off the UI thread
+            await QaRunner.RunEndOfRunAsync(Draft, plan, folder, null, _qaCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The step is closing; the next run end writes fresh reports
+            return;
+        }
+        catch (Exception)
+        {
+            // QA is report-only (D-15): a failure must never surface as a run error; the reports read as Not run
+            return;
+        }
+
+        // Case Summary reads the reports on entry; tell the shell the step's state moved on
+        if (!IsDisposed)
+            RaiseStateChanged();
     }
 
     private void DrainSnapshot()
@@ -1156,6 +1201,17 @@ public partial class StepGenerateCorpus : IWizardStep
             {
                 // The run already finished and released its token source; nothing to cancel
             }
+
+            // A QA pass never outlives the step; its reports are rewritten at the next run end
+            try
+            {
+                _qaCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // A second Dispose: the QA token was cancelled and released the first time
+            }
+            _qaCts.Dispose();
 
             // No snapshot is applied after the step is gone
             _refreshTimer.Stop();

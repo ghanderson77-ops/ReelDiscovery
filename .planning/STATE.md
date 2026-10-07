@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-20-PLAN.md
-last_updated: "2026-10-07T01:28:17.466Z"
+stopped_at: Completed 07-21-PLAN.md
+last_updated: "2026-10-07T01:49:55.805Z"
 last_activity: 2026-10-07
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 128
-  completed_plans: 126
-  percent: 98
+  completed_plans: 127
+  percent: 99
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 21 of 22
+Plan: 22 of 22
 Status: Ready to execute
 Last activity: 2026-10-07
 
@@ -177,6 +177,7 @@ Progress: [██████████] 99%
 | Phase 07 P19 | 9min | 2 tasks | 11 files |
 | Phase 07 P18 | 35min | 2 tasks | 7 files |
 | Phase 07 P20 | 15min | 2 tasks | 38 files |
+| Phase 07 P21 | 35min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -520,6 +521,9 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-18]: Move Case Folder... is disabled while a blind review runs
 - [Phase 07]: [07-20]: ApplyMediaAvailability removed outright (only legacy steps called it); case flow gates media via IsMediaAvailable/CreateMediaGenerator
 - [Phase 07]: [07-20]: Image model/quality live in Models/MediaSettings (WizardState.MediaSettings); Models/PresentationTheme.cs renamed to OrganizationTheme.cs
+- [Phase 07]: [07-21]: Key projection interval is adaptive: max(2 s, 10 x last per-thread projection), capped at 60 s; wave/run end always project
+- [Phase 07]: [07-21]: AnswerKeyXlsxWriter stays on the DOM API: 5K run peaks at ~360 MB live / ~465 MB batch (budget 1.5 GB)
+- [Phase 07]: [07-21]: Batch QuietPeriod 500 ms kept: measured wave start-up spread 36-38 ms
 
 ### Pending Todos
 
@@ -541,6 +545,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-07T01:28:17.460Z
-Stopped at: Completed 07-20-PLAN.md
+Last session: 2026-10-07T01:49:55.799Z
+Stopped at: Completed 07-21-PLAN.md
 Resume file: None

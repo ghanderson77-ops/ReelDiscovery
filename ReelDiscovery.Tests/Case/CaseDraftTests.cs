@@ -66,7 +66,6 @@ public class CaseDraftTests
     {
         var state = new WizardState();
 
-        Assert.Equal(WizardFlow.CaseDriven, state.Flow);
         Assert.NotNull(state.Case);
         Assert.Equal(ComplexityLevel.Standard, state.Case.Complexity);
     }

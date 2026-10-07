@@ -1,23 +1,72 @@
 using ReelDiscovery.Forms;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Tests.Render;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Case;
 
-// Covers WizardForm's flow table and Finish path without instantiating any form or control.
+/// <summary>
+/// Phase 7: one case-driven flow (D-21). Covers WizardForm's step list, close decisions and Finish path,
+/// and the removal of the flow choice (D-20).
+/// </summary>
 public class WizardFlowTests
 {
-    [Fact]
-    public void CaseDriven_StepTypes()
+    private static readonly Type[] CaseSteps =
     {
-        Assert.Equal(
-            new[]
-            {
-                typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
-                typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepCaseSummary)
-            },
-            WizardForm.StepTypesFor(WizardFlow.CaseDriven));
+        typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
+        typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepCaseSummary)
+    };
+
+    [Fact]
+    public void StepTypes_AreTheCaseFlow()
+    {
+        Assert.Equal(CaseSteps, WizardForm.StepTypes);
+    }
+
+    [Fact]
+    public void StepTypes_OpenOnApiThenCaseScenario()
+    {
+        // D-21: the app opens on API Configuration and Next leads to Case Scenario (recent cases)
+        Assert.Equal(typeof(StepApiConfiguration), WizardForm.StepTypes[0]);
+        Assert.Equal(typeof(StepCaseScenario), WizardForm.StepTypes[1]);
+    }
+
+    [Fact]
+    public void WizardFlowType_IsGone()
+    {
+        // D-20: no flow enum, no flow property on the state and no per-flow step table
+        var assembly = typeof(WizardForm).Assembly;
+        Assert.Null(assembly.GetType("ReelDiscovery.Models.WizardFlow"));
+        Assert.Null(typeof(WizardState).GetProperty("Flow"));
+        Assert.Null(typeof(WizardForm).GetMethod("StepTypesFor",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public));
+    }
+
+    [Fact]
+    public void WizardForm_NoLegacyStepReferences()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "Forms", "WizardForm.cs"));
+        foreach (var name in new[] { "StepTopicInput", "StepStorylines", "StepCharacters", "StepGenerationConfig", "typeof(StepGeneration)", "StepComplete" })
+            Assert.DoesNotContain(name, source);
+    }
+
+    [Fact]
+    public void ApiStep_HasNoWorkflowRows()
+    {
+        // S7: the Workflow header and radios (rows 13-14) are removed; the disclaimer row is last
+        RenderHarness.RunSta(() =>
+        {
+            using var step = new StepApiConfiguration();
+            Assert.Empty(AllControls(step).OfType<RadioButton>());
+            Assert.DoesNotContain(AllControls(step).OfType<Label>(), l => l.Text == "Workflow");
+
+            var layout = step.Controls.OfType<TableLayoutPanel>().Single();
+            Assert.Equal(13, layout.RowCount);
+            Assert.Equal(13, layout.RowStyles.Count);
+            var disclaimer = AllControls(step).OfType<Label>().Single(l => l.Text.StartsWith("NOTICE:", StringComparison.Ordinal));
+            Assert.Equal(12, layout.GetRow(disclaimer));
+        });
     }
 
     [Theory]
@@ -31,7 +80,7 @@ public class WizardFlowTests
     public void StepTypeForStage_MapsEveryStage(CaseStage stage, Type expected)
     {
         Assert.Equal(expected, WizardForm.StepTypeForStage(stage));
-        Assert.Contains(expected, WizardForm.StepTypesFor(WizardFlow.CaseDriven));
+        Assert.Contains(expected, WizardForm.StepTypes);
     }
 
     [Fact]
@@ -42,37 +91,21 @@ public class WizardFlowTests
     }
 
     [Fact]
-    public void CaseDriven_CorpusStepsSitBetweenGuideAndSummary()
+    public void CorpusStepsSitBetweenGuideAndSummary()
     {
         // D-12: Corpus Settings is step 5 of 8, Review Plan step 6 and Generate Corpus step 7 (UI-SPEC S4)
-        var types = WizardForm.StepTypesFor(WizardFlow.CaseDriven);
+        var types = WizardForm.StepTypes.ToList();
         Assert.Equal(8, types.Count);
-        Assert.Equal(4, types.ToList().IndexOf(typeof(StepCorpusSettings)));
-        Assert.Equal(5, types.ToList().IndexOf(typeof(StepReviewPlan)));
-        Assert.Equal(6, types.ToList().IndexOf(typeof(StepGenerateCorpus)));
-        Assert.Equal(7, types.ToList().IndexOf(typeof(StepCaseSummary)));
-    }
-
-    [Fact]
-    public void Legacy_StepTypes()
-    {
-        Assert.Equal(
-            new[]
-            {
-                typeof(StepApiConfiguration), typeof(StepTopicInput), typeof(StepStorylines), typeof(StepCharacters),
-                typeof(StepGenerationConfig), typeof(StepGeneration), typeof(StepComplete)
-            },
-            WizardForm.StepTypesFor(WizardFlow.Legacy));
+        Assert.Equal(4, types.IndexOf(typeof(StepCorpusSettings)));
+        Assert.Equal(5, types.IndexOf(typeof(StepReviewPlan)));
+        Assert.Equal(6, types.IndexOf(typeof(StepGenerateCorpus)));
+        Assert.Equal(7, types.IndexOf(typeof(StepCaseSummary)));
     }
 
     [Fact]
     public void AllStepTypes_AreWizardSteps()
     {
-        var types = WizardForm.StepTypesFor(WizardFlow.CaseDriven)
-            .Concat(WizardForm.StepTypesFor(WizardFlow.Legacy))
-            .Distinct();
-
-        foreach (var type in types)
+        foreach (var type in WizardForm.StepTypes)
         {
             Assert.True(typeof(IWizardStep).IsAssignableFrom(type), $"{type.Name} must implement IWizardStep");
             Assert.True(typeof(UserControl).IsAssignableFrom(type), $"{type.Name} must derive from UserControl");
@@ -95,6 +128,7 @@ public class WizardFlowTests
         Assert.True(validate >= 0, "BtnNext_Click must call ValidateStepAsync");
         Assert.True(close >= 0, "BtnNext_Click must close on Finish");
         Assert.True(validate < close, "ValidateStepAsync must run before this.Close()");
+        Assert.DoesNotContain("BuildSteps", body);
 
         // The discard prompt lives in OnFormClosing so Finish, Cancel and the window X all ask (WR-08)
         var closing = source.IndexOf("protected override void OnFormClosing", StringComparison.Ordinal);
@@ -108,6 +142,14 @@ public class WizardFlowTests
     }
 
     [Fact]
+    public void Cancel_ClosesWithoutLegacyPrompt()
+    {
+        // OnFormClosing saves and asks only when something would be lost (D-10); the legacy prompt is gone
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "Forms", "WizardForm.cs"));
+        Assert.DoesNotContain("Are you sure you want to cancel?", source);
+    }
+
+    [Fact]
     public void FormClosing_SavesInsteadOfDiscarding()
     {
         var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "Forms", "WizardForm.cs"));
@@ -118,51 +160,60 @@ public class WizardFlowTests
     }
 
     [Fact]
-    public void DecideClose_LegacyFlow_ClosesNow()
+    public void DecideClose_NullDraft_ClosesNow()
     {
-        var draft = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument() };
-        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(WizardFlow.Legacy, draft, runActive: false, saveSucceeded: false));
+        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(null!, runActive: false, saveSucceeded: false));
     }
 
     [Fact]
     public void DecideClose_EmptyDraft_ClosesNow()
     {
-        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(WizardFlow.CaseDriven, new CaseDraft(), false, true));
-        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(WizardFlow.CaseDriven, new CaseDraft { Scenario = "   " }, false, true));
+        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(new CaseDraft(), false, true));
+        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(new CaseDraft { Scenario = "   " }, false, true));
     }
 
     [Fact]
     public void DecideClose_TypedScenarioWithoutFolder_AsksC11()
     {
         var draft = new CaseDraft { Scenario = "A dispute." };
-        Assert.Equal(WizardForm.CloseDecision.AskUnsavedScenario, WizardForm.DecideClose(WizardFlow.CaseDriven, draft, false, true));
+        Assert.Equal(WizardForm.CloseDecision.AskUnsavedScenario, WizardForm.DecideClose(draft, false, true));
     }
 
     [Fact]
     public void DecideClose_SavedCase_ClosesWithoutPrompt()
     {
         var draft = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument(), FolderPath = @"C:\Cases\A" };
-        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(WizardFlow.CaseDriven, draft, false, saveSucceeded: true));
+        Assert.Equal(WizardForm.CloseDecision.CloseNow, WizardForm.DecideClose(draft, false, saveSucceeded: true));
     }
 
     [Fact]
     public void DecideClose_FailedSave_AsksC10()
     {
         var draft = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument(), FolderPath = @"C:\Cases\A" };
-        Assert.Equal(WizardForm.CloseDecision.AskFailedSave, WizardForm.DecideClose(WizardFlow.CaseDriven, draft, false, saveSucceeded: false));
+        Assert.Equal(WizardForm.CloseDecision.AskFailedSave, WizardForm.DecideClose(draft, false, saveSucceeded: false));
 
         // A core document whose folder could not be created is a failed save too
         var unsaved = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument() };
-        Assert.Equal(WizardForm.CloseDecision.AskFailedSave, WizardForm.DecideClose(WizardFlow.CaseDriven, unsaved, false, saveSucceeded: false));
+        Assert.Equal(WizardForm.CloseDecision.AskFailedSave, WizardForm.DecideClose(unsaved, false, saveSucceeded: false));
     }
 
     [Fact]
     public void DecideClose_RunActive_TakesPrecedence()
     {
         var saved = new CaseDraft { Scenario = "A dispute.", CoreDocument = new CoreDocument(), FolderPath = @"C:\Cases\A" };
-        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(WizardFlow.CaseDriven, saved, runActive: true, saveSucceeded: true));
-        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(WizardFlow.CaseDriven, saved, runActive: true, saveSucceeded: false));
-        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(WizardFlow.CaseDriven, new CaseDraft { Scenario = "A dispute." }, runActive: true, saveSucceeded: true));
+        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(saved, runActive: true, saveSucceeded: true));
+        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(saved, runActive: true, saveSucceeded: false));
+        Assert.Equal(WizardForm.CloseDecision.AskDuringRun, WizardForm.DecideClose(new CaseDraft { Scenario = "A dispute." }, runActive: true, saveSucceeded: true));
+    }
+
+    private static IEnumerable<Control> AllControls(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            yield return child;
+            foreach (var nested in AllControls(child))
+                yield return nested;
+        }
     }
 
     private static string FindRepoRoot()

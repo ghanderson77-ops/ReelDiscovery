@@ -16,6 +16,61 @@ namespace ReelDiscovery.Tests.Render;
 [Collection(RenderCollection.Name)]
 public class WizardShellRenderTests
 {
+    // D-21: the first screen after launch is API Configuration; dummy keys keep the step from reading the user's saved keys
+    [Fact]
+    public void Shell_ApiConfigurationStep()
+    {
+        RenderStep(0, "wizard-shell-api-configuration", "Step 1 of 8: API Configuration", "Next >", UseDummyKeys);
+    }
+
+    // D-21: Next from API Configuration leads to Case Scenario (recent cases)
+    [Fact]
+    public void Shell_CaseScenarioStep()
+    {
+        RenderStep(1, "wizard-shell-case-scenario", "Step 2 of 8: Describe the Case", "Next >", UseDummyKeys);
+    }
+
+    // S7 / DPI contract 32: with the Workflow rows gone the disclaimer is the last row and no blank gap follows it
+    [Fact]
+    public void ApiConfigurationStep_NoGapBelowDisclaimer()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                var gap = 0;
+                var tolerance = 0;
+                var result = RenderHarness.RenderControl(() =>
+                {
+                    var step = new StepApiConfiguration();
+                    var state = new WizardState();
+                    UseDummyKeys(state);
+                    step.BindState(state);
+                    return step;
+                }, "step-api-configuration", size, control =>
+                {
+                    ((StepApiConfiguration)control).OnEnterStepAsync().GetAwaiter().GetResult();
+                    control.PerformLayout();
+                    var layout = control.Controls.OfType<TableLayoutPanel>().Single();
+                    var disclaimer = Controls(layout).OfType<Label>().Single(l => l.Text.StartsWith("NOTICE:", StringComparison.Ordinal));
+                    gap = layout.Height - layout.Padding.Bottom - disclaimer.Bottom - disclaimer.Margin.Bottom;
+                    tolerance = control.LogicalToDeviceUnits(4);
+                });
+
+                Assert.True(File.Exists(result.PngPath), result.PngPath);
+                Assert.True(result.DeviceDpi >= RenderHarness.MinimumDpi, $"DPI {result.DeviceDpi}");
+                Assert.Empty(result.Clipping);
+                Assert.True(gap <= tolerance, $"{gap}px blank below the disclaimer at {size}");
+            }
+        });
+    }
+
+    private static void UseDummyKeys(WizardState state)
+    {
+        state.OpenAIApiKey = "sk-render-test";
+        state.AnthropicApiKey = "sk-ant-render-test";
+    }
+
     [Fact]
     public void Shell_CaseGuideStep()
     {

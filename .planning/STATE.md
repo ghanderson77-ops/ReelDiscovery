@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-10-08T23:05:50.232Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-10-08T23:10:42.926Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 131
-  percent: 88
+  completed_plans: 132
+  percent: 89
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 2 of 19
+Plan: 3 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-08
 
@@ -183,6 +183,7 @@ Progress: [██████████] 100%
 | Phase 07 P24 | 35 min | 3 tasks | 10 files |
 | Phase 07 P22 | 2 days | 4 tasks | 4 files |
 | Phase 08 P01 | 18min | 2 tasks | 14 files |
+| Phase 08 P02 | 12min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -540,6 +541,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-01: Missing discovery-documents.json loads as Missing with empty Reason, not a failure
 - [Phase 08]: 08-01: DiscoveryStore.FileNameFor caps names near 120 chars by truncating the case part first
 - [Phase 08]: 08-01: Test filter FullyQualifiedName~Discovery matches the whole suite (ReelDiscovery namespace); use ~Tests.Discovery.
+- [Phase 08]: 08-02: CounselDirectory.PartyOf returns null without a core document (parties live there)
+- [Phase 08]: 08-02: LitigationDraft adds defense witness CH-013 Michael Scott; five key witnesses with distinct KnownByIds fact counts (CH-003 7, CH-004 6, CH-001 5, CH-002 4, CH-013 3)
+- [Phase 08]: 08-02: MemoCriminalDraft adds party-3 United States (Complainant) and defense firm ORG-04 for Desert Bloom; Lane (individual party at Desert Bloom) has no firm of his own
 
 ### Pending Todos
 
@@ -561,6 +565,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T23:05:50.227Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-10-08T23:10:42.920Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None

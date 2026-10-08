@@ -270,7 +270,7 @@ Plans:
 
 Plans:
 - [x] 08-01-PLAN.md — Discovery models, CaseDraft v4 Discovery settings, sidecar store with safe docx paths, staleness stamp (Wave 1)
-- [ ] 08-02-PLAN.md — CounselDirectory (party/firm/partner lookup), shared Phase 8 fixtures and docx validation helper (Wave 1)
+- [x] 08-02-PLAN.md — CounselDirectory (party/firm/partner lookup), shared Phase 8 fixtures and docx validation helper (Wave 1)
 - [ ] 08-03-PLAN.md — CaseNumber + DepositionPlanner: witnesses, roles, dates, reporter, topic chunks, exhibit numbering (Wave 2)
 - [ ] 08-04-PLAN.md — WrittenDiscoveryPlanner: RFP/ROG/RFA slots keyed to issues/facts, parties, memo variants, titles (Wave 2)
 - [ ] 08-05-PLAN.md — CorpusDetector: usable-corpus probe, written-DocID exhibit candidates, ledger slice (Wave 2)

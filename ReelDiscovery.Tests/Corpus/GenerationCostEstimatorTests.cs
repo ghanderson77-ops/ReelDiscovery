@@ -336,6 +336,10 @@ public class GenerationCostEstimatorTests
     private static decimal B(AIModelConfig m, int input, int output) =>
         Cost(m, new TokenUsage { InputTokens = input, OutputTokens = output, IsBatch = true });
 
+    // WR-A12: a batched call is the base call at the batch rate plus the retry overhead at the live rate (D-10)
+    private static decimal BQ(AIModelConfig m, int input, int output) =>
+        B(m, input, output) + (1.15m - 1m) * L(m, input, output);
+
     [Fact]
     public void PriceWork_BatchTotal_RelevantLive_NonRelevantBatch()
     {
@@ -346,10 +350,10 @@ public class GenerationCostEstimatorTests
 
         // Amended D-07: relevant threads and their attachments run live; decoys and other non-relevant mail batch
         var batchStory = 10 * L(opus, 4_000, 450) * 1.15m + 2 * L(opus, 3_000, 1_500) * 1.15m
-                         + 4 * B(opus, 4_000, 450) * 1.15m;
+                         + 4 * BQ(opus, 4_000, 450);
 
         // Side world and voice cast never allow batching, so they are priced live
-        var batchVolume = 20 * B(haiku, 1_500, 300) * 1.15m + 3 * B(haiku, 800, 200) * 1.15m
+        var batchVolume = 20 * BQ(haiku, 1_500, 300) + 3 * BQ(haiku, 800, 200)
                           + L(haiku, 3_000, 1_200) * 1.15m + L(haiku, 2_500, 400) * 1.15m;
 
         Assert.Equal(batchStory, estimate.BatchStoryCost);
@@ -387,7 +391,7 @@ public class GenerationCostEstimatorTests
         work.LiveDocIds = new HashSet<string>(StringComparer.Ordinal) { "D-0001", "D-0002", "D-0003" };
         var repaired = GenerationCostEstimator.PriceWork(work, opus, haiku, Prices, true);
 
-        Assert.Equal(baseline.BatchVolumeCost + 3 * (L(haiku, 800, 200) - B(haiku, 800, 200)) * 1.15m,
+        Assert.Equal(baseline.BatchVolumeCost + 3 * (L(haiku, 800, 200) * 1.15m - BQ(haiku, 800, 200)),
             repaired.BatchVolumeCost);
         Assert.Equal(baseline.Total, repaired.Total);
     }

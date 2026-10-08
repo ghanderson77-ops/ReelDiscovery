@@ -270,10 +270,12 @@ public static class GenerationCostEstimator
             VolumeModelName = volume.DisplayName ?? string.Empty
         };
 
-        // D-17 batch side: count x (live or batch) price x QaOverhead, split by whether the call can be batched
+        // D-17 batch side: count x (live or batch) price x QaOverhead, split by whether the call can be batched. WR-A12: the
+        // overhead share of a batched call models retries, which D-10 always runs live, so only the base call gets the
+        // batch rate (the batch total still assumes no cache savings, UI-SPEC S1)
         decimal Split(AIModelConfig model, int count, int batchCount, int input, int output) =>
             (count - batchCount) * Price(model, input, output, false) * QaOverhead
-            + batchCount * Price(model, input, output, true) * QaOverhead;
+            + batchCount * (Price(model, input, output, true) + (QaOverhead - 1m) * Price(model, input, output, false));
 
         estimate.RelevantCost = storyMessages * Price(story, RelevantInputPerMessage, RelevantOutputPerMessage, false) * QaOverhead;
         estimate.OtherCost = volumeMessages * Price(volume, OtherInputPerMessage, OtherOutputPerMessage, false) * QaOverhead;

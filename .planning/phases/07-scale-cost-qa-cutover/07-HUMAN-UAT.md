@@ -1,5 +1,5 @@
 ---
-status: partial
+status: deferred
 phase: 07-scale-cost-qa-cutover
 source: [07-VERIFICATION.md]
 started: 2026-10-08T18:00:00
@@ -14,7 +14,7 @@ expected: |
   With an Anthropic key saved and tested on the API Configuration step, running
   REELDISCOVERY_LIVE_SPIKE=1 dotnet test ReelDiscovery.Tests/ReelDiscovery.Tests.csproj --filter "FullyQualifiedName~LiveSpike.LiveProviderSpikeTests.Anthropic"
   reports cache_creation / cache_read tokens on the second Sonnet evidence call; StablePrefixTokens (600, [ASSUMED]) is recalibrated if the measured prefix differs by >20% or is below the cache minimum.
-awaiting: user (needs an Anthropic key)
+awaiting: deferred by user 2026-10-08 ("not worry about Anthropic right now")
 
 ## Tests
 

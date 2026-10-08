@@ -282,5 +282,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 4. Corpus Plan & Answer Key | 22/22 | Complete    | 2026-10-03 |
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
-| 7. Scale, Cost, QA & Cutover | 24/24 | Ready for verification |  |
+| 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
 | 8. Ancillary Discovery Documents | 0/TBD | Not started | - |

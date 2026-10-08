@@ -276,6 +276,10 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Single(transport.Submissions[0]);
         Assert.All(responses, r => Assert.Equal("batch:same", r.Text));
         Assert.Empty(live.Requests);
+
+        // WR-A01: one billed item, so exactly one caller reports its tokens
+        Assert.Equal(1000, responses.Sum(r => r.InputTokens));
+        Assert.Equal(500, responses.Sum(r => r.OutputTokens));
     }
 
     // ----- live fallback (D-10) -----

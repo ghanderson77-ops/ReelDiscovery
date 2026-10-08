@@ -555,7 +555,7 @@ public class BatchingLlmProvider : ILlmProvider
             return delivery.Fatal;
 
         if (delivery.Result is { Outcome: BatchItemOutcome.Succeeded, Response: not null } result)
-            return Copy(result.Response, isBatch: true, withUsage: delivery.CarriesUsage);
+            return Copy(result.Response, isBatch: true, withUsage: delivery.TryTakeUsage());
 
         // D-10: errored, expired or cancelled items run live at full price
         return await SendLiveAsync(Live(request), ct);
@@ -1015,7 +1015,8 @@ public class BatchingLlmProvider : ILlmProvider
                 _available[result.CustomId] = new AvailableResult(batch.BatchId, _transport.Kind, result, batch.ModelFor(result.CustomId));
         }
 
-        // Consumed before the waiter completes, so a later Continue (or Regenerate) never reuses this result (D-09)
+        // Consumed before the waiter completes, so a later Continue (or Regenerate) never reuses this result (D-09).
+        // Known gap (WR-A01): a unit cancelled or killed after this line but before its journal line loses this result
         if (usable && waiters.Count > 0)
             await AppendConsumedAsync(batch.BatchId, result.CustomId);
 
@@ -1111,9 +1112,11 @@ public class BatchingLlmProvider : ILlmProvider
 
     private static void CompleteResult(List<TaskCompletionSource<Delivery>> waiters, BatchItemResult result)
     {
-        // Identical requests share one billed item: only the first caller reports its tokens
-        for (var i = 0; i < waiters.Count; i++)
-            waiters[i].TrySetResult(new Delivery { Result = result, CarriesUsage = i == 0 });
+        // Identical requests share one billed item: only one caller reports its tokens. WR-A01: the first caller that
+        // actually receives the result takes them, so a waiter cancelled meanwhile never drops the item's usage
+        var claim = new UsageClaim();
+        foreach (var waiter in waiters)
+            waiter.TrySetResult(new Delivery { Result = result, Claim = claim });
     }
 
     // ----- small helpers -----
@@ -1218,7 +1221,12 @@ public class BatchingLlmProvider : ILlmProvider
     {
         public BatchItemResult? Result { get; init; }
         public LlmProviderResponse? Fatal { get; init; }
-        public bool CarriesUsage { get; init; } = true;
+
+        // Shared by every waiter of one batch item; null when this delivery is the only one (it carries the usage)
+        public UsageClaim? Claim { get; init; }
+
+        /// <summary>True for exactly one caller of a shared item: the first that observes the result.</summary>
+        public bool TryTakeUsage() => Claim == null || Interlocked.Exchange(ref Claim.Taken, 1) == 0;
 
         public static Delivery Errored() =>
             new() { Result = new BatchItemResult { Outcome = BatchItemOutcome.Errored } };
@@ -1232,6 +1240,11 @@ public class BatchingLlmProvider : ILlmProvider
                 Message = string.IsNullOrWhiteSpace(message) ? "Provider batch rejected: " + kind : message
             }
         };
+    }
+
+    private sealed class UsageClaim
+    {
+        public int Taken;
     }
 
     private sealed class PendingItem

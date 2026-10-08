@@ -254,6 +254,24 @@ public class QaFindingsDialogTests
     }
 
     [Fact]
+    public void WRB02a_Regenerate_Cancelled_ShowsFooter_DoesNotThrow()
+    {
+        RunSta(() =>
+        {
+            using var dialog = Scans(ThreeRows(),
+                regenerate: _ => Task.FromException<ThreadInvalidationResult>(new TaskCanceledException("IO timeout")));
+            dialog.Confirm = (_, _) => true;
+            Select(dialog, 0);
+            dialog.RegenerateSelectedAsync().GetAwaiter().GetResult();
+
+            Assert.Equal(QaUiText.RegenerateFailed("the operation was cancelled"), dialog.FooterLabel.Text);
+            Assert.Equal(Theme.Danger, dialog.FooterLabel.ForeColor);
+            Assert.True(dialog.RegenerateButton.Enabled);
+            Assert.False(dialog.QueuedAny);
+        });
+    }
+
+    [Fact]
     public void OpenEmail_CallsDelegateWithDocId()
     {
         RunSta(() =>

@@ -440,7 +440,9 @@ public class QaFindingsDialog : Form
         }
         catch (OperationCanceledException)
         {
-            throw;
+            // WR-B02a: this runs from an async-void click handler, so a cancel (or an IO timeout surfacing as one) is a
+            // footer message, never a rethrow that would crash the app
+            ShowFooter(QaUiText.RegenerateFailed("the operation was cancelled"), Theme.Danger);
         }
         catch (Exception ex)
         {

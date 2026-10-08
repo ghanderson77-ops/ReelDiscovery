@@ -119,6 +119,16 @@ public static partial class CoreDocumentAssembler
 
     public static string BuildCaption(CoreDocument doc)
     {
+        var title = doc.Title.ToUpperInvariant();
+        if (doc.DocumentType == CoreDocumentType.Complaint && doc.DemandsJuryTrial && !title.Contains("JURY", StringComparison.Ordinal))
+            title += " AND DEMAND FOR JURY TRIAL";
+
+        // The core document keeps its pre-filing blank (D-24); discovery documents pass the assigned number
+        return BuildCaption(doc, "____________", title);
+    }
+
+    public static string BuildCaption(CoreDocument doc, string caseNumber, string title)
+    {
         // No presiding-officer line or name of any kind (Pitfall 11: avoids naming real people on the bench)
         var sb = new StringBuilder();
         var jurisdiction = doc.Jurisdiction;
@@ -137,7 +147,7 @@ public static partial class CoreDocumentAssembler
         sb.AppendLine();
 
         var caseNumberLabel = doc.DocumentType == CoreDocumentType.Petition ? "Cause No." : "Case No.";
-        sb.AppendLine($"v.                                        {caseNumberLabel} ____________");
+        sb.AppendLine($"v.                                        {caseNumberLabel} {caseNumber}");
         sb.AppendLine();
 
         foreach (var defendant in defendants)
@@ -145,9 +155,6 @@ public static partial class CoreDocumentAssembler
         sb.AppendLine(defendants.Count > 1 ? "    Defendants." : "    Defendant.");
         sb.AppendLine();
 
-        var title = doc.Title.ToUpperInvariant();
-        if (doc.DocumentType == CoreDocumentType.Complaint && doc.DemandsJuryTrial && !title.Contains("JURY", StringComparison.Ordinal))
-            title += " AND DEMAND FOR JURY TRIAL";
         sb.AppendLine(title);
 
         return sb.ToString();

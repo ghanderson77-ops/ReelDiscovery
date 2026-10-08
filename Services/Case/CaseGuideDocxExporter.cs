@@ -146,7 +146,8 @@ public static class CaseGuideDocxExporter
         }
     }
 
-    private static void WriteCaption(WordBuilder word, string caption)
+    // internal: reused by DiscoveryDocxBuilder
+    internal static void WriteCaption(WordBuilder word, string caption)
     {
         var lines = SplitLines(caption);
         var titleIndex = lines.FindLastIndex(l => l.Trim().Length > 0);
@@ -189,7 +190,8 @@ public static class CaseGuideDocxExporter
         }
     }
 
-    private static void WriteSignatureBlock(WordBuilder word, string block)
+    // internal: reused by DiscoveryDocxBuilder
+    internal static void WriteSignatureBlock(WordBuilder word, string block)
     {
         var lines = SplitLines(block);
         while (lines.Count > 0 && lines[^1].Trim().Length == 0)
@@ -449,9 +451,9 @@ public static class CaseGuideDocxExporter
         _ => "Individual"
     };
 
-    private static ParaFormat BodyFormat() => new() { FirstLine = 720, Align = JustificationValues.Both };
+    internal static ParaFormat BodyFormat() => new() { FirstLine = 720, Align = JustificationValues.Both };
 
-    private static ParaFormat Compact() => new() { SpaceAfter = 0 };
+    internal static ParaFormat Compact() => new() { SpaceAfter = 0 };
 
     // Assembler text uses AppendLine, so drop the empty entry after the final newline
     private static List<string> SplitLines(string text)

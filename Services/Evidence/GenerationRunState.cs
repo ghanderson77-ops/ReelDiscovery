@@ -542,13 +542,14 @@ public partial class GenerationRunState
     /// <summary>
     /// Cost of the work still to do: messages and attachments of threads not yet written, attachments to repair, the
     /// side-world call while filler is pending and none is journaled, and the voice-cast call while a voicemail is pending,
-    /// media is available and no voice set is journaled. batch selects the batch total (D-17) instead of the live one.
+    /// media is available and no voice set is journaled. batch selects the batch total (D-17, amended D-07: relevant threads,
+    /// repairs, side world and voice cast priced live) instead of the live one.
     /// </summary>
     public static decimal EstimateRemaining(CorpusPlan plan, GenerationRunState state, AIModelConfig? story,
         AIModelConfig? volume, MediaPrices prices, bool mediaAvailable, CaseGuide? guide = null, bool batch = false)
     {
-        var work = new PricedWork { Guide = guide };
         var repairs = new HashSet<string>(state.AttachmentsToRepair(plan, mediaAvailable), StringComparer.Ordinal);
+        var work = new PricedWork { Guide = guide, LiveDocIds = repairs };
         foreach (var thread in GenerationThreads(plan))
         {
             var done = state.IsDone(thread.Id);

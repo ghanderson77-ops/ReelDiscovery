@@ -36,10 +36,10 @@ public class CostEstimate
     // Live total: text with the expected prompt-cache effect, plus media
     public decimal Total { get; set; }
 
-    // Story-model text at batch prices with no cache reads (D-17; conservative, research Pattern 5)
+    // Story-model text in batch mode: relevant threads and their attachments at live prices (amended D-07), decoys at batch prices with no cache reads
     public decimal BatchStoryCost { get; set; }
 
-    // Volume-model text at batch prices with no cache reads, including the side-world and voice-cast calls
+    // Volume-model text in batch mode: non-relevant mail at batch prices; side-world, voice-cast and repairs live
     public decimal BatchVolumeCost { get; set; }
 
     // Batch total: BatchStoryCost + BatchVolumeCost + MediaCost (media is always priced live)
@@ -60,6 +60,9 @@ public class PricedWork
     public bool IncludeSideWorld { get; set; }
     public bool IncludeVoiceCast { get; set; }
     public CaseGuide? Guide { get; set; }
+
+    /// <summary>Attachment doc ids that run live even in batch mode (repairs, revision 1 W9); priced live in the batch total.</summary>
+    public HashSet<string> LiveDocIds { get; set; } = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Every planned message and attachment; the side world when any non-relevant thread has messages, the voice cast
@@ -178,7 +181,8 @@ public static class GenerationCostEstimator
     /// <summary>
     /// The single pricing path for the Ready card and the remaining-cost line (review 06-15). Rich Office attachments
     /// (IsRichAttachment) use document tokens; other Office attachments and invites use small-attachment tokens on their
-    /// parent's tier. Unavailable media prices images, voicemail and the voice-cast call at 0.
+    /// parent's tier. Unavailable media prices images, voicemail and the voice-cast call at 0. D-17: every text line is
+    /// priced live and in batch mode; relevant work is live in both totals (amended D-07).
     /// </summary>
     public static CostEstimate PriceWork(PricedWork work, AIModelConfig? storyModel, AIModelConfig? volumeModel,
         MediaPrices prices, bool mediaAvailable)
@@ -190,19 +194,35 @@ public static class GenerationCostEstimator
 
         prices ??= MediaPrices.Defaults();
 
+        // Amended D-07: relevant threads run live even in batch mode, so only non-relevant work is batch-eligible
         var storyMessages = 0;
+        var storyMessagesBatch = 0;
         var volumeMessages = 0;
+        var volumeMessagesBatch = 0;
         foreach (var (thread, _) in (work.Messages ?? new()).Where(m => m.Thread != null && m.Message != null))
         {
+            var batchable = thread.Relevance != ThreadRelevance.Relevant;
             if (IsStoryTier(thread))
+            {
                 storyMessages++;
+                if (batchable)
+                    storyMessagesBatch++;
+            }
             else
+            {
                 volumeMessages++;
+                if (batchable)
+                    volumeMessagesBatch++;
+            }
         }
 
+        var liveDocIds = work.LiveDocIds ?? new HashSet<string>(StringComparer.Ordinal);
         var storyDocuments = 0;
+        var storyDocumentsBatch = 0;
         var storySmall = 0;
+        var storySmallBatch = 0;
         var volumeSmall = 0;
+        var volumeSmallBatch = 0;
         var images = 0;
         var voicemails = 0;
         foreach (var (thread, parent, attachment) in (work.Attachments ?? new())
@@ -220,13 +240,27 @@ public static class GenerationCostEstimator
                 continue;
             }
 
+            // Repairs run live (revision 1 W9)
+            var batchable = thread.Relevance != ThreadRelevance.Relevant && !liveDocIds.Contains(attachment.DocId ?? string.Empty);
             var office = attachment.Kind is AttachmentType.Word or AttachmentType.Excel or AttachmentType.PowerPoint;
             if (!IsStoryTier(thread))
+            {
                 volumeSmall++;
+                if (batchable)
+                    volumeSmallBatch++;
+            }
             else if (office && IsRichAttachment(thread, parent, work.Guide))
+            {
                 storyDocuments++;
+                if (batchable)
+                    storyDocumentsBatch++;
+            }
             else
+            {
                 storySmall++;
+                if (batchable)
+                    storySmallBatch++;
+            }
         }
 
         // D-12: filler has V1/V5 checks only, so no length retries to price
@@ -236,17 +270,10 @@ public static class GenerationCostEstimator
             VolumeModelName = volume.DisplayName ?? string.Empty
         };
 
-        // D-17: every text line is priced live (with the cache term) and at batch prices (no cache reads)
-        decimal StoryText(bool batch) =>
-            storyMessages * Price(story, RelevantInputPerMessage, RelevantOutputPerMessage, batch) * QaOverhead
-            + storyDocuments * Price(story, DocumentInput, DocumentOutput, batch) * QaOverhead
-            + storySmall * Price(story, SmallAttachmentInput, SmallAttachmentOutput, batch) * QaOverhead;
-
-        decimal VolumeText(bool batch, bool voiceCast) =>
-            volumeMessages * Price(volume, OtherInputPerMessage, OtherOutputPerMessage, batch) * QaOverhead
-            + volumeSmall * Price(volume, SmallAttachmentInput, SmallAttachmentOutput, batch) * QaOverhead
-            + (work.IncludeSideWorld ? Price(volume, SideWorldInputTokens, SideWorldOutputTokens, batch) * QaOverhead : 0m)
-            + (voiceCast ? Price(volume, VoiceCastInputTokens, VoiceCastOutputTokens, batch) * QaOverhead : 0m);
+        // D-17 batch side: count x (live or batch) price x QaOverhead, split by whether the call can be batched
+        decimal Split(AIModelConfig model, int count, int batchCount, int input, int output) =>
+            (count - batchCount) * Price(model, input, output, false) * QaOverhead
+            + batchCount * Price(model, input, output, true) * QaOverhead;
 
         estimate.RelevantCost = storyMessages * Price(story, RelevantInputPerMessage, RelevantOutputPerMessage, false) * QaOverhead;
         estimate.OtherCost = volumeMessages * Price(volume, OtherInputPerMessage, OtherOutputPerMessage, false) * QaOverhead;
@@ -272,8 +299,14 @@ public static class GenerationCostEstimator
         estimate.VolumeCost = estimate.OtherCost + volumeAttachments + estimate.SideWorldCost + estimate.VoiceCastCost;
         estimate.Total = estimate.StoryCost + estimate.VolumeCost + estimate.MediaCost;
 
-        estimate.BatchStoryCost = StoryText(true);
-        estimate.BatchVolumeCost = VolumeText(true, voiceCast);
+        estimate.BatchStoryCost = Split(story, storyMessages, storyMessagesBatch, RelevantInputPerMessage, RelevantOutputPerMessage)
+                                  + Split(story, storyDocuments, storyDocumentsBatch, DocumentInput, DocumentOutput)
+                                  + Split(story, storySmall, storySmallBatch, SmallAttachmentInput, SmallAttachmentOutput);
+
+        // Side-world and voice-cast requests never allow batching, so they are priced live
+        estimate.BatchVolumeCost = Split(volume, volumeMessages, volumeMessagesBatch, OtherInputPerMessage, OtherOutputPerMessage)
+                                   + Split(volume, volumeSmall, volumeSmallBatch, SmallAttachmentInput, SmallAttachmentOutput)
+                                   + estimate.SideWorldCost + estimate.VoiceCastCost;
         estimate.BatchTotal = estimate.BatchStoryCost + estimate.BatchVolumeCost + estimate.MediaCost;
         return estimate;
     }

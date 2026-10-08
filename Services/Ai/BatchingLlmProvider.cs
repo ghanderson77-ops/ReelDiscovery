@@ -488,7 +488,12 @@ public class BatchingLlmProvider : ILlmProvider
         var startFlush = false;
         lock (_lock)
         {
-            if (_available.Remove(id, out var found))
+            if (_cts.IsCancellationRequested)
+            {
+                // WR-A04: Detach ran after the unlocked check above; its stranded-waiter sweep would miss a new waiter
+                goLive = true;
+            }
+            else if (_available.Remove(id, out var found))
             {
                 ready = found;
             }
@@ -672,6 +677,8 @@ public class BatchingLlmProvider : ILlmProvider
             // Detached while submitting: whatever was not submitted runs live
             if (taken != null)
                 ReleaseUnsubmitted(taken);
+            else
+                ReleaseQueue(label);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1090,6 +1097,21 @@ public class BatchingLlmProvider : ILlmProvider
         }
 
         Complete(waiters, delivery);
+    }
+
+    // WR-A04: detached before the flush took the queue; anyone still queued under this label runs live
+    private void ReleaseQueue(string label)
+    {
+        List<PendingItem> queued;
+        lock (_lock)
+        {
+            if (!_queues.Remove(label, out var queue))
+                return;
+
+            queued = queue.Items.ToList();
+        }
+
+        ReleaseItems(queued, Delivery.Errored());
     }
 
     private void ReleaseUnsubmitted(List<PendingItem> taken)

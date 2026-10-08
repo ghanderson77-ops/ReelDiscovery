@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-10-08T23:21:22.171Z"
+stopped_at: Completed 08-04-PLAN.md
+last_updated: "2026-10-08T23:29:06.511Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 133
-  percent: 89
+  completed_plans: 134
+  percent: 90
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 4 of 19
+Plan: 5 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-08
 
@@ -185,6 +185,7 @@ Progress: [██████████] 100%
 | Phase 08 P01 | 18min | 2 tasks | 14 files |
 | Phase 08 P02 | 12min | 2 tasks | 4 files |
 | Phase 08 P03 | 9min | 2 tasks | 5 files |
+| Phase 08 P04 | 20min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -549,6 +550,10 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-03: A witness with existing sidecar exhibit assignments reuses only those; new numbers start after the highest valid existing number (unselected witnesses included)
 - [Phase 08]: 08-03: Exhibits are selected by rank (hot, significance, date) but numbered in transcript order (topic, date); the impeachment tag follows selection rank
 - [Phase 08]: 08-03: A usable corpus with no qualifying emails yields zero exhibits (no canonical fallback)
+- [Phase 08]: 08-04: RFA order treats Hot and Key as one tier ahead of Supporting, then date, then id
+- [Phase 08]: 08-04: Memo file document part is {PropoundingShort}'s {memo label}; civil is {Short}'s First Set of ...
+- [Phase 08]: 08-04: ROG persons-with-knowledge slots shrink to keep at least one contention slot; excess issues are dealt round-robin heaviest first into shared contention slots
+- [Phase 08]: 08-04: RFP/ROG custodians are Key Party/Staff/InHouseCounsel characters of the responding party who act in or know the issue's facts
 
 ### Pending Todos
 
@@ -570,6 +575,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T23:21:22.166Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-10-08T23:29:06.505Z
+Stopped at: Completed 08-04-PLAN.md
 Resume file: None

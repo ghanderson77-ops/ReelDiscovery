@@ -1184,4 +1184,38 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Empty(live.Requests);
         Assert.True(new BatchLedger(_folder).Replay().IsConsumed("batch_new", IdOf(Req("a"))));
     }
+
+    [Fact]
+    public async Task CRA03_PriceOrphans_HasNoSideEffects_UntilMarkedBilled()
+    {
+        // A collected result nobody consumed
+        await RegeneratedLedgerAsync(collectSecond: true);
+        var model = new AIModelConfig
+        {
+            ModelId = "gpt-test",
+            InputTokenPricePerMillion = 2m,
+            OutputTokenPricePerMillion = 8m,
+            BatchDiscountPercent = 50m
+        };
+        var provider = Create(Live(), Transport(), priceLookup: _ => model);
+
+        var bill = provider.PriceOrphans();
+        var expected = model.CalculateCost(new TokenUsage { InputTokens = 1000, OutputTokens = 500, IsBatch = true });
+        Assert.Equal(expected.TotalUsd, bill.Cost.TotalUsd);
+        Assert.Equal(new[] { "batch_new" }, bill.ItemsByBatch.Keys);
+
+        // Not marked yet: the ledger has no OrphansBilled line, and a restart (RunEnded never written) still prices it
+        Assert.Empty(new BatchLedger(_folder).Replay().OrphansBilledIds);
+        provider.Detach();
+        var restarted = Create(Live(), Transport(), priceLookup: _ => model);
+        var again = restarted.PriceOrphans();
+        Assert.Equal(expected.TotalUsd, again.Cost.TotalUsd);
+
+        // Marked after the journal commit: billed once, never again
+        await restarted.MarkOrphansBilledAsync(again).WaitAsync(Wait);
+        Assert.Contains("batch_new", new BatchLedger(_folder).Replay().OrphansBilledIds);
+        Assert.True(restarted.PriceOrphans().IsEmpty);
+        restarted.Detach();
+        Assert.True(Create(Live(), Transport(), priceLookup: _ => model).PriceOrphans().IsEmpty);
+    }
 }

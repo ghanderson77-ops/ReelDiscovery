@@ -529,11 +529,12 @@ public class GenerationRunner
                 snapshot.SetStage(GenerationStage.Stopping);
 
             // D-10: results collected but never used are still billed; RunEnded carries them once (OrphansBilled)
+            OrphanBill? orphans = null;
             if (outcome == GenerationOutcome.Finished && batch != null)
             {
                 // Amended D-07: wave batches an earlier build submitted are never consumed now; close them so Continue never waits on them (the provider may still bill items it completed; that spend is not itemized)
                 await CloseStaleWaveBatchesAsync(batch, snapshot).ConfigureAwait(false);
-                await AddOrphanSpendAsync(ctx, batch).ConfigureAwait(false);
+                orphans = AddOrphanSpend(ctx, batch);
             }
 
             try
@@ -552,6 +553,10 @@ public class GenerationRunner
                     Message = message
                 };
             }
+
+            // CR-A03: the journal is the commit point; orphans are marked billed only once RunEnded carries their spend
+            if (orphans != null && batch != null && ctx.RunEndedAppended)
+                await MarkOrphansBilledAsync(batch, orphans).ConfigureAwait(false);
 
             // Always runs, so the snapshot never stays "running" without a RunEnded event
             FinishSnapshot(snapshot, final, outcome, message);
@@ -1124,21 +1129,40 @@ public class GenerationRunner
         }
     }
 
-    // D-10 + T-07-36: orphan spend joins the unjournaled spend RunEnded carries; BillOrphansAsync returns it only once
-    private static async Task AddOrphanSpendAsync(RunContext ctx, BatchingLlmProvider batch)
+    // D-10 + T-07-36: orphan spend joins the unjournaled spend RunEnded carries. CR-A03: priced without side effects; the
+    // batches are marked billed only after RunEnded is appended, so a failed append leaves them for the next finished run
+    private static OrphanBill? AddOrphanSpend(RunContext ctx, BatchingLlmProvider batch)
     {
         try
         {
-            var orphan = await batch.BillOrphansAsync(CancellationToken.None).ConfigureAwait(false);
-            if (orphan.Cost.TotalUsd > 0)
+            var orphan = batch.PriceOrphans();
+            if (orphan.IsEmpty)
+                return null;
+
+            if (orphan.Cost.TotalUsd > 0 || orphan.InputTokens > 0 || orphan.OutputTokens > 0)
             {
                 ctx.AddUnjournaledSpend(orphan.Cost, 0m, orphan.InputTokens, orphan.OutputTokens);
                 ctx.Snapshot.AddCost(orphan.Cost.TotalUsd);
             }
+
+            return orphan;
         }
         catch (Exception)
         {
-            // RunAsync never throws; an unbilled orphan stays in the ledger and the next finished run bills it
+            // RunAsync never throws; an unpriced orphan stays unbilled in the ledger and the next finished run bills it
+            return null;
+        }
+    }
+
+    private static async Task MarkOrphansBilledAsync(BatchingLlmProvider batch, OrphanBill orphans)
+    {
+        try
+        {
+            await batch.MarkOrphansBilledAsync(orphans, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // RunAsync never throws; RunEnded already carries the spend, so at worst a later run reports it again (over, never under)
         }
     }
 
@@ -1162,6 +1186,7 @@ public class GenerationRunner
                 MediaCostUsd = media,
                 CostDetail = detail
             }, CancellationToken.None).ConfigureAwait(false);
+            ctx.RunEndedAppended = true;
         }
         catch (Exception)
         {
@@ -1423,6 +1448,9 @@ public class GenerationRunner
         public NarrativeLedger StartLedger { get; set; } = new();
 
         public SemaphoreSlim ProjectionGate { get; } = new(1, 1);
+
+        // CR-A03: set once the final RunEnded line (with the unjournaled and orphan spend) is flushed
+        public bool RunEndedAppended { get; set; }
 
         // Last projection that came from a readable journal; read and written only under ProjectionGate
         public GenerationRunState LastGoodState { get; set; } = new();

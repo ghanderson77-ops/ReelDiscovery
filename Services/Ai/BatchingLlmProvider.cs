@@ -54,6 +54,21 @@ public class BatchStatusEvent
 }
 
 /// <summary>
+/// Orphan spend priced by <see cref="BatchingLlmProvider.PriceOrphans"/> and not yet marked billed (CR-A03).
+/// </summary>
+public class OrphanBill
+{
+    public CostBreakdown Cost { get; } = new();
+    public int InputTokens { get; set; }
+    public int OutputTokens { get; set; }
+
+    /// <summary>Priced custom ids per batch id; MarkOrphansBilledAsync marks these batches billed.</summary>
+    public Dictionary<string, List<string>> ItemsByBatch { get; } = new(StringComparer.Ordinal);
+
+    public bool IsEmpty => ItemsByBatch.Count == 0;
+}
+
+/// <summary>
 /// Transparent provider batching (RUN-03, D-01): an <see cref="ILlmProvider"/> decorator behind LlmGateway. First attempts
 /// that allow batching queue per <see cref="BatchStage"/> label and flush as one provider batch after a quiet period;
 /// units keep awaiting <see cref="SendAsync"/> exactly as in live mode. Everything that cannot be answered from a batch
@@ -161,9 +176,22 @@ public class BatchingLlmProvider : ILlmProvider
 
     /// <summary>
     /// Prices collected results of this plan that no unit consumed (still billed by the provider) with the catalog model at
-    /// batch prices, appends OrphansBilled per batch and returns the spend. A second call returns zero (T-07-26).
+    /// batch prices, appends OrphansBilled per batch and returns the spend. A second call returns zero (T-07-26). The run
+    /// uses <see cref="PriceOrphans"/> and <see cref="MarkOrphansBilledAsync"/> instead, so the journal commits first (CR-A03).
     /// </summary>
     public async Task<(CostBreakdown Cost, int InputTokens, int OutputTokens)> BillOrphansAsync(CancellationToken ct = default)
+    {
+        var bill = PriceOrphans();
+        await MarkOrphansBilledAsync(bill, ct);
+        return (bill.Cost, bill.InputTokens, bill.OutputTokens);
+    }
+
+    /// <summary>
+    /// Prices collected results of this plan that no unit consumed, without side effects: nothing is written and the
+    /// results stay available. Call <see cref="MarkOrphansBilledAsync"/> only after the spend is journaled (CR-A03), so a
+    /// failed or killed RunEnded leaves the orphans for the next finished run to bill.
+    /// </summary>
+    public OrphanBill PriceOrphans()
     {
         List<IGrouping<string, KeyValuePair<string, AvailableResult>>> groups;
         lock (_lock)
@@ -173,14 +201,12 @@ public class BatchingLlmProvider : ILlmProvider
                 .ToList();
         }
 
-        var total = new CostBreakdown();
-        var input = 0;
-        var output = 0;
+        var bill = new OrphanBill();
         foreach (var group in groups)
         {
-            ct.ThrowIfCancellationRequested();
-
             var cost = new CostBreakdown();
+            var input = 0;
+            var output = 0;
             foreach (var (_, orphan) in group)
             {
                 var usage = orphan.Result.Response!.ToUsage();
@@ -191,6 +217,32 @@ public class BatchingLlmProvider : ILlmProvider
                 output += usage.OutputTokens;
             }
 
+            bill.Cost.Add(cost);
+            bill.InputTokens += input;
+            bill.OutputTokens += output;
+            bill.ItemsByBatch[group.Key] = group.Select(kv => kv.Key).ToList();
+        }
+
+        return bill;
+    }
+
+    /// <summary>
+    /// Appends OrphansBilled for every batch of <paramref name="bill"/> and stops serving its results, so neither this nor
+    /// a later session bills them again. Call after the spend is journaled (CR-A03). A batch already marked is skipped.
+    /// </summary>
+    public async Task MarkOrphansBilledAsync(OrphanBill bill, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(bill);
+
+        foreach (var (batchId, ids) in bill.ItemsByBatch)
+        {
+            ct.ThrowIfCancellationRequested();
+            lock (_lock)
+            {
+                if (_orphansBilled.Contains(batchId))
+                    continue;
+            }
+
             try
             {
                 await _ledger.AppendAsync(new BatchLedgerRecord
@@ -198,26 +250,26 @@ public class BatchingLlmProvider : ILlmProvider
                     Type = BatchLedgerRecordType.OrphansBilled,
                     Utc = Now(),
                     Provider = _transport.Kind,
-                    BatchId = group.Key,
+                    BatchId = batchId,
                     PlanId = _planId
                 }, ct);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // The spend is still reported now; without the line a later session may report it again (over, never under)
+                // The spend is already journaled; without the line a later session may report it again (over, never under)
             }
 
             lock (_lock)
             {
-                foreach (var (id, _) in group)
-                    _available.Remove(id);
-                _orphansBilled.Add(group.Key);
+                foreach (var id in ids)
+                {
+                    if (_available.TryGetValue(id, out var found) && found.BatchId == batchId)
+                        _available.Remove(id);
+                }
+
+                _orphansBilled.Add(batchId);
             }
-
-            total.Add(cost);
         }
-
-        return (total, input, output);
     }
 
     /// <summary>

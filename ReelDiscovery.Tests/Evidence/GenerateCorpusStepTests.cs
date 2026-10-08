@@ -918,6 +918,44 @@ public class GenerateCorpusStepTests
     }
 
     [Fact]
+    public void WRB05_StartOver_StopsTheQaPassFirst_SoItsReportIsNotWrittenAfterTheReset()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var stopped = false;
+            // A QA pass that is still running when Start Over is clicked and saves its report as it stops
+            step.QaPassOverride = async (plan, folder, ct) =>
+            {
+                try
+                {
+                    await Task.Delay(System.Threading.Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    stopped = true;
+                }
+
+                await Task.Delay(50);
+                new ReelDiscovery.Services.Qa.QaReportStore(folder).SaveScans(new ReelDiscovery.Models.Qa.ScanReport { PlanId = plan.PlanId });
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+            Assert.NotNull(step.QaRun);
+            Assert.False(step.QaRun!.IsCompleted);
+
+            Pump(step.ClickStartOverAsync());
+
+            Assert.True(stopped);
+            Assert.True(step.QaRun.IsCompleted);
+            Assert.False(File.Exists(new ReelDiscovery.Services.Qa.QaReportStore(h.Folder).ScansPath));
+            Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+        });
+    }
+
+    [Fact]
     public void StartOver_CancelFailure_StillClears_WithWarning()
     {
         using var h = new Harness();

@@ -424,6 +424,9 @@ public partial class StepGenerateCorpus : IWizardStep
         GenerationRunResult? result = null;
         try
         {
+            // WR-B05: a QA pass of the previous run must not write its reports while this run changes the journal
+            await StopQaAsync();
+
             var runner = new GenerationRunner(gateway);
             // PROV-06: media only with a tested OpenAI key this session; a media stop never ends the run (UI-SPEC Decision 2).
             // The run keeps its own copy of the prices, so editing them mid-run never changes its estimate or ticker
@@ -497,24 +500,37 @@ public partial class StepGenerateCorpus : IWizardStep
     // Cancelled when the step closes, so a QA pass never outlives the wizard
     private readonly CancellationTokenSource _qaCts = new();
 
+    /// <summary>Test seam: replaces the end-of-run QA pass (plan, case folder, token).</summary>
+    internal Func<CorpusPlan, string, CancellationToken, Task>? QaPassOverride;
+
+    // WR-B05: the QA pass in flight; Start Over and a new run cancel it and wait, so it never writes reports afterwards
+    private CancellationTokenSource? _qaRunCts;
+
     private Task RunQaAfterRunAsync(CorpusPlan plan, string folder)
     {
-        var run = RunQaCoreAsync(plan, folder);
+        // A newer run end supersedes a pass still in flight
+        CancelQaRun();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(_qaCts.Token);
+        _qaRunCts = cts;
+        var run = RunQaCoreAsync(plan, folder, cts);
         QaRun = run;
         return run;
     }
 
-    private async Task RunQaCoreAsync(CorpusPlan plan, string folder)
+    private async Task RunQaCoreAsync(CorpusPlan plan, string folder, CancellationTokenSource cts)
     {
         try
         {
             // Null overlay: QaRunner rebuilds it from the journal exactly as the answer-key projection does
             // (GenerationRunState.BuildFullOverlay), off the UI thread
-            await QaRunner.RunEndOfRunAsync(Draft, plan, folder, null, _qaCts.Token);
+            if (QaPassOverride != null)
+                await QaPassOverride(plan, folder, cts.Token);
+            else
+                await QaRunner.RunEndOfRunAsync(Draft, plan, folder, null, cts.Token);
         }
         catch (OperationCanceledException)
         {
-            // The step is closing; the next run end writes fresh reports
+            // The step is closing, or Start Over / a new run stopped it; the next run end writes fresh reports
             return;
         }
         catch (Exception)
@@ -522,10 +538,49 @@ public partial class StepGenerateCorpus : IWizardStep
             // QA is report-only (D-15): a failure must never surface as a run error; the reports read as Not run
             return;
         }
+        finally
+        {
+            if (ReferenceEquals(_qaRunCts, cts))
+                _qaRunCts = null;
+            cts.Dispose();
+        }
 
         // Case Summary reads the reports on entry; tell the shell the step's state moved on
         if (!IsDisposed)
             RaiseStateChanged();
+    }
+
+    private void CancelQaRun()
+    {
+        try
+        {
+            _qaRunCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The pass already finished and released its token source
+        }
+    }
+
+    /// <summary>
+    /// WR-B05: cancels the end-of-run QA pass and waits for it, so it cannot save reports over a reset or a new run.
+    /// Never throws: QA is report-only.
+    /// </summary>
+    private async Task StopQaAsync()
+    {
+        CancelQaRun();
+        var run = QaRun;
+        if (run == null)
+            return;
+
+        try
+        {
+            await run;
+        }
+        catch (Exception)
+        {
+            // RunQaCoreAsync catches everything itself; nothing a report pass does may block Start Over or a run
+        }
     }
 
     private void DrainSnapshot()
@@ -841,6 +896,11 @@ public partial class StepGenerateCorpus : IWizardStep
         var useBatch = CaseUseBatch;
         try
         {
+            // WR-B05: an end-of-run QA pass still reading the old journal must not save reports after the reset
+            await StopQaAsync();
+            if (IsDisposed)
+                return;
+
             var cancelFailed = false;
             if (pending > 0)
                 cancelFailed = !await CancelPendingBatchesAsync(folder);

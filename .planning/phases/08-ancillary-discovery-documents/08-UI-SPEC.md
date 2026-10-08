@@ -1,7 +1,8 @@
 ---
 phase: 8
 slug: ancillary-discovery-documents
-status: draft
+status: approved
+reviewed_at: 2026-10-08
 shadcn_initialized: false
 preset: none
 created: 2026-10-08
@@ -56,7 +57,7 @@ Identical to Phase 5/6/7 (multiples of 4, mapped to `Theme` constants). No new v
 |-------|-------|----------------|---------------------|
 | xs | 4px | — | Hint line under a field row (top 4); gap between the estimate line and the status line; dialog caption-to-field gap |
 | sm | 8px | `SmallGap` | Gap between buttons; label-to-field gap; card header bottom margin; row gap inside the Written discovery card; header bottom margin |
-| sm+ | 12px | — | Case Summary row padding and group-heading top padding (inherited, approved deviation); dialog checkbox / warning top margin (inherited from `RegenerateTabDialog`) |
+| sm+ | 12px | — | Case Summary row padding and group-heading top padding (inherited, approved deviation); dialog checkbox / warning top margin (inherited from `RegenerateTabDialog`); Documents card divider top and bottom margin (Card 3 row 4) |
 | md | 16px | `Gap`, `CardPadding` | Card padding; gap between the three cards; gap between section blocks inside a card; dialog body bottom margin |
 | lg | 24px | `PageMargin` | Shell page margin; `ThemedDialog` padding |
 | xl | 32px | — | Not used |
@@ -167,7 +168,7 @@ Accent is never used for links, headings, card borders, captions, the witness `F
 | Column | Header | Width | Content |
 |--------|--------|-------|---------|
 | Check | (blank) | 28 | `DataGridViewCheckBoxColumn`, centered. Toggled by click or Space; commits on click (`CurrentCellDirtyStateChanged` → `CommitEdit`) |
-| `Witness` | `Witness` | Fill (min 100) | Full name exactly as in the cast |
+| `Witness` | `Witness` | Fill (min 96) | Full name exactly as in the cast |
 | `Side` | `Side` | 80 | civil `Plaintiff` / `Defense` / `Non-party`; memo `Complainant` / `Subject` / `Non-party` |
 | `Facts` | `Facts` | 52 | `{n:N0}`, right-aligned |
 
@@ -241,7 +242,7 @@ Accent is never used for links, headings, card borders, captions, the witness `F
 | Column | Header | Width | Content |
 |--------|--------|-------|---------|
 | Dot | (blank) | 28 | `Theme.DrawStatusDot`, tone per the status table |
-| `Document` | `Document` | Fill (min 120) | Short title, `DiscoveryUiText.ShortTitle(...)`: `Deposition of {Full Name}` (memo: `Interview of {Full Name}` / `EUO of {Full Name}`), `Requests for Production ({n})`, `Interrogatories ({n})`, `Requests for Admission ({n})` (memo labels from the Card 2 table). `{n}` is the request count from the saved document, or from the settings when it is not generated |
+| `Document` | `Document` | Fill (min 112) | Short title, `DiscoveryUiText.ShortTitle(...)`: `Deposition of {Full Name}` (memo: `Interview of {Full Name}` / `EUO of {Full Name}`), `Requests for Production ({n})`, `Interrogatories ({n})`, `Requests for Admission ({n})` (memo labels from the Card 2 table). `{n}` is the request count from the saved document, or from the settings when it is not generated |
 | `Status` | `Status` | 112 | Short status (table below) |
 
   Statuses (`DiscoveryUiText.RowStatus(...)`):
@@ -253,12 +254,12 @@ Accent is never used for links, headings, card borders, captions, the witness `F
 | Generated, clean | `Generated` | `Generated {MMM d, h:mm tt} · {pages}`, where `{pages}` = `{Plural(p, "page")}` for depositions and `{Plural(n, "request")}` for written sets | Success |
 | Kept with warnings (D-26) | `Warnings` | `Generated with warnings: {Plural(v, "check")} still failed after 3 attempts. {first violation}` | Warning |
 | Failed | `Failed` | `Failed: {reason}. Click Generate Documents or Regenerate... to try again.` | Danger |
-| Out of date (D-27) | `Out of date` | `Out of date with the case guide: the {what} changed after this document was written. Click Regenerate... to write it again.` `{what}` = `case guide` / `core document` / `caption or counsel` / `corpus plan` (first one that differs) | Warning |
+| Out of date (D-27) | `Out of date` | `Out of date with the case guide: {what} changed after this document was written. Click Regenerate... to write it again.` `{what}` = `it` (the guide itself) / `the core document` / `the caption or counsel` / `the corpus plan` (first one that differs) | Warning |
 | Content saved, .docx not written because Word had it open (research Open Question 3) | `Not saved` | `Not saved: {file name} is open in Word. Close it, then click Save Again.` | Warning |
 | Content saved, .docx missing from `Discovery\` | `File missing` | `File missing: {file name} is not in the Discovery folder. Click Save Again to write it from the saved content.` | Warning |
 
   - **Precedence** when several states apply: Writing, then Failed, then Not saved, then File missing, then Out of date, then Warnings, then Generated.
-  - **Row tooltip:** the full status, a blank line, then for Warnings every violation as `• {violation}` (all of them, D-26). For depositions with planner fallbacks, add `• Counsel for {party} is not in the cast, so the transcript says "Counsel for {party}".`
+  - **Row tooltip:** first line is the full short title (the `Document` cell may ellipsize), then the full status, a blank line, then for Warnings every violation as `• {violation}` (all of them, D-26). For depositions with planner fallbacks, add `• Counsel for {party} is not in the cast, so the transcript says "Counsel for {party}".`
   - **Empty grid** (nothing selected and no saved documents): the grid is hidden, and this text appears in its place (`BodyFont`, `TextMuted`, wraps, top-left): `Nothing selected yet. Check a witness or a written discovery set to add it here.`
   - Double-click or Enter on a row = `Open in Word` when the file exists. Otherwise it does nothing.
 - **Selected-row detail line:** the full status of the selected row, in the row's tone (Success shows as `TextMuted`, so green stays reserved for the dot and outcome lines). One line with `AutoEllipsis`; the tooltip shows the full text. It is empty when no row is selected.
@@ -270,7 +271,7 @@ Accent is never used for links, headings, card borders, captions, the witness `F
 | `Regenerate...` | the selected row is not `Not saved` / `File missing` | the selected row has a saved version (any status except `Not generated`) and a tested key exists. Opens S2 |
 | `Save Again` | the selected row is `Not saved` or `File missing` (it replaces `Regenerate...` in the same slot) | always. Rewrites the .docx from the saved content with **no model call and no cost** |
 
-  - `Open in Word` failure: status line `Could not open {file name}: {message}.` (Danger).
+  - `Open in Word` failure: status line `Could not open {file name}: {message}. Click Open Discovery Folder to open it from Explorer.` (Danger).
   - `Save Again` with the file still open: status line `{file name} is still open in Word. Close it, then click Save Again.` (Warning). Success: status line `Saved {file name}.` (Success) and the row returns to its content status.
 - **Estimate line** (D-28; `DiscoveryUiText.EstimateLine(...)`; priced through the single `GenerationCostEstimator` path):
 
@@ -353,7 +354,7 @@ Case guide:      Core document · Cast · Key Facts & Events · Canonical values
 |-------|--------|------------|
 | Nothing generated | `Not generated` | Muted / BorderStrong |
 | All clean | `{Plural(n, "document")} · last generated {MMM d, yyyy}` | Success |
-| Any problem | `{Plural(n, "document")} · last generated {MMM d, yyyy}{clauses}` where `{clauses}` = ` · {w:N0} with warnings`, ` · {o:N0} out of date`, ` · {s:N0} not saved`, ` · {f:N0} failed` (zero clauses dropped) | Danger when f > 0, otherwise Warning |
+| Any problem | `{Plural(n, "document")} · last generated {MMM d, yyyy}{clauses}` where `{clauses}` = ` · {w:N0} with warnings`, ` · {o:N0} out of date`, ` · {s:N0} not saved`, ` · {m:N0} files missing`, ` · {f:N0} failed` (zero clauses dropped) | Danger when f > 0, otherwise Warning (any of w, o, s, m > 0) |
 
   - `{n}` counts documents with a saved version (Generated, Warnings, Out of date, Not saved, File missing). Failed-only rows are counted only in `{f}`.
   - Line 3 tooltip: the full line 3 text, a blank line, then one line per document: `{short title}: {short status}`.
@@ -402,7 +403,7 @@ Case guide:      Core document · Cast · Key Facts & Events · Canonical values
 | Error state (file open in Word) | `Not saved: {file name} is open in Word. Close it, then click Save Again.` |
 | Error state (field) | `Enter a number from 10 to 60.` / `Enter {min} to {max} {label}.` / `Choose two different parties.` |
 | Warning state | `Generated with warnings: {Plural(v, "check")} still failed after 3 attempts. {first violation}` |
-| Staleness | `Out of date with the case guide: the {what} changed after this document was written. Click Regenerate... to write it again.` |
+| Staleness | `Out of date with the case guide: {what} changed after this document was written. Click Regenerate... to write it again.` |
 | Destructive confirmation | Cancel Generation: C-D1. Close during a run: C-D2. Regenerate: the S2 dialog itself (names the replaced file) |
 
 **`{reason}` texts in plain words** [DEFAULT]: `the model returned no usable content`, `the request timed out`, `the provider refused the request`, `the Word file could not be written: {message}`. Fatal `{message}` reuses the existing gateway fatal texts.
@@ -431,8 +432,8 @@ Case guide:      Core document · Cast · Key Facts & Events · Canonical values
 Rules 1-33 apply unchanged. Additions:
 
 34. At `WizardMin` (1000 x 540) and 144 DPI, the three cards sit side by side with no horizontal scrollbar on the step and no clipped control. The longest Card 2 checkbox label (`Requests for Admission`, memo `Pre-suit document requests`) never clips or overlaps its 64-wide field.
-35. Witness grid: at `WizardMin` it shows at least 3 rows with the pages row and hint fully visible. `Witness` may ellipsize (tooltip carries the full name). `Side` fits `Non-party`, `Complainant` and `Subject` without ellipsis.
-36. Documents card at `WizardMin`: the grid shows at least 3 rows while the detail line, row buttons, divider, a two-line estimate, the status line, the progress bar and the run button are all visible. No button text ellipsizes. `Status` fits `Not generated`, `Out of date`, `File missing` and `Writing...` without ellipsis.
+35. Witness grid: at `WizardMin` it shows at least 3 rows with the pages row and hint fully visible. `Witness` may ellipsize (tooltip carries the full name). This includes the 150% `WizardMin` case where the grid shows a vertical scrollbar and `Witness` shrinks to about 97 px; its minimum is therefore 96. `Side` fits `Non-party`, `Complainant` and `Subject` without ellipsis.
+36. Documents card at `WizardMin`: the grid shows at least 3 rows while the detail line, row buttons, divider, a two-line estimate, the status line, the progress bar and the run button are all visible. No button text ellipsizes. With a vertical scrollbar at 150% `WizardMin`, `Document` shrinks to about 117 px (minimum 112) and may ellipsize; the row tooltip's first line carries the full short title. `Status` stays 112 and fits `Not generated`, `Out of date`, `File missing` and `Writing...` without ellipsis.
 37. The count and pages fields show 2 digits with their right padding. An invalid field's red border does not shift the row.
 38. Party combos: the drop-down list width is at least the host width, and it is widened to the longest item when the item is longer (`DropDownWidth`). Selected text ellipsizes inside the host and never overlaps the arrow.
 39. `RegenerateDiscoveryDialog` at 144 DPI, with every optional line visible (file-open warning, deposition settings line): it fits the working area, and the buttons sit on one row.
@@ -489,11 +490,11 @@ No new NuGet packages or UI libraries.
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: FLAG (recommendations applied)
+- [x] Dimension 2 Visuals: FLAG (recommendations applied)
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: FLAG (recommendations applied)
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-10-08 (gsd-ui-checker, 3 PASS / 3 FLAG; 4 non-blocking recommendations applied)

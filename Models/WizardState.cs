@@ -46,8 +46,9 @@ public class WizardState
     // Images and voicemail always use OpenAI, regardless of the text provider
     public bool IsMediaAvailable => !string.IsNullOrWhiteSpace(OpenAIApiKey) && OpenAIKeyTested;
 
+    /// <summary>Media-gating line on the API Configuration step (shown under the OpenAI key row); later steps use their own text that points back to this step.</summary>
     public string MediaUnavailableNotice =>
-        "Images and voicemail need a tested OpenAI key. Add one on the API Configuration step to enable them.";
+        "Images and voicemail need a tested OpenAI key. Enter and test one above to enable them.";
 
     /// <summary>
     /// Next is allowed once the selected text provider's key has passed its test (D-06).

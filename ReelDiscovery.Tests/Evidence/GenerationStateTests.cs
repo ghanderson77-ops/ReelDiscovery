@@ -405,7 +405,7 @@ public class GenerationStateTests
         draft.Corpus.Generation = state;
 
         var json = draft.ToJson();
-        Assert.Contains("\"FormatVersion\": 3", json);
+        Assert.Contains($"\"FormatVersion\": {CaseDraft.CurrentFormatVersion}", json);
         var loaded = CaseDraft.FromJson(json);
         loaded.Normalize();
 

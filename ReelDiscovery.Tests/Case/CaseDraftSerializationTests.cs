@@ -1,5 +1,6 @@
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Discovery;
 using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.Tests.Case;
@@ -7,10 +8,121 @@ namespace ReelDiscovery.Tests.Case;
 public class CaseDraftSerializationTests
 {
     [Fact]
-    public void FormatVersion_IsThree()
+    public void FormatVersion_IsFour()
     {
-        Assert.Equal(3, CaseDraft.CurrentFormatVersion);
-        Assert.Contains("\"FormatVersion\": 3", new CaseDraft().ToJson());
+        Assert.Equal(4, CaseDraft.CurrentFormatVersion);
+        Assert.Contains("\"FormatVersion\": 4", new CaseDraft().ToJson());
+    }
+
+    [Fact]
+    public void Discovery_RoundTrips()
+    {
+        var draft = CaseTestData.SampleGuidedDraft();
+        draft.Discovery = new DiscoverySettings
+        {
+            WitnessIds = { "CH-002", "CH-003" },
+            PagesPerExcerpt = 30,
+            RfpCount = 20,
+            RogEnabled = false,
+            PropoundingPartyId = "PTY-01",
+            UserTouched = true
+        };
+
+        var copy = CaseDraft.FromJson(draft.ToJson());
+
+        Assert.NotNull(copy.Discovery);
+        Assert.Equal(new[] { "CH-002", "CH-003" }, copy.Discovery!.WitnessIds);
+        Assert.Equal(30, copy.Discovery.PagesPerExcerpt);
+        Assert.Equal(20, copy.Discovery.RfpCount);
+        Assert.False(copy.Discovery.RogEnabled);
+        Assert.True(copy.Discovery.RfpEnabled);
+        Assert.Equal("PTY-01", copy.Discovery.PropoundingPartyId);
+        Assert.True(copy.Discovery.UserTouched);
+    }
+
+    [Fact]
+    public void V3File_LoadsWithoutDiscovery()
+    {
+        var json = "{ \"FormatVersion\": 3, \"Scenario\": \"A dispute\" }";
+
+        var draft = CaseDraft.FromJson(json);
+        Assert.Null(draft.Discovery);
+
+        draft.Normalize();
+        Assert.Null(draft.Discovery);
+        Assert.Equal(4, draft.FormatVersion);
+    }
+
+    [Fact]
+    public void DiscoverySettings_Normalize_Clamps()
+    {
+        var low = new DiscoverySettings { PagesPerExcerpt = 5, RfpCount = 2, RogCount = 0, RfaCount = 0 };
+        low.Normalize();
+        Assert.Equal(10, low.PagesPerExcerpt);
+        Assert.Equal(5, low.RfpCount);
+        Assert.Equal(1, low.RogCount);
+        Assert.Equal(1, low.RfaCount);
+
+        var high = new DiscoverySettings
+        {
+            PagesPerExcerpt = 99,
+            RfpCount = 200,
+            RogCount = 40,
+            RfaCount = 90,
+            WitnessIds = new() { "CH-001", "CH-002", "CH-003", "CH-004", "CH-005", "CH-006", "CH-007", "CH-008" }
+        };
+        high.Normalize();
+        Assert.Equal(60, high.PagesPerExcerpt);
+        Assert.Equal(80, high.RfpCount);
+        Assert.Equal(25, high.RogCount);
+        Assert.Equal(50, high.RfaCount);
+        Assert.Equal(new[] { "CH-001", "CH-002", "CH-003", "CH-004", "CH-005", "CH-006" }, high.WitnessIds);
+
+        var messy = new DiscoverySettings
+        {
+            WitnessIds = new() { "CH-001", null!, " ", "CH-001", "", "CH-002" },
+            PropoundingPartyId = null!,
+            RespondingPartyId = null!
+        };
+        messy.Normalize();
+        Assert.Equal(new[] { "CH-001", "CH-002" }, messy.WitnessIds);
+        Assert.Equal(string.Empty, messy.PropoundingPartyId);
+        Assert.Equal(string.Empty, messy.RespondingPartyId);
+
+        var nullList = new DiscoverySettings { WitnessIds = null! };
+        nullList.Normalize();
+        Assert.Empty(nullList.WitnessIds);
+    }
+
+    [Theory]
+    [InlineData(ComplexityLevel.Simple, 15, 15, 12, 10)]
+    [InlineData(ComplexityLevel.Standard, 25, 25, 18, 20)]
+    [InlineData(ComplexityLevel.Complex, 40, 40, 25, 30)]
+    public void DiscoverySettings_ForPreset_Defaults(ComplexityLevel level, int pages, int rfp, int rog, int rfa)
+    {
+        var settings = DiscoverySettings.ForPreset(level);
+
+        Assert.Equal(pages, settings.PagesPerExcerpt);
+        Assert.Equal(rfp, settings.RfpCount);
+        Assert.Equal(rog, settings.RogCount);
+        Assert.Equal(rfa, settings.RfaCount);
+        Assert.True(settings.RfpEnabled);
+        Assert.True(settings.RogEnabled);
+        Assert.True(settings.RfaEnabled);
+        Assert.False(settings.UserTouched);
+    }
+
+    [Fact]
+    public void DiscoveryVariants_Of_MapsDocumentType()
+    {
+        Assert.Equal(DiscoveryVariant.Civil, DiscoveryVariants.Of(null));
+        Assert.Equal(DiscoveryVariant.Civil, DiscoveryVariants.Of(new CoreDocument { DocumentType = CoreDocumentType.Complaint, MatterKind = MatterKind.Criminal }));
+        Assert.Equal(DiscoveryVariant.Civil, DiscoveryVariants.Of(new CoreDocument { DocumentType = CoreDocumentType.Petition }));
+        Assert.Equal(DiscoveryVariant.MemoCriminal, DiscoveryVariants.Of(new CoreDocument { DocumentType = CoreDocumentType.InvestigationMemo, MatterKind = MatterKind.Criminal }));
+        Assert.Equal(DiscoveryVariant.MemoRegulatory, DiscoveryVariants.Of(new CoreDocument { DocumentType = CoreDocumentType.InvestigationMemo, MatterKind = MatterKind.Regulatory }));
+        Assert.Equal(DiscoveryVariant.MemoCivil, DiscoveryVariants.Of(new CoreDocument { DocumentType = CoreDocumentType.InvestigationMemo, MatterKind = MatterKind.Civil }));
+        Assert.False(DiscoveryVariants.IsMemo(DiscoveryVariant.Civil));
+        Assert.True(DiscoveryVariants.IsMemo(DiscoveryVariant.MemoCivil));
     }
 
     [Fact]

@@ -69,8 +69,7 @@ public class DiscoveryDocxBuilderTests
         var (errors, paragraphs) = DocxTestHelper.OpenAndValidate(DiscoveryDocxBuilder.Build(content));
 
         Assert.Empty(errors);
-        var i = IndexOf(paragraphs, "Case No.\t", 0);
-        Assert.Contains("2:25-cv-01873", paragraphs[i]);
+        var i = IndexOf(paragraphs, "Case No. 2:25-cv-01873", 0);
         i = IndexOf(paragraphs, content.Title, i + 1);
         i = IndexOf(paragraphs, content.PreliminaryStatement, i + 1);
         i = IndexOf(paragraphs, "DEFINITIONS", i + 1);

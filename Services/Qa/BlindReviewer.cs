@@ -266,10 +266,9 @@ public class BlindReviewer
         }
         else if (existingHeader!.SampleSize != header.SampleSize)
         {
-            // Resized sample: restate the header and carry the verdicts that are still in the sample
-            await _store.AppendBlindReviewHeaderAsync(header, ct);
-            foreach (var verdict in kept)
-                await _store.AppendBlindReviewVerdictAsync(verdict, ct);
+            // Resized sample: restate the header and carry the verdicts that are still in the sample, as one write a
+            // cancel cannot split (WR-B01, D-13)
+            await _store.RestateBlindReviewAsync(header, kept, ct);
         }
 
         var reviewed = new HashSet<string>(kept.Select(v => v.DocId), StringComparer.Ordinal);

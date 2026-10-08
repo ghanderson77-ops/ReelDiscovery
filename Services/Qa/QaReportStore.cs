@@ -51,6 +51,22 @@ public class QaReportStore
         AppendLineAsync(new BlindReviewLine { Kind = VerdictKind, Verdict = verdict }, ct);
 
     /// <summary>
+    /// Restates the pass header followed by the verdicts it keeps, as one write that a cancel cannot split (WR-B01): a
+    /// header without its carried verdicts would drop verdicts that were already paid for. A cancel before the write
+    /// leaves the file unchanged.
+    /// </summary>
+    public Task RestateBlindReviewAsync(BlindReviewHeader header, IEnumerable<BlindReviewVerdict> keep,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var lines = new List<BlindReviewLine> { new() { Kind = HeaderKind, Header = header } };
+        lines.AddRange((keep ?? Enumerable.Empty<BlindReviewVerdict>())
+            .Where(v => v != null)
+            .Select(v => new BlindReviewLine { Kind = VerdictKind, Verdict = v }));
+        return AppendLinesAsync(lines, CancellationToken.None);
+    }
+
+    /// <summary>
     /// The latest header and the verdicts after it (last line per DocId wins, first-seen order). Torn or unreadable
     /// lines are skipped; a missing or unreadable file gives (null, empty).
     /// </summary>
@@ -117,10 +133,16 @@ public class QaReportStore
         return (header, verdicts);
     }
 
-    private async Task AppendLineAsync(BlindReviewLine record, CancellationToken ct)
+    private Task AppendLineAsync(BlindReviewLine record, CancellationToken ct) =>
+        AppendLinesAsync(new[] { record }, ct);
+
+    private async Task AppendLinesAsync(IReadOnlyList<BlindReviewLine> records, CancellationToken ct)
     {
-        // Serialized before taking the lock so the whole line is ready for one write
-        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(record, LineOptions) + "\n");
+        // Serialized before taking the lock so all lines are ready for one write
+        var text = new StringBuilder();
+        foreach (var record in records)
+            text.Append(JsonSerializer.Serialize(record, LineOptions)).Append('\n');
+        var bytes = Encoding.UTF8.GetBytes(text.ToString());
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try

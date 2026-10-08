@@ -213,4 +213,27 @@ public class QaReportStoreTests : IDisposable
         Assert.Null(header);
         Assert.Empty(verdicts);
     }
+
+    [Fact]
+    public async Task WRB01_Restate_WritesHeaderAndKeptVerdictsTogether_CancelledBeforeLeavesFileUnchanged()
+    {
+        var store = new QaReportStore(_folder);
+        await store.AppendBlindReviewHeaderAsync(Header("m"));
+        await store.AppendBlindReviewVerdictAsync(Verdict("RD-000001", true));
+        await store.AppendBlindReviewVerdictAsync(Verdict("RD-000002", false));
+        var before = File.ReadAllText(store.BlindReviewPath);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var resized = Header("m");
+        resized.SampleSize = 10;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.RestateBlindReviewAsync(resized, new[] { Verdict("RD-000001", true) }, cts.Token));
+        Assert.Equal(before, File.ReadAllText(store.BlindReviewPath));
+
+        await store.RestateBlindReviewAsync(resized, new[] { Verdict("RD-000001", true) });
+        var (header, verdicts) = store.LoadBlindReview();
+        Assert.Equal(10, header!.SampleSize);
+        Assert.Equal(new[] { "RD-000001" }, verdicts.Select(v => v.DocId));
+    }
 }

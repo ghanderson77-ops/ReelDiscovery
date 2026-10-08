@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-06-PLAN.md
-last_updated: "2026-10-08T23:38:57.872Z"
+stopped_at: Completed 08-07-PLAN.md
+last_updated: "2026-10-08T23:45:14.037Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 136
-  percent: 91
+  completed_plans: 137
+  percent: 92
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 7 of 19
+Plan: 8 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-08
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -188,6 +188,7 @@ Progress: [█████████░] 91%
 | Phase 08 P04 | 20min | 2 tasks | 2 files |
 | Phase 08 P05 | 8min | 2 tasks | 3 files |
 | Phase 08 P06 | 8min | 2 tasks | 5 files |
+| Phase 08 P07 | 25min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -561,6 +562,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-06: Transcript Wrap keeps first-line leading spaces (federal indentation); turn text is whitespace-collapsed before the prefix is added
 - [Phase 08]: 08-06: Exhibit is marked before the first turn referencing it; index shows '--' for an exhibit never introduced
 - [Phase 08]: 08-06: Memo transcripts use 'EXAMINATION OF', '(Exhibit N was marked...)' and 'interview concluded'
+- [Phase 08]: 08-07: DiscoveryDocxBuilder numbers requests by position (1..n), not DiscoveryRequest.Number
+- [Phase 08]: 08-07: Discovery signature prints a bar number only for the core document's own counsel; no counsel -> 'Counsel of record', never an invented name
+- [Phase 08]: 08-07: Memo variants sign with Memo.From / Memo.Organization; petition terminology (Petitioner/Respondent) carries into the boilerplate
 
 ### Pending Todos
 
@@ -582,6 +586,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T23:38:57.866Z
-Stopped at: Completed 08-06-PLAN.md
+Last session: 2026-10-08T23:45:14.031Z
+Stopped at: Completed 08-07-PLAN.md
 Resume file: None

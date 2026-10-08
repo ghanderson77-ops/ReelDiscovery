@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-04-PLAN.md
-last_updated: "2026-10-08T23:29:06.511Z"
+stopped_at: Completed 08-05-PLAN.md
+last_updated: "2026-10-08T23:31:53.904Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 134
-  percent: 90
+  completed_plans: 135
+  percent: 91
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 5 of 19
+Plan: 6 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-08
 
@@ -186,6 +186,7 @@ Progress: [██████████] 100%
 | Phase 08 P02 | 12min | 2 tasks | 4 files |
 | Phase 08 P03 | 9min | 2 tasks | 5 files |
 | Phase 08 P04 | 20min | 2 tasks | 2 files |
+| Phase 08 P05 | 8min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -554,6 +555,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-04: Memo file document part is {PropoundingShort}'s {memo label}; civil is {Short}'s First Set of ...
 - [Phase 08]: 08-04: ROG persons-with-knowledge slots shrink to keep at least one contention slot; excess issues are dealt round-robin heaviest first into shared contention slots
 - [Phase 08]: 08-04: RFP/ROG custodians are Key Party/Staff/InHouseCounsel characters of the responding party who act in or know the issue's facts
+- [Phase 08]: 08-05: Missing, unreadable and plan-changed journals each return a distinct CorpusDetector reason
+- [Phase 08]: 08-05: Exhibit candidate FactIds fall back to thread FactIds; ParticipantIds are From+To+Cc distinct
 
 ### Pending Todos
 
@@ -575,6 +578,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T23:29:06.505Z
-Stopped at: Completed 08-04-PLAN.md
+Last session: 2026-10-08T23:31:53.898Z
+Stopped at: Completed 08-05-PLAN.md
 Resume file: None

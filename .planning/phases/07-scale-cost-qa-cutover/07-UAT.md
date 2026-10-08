@@ -1,26 +1,23 @@
 ---
-status: partial
+status: complete
 phase: 07-scale-cost-qa-cutover
 source: [07-10-SUMMARY.md, 07-11-SUMMARY.md, 07-19-SUMMARY.md, 07-22-SPIKE-NOTES.md]
 started: 2026-10-08T08:45:00
-updated: 2026-10-08T11:00:00
+updated: 2026-10-08T17:00:00
 ---
 
 ## Current Test
 
-number: 4
-name: Batch run with restart (07-22 Task 4 step 4)
-expected: |
-  Batch mode finishes a small case in a practical time.
-awaiting: user re-run of 07-22 Task 4 step 4 (gaps closed by 07-23 and 07-24)
+[testing complete]
 
 ## Tests
 
 ### 4. Batch run with restart
 expected: Ticking "Use batch pricing" on a ~445-thread case (59 relevant in 24 waves) produces a corpus in a practical time.
-result: issue
-reported: "Is each wave going to take up to 24 hours?" (screenshot: wave 1 waiting on provider batch, 0 of 4 done; 23 relevant waves queued behind it)
-severity: blocker
+result: pass
+note: "Passed after gap closure (07-23, 07-24); user approved 07-22 Task 4 in chat on 2026-10-08"
+first_run_reported: "Is each wave going to take up to 24 hours?" (screenshot: wave 1 waiting on provider batch, 0 of 4 done; 23 relevant waves queued behind it)
+first_run_severity: blocker
 
 ## Gaps
 
@@ -28,7 +25,7 @@ severity: blocker
   status: resolved
   reason: "User reported: Is each wave going to take up to 24 hours? 24 relevant waves each submitted as a separate batch; observed OpenAI batch ~28 min, SLA 24 h"
   resolved_by: [07-23, 07-24]
-  resolution: "07-23 runs relevant waves live in batch mode and batches only non-relevant mail; 07-24 prices the batch total the same way and updates the Ready-card and UI-SPEC copy. Needs the user re-run of test 4."
+  resolution: "07-23 runs relevant waves live in batch mode and batches only non-relevant mail; 07-24 prices the batch total the same way and updates the Ready-card and UI-SPEC copy. User re-ran test 4 and approved on 2026-10-08."
   severity: blocker
   test: 4
   root_cause: "GenerationRunner batch mode (07-10) labels every relevant wave 'wave {i}' and submits its first attempts through BatchingLlmProvider; each wave waits for its batch before the next starts (original D-07). Relevant-wave calls (thread renders AND their attachments) must run under BatchStage.EnterLive() in batch mode; only the non-relevant stage (and its attachments) stays batch-eligible."

@@ -19,7 +19,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Corpus Plan & Answer Key** - Code-owned manifest of every thread/message with a validator, a plan review screen, the answer key and the review protocol derived from it (completed 2026-10-03)
 - [x] **Phase 5: Relevant Evidence Generation & Narrative Ledger** - Knowledge-gated, chronologically waved rendering of relevant threads with a running narrative ledger, saved incrementally as per-custodian EMLs (completed 2026-10-03)
 - [x] **Phase 6: Attachments & Non-Relevant Corpus** - Case-driven attachments plus daily business, ancillary, newsletter/spam/personal and near-miss decoy traffic through the same pipeline (completed 2026-10-05)
-- [ ] **Phase 7: Scale, Cost, QA & Cutover** - Batch APIs, prompt caching, cost accounting, blind-review and leakage QA, 5K-scale runs, and removal of the old wizard flow
+- [x] **Phase 7: Scale, Cost, QA & Cutover** - Batch APIs, prompt caching, cost accounting, blind-review and leakage QA, 5K-scale runs, and removal of the old wizard flow
+ (completed 2026-10-08)
 - [ ] **Phase 8: Ancillary Discovery Documents** - Optional depositions, RFPs, RFAs and interrogatories grounded in the case guide and exported as .docx
 
 ## Phase Details
@@ -252,7 +253,7 @@ Plans:
 - [x] 07-19-PLAN.md — Single case-driven flow, API step cleanup, no legacy key migration (Wave 6)
 - [x] 07-20-PLAN.md — Delete the legacy wizard, generators, models and tests (Wave 7)
 - [x] 07-21-PLAN.md — Adaptive key projection and 5K scale tests in live and batch modes (Wave 8)
-- [ ] 07-22-PLAN.md — Live provider spike, real batch round trip with restart, UAT at 150% (Wave 9, checkpoints)
+- [x] 07-22-PLAN.md — Live provider spike, real batch round trip with restart, UAT at 150% (Wave 9, checkpoints)
 - [x] 07-23-PLAN.md — Gap closure: relevant waves live in batch mode, only non-relevant mail batched (amended D-07), parity/restart/5K tests (Wave 1, gap closure)
 - [x] 07-24-PLAN.md — Gap closure: batch total prices relevant work live, Ready-card/UI-SPEC batch copy, API-step media notice wording (Wave 1, gap closure)
 **UI hint**: yes
@@ -281,5 +282,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 4. Corpus Plan & Answer Key | 22/22 | Complete    | 2026-10-03 |
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
-| 7. Scale, Cost, QA & Cutover | 23/24 | In Progress|  |
+| 7. Scale, Cost, QA & Cutover | 24/24 | Ready for verification |  |
 | 8. Ancillary Discovery Documents | 0/TBD | Not started | - |

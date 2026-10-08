@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 07-24-PLAN.md
-last_updated: "2026-10-08T15:54:45.000Z"
+status: verifying
+stopped_at: Completed 07-22-PLAN.md (UAT approved; all 24 phase 7 plans complete)
+last_updated: "2026-10-08T16:18:16.918Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 130
-  completed_plans: 129
-  percent: 99
+  completed_plans: 130
+  percent: 100
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 
 ## Current Position
 
-Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 24 of 24 (gap closure done; 07-22 Task 4 live UAT re-run pending)
-Status: Executing — 07-23 and 07-24 gap closure done; awaiting user re-run of 07-22 Task 4 (UAT test 4)
+Phase: 7 (Scale, Cost, QA & Cutover) — READY FOR VERIFICATION
+Plan: 24 of 24 complete (07-22 UAT approved 2026-10-08 after gap closure 07-23/07-24)
+Status: Ready for verification — all 24 plans have SUMMARYs
 Last activity: 2026-10-08
 
-Progress: [██████████] 99%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -180,6 +180,7 @@ Progress: [██████████] 99%
 | Phase 07 P21 | 35min | 2 tasks | 4 files |
 | Phase 07 P23 | 45 min | 3 tasks | 8 files |
 | Phase 07 P24 | 35 min | 3 tasks | 10 files |
+| Phase 07 P22 | 2 days | 4 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -532,6 +533,7 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-24: Batch total = relevant work, repairs, side world and voice cast at live prices + non-relevant mail at batch prices + media (amended D-07, D-17); PricedWork.LiveDocIds carries repairs
 - [Phase 07]: 07-24: Batch checkbox reads 'Use batch pricing for non-relevant mail (slower, lower cost)'; hints say relevant threads run live first
 - [Phase 07]: 07-24: API-step media notice reads 'Enter and test one above to enable them.'; later steps keep their API Configuration pointer
+- [Phase 07]: 07-22: OpenAI implicit prompt caching kept (explicit mode disables cache reads); Anthropic evidence prefix unmeasured, StablePrefixTokens stays [ASSUMED] 600
 
 ### Pending Todos
 
@@ -553,6 +555,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T15:54:45.000Z
-Stopped at: Completed 07-24-PLAN.md (07-22 Task 4 UAT re-run pending)
+Last session: 2026-10-08T16:18:10.780Z
+Stopped at: Completed 07-22-PLAN.md (phase 7 ready for verification)
 Resume file: None

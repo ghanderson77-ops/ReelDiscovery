@@ -1283,7 +1283,7 @@ public class GenerationUiTextTests
             card.Body);
         Assert.Equal("Estimated cost ≈$4.10 at live prices or ≈$2.15 with batch pricing, ±50%, including prompt caching.", card.EstimateLine);
         Assert.Equal(
-            "Live: Claude Sonnet ≈$3.20 · Claude Haiku ≈$0.70 · images and voicemail ≈$0.20. Batch: Claude Sonnet ≈$1.60 · Claude Haiku ≈$0.35 · images and voicemail ≈$0.20. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings.",
+            "Live: Claude Sonnet ≈$3.20 · Claude Haiku ≈$0.70 · images and voicemail ≈$0.20. Batch: Claude Sonnet ≈$1.60 · Claude Haiku ≈$0.35 · images and voicemail ≈$0.20. Relevant threads and their attachments, images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings on batched mail.",
             card.EstimateTooltip);
         Assert.Equal("", card.BatchHint);
         Assert.Equal("", card.MediaNotice);
@@ -1297,7 +1297,7 @@ public class GenerationUiTextTests
         var card = GenerationUiText.ReadyCard(Ready(volumeModel: "Claude Sonnet", mediaPlanned: 0, media: 0m));
         Assert.Equal("Estimated cost ≈$3.90 at live prices or ≈$1.95 with batch pricing, ±50%, including prompt caching.", card.EstimateLine);
         Assert.Equal(
-            "Live: Claude Sonnet ≈$3.90. Batch: Claude Sonnet ≈$1.95. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings.",
+            "Live: Claude Sonnet ≈$3.90. Batch: Claude Sonnet ≈$1.95. Relevant threads and their attachments, images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings on batched mail.",
             card.EstimateTooltip);
 
         var withMedia = GenerationUiText.ReadyCard(Ready(volumeModel: "Claude Sonnet"));
@@ -1902,15 +1902,35 @@ public class GenerationUiTextTests
     public void EstimateTooltip_NoMedia_DropsMediaClause()
     {
         var tooltip = GenerationUiText.EstimateTooltip(Ready(mediaPlanned: 0), false, 0m);
-        Assert.StartsWith("Live: Claude Sonnet ≈$3.20 · Claude Haiku ≈$0.70. Batch: Claude Sonnet ≈$1.60 · Claude Haiku ≈$0.35. Images and voicemail", tooltip);
+        Assert.StartsWith("Live: Claude Sonnet ≈$3.20 · Claude Haiku ≈$0.70. Batch: Claude Sonnet ≈$1.60 · Claude Haiku ≈$0.35. Relevant threads and their attachments, images and voicemail", tooltip);
         AssertNoBannedWords(tooltip);
     }
 
     [Fact]
     public void BatchCheckboxText_IsTheContractCopy()
     {
-        Assert.Equal("Use batch pricing (slower, about half the cost)", GenerationUiText.BatchCheckboxText);
+        Assert.Equal("Use batch pricing for non-relevant mail (slower, lower cost)", GenerationUiText.BatchCheckboxText);
         Assert.Equal(2_000, GenerationUiText.BatchRecommendThreshold);
+    }
+
+    [Fact]
+    public void BatchCopy_NeverMentionsWaitingBetweenWaves()
+    {
+        // Amended D-07: relevant waves run live, so no batch copy may promise waits between waves or half the cost
+        var copy = new[]
+        {
+            GenerationUiText.BatchCheckboxText,
+            GenerationUiText.BatchHint(2000, false, 2000).Text,
+            GenerationUiText.BatchHint(10, true, 2000).Text,
+            GenerationUiText.EstimateTooltip(Ready(), true, 0.2m),
+            GenerationUiText.EstimateTooltip(Ready(volumeModel: "Claude Sonnet", mediaPlanned: 0), false, 0m)
+        };
+
+        foreach (var text in copy)
+        {
+            Assert.DoesNotContain("between waves", text);
+            Assert.DoesNotContain("half the cost", text);
+        }
     }
 
     [Fact]
@@ -1918,7 +1938,7 @@ public class GenerationUiTextTests
     {
         Assert.Equal("", GenerationUiText.BatchHint(1999, false, 2000).Text);
         var recommend = GenerationUiText.BatchHint(2000, false, 2000);
-        Assert.Equal("Batch pricing is recommended for a corpus this size. It waits on the provider between waves, so the run can take several hours.", recommend.Text);
+        Assert.Equal("Batch pricing is recommended for a corpus this size. Relevant threads still run live; non-relevant mail then waits on the provider, which can take several hours.", recommend.Text);
         Assert.Equal(SummaryTone.Muted, recommend.Tone);
     }
 
@@ -1929,7 +1949,7 @@ public class GenerationUiTextTests
     public void BatchHint_Checked_IsWarning(int planned)
     {
         var hint = GenerationUiText.BatchHint(planned, true, 2000);
-        Assert.Equal("Batch runs wait on the provider between waves and can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.", hint.Text);
+        Assert.Equal("Relevant threads run live first. Non-relevant mail then waits on the provider in large batches, which can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.", hint.Text);
         Assert.Equal(SummaryTone.Warning, hint.Tone);
     }
 
@@ -1941,7 +1961,7 @@ public class GenerationUiTextTests
         Assert.StartsWith("Batch pricing is recommended", recommend.BatchHint);
         Assert.Equal(SummaryTone.Muted, recommend.BatchHintTone);
         var checkedCard = GenerationUiText.ReadyCard(Ready(emails: 10, batchChecked: true));
-        Assert.StartsWith("Batch runs wait on the provider", checkedCard.BatchHint);
+        Assert.StartsWith("Relevant threads run live first", checkedCard.BatchHint);
         Assert.Equal(SummaryTone.Warning, checkedCard.BatchHintTone);
     }
 

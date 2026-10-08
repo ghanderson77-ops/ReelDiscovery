@@ -350,7 +350,7 @@ public class GenerateCorpusRenderTests
             Assert.Equal(card.EstimateTooltip, step.EstimateTooltipText);
             Assert.True(step.UseBatchCheckBox.Visible);
             Assert.False(step.UseBatchCheckBox.Checked);
-            Assert.Equal("Use batch pricing (slower, about half the cost)", step.UseBatchCheckBox.Text);
+            Assert.Equal("Use batch pricing for non-relevant mail (slower, lower cost)", step.UseBatchCheckBox.Text);
             Assert.True(step.BatchHintLabel.Visible);
             Assert.StartsWith("Batch pricing is recommended for a corpus this size.", step.BatchHintLabel.Text);
             Assert.Equal(Theme.TextMuted, step.BatchHintLabel.ForeColor);
@@ -372,7 +372,7 @@ public class GenerateCorpusRenderTests
         {
             Assert.True(step.UseBatchCheckBox.Visible);
             Assert.True(step.UseBatchCheckBox.Checked);
-            Assert.StartsWith("Batch runs wait on the provider between waves", step.BatchHintLabel.Text);
+            Assert.StartsWith("Relevant threads run live first", step.BatchHintLabel.Text);
             Assert.Equal(Theme.Warning, step.BatchHintLabel.ForeColor);
             Assert.False(step.MediaNoticeLabel.Visible);
             Assert.DoesNotContain("images and voicemail", step.EstimateTooltipText);

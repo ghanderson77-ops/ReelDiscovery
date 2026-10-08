@@ -1278,4 +1278,21 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.DoesNotContain("batch_unknown", state.OrphansBilledIds);
         Assert.Equal(new[] { "batch_unknown" }, provider.PriceOrphans().UnpricedBatchIds);
     }
+
+    [Fact]
+    public async Task WRA03_CollectedBatch_DeletesItsProviderFiles()
+    {
+        var transport = Transport();
+        var provider = Create(Live(), transport);
+        var events = new EventLog();
+        events.Attach(provider);
+
+        await Task.WhenAll(SendAll(provider, "non-relevant mail", 2)).WaitAsync(Wait);
+        var finished = await events.WaitFor(BatchStatusKind.Finished);
+
+        await Until(() => transport.DeletedFiles.Count > 0);
+        var input = new BatchLedger(_folder).Replay().SubmittedById[finished.BatchId].InputFileId;
+        Assert.Equal(new[] { (input, "file_out_" + finished.BatchId) },
+            transport.DeletedFiles.Select(f => (f.Item1!, f.Item2!)));
+    }
 }

@@ -736,6 +736,9 @@ public class BatchingLlmProvider : ILlmProvider
                 ? Delivery.FatalFailure(submit.FailureKind, submit.Message)
                 : Delivery.Errored();
             ReleaseItems(chunk, delivery);
+
+            // WR-A03: an upload whose batch was never created must not leave the prompts at the provider
+            await DeleteFilesBestEffortAsync(submit.InputFileId, null);
             return;
         }
 
@@ -768,10 +771,14 @@ public class BatchingLlmProvider : ILlmProvider
             // RUN-04: a batch we cannot track must not exist; cancel it (best effort) and run its items live
             await _transport.CancelAsync(submit.BatchId, CancellationToken.None);
             ReleaseItems(chunk, Delivery.Errored());
+            await DeleteFilesBestEffortAsync(submit.InputFileId, null);
             return;
         }
 
-        var batch = new TrackedBatch(submit.BatchId, label, submittedUtc, resumed: false);
+        var batch = new TrackedBatch(submit.BatchId, label, submittedUtc, resumed: false)
+        {
+            InputFileId = submit.InputFileId ?? string.Empty
+        };
         foreach (var item in record.Items)
             batch.Add(item.CustomId, item.ModelId);
 
@@ -905,9 +912,11 @@ public class BatchingLlmProvider : ILlmProvider
             : new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Expired, Message = "Missing from the batch results" })
             .ToList();
 
+        var saved = false;
         try
         {
             _ledger.SaveResults(batch.BatchId, ordered);
+            saved = true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -954,6 +963,26 @@ public class BatchingLlmProvider : ILlmProvider
             e.Failed = failed;
             e.Duration = Now() - batch.SubmittedUtc;
         }));
+
+        // WR-A03: the results are cached on disk, so the uploaded prompts and the output file are no longer needed at the
+        // provider (OpenAI keeps batch files until they are deleted). Kept when the cache could not be written.
+        if (saved)
+            await DeleteFilesBestEffortAsync(batch.InputFileId, status.OutputFileId);
+    }
+
+    private async Task DeleteFilesBestEffortAsync(string? inputFileId, string? outputFileId)
+    {
+        if (string.IsNullOrEmpty(inputFileId) && string.IsNullOrEmpty(outputFileId))
+            return;
+
+        try
+        {
+            await _transport.DeleteFilesAsync(NullIfEmpty(inputFileId), NullIfEmpty(outputFileId), CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Best effort: a file left at the provider is cleaned up by Start Over; it never affects the run
+        }
     }
 
     private async Task FailAtProviderAsync(TrackedBatch batch, BatchStatusResult status)
@@ -1307,6 +1336,9 @@ public class BatchingLlmProvider : ILlmProvider
         public bool Resumed { get; }
         public bool Polling { get; set; }
 
+        /// <summary>Uploaded input file (OpenAI); deleted once the results are cached (WR-A03).</summary>
+        public string InputFileId { get; init; } = string.Empty;
+
         /// <summary>Closed at run end (CancelPendingStagesAsync): never collected or delivered by this session.</summary>
         public bool Closed { get; set; }
 
@@ -1322,7 +1354,10 @@ public class BatchingLlmProvider : ILlmProvider
 
         public static TrackedBatch From(BatchLedgerRecord record, bool resumed)
         {
-            var batch = new TrackedBatch(record.BatchId, record.StageLabel ?? string.Empty, record.SubmittedUtc, resumed);
+            var batch = new TrackedBatch(record.BatchId, record.StageLabel ?? string.Empty, record.SubmittedUtc, resumed)
+            {
+                InputFileId = record.InputFileId ?? string.Empty
+            };
             foreach (var item in record.Items.Where(i => i != null))
                 batch.Add(item.CustomId, item.ModelId);
 

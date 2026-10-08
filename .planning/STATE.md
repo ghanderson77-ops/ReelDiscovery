@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-07-PLAN.md
-last_updated: "2026-10-08T23:45:14.037Z"
+stopped_at: Completed 08-08-PLAN.md
+last_updated: "2026-10-08T23:50:57.537Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 137
-  percent: 92
+  completed_plans: 138
+  percent: 93
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 8 of 19
+Plan: 9 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-08
 
-Progress: [█████████░] 92%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -189,6 +189,7 @@ Progress: [█████████░] 92%
 | Phase 08 P05 | 8min | 2 tasks | 3 files |
 | Phase 08 P06 | 8min | 2 tasks | 5 files |
 | Phase 08 P07 | 25min | 2 tasks | 6 files |
+| Phase 08 P08 | 15min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -565,6 +566,10 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-07: DiscoveryDocxBuilder numbers requests by position (1..n), not DiscoveryRequest.Number
 - [Phase 08]: 08-07: Discovery signature prints a bar number only for the core document's own counsel; no counsel -> 'Counsel of record', never an invented name
 - [Phase 08]: 08-07: Memo variants sign with Memo.From / Memo.Organization; petition terminology (Petitioner/Respondent) carries into the boilerplate
+- [Phase 08]: 08-08: D1 flags a deposition chunk below 50% of its target turns; an exhibit counts as shown by ExhibitNumber or 'Exhibit N' text
+- [Phase 08]: 08-08: D5 requires every Amount value linked to the RFA's fact and every fact actor by full, first or last name; genuineness slots skipped
+- [Phase 08]: 08-08: D7 subpart markers must not be glued to a word so 'person(s)' never counts
+- [Phase 08]: 08-08: TextScan owns the shared name/date/identifier scanners; RenderValidator and DiscoveryValidator both call it
 
 ### Pending Todos
 
@@ -586,6 +591,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T23:45:14.031Z
-Stopped at: Completed 08-07-PLAN.md
+Last session: 2026-10-08T23:50:51.076Z
+Stopped at: Completed 08-08-PLAN.md
 Resume file: None

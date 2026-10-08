@@ -276,7 +276,7 @@ Plans:
 - [x] 08-05-PLAN.md — CorpusDetector: usable-corpus probe, written-DocID exhibit candidates, ledger slice (Wave 2)
 - [x] 08-06-PLAN.md — TranscriptLayout (25 lines/page engine) + TranscriptDocxBuilder (Courier New, exact spacing) (Wave 2)
 - [x] 08-07-PLAN.md — Caption overload, DiscoveryBoilerplate (definitions/instructions/signature/COS), DiscoveryDocxBuilder (Wave 2)
-- [ ] 08-08-PLAN.md — TextScan regex promotion + DiscoveryValidator D1-D8 with keep-best and feedback (Wave 2)
+- [x] 08-08-PLAN.md — TextScan regex promotion + DiscoveryValidator D1-D8 with keep-best and feedback (Wave 2)
 - [ ] 08-09-PLAN.md — DiscoveryUiText (all copy), DiscoveryRowInfo, RegenerateDiscoveryDialog at 144 DPI (Wave 2)
 - [ ] 08-10-PLAN.md — Discovery pricing on the single estimator, DiscoveryWorklist, DiscoveryStepModel (Wave 3)
 - [ ] 08-11-PLAN.md — DiscoveryPrompts (grounded, cacheable, name-safe) + strict DTO registration (Wave 3)
@@ -304,4 +304,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
-| 8. Ancillary Discovery Documents | 7/19 | In Progress | - |
+| 8. Ancillary Discovery Documents | 8/19 | In Progress | - |

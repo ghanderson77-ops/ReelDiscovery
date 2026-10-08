@@ -457,17 +457,16 @@ public class BatchingLlmProvider : ILlmProvider
     private async Task<LlmProviderResponse> SendLiveAsync(LlmProviderRequest request, CancellationToken ct)
     {
         var gate = BatchStage.LiveGate;
-        if (gate == null)
-            return await _live.SendAsync(request, ct);
+        if (gate != null)
+            await gate.WaitAsync(ct);
 
-        await gate.WaitAsync(ct);
         try
         {
             return await _live.SendAsync(request, ct);
         }
         finally
         {
-            gate.Release();
+            gate?.Release();
         }
     }
 

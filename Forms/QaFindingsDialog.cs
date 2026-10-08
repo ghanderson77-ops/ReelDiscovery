@@ -510,6 +510,22 @@ public class QaFindingsDialog : Form
         Size = new Size(Math.Min(area.Width, Width), Math.Min(area.Height, Height));
     }
 
+    /// <summary>
+    /// WR-B03: Close, Esc and the title-bar X wait while a regeneration is in flight, so <see cref="QueuedAny"/> is final
+    /// when ShowDialog returns (the caller then reprojects) and the continuation never writes to a disposed dialog.
+    /// Windows shutdown and Application.Exit still close.
+    /// </summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (_busy && e.CloseReason is CloseReason.UserClosing or CloseReason.None)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        base.OnFormClosing(e);
+    }
+
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);

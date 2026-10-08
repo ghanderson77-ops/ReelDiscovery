@@ -272,6 +272,30 @@ public class QaFindingsDialogTests
     }
 
     [Fact]
+    public void WRB03_CloseWhileRegenerating_IsRefused_UntilTheRegenerateFinishes()
+    {
+        RunSta(() =>
+        {
+            var pending = new TaskCompletionSource<ThreadInvalidationResult>();
+            using var dialog = Scans(ThreeRows(), regenerate: _ => pending.Task);
+            dialog.Confirm = (_, _) => true;
+            Select(dialog, 0);
+            var run = dialog.RegenerateSelectedAsync();
+
+            dialog.Close();
+            Assert.False(dialog.IsDisposed);
+            Assert.True(dialog.Visible);
+
+            pending.SetResult(new ThreadInvalidationResult { Appended = true });
+            CaseSummaryQaTests.PumpUntil(() => run.IsCompleted, "regenerate finished");
+            Assert.True(dialog.QueuedAny);
+
+            dialog.Close();
+            Assert.True(dialog.IsDisposed || !dialog.Visible);
+        });
+    }
+
+    [Fact]
     public void OpenEmail_CallsDelegateWithDocId()
     {
         RunSta(() =>

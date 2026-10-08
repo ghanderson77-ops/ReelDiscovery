@@ -242,7 +242,10 @@ public class BlindReviewer
         string systemPrompt, IProgress<int>? progress = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(header);
-        docs ??= Array.Empty<BlindReviewDocument>();
+        // WR-B07: a null document or one without a DocId can be neither reviewed nor matched to a verdict
+        docs = (docs ?? Array.Empty<BlindReviewDocument>())
+            .Where(d => d != null && !string.IsNullOrEmpty(d.DocId))
+            .ToList();
 
         var (existingHeader, existingVerdicts) = _store.LoadBlindReview();
         var samePass = existingHeader != null
@@ -253,10 +256,7 @@ public class BlindReviewer
         // CR-B02: a verdict on content that has since been regenerated is not kept, so the new text is reviewed again
         var docById = new Dictionary<string, BlindReviewDocument>(StringComparer.Ordinal);
         foreach (var doc in docs)
-        {
-            if (doc != null)
-                docById.TryAdd(doc.DocId ?? string.Empty, doc);
-        }
+            docById.TryAdd(doc.DocId, doc);
         var kept = samePass
             ? existingVerdicts.Where(v => docById.TryGetValue(v.DocId ?? string.Empty, out var doc) && JudgesCurrent(v, doc)).ToList()
             : new List<BlindReviewVerdict>();
@@ -272,7 +272,7 @@ public class BlindReviewer
         }
 
         var reviewed = new HashSet<string>(kept.Select(v => v.DocId), StringComparer.Ordinal);
-        var todo = docs.Where(d => d != null && !reviewed.Contains(d.DocId)).ToList();
+        var todo = docs.Where(d => !reviewed.Contains(d.DocId)).ToList();
 
         var result = new BlindReviewRunResult();
         var gate = new object();

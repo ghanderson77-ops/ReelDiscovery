@@ -449,6 +449,29 @@ public class BlindReviewTests
     }
 
     [Fact]
+    public async Task WRB07_NullAndIdlessDocuments_AreSkipped()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var docs = Docs(3);
+            var (reviewer, fake, store) = Reviewer(folder);
+            fake.Respond = Responder(docs);
+            var input = new List<BlindReviewDocument> { docs[0], null!, docs[1], new() { DocId = string.Empty, Subject = "x" }, docs[2] };
+
+            var result = await reviewer.RunAsync(Header(Guid.NewGuid(), 3), input, "protocol");
+
+            Assert.Equal(3, fake.Requests.Count);
+            Assert.Equal(3, result.Reviewed);
+            Assert.Equal(3, store.LoadBlindReview().Verdicts.Count);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
     public async Task Run_RefusalCountsError_AndContinues()
     {
         var folder = EvidenceTestData.TempCaseFolder();

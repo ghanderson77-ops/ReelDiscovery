@@ -185,7 +185,8 @@ public class ThreadInvalidationTests : IDisposable
         var error = Assert.Single(result.Errors);
         Assert.StartsWith(locked + ": ", error, StringComparison.Ordinal);
         Assert.Equal(JournalRecordType.ThreadInvalidated, JournalRecords().Last().Type);
-        Assert.DoesNotContain(locked, JournalRecords().Last().Files);
+        // WR-A10: the line is written before deleting, so it lists every copy it set out to remove
+        Assert.Contains(locked, JournalRecords().Last().Files);
         Assert.True(File.Exists(Full(locked)));
         Assert.False(GenerationRunState.From(_plan, GenerationJournal.Replay(_folder, _plan)).IsDone(target.Id));
     }
@@ -250,5 +251,26 @@ public class ThreadInvalidationTests : IDisposable
         Assert.True(result.Appended);
         Assert.NotEqual(string.Empty, result.KeyError);
         Assert.Equal(JournalRecordType.ThreadInvalidated, JournalRecords().Last().Type);
+    }
+
+    [Fact]
+    public async Task WRA10_JournalAppendFails_NothingDeleted_ThreadStaysWritten()
+    {
+        await FullRunAsync();
+        var target = Target;
+        var copies = CopiesOf(target);
+        var linesBefore = JournalRecords().Count;
+
+        // Readers are allowed, writers are not: the replay works, the ThreadInvalidated append fails
+        ThreadInvalidationResult result;
+        using (new FileStream(GenerationJournal.PathFor(_folder), FileMode.Open, FileAccess.Read, FileShare.Read))
+            result = await ThreadInvalidation.InvalidateAsync(_folder, _plan, Guide, target.Id);
+
+        Assert.False(result.Appended);
+        Assert.StartsWith(GenerationState.JournalFileName + ": ", Assert.Single(result.Errors), StringComparison.Ordinal);
+        Assert.Equal(0, result.FilesDeleted);
+        Assert.All(copies, c => Assert.True(File.Exists(Full(c)), c));
+        Assert.Equal(linesBefore, JournalRecords().Count);
+        Assert.True(GenerationRunState.From(_plan, GenerationJournal.Replay(_folder, _plan)).IsDone(target.Id));
     }
 }

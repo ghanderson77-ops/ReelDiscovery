@@ -18,8 +18,8 @@ public class ThreadInvalidationResult
 }
 
 /// <summary>
-/// "Regenerate thread" (D-13 blind review, D-15 consistency scans): deletes a written thread's EML copies, journals a
-/// ThreadInvalidated line and re-projects the answer key so the thread shows Planned until Continue Generating re-renders
+/// "Regenerate thread" (D-13 blind review, D-15 consistency scans): journals a ThreadInvalidated line, deletes the written
+/// thread's EML copies and re-projects the answer key so the thread shows Planned until Continue Generating re-renders
 /// it. A relevant thread keeps the details it had established (OQ3, D-02); its spend stays counted.
 /// </summary>
 public static class ThreadInvalidation
@@ -27,8 +27,10 @@ public static class ThreadInvalidation
     public const string NotWrittenMessage = "This thread has not been written yet.";
 
     /// <summary>
-    /// Invalidates one written thread. Copies that cannot be deleted are reported and the line is still journaled, so the
-    /// next run overwrites them. Only OperationCanceledException before any delete escapes.
+    /// Invalidates one written thread. WR-A10: the ThreadInvalidated line (listing the copies about to be removed) is
+    /// journaled first, so a failed append deletes nothing and the thread stays Written with its files. Copies that cannot
+    /// be deleted afterwards are reported; the next run overwrites them. Only OperationCanceledException before any write
+    /// escapes.
     /// </summary>
     public static async Task<ThreadInvalidationResult> InvalidateAsync(string caseFolder, CorpusPlan plan, CaseGuide guide,
         string threadId, CancellationToken ct = default)
@@ -60,10 +62,11 @@ public static class ThreadInvalidation
             ? established.ToList()
             : new List<LedgerDelta>();
 
-        // Off the UI thread: lock retries wait up to about a second per file
-        var deleted = await Task.Run(() => DeleteCopies(caseFolder, guide, thread, record, result), CancellationToken.None)
+        // Off the UI thread: the existence checks touch every copy
+        var (candidates, existing) = await Task.Run(() => ExistingCopies(caseFolder, guide, thread, record), CancellationToken.None)
             .ConfigureAwait(false);
 
+        // WR-A10: journal before deleting, so the journal never says ThreadDone for a thread whose files are gone
         try
         {
             await new GenerationJournal(caseFolder).AppendAsync(new JournalRecord
@@ -72,16 +75,21 @@ public static class ThreadInvalidation
                 PlanId = plan.PlanId,
                 ThreadId = threadId,
                 LedgerDelta = deltas,
-                Files = deleted,
+                Files = existing,
                 Utc = DateTime.UtcNow
             }, CancellationToken.None).ConfigureAwait(false);
             result.Appended = true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Nothing was deleted: the thread stays Written with all its copies (JournalFullException included)
             result.Errors.Add($"{GenerationState.JournalFileName}: {ex.Message}");
             return result;
         }
+
+        // Off the UI thread: lock retries wait up to about a second per file
+        await Task.Run(() => DeleteCopies(caseFolder, guide, thread, candidates, existing, result), CancellationToken.None)
+            .ConfigureAwait(false);
 
         // C-Q1: the key is a projection of the journal, so the thread shows Planned right away
         try
@@ -101,21 +109,31 @@ public static class ThreadInvalidation
         return result;
     }
 
-    // Deletes validated paths only (T-07-48): planned copies through MailboxWriter, journal-listed files through ResolveUnderCase
-    private static List<string> DeleteCopies(string caseFolder, CaseGuide guide, PlannedThread thread, JournalRecord record,
-        ThreadInvalidationResult result)
+    // Planned copies plus journal-listed files (validated paths only, T-07-48), and the sorted subset that exists now
+    private static (List<string> Candidates, List<string> Existing) ExistingCopies(string caseFolder, CaseGuide guide,
+        PlannedThread thread, JournalRecord record)
     {
         var folders = PlanNumbering.CustodianFolders(guide);
-        var writer = new MailboxWriter(caseFolder, folders);
         var candidates = new List<string>();
         foreach (var message in thread.Messages.Where(m => m != null))
             candidates.AddRange(MailboxWriter.CopyPathsFor(message, folders));
         candidates.AddRange(record.Files);
         candidates = candidates.Distinct(StringComparer.Ordinal).ToList();
 
-        var existed = candidates
+        var existing = candidates
             .Where(r => MailboxWriter.ResolveUnderCase(caseFolder, r) is { } full && File.Exists(full))
-            .ToHashSet(StringComparer.Ordinal);
+            .OrderBy(r => r, StringComparer.Ordinal)
+            .ToList();
+        return (candidates, existing);
+    }
+
+    // Deletes validated paths only (T-07-48): planned copies through MailboxWriter, journal-listed files through ResolveUnderCase
+    private static void DeleteCopies(string caseFolder, CaseGuide guide, PlannedThread thread, List<string> candidates,
+        List<string> existing, ThreadInvalidationResult result)
+    {
+        var folders = PlanNumbering.CustodianFolders(guide);
+        var writer = new MailboxWriter(caseFolder, folders);
+        var existed = existing.ToHashSet(StringComparer.Ordinal);
 
         var left = new List<string>();
         foreach (var message in thread.Messages.Where(m => m != null))
@@ -138,11 +156,7 @@ public static class ThreadInvalidation
                 result.Errors.Add($"{relative}: The file could not be deleted.");
         }
 
-        var deleted = existed
-            .Where(r => MailboxWriter.ResolveUnderCase(caseFolder, r) is { } full && !File.Exists(full))
-            .OrderBy(r => r, StringComparer.Ordinal)
-            .ToList();
-        result.FilesDeleted = deleted.Count;
-        return deleted;
+        result.FilesDeleted = existed
+            .Count(r => MailboxWriter.ResolveUnderCase(caseFolder, r) is { } full && !File.Exists(full));
     }
 }

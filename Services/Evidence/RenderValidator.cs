@@ -53,25 +53,7 @@ public static partial class RenderValidator
         "team", "all", "everyone", "everybody", "folks", "guys", "both", "there", "y'all", "gang", "group"
     };
 
-    // Capitalized words that follow a first name without being a surname ("Tom Monday", "Lisa Thanks")
-    private static readonly HashSet<string> NotSurnames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
-        "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December",
-        "The", "This", "That", "These", "Those", "Please", "Thanks", "Thank", "And", "But", "Also", "Can", "Could", "Will", "Would",
-        "Let", "Just", "Here", "There", "Team", "Everyone", "All"
-    };
-
-    private static readonly string[] Honorifics = { "mr.", "mr", "ms.", "ms", "mrs.", "mrs", "dr.", "dr" };
-
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-
-    // Overlapping "First Last" pairs on one line (a newline never joins two names)
-    [GeneratedRegex(@"\b([A-Z][a-z]+)(?=[ \t]+([A-Z][a-z]+)\b)", RegexOptions.None, 1000)]
-    private static partial Regex NameBigram();
-
-    [GeneratedRegex(@"\b(?:Mr|Ms|Mrs|Dr)\.?[ \t]+([A-Z][a-z]+)\b", RegexOptions.None, 1000)]
-    private static partial Regex HonorificName();
 
     [GeneratedRegex(@"^(?:Hi|Hello|Hey|Dear|Morning|Good morning)[ \t]+([A-Z][a-z]+)\b", RegexOptions.None, 1000)]
     private static partial Regex GreetingName();
@@ -80,23 +62,9 @@ public static partial class RenderValidator
     [GeneratedRegex(@"\bCount [IVX]+\b", RegexOptions.None, 1000)]
     private static partial Regex CountNumber();
 
-    [GeneratedRegex(@"\s+", RegexOptions.None, 1000)]
-    private static partial Regex Whitespace();
-
-    // Leading letters of a canonical identifier: "CO-007" -> "CO-", "INV-2024-118" -> "INV-"
-    [GeneratedRegex(@"^([A-Za-z]+-)", RegexOptions.None, 1000)]
-    private static partial Regex IdentifierPrefix();
-
     // Sentence ends: terminal punctuation before a capitalized word ("Apr. 9" stays whole), or a line break
     [GeneratedRegex(@"(?<=[.!?])\s+(?=[A-Z""'(])|\n+", RegexOptions.None, 1000)]
     private static partial Regex SentenceBreak();
-
-    [GeneratedRegex(@"\b(\d{4})-(\d{2})-(\d{2})\b", RegexOptions.None, 1000)]
-    private static partial Regex IsoDate();
-
-    // en-US "April 9", "Apr 9, 2024", "Sept. 3rd 2024" (capitalized month names only, so "may" the verb never matches)
-    [GeneratedRegex(@"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sept?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?[ \t]+(\d{4})\b)?", RegexOptions.None, 1000)]
-    private static partial Regex MonthDate();
 
     // Function words that end the head phrase of a ledger About ("site walk | with the glazing crew")
     private static readonly HashSet<string> AboutStopWords = new(StringComparer.Ordinal)
@@ -341,11 +309,11 @@ public static partial class RenderValidator
             var body = message.Body ?? string.Empty;
 
             // (b) "Maria Ortiz": a known first name followed by a surname nobody in the case has
-            foreach (Match m in NameBigram().Matches(body))
+            foreach (Match m in TextScan.NameBigram().Matches(body))
             {
                 var first = m.Groups[1].Value;
                 var second = m.Groups[2].Value;
-                if (!c.FirstNames.Contains(first) || NotSurnames.Contains(second))
+                if (!c.FirstNames.Contains(first) || TextScan.NotSurnames.Contains(second))
                     continue;
                 if (c.FullNames.Contains(first + " " + second) || c.FirstNames.Contains(second) || c.LastNames.Contains(second))
                     continue;
@@ -353,10 +321,10 @@ public static partial class RenderValidator
             }
 
             // (c) "Mr. Kowalski" with no such last name
-            foreach (Match m in HonorificName().Matches(body))
+            foreach (Match m in TextScan.HonorificName().Matches(body))
             {
                 if (!c.LastNames.Contains(m.Groups[1].Value) && !c.FirstNames.Contains(m.Groups[1].Value))
-                    result.Add(NotInCast(seq, Whitespace().Replace(m.Value, " ")));
+                    result.Add(NotInCast(seq, TextScan.Whitespace().Replace(m.Value, " ")));
             }
 
             // (d) Greeting a known person who is not on this email; group words and non-person names are ignored
@@ -387,7 +355,7 @@ public static partial class RenderValidator
         var amounts = c.CanonicalAmounts();
         var prefixes = c.Values
             .Where(v => v.Kind != ValueKind.Amount)
-            .Select(v => IdentifierPrefix().Match(v.Value.Trim()))
+            .Select(v => TextScan.IdentifierPrefix().Match(v.Value.Trim()))
             .Where(m => m.Success)
             .Select(m => m.Groups[1].Value)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -600,7 +568,7 @@ public static partial class RenderValidator
                     if (!subject!.Matches(LedgerMerger.NormalizeAbout(sentence)))
                         continue;
 
-                    var dates = DatesIn(sentence, year);
+                    var dates = TextScan.DatesIn(sentence, year);
                     if (dates.Count == 0 || dates.Contains(date))
                         continue;
 
@@ -611,41 +579,6 @@ public static partial class RenderValidator
         }
 
         return result;
-    }
-
-    // Valid dates in order of appearance; a month-day date without a year takes the message's year
-    private static List<DateOnly> DatesIn(string sentence, int defaultYear)
-    {
-        var found = new List<(int Index, DateOnly Date)>();
-        foreach (Match m in IsoDate().Matches(sentence))
-        {
-            if (TryDate(m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value, out var d))
-                found.Add((m.Index, d));
-        }
-
-        foreach (Match m in MonthDate().Matches(sentence))
-        {
-            var month = Array.IndexOf(MonthPrefixes, m.Groups[1].Value[..3].ToLowerInvariant()) + 1;
-            var year = m.Groups[3].Success ? m.Groups[3].Value : defaultYear.ToString(Inv);
-            if (month > 0 && TryDate(year, month.ToString(Inv), m.Groups[2].Value, out var d))
-                found.Add((m.Index, d));
-        }
-
-        return found.OrderBy(f => f.Index).Select(f => f.Date).ToList();
-    }
-
-    private static readonly string[] MonthPrefixes = { "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec" };
-
-    private static bool TryDate(string year, string month, string day, out DateOnly date)
-    {
-        date = default;
-        if (!int.TryParse(year, NumberStyles.None, Inv, out var y) || !int.TryParse(month, NumberStyles.None, Inv, out var mo)
-            || !int.TryParse(day, NumberStyles.None, Inv, out var d))
-            return false;
-        if (y < 1 || y > 9999 || mo < 1 || mo > 12 || d < 1 || d > DateTime.DaysInMonth(y, mo))
-            return false;
-        date = new DateOnly(y, mo, d);
-        return true;
     }
 
     /// <summary>
@@ -832,7 +765,7 @@ public static partial class RenderValidator
                 if (!string.IsNullOrWhiteSpace(person.LastName))
                     LastNames.Add(person.LastName.Trim());
                 if (!string.IsNullOrWhiteSpace(person.FullName))
-                    FullNames.Add(Whitespace().Replace(person.FullName.Trim(), " "));
+                    FullNames.Add(TextScan.Whitespace().Replace(person.FullName.Trim(), " "));
             }
 
             Values = (Guide.Values ?? new List<CanonicalValue>()).Where(v => v != null && !string.IsNullOrWhiteSpace(v.Value)).ToList();
@@ -935,7 +868,7 @@ public static partial class RenderValidator
         /// </summary>
         public bool IsKnownName(string name)
         {
-            var text = Whitespace().Replace(name.Trim(), " ");
+            var text = TextScan.Whitespace().Replace(name.Trim(), " ");
             if (People.Find(text) != null)
                 return true;
 
@@ -943,7 +876,7 @@ public static partial class RenderValidator
                 text = text[..^2];
 
             var space = text.IndexOf(' ');
-            if (space > 0 && Honorifics.Contains(text[..space], StringComparer.OrdinalIgnoreCase))
+            if (space > 0 && TextScan.Honorifics.Contains(text[..space], StringComparer.OrdinalIgnoreCase))
                 text = text[(space + 1)..].Trim();
 
             return text.Length > 0

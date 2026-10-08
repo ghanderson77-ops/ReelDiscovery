@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-10-08T23:10:42.926Z"
+stopped_at: Completed 08-03-PLAN.md
+last_updated: "2026-10-08T23:21:22.171Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 132
+  completed_plans: 133
   percent: 89
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 3 of 19
+Plan: 4 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-08
 
@@ -184,6 +184,7 @@ Progress: [██████████] 100%
 | Phase 07 P22 | 2 days | 4 tasks | 4 files |
 | Phase 08 P01 | 18min | 2 tasks | 14 files |
 | Phase 08 P02 | 12min | 2 tasks | 4 files |
+| Phase 08 P03 | 9min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -544,6 +545,10 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-02: CounselDirectory.PartyOf returns null without a core document (parties live there)
 - [Phase 08]: 08-02: LitigationDraft adds defense witness CH-013 Michael Scott; five key witnesses with distinct KnownByIds fact counts (CH-003 7, CH-004 6, CH-001 5, CH-002 4, CH-013 3)
 - [Phase 08]: 08-02: MemoCriminalDraft adds party-3 United States (Complainant) and defense firm ORG-04 for Desert Bloom; Lane (individual party at Desert Bloom) has no firm of his own
+- [Phase 08]: 08-03: DepositionPlan.Assignments carries exhibits as ExhibitAssignment with SourceKey DOC:{DocId} / VAL:{valueId} for the generator to persist
+- [Phase 08]: 08-03: A witness with existing sidecar exhibit assignments reuses only those; new numbers start after the highest valid existing number (unselected witnesses included)
+- [Phase 08]: 08-03: Exhibits are selected by rank (hot, significance, date) but numbered in transcript order (topic, date); the impeachment tag follows selection rank
+- [Phase 08]: 08-03: A usable corpus with no qualifying emails yields zero exhibits (no canonical fallback)
 
 ### Pending Todos
 
@@ -565,6 +570,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T23:10:42.920Z
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-10-08T23:21:22.166Z
+Stopped at: Completed 08-03-PLAN.md
 Resume file: None

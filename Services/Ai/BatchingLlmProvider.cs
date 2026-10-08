@@ -65,6 +65,12 @@ public class OrphanBill
     /// <summary>Priced custom ids per batch id; MarkOrphansBilledAsync marks these batches billed.</summary>
     public Dictionary<string, List<string>> ItemsByBatch { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// CR-A04: batches holding an item whose (provider, model) has no catalog price. They are left unbilled rather than
+    /// recorded at $0; a later finished run whose catalog prices them bills them.
+    /// </summary>
+    public List<string> UnpricedBatchIds { get; } = new();
+
     public bool IsEmpty => ItemsByBatch.Count == 0;
 }
 
@@ -86,7 +92,7 @@ public class BatchingLlmProvider : ILlmProvider
     private readonly IBatchTransport _transport;
     private readonly BatchLedger _ledger;
     private readonly Guid _planId;
-    private readonly Func<string, AIModelConfig?> _priceLookup;
+    private readonly Func<LlmProviderKind, string, AIModelConfig?> _priceLookup;
     private readonly BatchTimings _timings;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _lock = new();
@@ -99,8 +105,19 @@ public class BatchingLlmProvider : ILlmProvider
     private readonly Dictionary<string, TrackedBatch> _batches = new(StringComparer.Ordinal);
     private readonly HashSet<string> _orphansBilled = new(StringComparer.Ordinal);
 
+    /// <summary>Prices orphans by model id only (tests and single-provider catalogs).</summary>
     public BatchingLlmProvider(ILlmProvider live, IBatchTransport transport, BatchLedger ledger, Guid planId,
         Func<string, AIModelConfig?> priceLookup, BatchTimings? timings = null)
+        : this(live, transport, ledger, planId, ToProviderLookup(priceLookup), timings)
+    {
+    }
+
+    /// <summary>
+    /// CR-A04: <paramref name="priceLookup"/> takes the provider that ran the batch and the item's model id, so results a
+    /// batch of another provider left behind are priced with that provider's catalog model.
+    /// </summary>
+    public BatchingLlmProvider(ILlmProvider live, IBatchTransport transport, BatchLedger ledger, Guid planId,
+        Func<LlmProviderKind, string, AIModelConfig?> priceLookup, BatchTimings? timings = null)
     {
         _live = live ?? throw new ArgumentNullException(nameof(live));
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
@@ -110,6 +127,12 @@ public class BatchingLlmProvider : ILlmProvider
         _timings = timings ?? new BatchTimings();
 
         Recover(_ledger.Replay());
+    }
+
+    private static Func<LlmProviderKind, string, AIModelConfig?> ToProviderLookup(Func<string, AIModelConfig?> priceLookup)
+    {
+        ArgumentNullException.ThrowIfNull(priceLookup);
+        return (_, modelId) => priceLookup(modelId);
     }
 
     /// <summary>
@@ -134,7 +157,7 @@ public class BatchingLlmProvider : ILlmProvider
                     continue;
 
                 if (IsUsable(result))
-                    _available[result.CustomId] = new AvailableResult(record.BatchId, result, batch.ModelFor(result.CustomId));
+                    _available[result.CustomId] = new AvailableResult(record.BatchId, record.Provider, result, batch.ModelFor(result.CustomId));
                 else
                     _failedIds.Add(result.CustomId);
             }
@@ -207,14 +230,29 @@ public class BatchingLlmProvider : ILlmProvider
             var cost = new CostBreakdown();
             var input = 0;
             var output = 0;
+            var priced = true;
             foreach (var (_, orphan) in group)
             {
+                // CR-A04: the batch's own provider and model; no catalog price means unbilled, never a recorded $0
+                var model = _priceLookup(orphan.Provider, orphan.ModelId);
+                if (model == null)
+                {
+                    priced = false;
+                    break;
+                }
+
                 var usage = orphan.Result.Response!.ToUsage();
                 usage.IsBatch = true;
                 usage.Normalize();
-                cost.Add(_priceLookup(orphan.ModelId)?.CalculateCost(usage));
+                cost.Add(model.CalculateCost(usage));
                 input += usage.TotalInputTokens;
                 output += usage.OutputTokens;
+            }
+
+            if (!priced)
+            {
+                bill.UnpricedBatchIds.Add(group.Key);
+                continue;
             }
 
             bill.Cost.Add(cost);
@@ -954,7 +992,7 @@ public class BatchingLlmProvider : ILlmProvider
             if (!usable)
                 _failedIds.Add(result.CustomId);
             else if (waiters.Count == 0)
-                _available[result.CustomId] = new AvailableResult(batch.BatchId, result, batch.ModelFor(result.CustomId));
+                _available[result.CustomId] = new AvailableResult(batch.BatchId, _transport.Kind, result, batch.ModelFor(result.CustomId));
         }
 
         // Consumed before the waiter completes, so a later Continue (or Regenerate) never reuses this result (D-09)
@@ -1202,14 +1240,18 @@ public class BatchingLlmProvider : ILlmProvider
 
     private sealed class AvailableResult
     {
-        public AvailableResult(string batchId, BatchItemResult result, string modelId)
+        public AvailableResult(string batchId, LlmProviderKind provider, BatchItemResult result, string modelId)
         {
             BatchId = batchId;
+            Provider = provider;
             Result = result;
             ModelId = modelId;
         }
 
         public string BatchId { get; }
+
+        /// <summary>Provider that ran the batch; prices the result when it becomes an orphan (CR-A04).</summary>
+        public LlmProviderKind Provider { get; }
         public BatchItemResult Result { get; }
         public string ModelId { get; }
     }

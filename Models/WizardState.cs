@@ -103,11 +103,13 @@ public class WizardState
         if (!useBatch)
             return (new LlmGateway(live, story, volume, UsageTracker), null);
 
-        // Orphans are priced with this provider's catalog models (tiers never mix providers, D-11)
+        // CR-A04: orphans are priced with the catalog model of the provider that ran their batch (tiers never mix
+        // providers, D-11), so a batch left by another provider is never billed at $0
         var provider = TextProvider;
+        Func<LlmProviderKind, string, AIModelConfig?> price = (kind, id) =>
+            AvailableModelConfigs.FirstOrDefault(m => m.ModelId == id && m.Provider == kind);
         var batch = new BatchingLlmProvider(live, transport ?? LlmProviderFactory.CreateBatchTransport(provider, key),
-            new BatchLedger(caseFolder), planId,
-            id => AvailableModelConfigs.FirstOrDefault(m => m.ModelId == id && m.Provider == provider), timings);
+            new BatchLedger(caseFolder), planId, price, timings);
         return (new LlmGateway(batch, story, volume, UsageTracker), batch);
     }
 

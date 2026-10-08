@@ -1218,4 +1218,60 @@ public class BatchingLlmProviderTests : IDisposable
         restarted.Detach();
         Assert.True(Create(Live(), Transport(), priceLookup: _ => model).PriceOrphans().IsEmpty);
     }
+
+    private async Task CollectedOrphanAsync(string batchId, LlmProviderKind kind, string modelId)
+    {
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = kind,
+            BatchId = batchId,
+            PlanId = _plan,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "non-relevant mail",
+            Items = new List<BatchLedgerItem> { new() { CustomId = "q-" + batchId, Operation = "Thread", ModelId = modelId } }
+        });
+        ledger.SaveResults(batchId, new[]
+        {
+            new BatchItemResult { CustomId = "q-" + batchId, Outcome = BatchItemOutcome.Succeeded, Response = FakeLlmProvider.Ok("{}", 1000, 500) }
+        });
+        await ledger.AppendAsync(new BatchLedgerRecord { Type = BatchLedgerRecordType.Collected, Utc = DateTime.UtcNow, Provider = kind, BatchId = batchId, PlanId = _plan });
+    }
+
+    [Fact]
+    public async Task CRA04_OrphanOfAnotherProvider_PricedWithThatProvidersModel_UnpricedLeftUnbilled()
+    {
+        await CollectedOrphanAsync("msgbatch_claude", LlmProviderKind.Anthropic, "claude-test");
+        await CollectedOrphanAsync("batch_unknown", LlmProviderKind.OpenAI, "edited-away");
+        var claude = new AIModelConfig
+        {
+            Provider = LlmProviderKind.Anthropic,
+            ModelId = "claude-test",
+            InputTokenPricePerMillion = 3m,
+            OutputTokenPricePerMillion = 15m,
+            BatchDiscountPercent = 50m
+        };
+
+        // The current text provider is OpenAI; the lookup is by (provider, model) across the whole catalog
+        var provider = new BatchingLlmProvider(Live(), Transport(), new BatchLedger(_folder), _plan,
+            (kind, id) => kind == LlmProviderKind.Anthropic && id == "claude-test" ? claude : null, Fast());
+        _providers.Add(provider);
+
+        var bill = provider.PriceOrphans();
+        var expected = claude.CalculateCost(new TokenUsage { InputTokens = 1000, OutputTokens = 500, IsBatch = true });
+        Assert.True(expected.TotalUsd > 0);
+        Assert.Equal(expected.TotalUsd, bill.Cost.TotalUsd);
+        Assert.Equal(1000, bill.InputTokens);
+        Assert.Equal(new[] { "msgbatch_claude" }, bill.ItemsByBatch.Keys);
+        Assert.Equal(new[] { "batch_unknown" }, bill.UnpricedBatchIds);
+
+        // Only the priced batch is marked billed; the unpriced one is never recorded at $0
+        await provider.MarkOrphansBilledAsync(bill).WaitAsync(Wait);
+        var state = new BatchLedger(_folder).Replay();
+        Assert.Contains("msgbatch_claude", state.OrphansBilledIds);
+        Assert.DoesNotContain("batch_unknown", state.OrphansBilledIds);
+        Assert.Equal(new[] { "batch_unknown" }, provider.PriceOrphans().UnpricedBatchIds);
+    }
 }

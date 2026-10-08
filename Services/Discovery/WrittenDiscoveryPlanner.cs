@@ -1,5 +1,7 @@
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Discovery;
+using ReelDiscovery.Services.Case;
 
 namespace ReelDiscovery.Services.Discovery;
 
@@ -74,6 +76,25 @@ public class RequestSlot
 
     // Code-owned opening words of the request (RFAs)
     public string Prefix { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Independent copy (lists are not shared between slots).
+    /// </summary>
+    public RequestSlot Copy() => new()
+    {
+        Number = Number,
+        IssueIds = new List<string>(IssueIds),
+        FactId = FactId,
+        DocId = DocId,
+        DocSubject = DocSubject,
+        IsGenuineness = IsGenuineness,
+        IsPersonsWithKnowledge = IsPersonsWithKnowledge,
+        CustodianIds = new List<string>(CustodianIds),
+        ValueIds = new List<string>(ValueIds),
+        FromDate = FromDate,
+        ToDate = ToDate,
+        Prefix = Prefix
+    };
 }
 
 /// <summary>
@@ -274,7 +295,196 @@ public static class WrittenDiscoveryPlanner
         if (count.Lowered)
             plan.Notes.Add($"Requests lowered to {count.Effective}: {count.LoweredReason}.");
 
+        var guide = draft.Guide;
+        if (guide == null || (kind != DiscoveryKind.RequestsForAdmission && Issues(guide).Count == 0))
+        {
+            plan.Notes.Add("The case guide has no issues, so no requests were planned.");
+            return plan;
+        }
+
+        plan.Slots = kind switch
+        {
+            DiscoveryKind.RequestsForProduction => ProductionSlots(draft, parties.Responding, count.Effective),
+            DiscoveryKind.Interrogatories => InterrogatorySlots(draft, parties.Responding, count.Effective),
+            _ => AdmissionSlots(guide, count.Effective, corpus)
+        };
+        for (var i = 0; i < plan.Slots.Count; i++)
+            plan.Slots[i].Number = i + 1;
+
         return plan;
+    }
+
+    // ---- Slots ----
+
+    /// <summary>
+    /// Every issue gets at least one request; the rest follow the issue's fact count. Ordered by issue (guide order).
+    /// </summary>
+    private static List<RequestSlot> ProductionSlots(CaseDraft draft, CaseParty responding, int effective)
+    {
+        var issues = Issues(draft.Guide);
+        var shares = Apportion.Largest(effective, IssueWeights(draft.Guide, issues), min: 1);
+
+        var slots = new List<RequestSlot>();
+        for (var i = 0; i < issues.Count; i++)
+        {
+            var anchor = IssueAnchor(draft, responding, new[] { issues[i].Id });
+            for (var n = 0; n < shares[i]; n++)
+                slots.Add(anchor.Copy());
+        }
+        return slots;
+    }
+
+    /// <summary>
+    /// Persons-with-knowledge interrogatories first, then contention interrogatories per issue (min 1). When there are
+    /// more issues than contention slots, issues are dealt round-robin by weight into shared slots so every issue
+    /// appears (research Pattern 5). Never more than 25 including subparts (FRCP 33(a)(1)).
+    /// </summary>
+    private static List<RequestSlot> InterrogatorySlots(CaseDraft draft, CaseParty responding, int effective)
+    {
+        effective = Math.Min(effective, MaxInterrogatories);
+        var issues = Issues(draft.Guide);
+        var issueIds = issues.Select(i => i.Id).ToList();
+
+        // At least one contention slot always remains
+        var persons = Math.Min(PersonsWithKnowledgeSlots, Math.Max(0, effective - 1));
+        var contention = effective - persons;
+
+        var slots = new List<RequestSlot>();
+        for (var n = 0; n < persons; n++)
+            slots.Add(new RequestSlot { IsPersonsWithKnowledge = true, IssueIds = new List<string>(issueIds) });
+
+        var weights = IssueWeights(draft.Guide, issues);
+        if (issues.Count <= contention)
+        {
+            var shares = Apportion.Largest(contention, weights, min: 1);
+            for (var i = 0; i < issues.Count; i++)
+            {
+                var anchor = IssueAnchor(draft, responding, new[] { issues[i].Id });
+                for (var n = 0; n < shares[i]; n++)
+                    slots.Add(anchor.Copy());
+            }
+            return slots;
+        }
+
+        // Heaviest issues first; slot k takes issues k, k + contention, ... then guide order inside a slot
+        var byWeight = Enumerable.Range(0, issues.Count).OrderByDescending(i => weights[i]).ThenBy(i => i).ToList();
+        var groups = Enumerable.Range(0, contention).Select(_ => new List<int>()).ToList();
+        for (var r = 0; r < byWeight.Count; r++)
+            groups[r % contention].Add(byWeight[r]);
+
+        foreach (var group in groups.OrderBy(g => g.Min()))
+            slots.Add(IssueAnchor(draft, responding, group.OrderBy(i => i).Select(i => issueIds[i])));
+        return slots;
+    }
+
+    /// <summary>
+    /// One dated fact per request (Hot/Key before Supporting, then chronological), then 1-3 genuineness requests for hot
+    /// written documents linked to the selected facts. Genuineness RFAs are part of the requested count (D-19), so the
+    /// slot count always equals the effective count.
+    /// </summary>
+    private static List<RequestSlot> AdmissionSlots(CaseGuide guide, int effective, DiscoveryCorpus? corpus)
+    {
+        var dated = DatedFacts(guide)
+            .OrderBy(f => f.Significance == FactSignificance.Supporting ? 1 : 0)
+            .ThenBy(f => f.Date, StringComparer.Ordinal)
+            .ThenBy(f => f.Id, StringComparer.Ordinal)
+            .ToList();
+
+        // Plan revision 3: when EffectiveCount was lowered to dated facts + candidates, genuineness absorbs the
+        // remainder so fact slots never exceed the dated facts
+        var formula = Math.Min(Math.Min(MaxGenuineness, Math.Max(1, effective / 10)), Math.Max(0, effective - 1));
+        var usable = corpus?.Usable == true;
+        var genuineness = usable
+            ? Math.Min(GenuinenessCandidates(corpus, dated.Select(f => f.Id)).Count, Math.Max(formula, effective - dated.Count))
+            : 0;
+        var factSlots = Math.Min(effective - genuineness, dated.Count);
+
+        // Candidates must link to a selected fact; take more facts (fewer genuineness requests) until they do
+        var selected = dated.Take(factSlots).ToList();
+        var candidates = GenuinenessCandidates(corpus, selected.Select(f => f.Id));
+        while (candidates.Count < genuineness && factSlots < dated.Count)
+        {
+            factSlots++;
+            genuineness--;
+            selected = dated.Take(factSlots).ToList();
+            candidates = GenuinenessCandidates(corpus, selected.Select(f => f.Id));
+        }
+        genuineness = Math.Min(genuineness, candidates.Count);
+
+        var slots = selected.Select(f => new RequestSlot
+        {
+            IssueIds = CaseGuide.CleanStrings(f.IssueIds).ToList(),
+            FactId = f.Id,
+            FromDate = f.Date,
+            ToDate = f.Date,
+            Prefix = $"Admit that on {CaseGuideDocxExporter.LongDate(f.Date)},"
+        }).ToList();
+
+        // Rule 36(a)(1)(B) genuineness; "produced as DocID" means the document was already furnished (36(a)(2)).
+        // DocIDs come only from the written corpus, never from model output (T-08-12)
+        foreach (var candidate in candidates.Take(genuineness))
+        {
+            var fact = selected.First(f => (candidate.FactIds ?? new List<string>()).Contains(f.Id));
+            slots.Add(new RequestSlot
+            {
+                IsGenuineness = true,
+                IssueIds = CaseGuide.CleanStrings(fact.IssueIds).ToList(),
+                FactId = fact.Id,
+                DocId = candidate.DocId,
+                DocSubject = candidate.Subject ?? string.Empty,
+                FromDate = candidate.Date ?? string.Empty,
+                ToDate = candidate.Date ?? string.Empty,
+                Prefix = $"Admit that the document produced as {candidate.DocId} is a true and correct copy of"
+            });
+        }
+        return slots;
+    }
+
+    // Facts per issue, at least 1, in issue order
+    private static List<double> IssueWeights(CaseGuide? guide, List<CaseIssue> issues)
+    {
+        var facts = Facts(guide);
+        return issues.Select(i => (double)Math.Max(1, facts.Count(f => (f.IssueIds ?? new List<string>()).Contains(i.Id)))).ToList();
+    }
+
+    /// <summary>
+    /// Custodians, canonical values and date range shared by every request on the given issues.
+    /// </summary>
+    private static RequestSlot IssueAnchor(CaseDraft draft, CaseParty responding, IEnumerable<string> issueIds)
+    {
+        var ids = issueIds.ToList();
+        var facts = Facts(draft.Guide).Where(f => (f.IssueIds ?? new List<string>()).Any(ids.Contains)).ToList();
+        var factIds = facts.Select(f => f.Id).ToHashSet(StringComparer.Ordinal);
+        var people = facts
+            .SelectMany(f => (f.ActorIds ?? new List<string>()).Concat(f.KnownByIds ?? new List<string>()))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var custodians = (draft.Guide?.Cast ?? new List<CastMember>())
+            .Where(c => c != null
+                && c.Tier == CastTier.Key
+                && c.Role is CastRole.Party or CastRole.Staff or CastRole.InHouseCounsel
+                && people.Contains(c.Id)
+                && string.Equals(CounselDirectory.PartyOf(draft, c)?.Id, responding.Id, StringComparison.Ordinal))
+            .Select(c => c.Id)
+            .ToList();
+
+        var values = (draft.Guide?.Values ?? new List<CanonicalValue>())
+            .Where(v => v != null
+                && v.Kind is ValueKind.ProjectName or ValueKind.ContractNumber or ValueKind.ChangeOrderNumber or ValueKind.Amount
+                && (v.FactIds ?? new List<string>()).Any(factIds.Contains))
+            .Select(v => v.Id)
+            .ToList();
+
+        var dates = facts.Where(f => CaseDraft.TryParseDate(f.Date, out _)).Select(f => f.Date).OrderBy(d => d, StringComparer.Ordinal).ToList();
+
+        return new RequestSlot
+        {
+            IssueIds = ids,
+            CustodianIds = custodians,
+            ValueIds = values,
+            FromDate = dates.FirstOrDefault() ?? string.Empty,
+            ToDate = dates.LastOrDefault() ?? string.Empty
+        };
     }
 
     // ---- Helpers ----

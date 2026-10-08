@@ -324,10 +324,15 @@ public class WrittenDiscoveryPlannerTests
         Assert.Equal(facts.Min(f => f.Date), slot.FromDate);
         Assert.Equal(facts.Max(f => f.Date), slot.ToDate);
 
-        // ISS-04 has no facts: still one request, no date range
+        // ISS-04 has no facts: weight 1, fewer requests than ISS-01, no date range
         var empty = plan.Slots.Where(s => s.IssueIds[0] == "ISS-04").ToList();
-        Assert.Single(empty);
-        Assert.Equal(string.Empty, empty[0].FromDate);
+        Assert.NotEmpty(empty);
+        Assert.True(empty.Count < plan.Slots.Count(s => s.IssueIds[0] == "ISS-01"));
+        Assert.All(empty, s => Assert.Equal(string.Empty, s.FromDate));
+
+        // Slots are independent copies
+        slot.CustodianIds.Add("CH-999");
+        Assert.DoesNotContain("CH-999", plan.Slots.Last(s => s.IssueIds[0] == "ISS-01").CustodianIds);
     }
 
     [Fact]

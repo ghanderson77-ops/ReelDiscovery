@@ -65,6 +65,9 @@ public class DepositionExhibit
 
     public string IssueId { get; set; } = string.Empty;
     public int TopicIndex { get; set; }
+
+    // The exhibit the examining attorney uses to impeach an adverse witness (D-22); at most one per deposition
+    public bool IsImpeachment { get; set; }
 }
 
 /// <summary>

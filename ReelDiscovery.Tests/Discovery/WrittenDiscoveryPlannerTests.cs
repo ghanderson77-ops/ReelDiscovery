@@ -1,3 +1,4 @@
+using System.Globalization;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Discovery;
 using ReelDiscovery.Services.Discovery;
@@ -287,6 +288,243 @@ public class WrittenDiscoveryPlannerTests
         Assert.Equal("United States's CID document requests", WrittenDiscoveryPlanner.FileDocumentPart(memo, DiscoveryKind.RequestsForProduction, us));
     }
 
+    // ---- Request slots ----
+
+    [Fact]
+    public void Rfp_EveryIssueAtLeastOne()
+    {
+        var draft = WithIssues(4);
+        var guide = draft.Guide!;
+
+        var plan = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForProduction, new DiscoverySettings { RfpCount = 25 }, null)!;
+
+        Assert.Equal("RFP", plan.Key);
+        Assert.Equal(25, plan.Slots.Count);
+        Assert.Equal(Enumerable.Range(1, 25), plan.Slots.Select(s => s.Number));
+        foreach (var issue in guide.Issues)
+            Assert.Contains(plan.Slots, s => s.IssueIds.Contains(issue.Id));
+        Assert.All(plan.Slots, s => Assert.Single(s.IssueIds));
+
+        // Slots follow guide issue order
+        var order = guide.Issues.Select(i => i.Id).ToList();
+        var indexes = plan.Slots.Select(s => order.IndexOf(s.IssueIds[0])).ToList();
+        Assert.Equal(indexes.OrderBy(i => i), indexes);
+
+        // Custodians, values and date range of ISS-01
+        var slot = plan.Slots.First(s => s.IssueIds[0] == "ISS-01");
+        var facts = guide.Facts.Where(f => f.IssueIds.Contains("ISS-01")).ToList();
+        Assert.NotEmpty(slot.CustodianIds);
+        Assert.All(slot.CustodianIds, id =>
+        {
+            var member = guide.Cast.Single(c => c.Id == id);
+            Assert.Equal("party-2", CounselDirectory.PartyOf(draft, member)?.Id);
+            Assert.Contains(facts, f => f.ActorIds.Contains(id) || f.KnownByIds.Contains(id));
+        });
+        Assert.Contains("V-006", slot.ValueIds);
+        Assert.Equal(facts.Min(f => f.Date), slot.FromDate);
+        Assert.Equal(facts.Max(f => f.Date), slot.ToDate);
+
+        // ISS-04 has no facts: still one request, no date range
+        var empty = plan.Slots.Where(s => s.IssueIds[0] == "ISS-04").ToList();
+        Assert.Single(empty);
+        Assert.Equal(string.Empty, empty[0].FromDate);
+    }
+
+    [Fact]
+    public void Rog_PersonsWithKnowledgeThenContention()
+    {
+        var draft = DiscoveryTestData.LitigationDraft();
+        var issues = draft.Guide!.Issues.Select(i => i.Id).ToList();
+
+        var plan = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.Interrogatories, new DiscoverySettings { RogCount = 18 }, null)!;
+
+        Assert.Equal(18, plan.Slots.Count);
+        Assert.Equal(Enumerable.Range(1, 18), plan.Slots.Select(s => s.Number));
+        Assert.True(plan.Slots[0].IsPersonsWithKnowledge);
+        Assert.True(plan.Slots[1].IsPersonsWithKnowledge);
+        Assert.Equal(issues, plan.Slots[0].IssueIds);
+        Assert.All(plan.Slots.Skip(2), s => Assert.False(s.IsPersonsWithKnowledge));
+        foreach (var issue in issues)
+            Assert.Contains(plan.Slots.Skip(2), s => s.IssueIds.Contains(issue));
+    }
+
+    [Fact]
+    public void Rog_NeverExceeds25()
+    {
+        foreach (var issues in new[] { 1, 3, 10, 25, 40 })
+            foreach (var requested in new[] { -5, 0, 1, 2, 3, 18, 25, 26, 100 })
+            {
+                var draft = WithIssues(issues);
+                if (issues == 1)
+                    draft.Guide!.Issues.RemoveRange(1, draft.Guide.Issues.Count - 1);
+                var plan = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.Interrogatories, new DiscoverySettings { RogCount = requested }, null)!;
+                Assert.InRange(plan.Slots.Count, 1, 25);
+                Assert.Equal(plan.Count.Effective, plan.Slots.Count);
+                foreach (var issue in draft.Guide!.Issues)
+                    Assert.Contains(plan.Slots, s => s.IssueIds.Contains(issue.Id));
+            }
+    }
+
+    [Fact]
+    public void Rog_ManyIssues_AllCovered()
+    {
+        var draft = WithIssues(30);
+
+        var plan = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.Interrogatories, new DiscoverySettings { RogCount = 18 }, null)!;
+
+        Assert.Equal(25, plan.Slots.Count);
+        var contention = plan.Slots.Where(s => !s.IsPersonsWithKnowledge).ToList();
+        Assert.Equal(23, contention.Count);
+        foreach (var issue in draft.Guide!.Issues)
+            Assert.Contains(contention, s => s.IssueIds.Contains(issue.Id));
+        Assert.Contains(contention, s => s.IssueIds.Count > 1);
+    }
+
+    [Fact]
+    public void Rfa_OrderedBySignificanceThenDate()
+    {
+        var draft = DraftWithDatedFacts(25);
+        var guide = draft.Guide!;
+
+        var plan = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, new DiscoverySettings { RfaCount = 20 }, null)!;
+
+        Assert.Equal(20, plan.Slots.Count);
+        Assert.Equal(Enumerable.Range(1, 20), plan.Slots.Select(s => s.Number));
+        Assert.All(plan.Slots, s => Assert.False(s.IsGenuineness));
+        Assert.Equal(20, plan.Slots.Select(s => s.FactId).Distinct().Count());
+
+        var facts = plan.Slots.Select(s => guide.Facts.Single(f => f.Id == s.FactId)).ToList();
+        var ranks = facts.Select(f => f.Significance == FactSignificance.Supporting ? 1 : 0).ToList();
+        Assert.Equal(ranks.OrderBy(r => r), ranks);
+        foreach (var group in facts.GroupBy(f => f.Significance == FactSignificance.Supporting))
+        {
+            var dates = group.Select(f => f.Date).ToList();
+            Assert.Equal(dates.OrderBy(d => d, StringComparer.Ordinal), dates);
+        }
+
+        // Every Hot/Key dated fact is selected before any Supporting one
+        var important = guide.Facts.Count(f => f.Significance != FactSignificance.Supporting);
+        Assert.Equal(Math.Min(20, important), ranks.Count(r => r == 0));
+
+        var first = plan.Slots[0];
+        var fact = facts[0];
+        var longDate = DateTime.ParseExact(fact.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture).ToString("MMMM d, yyyy", CultureInfo.InvariantCulture);
+        Assert.Equal($"Admit that on {longDate},", first.Prefix);
+        Assert.Equal(fact.IssueIds, first.IssueIds);
+    }
+
+    [Fact]
+    public void Rfa_UndatedFactsSkipped()
+    {
+        var draft = SevenDatedFacts();
+
+        var plan = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, new DiscoverySettings { RfaCount = 20 }, null)!;
+
+        Assert.Equal(7, plan.Slots.Count);
+        Assert.DoesNotContain(plan.Slots, s => s.FactId is "F-008" or "F-009" or "F-010");
+    }
+
+    [Fact]
+    public void Rfa_GenuinenessOnlyWithUsableCorpus()
+    {
+        var draft = DraftWithDatedFacts(25);
+        var settings = new DiscoverySettings { RfaCount = 20 };
+
+        var unusable = HotCorpusFor25();
+        unusable.Usable = false;
+        Assert.DoesNotContain(WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, settings, unusable)!.Slots, s => s.IsGenuineness);
+        Assert.DoesNotContain(WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, settings, null)!.Slots, s => s.IsGenuineness);
+
+        var plan = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, settings, HotCorpusFor25())!;
+        var genuine = plan.Slots.Where(s => s.IsGenuineness).ToList();
+        Assert.Equal(2, genuine.Count);
+
+        // Genuineness requests come last, ordered by document date
+        Assert.All(plan.Slots.TakeLast(2), s => Assert.True(s.IsGenuineness));
+        var factIds = plan.Slots.Where(s => !s.IsGenuineness).Select(s => s.FactId).ToHashSet();
+        Assert.Equal(new[] { "BRL-000020", "BRL-000210" }, genuine.Select(s => s.DocId));
+        Assert.All(genuine, s =>
+        {
+            Assert.Equal($"Admit that the document produced as {s.DocId} is a true and correct copy of", s.Prefix);
+            Assert.False(string.IsNullOrEmpty(s.DocSubject));
+            Assert.Contains(s.FactId, factIds);
+        });
+    }
+
+    [Fact]
+    public void Rfa_SlotCountEqualsEffective_WithAndWithoutCorpus()
+    {
+        var draft = DraftWithDatedFacts(25);
+
+        var plain = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, new DiscoverySettings { RfaCount = 20 }, null)!;
+        Assert.Equal(plain.Count.Effective, plain.Slots.Count);
+        Assert.Equal(20, plain.Slots.Count(s => !s.IsGenuineness));
+
+        var withCorpus = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, new DiscoverySettings { RfaCount = 20 }, HotCorpusFor25())!;
+        Assert.Equal(withCorpus.Count.Effective, withCorpus.Slots.Count);
+        Assert.Equal(2, withCorpus.Slots.Count(s => s.IsGenuineness));
+        Assert.Equal(18, withCorpus.Slots.Count(s => !s.IsGenuineness));
+
+        var one = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, new DiscoverySettings { RfaCount = 1 }, HotCorpusFor25())!;
+        Assert.Single(one.Slots);
+        Assert.False(one.Slots[0].IsGenuineness);
+    }
+
+    [Fact]
+    public void Rfa_FewerDatedFactsThanRequested_LoweredAndSlotCountMatches()
+    {
+        var draft = SevenDatedFacts();
+        var settings = new DiscoverySettings { RfaCount = 20 };
+
+        var plain = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, settings, null)!;
+        Assert.Equal(7, plain.Count.Effective);
+        Assert.True(plain.Count.Lowered);
+        Assert.Equal(7, plain.Slots.Count);
+        Assert.NotEmpty(plain.Notes);
+
+        var withCorpus = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, settings, TwoHotCandidates())!;
+        Assert.Equal(9, withCorpus.Count.Effective);
+        Assert.Equal(9, withCorpus.Slots.Count);
+        Assert.Equal(2, withCorpus.Slots.Count(s => s.IsGenuineness));
+        Assert.Equal(7, withCorpus.Slots.Count(s => !s.IsGenuineness));
+        Assert.Equal(Enumerable.Range(1, 9), withCorpus.Slots.Select(s => s.Number));
+    }
+
+    [Fact]
+    public void Plan_HiddenKind_ReturnsNull()
+    {
+        var draft = DiscoveryTestData.MemoCriminalDraft();
+
+        Assert.Null(WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.Interrogatories, new DiscoverySettings(), null));
+        Assert.Null(WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, new DiscoverySettings(), null));
+        Assert.Null(WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.Deposition, new DiscoverySettings(), null));
+
+        var rider = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForProduction, new DiscoverySettings(), null)!;
+        Assert.Equal(DiscoveryVariant.MemoCriminal, rider.Variant);
+        Assert.StartsWith("SUBPOENA RIDER", rider.Title);
+        Assert.Equal(rider.Count.Effective, rider.Slots.Count);
+    }
+
+    [Fact]
+    public void Plan_DisabledKind_ReturnsNull()
+    {
+        var draft = DiscoveryTestData.LitigationDraft();
+
+        Assert.Null(WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForProduction, new DiscoverySettings { RfpEnabled = false }, null));
+    }
+
+    [Fact]
+    public void Plan_NoGuide_EmptyPlanWithNote()
+    {
+        var draft = DiscoveryTestData.NoGuideDraft();
+
+        var plan = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForProduction, new DiscoverySettings(), null)!;
+
+        Assert.Empty(plan.Slots);
+        Assert.NotEmpty(plan.Notes);
+        Assert.Null(WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.RequestsForAdmission, new DiscoverySettings(), null));
+    }
+
     // ---- Helpers ----
 
     private static string Visible(CoreDocument? doc, DiscoveryKind kind)
@@ -334,6 +572,22 @@ public class WrittenDiscoveryPlannerTests
             new() { DocId = "BRL-000045", Subject = "CO 7 approved", Date = "2024-03-18", IsHot = true, FactIds = new List<string> { "F-003" } },
             new() { DocId = "BRL-000300", Subject = "Lunch", Date = "2024-03-19", IsHot = false, FactIds = new List<string> { "F-003" } },
             new() { DocId = "BRL-000400", Subject = "Back-charge", Date = "2024-10-22", IsHot = true, FactIds = new List<string> { "F-010" } }
+        }
+    };
+
+    /// <summary>
+    /// A usable corpus for DraftWithDatedFacts(25): hot candidates on Hot facts F-007 and F-102 (both selected for 20
+    /// RFAs), a cold one and a hot one on an unknown fact.
+    /// </summary>
+    internal static DiscoveryCorpus HotCorpusFor25() => new()
+    {
+        Usable = true,
+        Candidates = new List<ExhibitCandidate>
+        {
+            new() { DocId = "BRL-000210", Subject = "Hold Brightline payments", Date = "2024-07-15", IsHot = true, FactIds = new List<string> { "F-007" } },
+            new() { DocId = "BRL-000020", Subject = "Synthetic fact 2", Date = "2023-06-03", IsHot = true, FactIds = new List<string> { "F-102" } },
+            new() { DocId = "BRL-000300", Subject = "Lunch", Date = "2024-03-19", IsHot = false, FactIds = new List<string> { "F-007" } },
+            new() { DocId = "BRL-000500", Subject = "Other", Date = "2024-03-20", IsHot = true, FactIds = new List<string> { "F-999" } }
         }
     };
 

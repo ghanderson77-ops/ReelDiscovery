@@ -76,10 +76,10 @@ files_reviewed_list:
   - UserControls/StepGenerateCorpus.Run.cs
   - UserControls/StepGenerateCorpus.cs
 findings:
-  critical: 0
-  warning: 0
-  info: 0
-  total: 0
+  critical: 7
+  warning: 20
+  info: 9
+  total: 36
 status: issues_found
 parts: merged from two parallel reviewers (A: AI/batch/cost/runner, B: QA/UI)
 ---

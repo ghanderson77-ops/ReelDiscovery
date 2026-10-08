@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-21-PLAN.md
-last_updated: "2026-10-07T01:49:55.805Z"
-last_activity: 2026-10-07
+stopped_at: Completed 07-23-PLAN.md
+last_updated: "2026-10-08T15:39:44.486Z"
+last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 6
-  total_plans: 128
-  completed_plans: 127
-  percent: 99
+  total_plans: 130
+  completed_plans: 128
+  percent: 98
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 22 of 22
-Status: Ready to execute
-Last activity: 2026-10-07
+Plan: 23 of 24 (gap closure; 07-24 and 07-22 Task 4 live UAT pending)
+Status: Executing gap closure (07-23 done)
+Last activity: 2026-10-08
 
 Progress: [██████████] 99%
 
@@ -178,6 +178,7 @@ Progress: [██████████] 99%
 | Phase 07 P18 | 35min | 2 tasks | 7 files |
 | Phase 07 P20 | 15min | 2 tasks | 38 files |
 | Phase 07 P21 | 35min | 2 tasks | 4 files |
+| Phase 07 P23 | 45 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -524,6 +525,9 @@ Recent decisions affecting current work:
 - [Phase 07]: [07-21]: Key projection interval is adaptive: max(2 s, 10 x last per-thread projection), capped at 60 s; wave/run end always project
 - [Phase 07]: [07-21]: AnswerKeyXlsxWriter stays on the DOM API: 5K run peaks at ~360 MB live / ~465 MB batch (budget 1.5 GB)
 - [Phase 07]: [07-21]: Batch QuietPeriod 500 ms kept: measured wave start-up spread 36-38 ms
+- [Phase 07]: 07-23: Amended D-07 live: in batch mode relevant waves run live at MaxParallelThreads; only non-relevant mail is batched
+- [Phase 07]: 07-23: Stage B live attempts (D-10 fallbacks, retries) gated at _maxParallel via BatchStage.UseLiveGate
+- [Phase 07]: 07-23: Finished batch runs close stale 'wave N' batches (best-effort cancel, recorded Cancelled even on failure) so PendingBatchCount returns to 0
 
 ### Pending Todos
 
@@ -545,6 +549,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-07T01:49:55.799Z
-Stopped at: Completed 07-21-PLAN.md
+Last session: 2026-10-08T15:39:44.479Z
+Stopped at: Completed 07-23-PLAN.md
 Resume file: None

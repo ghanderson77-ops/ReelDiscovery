@@ -253,7 +253,7 @@ Plans:
 - [x] 07-20-PLAN.md — Delete the legacy wizard, generators, models and tests (Wave 7)
 - [x] 07-21-PLAN.md — Adaptive key projection and 5K scale tests in live and batch modes (Wave 8)
 - [ ] 07-22-PLAN.md — Live provider spike, real batch round trip with restart, UAT at 150% (Wave 9, checkpoints)
-- [ ] 07-23-PLAN.md — Gap closure: relevant waves live in batch mode, only non-relevant mail batched (amended D-07), parity/restart/5K tests (Wave 1, gap closure)
+- [x] 07-23-PLAN.md — Gap closure: relevant waves live in batch mode, only non-relevant mail batched (amended D-07), parity/restart/5K tests (Wave 1, gap closure)
 - [ ] 07-24-PLAN.md — Gap closure: batch total prices relevant work live, Ready-card/UI-SPEC batch copy, API-step media notice wording (Wave 1, gap closure)
 **UI hint**: yes
 

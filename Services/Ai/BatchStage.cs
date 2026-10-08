@@ -11,12 +11,16 @@ public static class BatchStage
 
     private static readonly AsyncLocal<string?> _current = new();
     private static readonly AsyncLocal<bool> _live = new();
+    private static readonly AsyncLocal<SemaphoreSlim?> _liveGate = new();
 
     /// <summary>The label of the enclosing stage; "batch" when unset.</summary>
     public static string Current => _current.Value ?? DefaultLabel;
 
     /// <summary>True inside <see cref="EnterLive"/>: requests always go live even when they allow batching.</summary>
     public static bool IsLive => _live.Value;
+
+    /// <summary>Gate every live send inside <see cref="UseLiveGate"/> waits on; null when unset.</summary>
+    public static SemaphoreSlim? LiveGate => _liveGate.Value;
 
     /// <summary>Sets the stage label (e.g. "wave 3", "non-relevant mail") until the returned scope is disposed.</summary>
     public static IDisposable Enter(string label)
@@ -32,6 +36,15 @@ public static class BatchStage
         var previous = _live.Value;
         _live.Value = true;
         return new Scope(() => _live.Value = previous);
+    }
+
+    /// <summary>Live sends inside wait on this gate (amended D-07: Stage B live fallbacks and retries keep live parallelism) until the returned scope is disposed.</summary>
+    public static IDisposable UseLiveGate(SemaphoreSlim gate)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        var previous = _liveGate.Value;
+        _liveGate.Value = gate;
+        return new Scope(() => _liveGate.Value = previous);
     }
 
     private sealed class Scope : IDisposable

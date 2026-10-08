@@ -220,22 +220,35 @@ public class BatchingLlmProvider : ILlmProvider
 
     /// <summary>
     /// Start Over: cancels this plan's pending provider batches (one transport per record's provider; a null transport is
-    /// skipped), appends Cancelled, then deletes uploaded batch files (best effort).
+    /// skipped), appends Cancelled, then deletes uploaded batch files (best effort). <paramref name="include"/> limits both
+    /// the cancel and the file deletion to matching records; <paramref name="closeOnCancelFailure"/> records a batch
+    /// Cancelled even when the provider cancel call fails. Returns the batch ids recorded Cancelled (or attempted).
     /// </summary>
-    public static async Task CancelPendingAsync(BatchLedger ledger, Func<LlmProviderKind, IBatchTransport?> transportFor,
-        Guid planId, CancellationToken ct = default)
+    public static async Task<List<string>> CancelPendingAsync(BatchLedger ledger,
+        Func<LlmProviderKind, IBatchTransport?> transportFor, Guid planId, Func<BatchLedgerRecord, bool>? include = null,
+        bool closeOnCancelFailure = false, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ledger);
         ArgumentNullException.ThrowIfNull(transportFor);
 
         var state = ledger.Replay();
-        foreach (var record in state.Pending(planId).ToList())
+        var cancelled = new List<string>();
+        foreach (var record in state.Pending(planId).Where(r => include == null || include(r)).ToList())
         {
             var transport = transportFor(record.Provider);
             if (transport == null)
                 continue;
 
-            await transport.CancelAsync(record.BatchId, ct);
+            try
+            {
+                await transport.CancelAsync(record.BatchId, ct);
+            }
+            catch (Exception ex) when (closeOnCancelFailure && ex is not OperationCanceledException)
+            {
+                // Best effort: the run already finished; record the batch closed so it is never waited on again (the provider may still bill items it completed)
+            }
+
+            cancelled.Add(record.BatchId);
             try
             {
                 await ledger.AppendAsync(new BatchLedgerRecord
@@ -249,11 +262,14 @@ public class BatchingLlmProvider : ILlmProvider
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Start Over deletes the ledger next; the provider batch is cancelled either way
+                // Start Over deletes the ledger next; the provider batch is cancelled either way (a run-end close retries next run)
             }
         }
 
-        foreach (var record in state.SubmittedById.Values.Where(r => r.PlanId == planId))
+        var deleteFrom = include == null
+            ? state.SubmittedById.Values.Where(r => r.PlanId == planId)
+            : state.SubmittedById.Values.Where(r => cancelled.Contains(r.BatchId, StringComparer.Ordinal));
+        foreach (var record in deleteFrom)
         {
             if (string.IsNullOrEmpty(record.InputFileId) && string.IsNullOrEmpty(record.OutputFileId))
                 continue;
@@ -265,6 +281,40 @@ public class BatchingLlmProvider : ILlmProvider
             // Best effort: the transport ignores delete failures; uploaded prompts should not outlive the case
             await transport.DeleteFilesAsync(NullIfEmpty(record.InputFileId), NullIfEmpty(record.OutputFileId), ct);
         }
+
+        return cancelled;
+    }
+
+    /// <summary>
+    /// Closes this plan's pending batches of this provider whose stage label matches: best-effort provider cancel, a
+    /// Cancelled ledger line (even when the cancel call fails) and file deletion, then stops tracking them so
+    /// <see cref="PendingBatchCount"/> drops. For batches an earlier build submitted per relevant wave (pre amended D-07),
+    /// which no unit consumes any more. Anyone still waiting on a closed batch runs live (D-10). Returns the number closed.
+    /// </summary>
+    public async Task<int> CancelPendingStagesAsync(Func<string, bool> stageMatch, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stageMatch);
+
+        var closed = await CancelPendingAsync(_ledger, kind => kind == _transport.Kind ? _transport : null, _planId,
+            include: r => r.Provider == _transport.Kind && stageMatch(r.StageLabel ?? string.Empty),
+            closeOnCancelFailure: true, ct: ct);
+
+        foreach (var batchId in closed)
+        {
+            TrackedBatch? batch;
+            lock (_lock)
+            {
+                if (!_batches.TryGetValue(batchId, out batch))
+                    continue;
+
+                // The poll loop stops at its next check instead of collecting a cancelled batch nobody waits on
+                batch.Closed = true;
+            }
+
+            ReleaseBatch(batch, Delivery.Errored());
+        }
+
+        return closed.Count;
     }
 
     private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
@@ -293,11 +343,32 @@ public class BatchingLlmProvider : ILlmProvider
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!request.AllowBatch || BatchStage.IsLive || _cts.IsCancellationRequested)
-            return await _live.SendAsync(request, ct);
+        if (!request.AllowBatch || _cts.IsCancellationRequested)
+            return await SendLiveAsync(request, ct);
 
         var label = BatchStage.Current;
         var id = RequestIdentity.CustomIdFor(_live.Kind, request);
+
+        if (BatchStage.IsLive)
+        {
+            // Amended D-07: live scopes (relevant waves, repairs) never wait a provider cycle; a result an earlier session
+            // already collected is free, so use it
+            AvailableResult? collected = null;
+            lock (_lock)
+            {
+                if (_available.TryGetValue(id, out var found) && IsUsable(found.Result))
+                {
+                    _available.Remove(id);
+                    collected = found;
+                }
+            }
+
+            if (collected == null)
+                return await SendLiveAsync(request, ct);
+
+            await AppendConsumedAsync(collected.BatchId, id);
+            return Copy(collected.Result.Response!, isBatch: true, withUsage: true);
+        }
 
         TaskCompletionSource<Delivery>? waiter = null;
         AvailableResult? ready = null;
@@ -354,7 +425,7 @@ public class BatchingLlmProvider : ILlmProvider
         }
 
         if (goLive)
-            return await _live.SendAsync(Live(request), ct);
+            return await SendLiveAsync(Live(request), ct);
 
         Delivery delivery;
         try
@@ -375,7 +446,29 @@ public class BatchingLlmProvider : ILlmProvider
             return Copy(result.Response, isBatch: true, withUsage: delivery.CarriesUsage);
 
         // D-10: errored, expired or cancelled items run live at full price
-        return await _live.SendAsync(Live(request), ct);
+        return await SendLiveAsync(Live(request), ct);
+    }
+
+    /// <summary>
+    /// Every live send goes through here: inside <see cref="BatchStage.UseLiveGate"/> it waits on the gate (amended D-07).
+    /// The gate is held only during the live call, never while waiting on a batch, so it cannot deadlock with run
+    /// semaphores.
+    /// </summary>
+    private async Task<LlmProviderResponse> SendLiveAsync(LlmProviderRequest request, CancellationToken ct)
+    {
+        var gate = BatchStage.LiveGate;
+        if (gate == null)
+            return await _live.SendAsync(request, ct);
+
+        await gate.WaitAsync(ct);
+        try
+        {
+            return await _live.SendAsync(request, ct);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     /// <summary>
@@ -595,8 +688,12 @@ public class BatchingLlmProvider : ILlmProvider
             while (true)
             {
                 await Task.Delay(IntervalFor(Now() - started), _cts.Token);
+                if (IsClosed(batch))
+                    return;
 
                 var status = await _transport.GetStatusAsync(batch.BatchId, _cts.Token);
+                if (IsClosed(batch))
+                    return;
                 var now = Now();
 
                 if (!status.Succeeded)
@@ -645,6 +742,9 @@ public class BatchingLlmProvider : ILlmProvider
 
                     continue;
                 }
+
+                if (IsClosed(batch))
+                    return;
 
                 await CollectAsync(batch, status, results);
                 return;
@@ -899,6 +999,12 @@ public class BatchingLlmProvider : ILlmProvider
     private TimeSpan IntervalFor(TimeSpan waited) =>
         waited >= _timings.SlowAfter ? _timings.SlowPollInterval : _timings.PollInterval;
 
+    private bool IsClosed(TrackedBatch batch)
+    {
+        lock (_lock)
+            return batch.Closed;
+    }
+
     private static bool IsFatal(LlmFailureKind kind) => kind is LlmFailureKind.Auth or LlmFailureKind.SpendLimit;
 
     private static bool IsUsable(BatchItemResult result) =>
@@ -1059,6 +1165,10 @@ public class BatchingLlmProvider : ILlmProvider
         public DateTime SubmittedUtc { get; }
         public bool Resumed { get; }
         public bool Polling { get; set; }
+
+        /// <summary>Closed at run end (CancelPendingStagesAsync): never collected or delivered by this session.</summary>
+        public bool Closed { get; set; }
+
         public List<string> ItemIds { get; } = new();
 
         public void Add(string customId, string modelId)

@@ -917,7 +917,7 @@ public partial class StepGenerateCorpus : IWizardStep
 
         try
         {
-            await Task.Run(() => BatchingLlmProvider.CancelPendingAsync(new BatchLedger(folder), transportFor, planId, CancellationToken.None));
+            await Task.Run(() => BatchingLlmProvider.CancelPendingAsync(new BatchLedger(folder), transportFor, planId, ct: CancellationToken.None));
             return true;
         }
         catch (OperationCanceledException)

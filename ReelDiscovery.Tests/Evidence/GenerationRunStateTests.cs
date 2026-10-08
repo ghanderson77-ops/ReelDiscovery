@@ -980,6 +980,75 @@ public class GenerationRunStateTests
     }
 
     [Fact]
+    public void EstimateRemaining_BatchAfterRelevantDone_PricesOnlyNonRelevantAtBatch()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var relevant = GenerationThreads(plan).Where(t => t.Relevance == ThreadRelevance.Relevant).ToList();
+        var state = GenerationRunState.From(plan, Journal(plan, relevant
+            .Select(t => DoneWith(plan, t, A(plan, t.Id).Select(a => Attachment(plan, a, JournalRecordType.AttachmentDone)).ToArray()))
+            .ToArray()));
+        var prices = MediaPrices.Defaults();
+        var opus = AIModelConfig.GetDefaultModels().First(m => m.ModelId == "claude-opus-5-5");
+        var haiku = AIModelConfig.GetDefaultModels().First(m => m.ModelId == "claude-haiku-4-5-20251001");
+        Assert.Empty(state.AttachmentsToRepair(plan, true));
+
+        // Only non-relevant work is left: batched mail plus the always-live side world, voice cast and media
+        var work = new PricedWork { IncludeSideWorld = true, IncludeVoiceCast = true };
+        foreach (var thread in GenerationThreads(plan).Where(t => t.Relevance != ThreadRelevance.Relevant))
+        {
+            foreach (var message in thread.Messages)
+            {
+                work.Messages.Add((thread, message));
+                foreach (var attachment in message.Attachments)
+                    work.Attachments.Add((thread, message, attachment));
+            }
+        }
+
+        var expected = GenerationCostEstimator.PriceWork(work, opus, haiku, prices, mediaAvailable: true);
+        var batch = GenerationRunState.EstimateRemaining(plan, state, opus, haiku, prices, true, batch: true);
+        var live = GenerationRunState.EstimateRemaining(plan, state, opus, haiku, prices, true, batch: false);
+
+        Assert.Equal(expected.BatchTotal, batch);
+        Assert.Equal(expected.Total, live);
+        Assert.True(batch < live);
+    }
+
+    [Fact]
+    public void EstimateRemaining_BatchRepairs_PricedLive()
+    {
+        var (_, plan) = AttachmentTestData.MixedCase();
+        var daily = T(plan, AttachmentTestData.DailyBusinessThreadId);
+        var word = A(plan, daily.Id).Single(a => a.Kind == AttachmentType.Word);
+        var state = GenerationRunState.From(plan, Journal(plan,
+            DoneWith(plan, daily, Attachment(plan, word, JournalRecordType.AttachmentFailed, reason: "provider error"))));
+        var prices = MediaPrices.Defaults();
+        var opus = AIModelConfig.GetDefaultModels().First(m => m.ModelId == "claude-opus-5-5");
+        var haiku = AIModelConfig.GetDefaultModels().First(m => m.ModelId == "claude-haiku-4-5-20251001");
+        Assert.Equal(new[] { word.DocId }, state.AttachmentsToRepair(plan, true));
+
+        var work = new PricedWork { IncludeSideWorld = true, IncludeVoiceCast = true };
+        foreach (var thread in GenerationThreads(plan).Where(t => t.Id != daily.Id))
+        {
+            foreach (var message in thread.Messages)
+            {
+                work.Messages.Add((thread, message));
+                foreach (var attachment in message.Attachments)
+                    work.Attachments.Add((thread, message, attachment));
+            }
+        }
+
+        work.Attachments.Add((daily, ParentOf(plan, word.DocId), word));
+        var batchedRepair = GenerationCostEstimator.PriceWork(work, opus, haiku, prices, mediaAvailable: true).BatchTotal;
+
+        // The repair runs live (revision 1 W9), so its attachment is priced live in the batch remaining
+        work.LiveDocIds = new HashSet<string>(StringComparer.Ordinal) { word.DocId };
+        var expected = GenerationCostEstimator.PriceWork(work, opus, haiku, prices, mediaAvailable: true).BatchTotal;
+
+        Assert.Equal(expected, GenerationRunState.EstimateRemaining(plan, state, opus, haiku, prices, true, batch: true));
+        Assert.True(expected > batchedRepair);
+    }
+
+    [Fact]
     public void Apply_CopiesPhase6CachedCounts_RelevantThreadCountsStayRelevant()
     {
         var (draft, plan) = AttachmentTestData.MixedCase();

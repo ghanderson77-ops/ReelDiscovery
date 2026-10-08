@@ -323,29 +323,73 @@ public class GenerationCostEstimatorTests
         Assert.Equal(10 * legacy.CalculateTotalCost(4_000, 450) * 1.15m, estimate.RelevantCost);
     }
 
+    // Live price with the cache term, as GenerationCostEstimator prices a live call
+    private static decimal L(AIModelConfig m, int input, int output)
+    {
+        var prefix = GenerationCostEstimator.StablePrefixTokens;
+        var caches = m.MinCacheablePrefixTokens > 0 && prefix >= m.MinCacheablePrefixTokens && input > prefix;
+        return caches
+            ? Cost(m, new TokenUsage { InputTokens = input - prefix, CacheReadTokens = prefix, OutputTokens = output })
+            : Cost(m, new TokenUsage { InputTokens = input, OutputTokens = output });
+    }
+
+    private static decimal B(AIModelConfig m, int input, int output) =>
+        Cost(m, new TokenUsage { InputTokens = input, OutputTokens = output, IsBatch = true });
+
     [Fact]
-    public void PriceWork_BatchTotal_NoCacheReadsBatchDiscountPlusLiveMedia()
+    public void PriceWork_BatchTotal_RelevantLive_NonRelevantBatch()
     {
         var opus = Catalog("claude-opus-5-5");
         var haiku = Catalog("claude-haiku-4-5-20251001");
 
         var estimate = GenerationCostEstimator.Estimate(MixedPlan(), opus, haiku, Prices);
 
-        decimal B(AIModelConfig m, int input, int output) =>
-            Cost(m, new TokenUsage { InputTokens = input, OutputTokens = output, IsBatch = true });
+        // Amended D-07: relevant threads and their attachments run live; decoys and other non-relevant mail batch
+        var batchStory = 10 * L(opus, 4_000, 450) * 1.15m + 2 * L(opus, 3_000, 1_500) * 1.15m
+                         + 4 * B(opus, 4_000, 450) * 1.15m;
 
-        var batchStory = 14 * B(opus, 4_000, 450) * 1.15m + 2 * B(opus, 3_000, 1_500) * 1.15m;
+        // Side world and voice cast never allow batching, so they are priced live
         var batchVolume = 20 * B(haiku, 1_500, 300) * 1.15m + 3 * B(haiku, 800, 200) * 1.15m
-                          + B(haiku, 3_000, 1_200) * 1.15m + B(haiku, 2_500, 400) * 1.15m;
+                          + L(haiku, 3_000, 1_200) * 1.15m + L(haiku, 2_500, 400) * 1.15m;
 
         Assert.Equal(batchStory, estimate.BatchStoryCost);
         Assert.Equal(batchVolume, estimate.BatchVolumeCost);
-        Assert.Equal(batchStory + batchVolume + estimate.MediaCost, estimate.BatchTotal);
-
-        // 50% discount: batch text is half the uncached live text
-        var liveNoCacheStory = (14 * opus.CalculateTotalCost(4_000, 450) + 2 * opus.CalculateTotalCost(3_000, 1_500)) * 1.15m;
-        Assert.Equal(liveNoCacheStory / 2, estimate.BatchStoryCost);
+        Assert.Equal(estimate.BatchStoryCost + estimate.BatchVolumeCost + estimate.MediaCost, estimate.BatchTotal);
         Assert.True(estimate.BatchTotal < estimate.Total);
+    }
+
+    [Fact]
+    public void PriceWork_RelevantOnlyPlan_BatchEqualsLive()
+    {
+        var opus = Catalog("claude-opus-5-5");
+        var haiku = Catalog("claude-haiku-4-5-20251001");
+
+        var estimate = GenerationCostEstimator.Estimate(RelevantOnlyPlan(), opus, haiku, Prices);
+
+        Assert.Equal(estimate.Total, estimate.BatchTotal);
+        Assert.Equal(estimate.StoryCost, estimate.BatchStoryCost);
+    }
+
+    [Fact]
+    public void PriceWork_LiveDocIds_PricedLiveInBatchTotal()
+    {
+        var opus = Catalog("claude-opus-5-5");
+        var haiku = Catalog("claude-haiku-4-5-20251001");
+
+        var plan = MixedPlan();
+        var daily = plan.Threads[2];
+        for (var i = 0; i < 3; i++)
+            daily.Messages[i].Attachments[0].DocId = $"D-{i + 1:0000}";
+
+        var baseline = GenerationCostEstimator.PriceWork(PricedWork.ForPlan(plan, null), opus, haiku, Prices, true);
+
+        var work = PricedWork.ForPlan(plan, null);
+        work.LiveDocIds = new HashSet<string>(StringComparer.Ordinal) { "D-0001", "D-0002", "D-0003" };
+        var repaired = GenerationCostEstimator.PriceWork(work, opus, haiku, Prices, true);
+
+        Assert.Equal(baseline.BatchVolumeCost + 3 * (L(haiku, 800, 200) - B(haiku, 800, 200)) * 1.15m,
+            repaired.BatchVolumeCost);
+        Assert.Equal(baseline.Total, repaired.Total);
     }
 
     [Fact]

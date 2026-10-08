@@ -1102,4 +1102,86 @@ public class BatchingLlmProviderTests : IDisposable
         var record = Assert.Single(new BatchLedger(_folder).Replay().Pending(_plan));
         Assert.Equal(IdOf(Req("a")), Assert.Single(record.Items).CustomId);
     }
+
+    // "Regenerate thread" re-sends the same request (same custom id) after an older batch's result was consumed
+    private async Task<string> RegeneratedLedgerAsync(bool collectSecond)
+    {
+        var ledger = new BatchLedger(_folder);
+        var id = IdOf(Req("a"));
+        BatchLedgerRecord Submitted(string batchId) => new()
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = LlmProviderKind.OpenAI,
+            BatchId = batchId,
+            PlanId = _plan,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "non-relevant mail",
+            Items = new List<BatchLedgerItem> { new() { CustomId = id, Operation = "Thread", ModelId = "gpt-test" } }
+        };
+
+        await ledger.AppendAsync(Submitted("batch_old"));
+        await ledger.AppendAsync(new BatchLedgerRecord { Type = BatchLedgerRecordType.Collected, Utc = DateTime.UtcNow, BatchId = "batch_old", PlanId = _plan });
+        await ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Consumed,
+            Utc = DateTime.UtcNow,
+            BatchId = "batch_old",
+            PlanId = _plan,
+            Items = new List<BatchLedgerItem> { new() { CustomId = id } }
+        });
+        await ledger.AppendAsync(Submitted("batch_new"));
+        if (collectSecond)
+        {
+            ledger.SaveResults("batch_new", new[]
+            {
+                new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Succeeded, Response = FakeLlmProvider.Ok("batch:new", 1000, 500) }
+            });
+            await ledger.AppendAsync(new BatchLedgerRecord { Type = BatchLedgerRecordType.Collected, Utc = DateTime.UtcNow, BatchId = "batch_new", PlanId = _plan });
+        }
+
+        return id;
+    }
+
+    [Fact]
+    public async Task CRA02_RegeneratedRequest_PendingNewerBatch_AttachesInsteadOfResubmitting()
+    {
+        await RegeneratedLedgerAsync(collectSecond: false);
+        var transport = Transport();
+        var live = Live();
+        var provider = Create(live, transport);
+        Assert.Equal(1, provider.PendingBatchCount);
+
+        using var cts = new CancellationTokenSource();
+        Task<LlmProviderResponse> waiting;
+        using (BatchStage.Enter("non-relevant mail"))
+            waiting = provider.SendAsync(Req("a"), cts.Token);
+
+        // Several quiet periods: nothing is queued, because the request is already in batch_new
+        await Task.Delay(400);
+        Assert.Empty(transport.Submissions);
+        Assert.Empty(live.Requests);
+
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting.WaitAsync(Wait));
+    }
+
+    [Fact]
+    public async Task CRA02_RegeneratedRequest_CollectedNewerBatch_IsServedNotDropped()
+    {
+        await RegeneratedLedgerAsync(collectSecond: true);
+        var transport = Transport();
+        var live = Live();
+        var provider = Create(live, transport);
+
+        LlmProviderResponse response;
+        using (BatchStage.Enter("non-relevant mail"))
+            response = await provider.SendAsync(Req("a")).WaitAsync(Wait);
+
+        Assert.Equal("batch:new", response.Text);
+        Assert.Equal(1000, response.InputTokens);
+        Assert.Empty(transport.Submissions);
+        Assert.Empty(live.Requests);
+        Assert.True(new BatchLedger(_folder).Replay().IsConsumed("batch_new", IdOf(Req("a"))));
+    }
 }

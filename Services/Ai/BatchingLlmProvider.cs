@@ -113,8 +113,9 @@ public class BatchingLlmProvider : ILlmProvider
             var batch = TrackedBatch.From(record, resumed: false);
             foreach (var result in _ledger.ReadResults(record.BatchId))
             {
-                // T-07-23: only ids this batch was submitted with; consumed results are never served twice (D-09)
-                if (!batch.Contains(result.CustomId) || state.ConsumedCustomIds.Contains(result.CustomId))
+                // T-07-23: only ids this batch was submitted with; consumed results are never served twice (D-09). CR-A02:
+                // keyed by batch, so a result of a newer batch for a regenerated thread's id is still served
+                if (!batch.Contains(result.CustomId) || state.IsConsumed(record.BatchId, result.CustomId))
                     continue;
 
                 if (IsUsable(result))
@@ -129,7 +130,8 @@ public class BatchingLlmProvider : ILlmProvider
         {
             var batch = TrackedBatch.From(record, resumed: true);
             _batches[batch.BatchId] = batch;
-            foreach (var id in batch.ItemIds.Where(id => !state.ConsumedCustomIds.Contains(id) && !_inflight.ContainsKey(id)))
+            // CR-A02: consumption is per batch; the same id consumed from an older batch does not make this item done
+            foreach (var id in batch.ItemIds.Where(id => !state.IsConsumed(batch.BatchId, id) && !_inflight.ContainsKey(id)))
                 _inflight[id] = new PendingItem(id, new LlmProviderRequest()) { BatchId = batch.BatchId };
         }
     }

@@ -56,6 +56,12 @@ public class BatchLedgerState
     public HashSet<string> CancelledIds { get; set; } = new(StringComparer.Ordinal);
     public HashSet<string> OrphansBilledIds { get; set; } = new(StringComparer.Ordinal);
     public HashSet<string> ConsumedCustomIds { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Consumed items keyed by (batch id, custom id): request ids are deterministic, so after "Regenerate thread" the same
+    /// custom id can be in a newer batch whose result has not been used yet (CR-A02).
+    /// </summary>
+    public HashSet<(string BatchId, string CustomId)> ConsumedItems { get; set; } = new();
     public Dictionary<string, string> BatchIdByCustomId { get; set; } = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -66,6 +72,9 @@ public class BatchLedgerState
             .Where(r => r.PlanId == planId && !CollectedIds.Contains(r.BatchId) && !CancelledIds.Contains(r.BatchId))
             .OrderBy(r => r.SubmittedUtc)
             .ThenBy(r => r.BatchId, StringComparer.Ordinal);
+
+    /// <summary>True when this batch's result for this custom id was already delivered (ordinal comparison).</summary>
+    public bool IsConsumed(string batchId, string customId) => ConsumedItems.Contains((batchId ?? string.Empty, customId ?? string.Empty));
 }
 
 /// <summary>
@@ -210,7 +219,10 @@ public partial class BatchLedger
                 break;
             case BatchLedgerRecordType.Consumed:
                 foreach (var item in items.Where(i => i != null && !string.IsNullOrEmpty(i.CustomId)))
+                {
                     state.ConsumedCustomIds.Add(item.CustomId);
+                    state.ConsumedItems.Add((batchId, item.CustomId));
+                }
                 break;
         }
     }

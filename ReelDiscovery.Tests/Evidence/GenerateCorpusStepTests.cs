@@ -943,6 +943,9 @@ public class GenerateCorpusStepTests
             Pump(step.ClickStartOverAsync());
 
             Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+
+            // WR-A05: the batch that could not be cancelled stays tracked
+            Assert.True(File.Exists(BatchLedger.PathFor(h.Folder)));
             Assert.EndsWith(GenerationUiText.BatchCancelFailedText, step.StatusLabel.Text);
             Assert.Equal(Theme.Warning, step.StatusLabel.ForeColor);
             Assert.Equal("Ready to write the corpus", step.StateHeading);

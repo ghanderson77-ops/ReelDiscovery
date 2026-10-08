@@ -1295,4 +1295,35 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Equal(new[] { (input, "file_out_" + finished.BatchId) },
             transport.DeletedFiles.Select(f => (f.Item1!, f.Item2!)));
     }
+
+    [Fact]
+    public async Task WRA05_CancelAllPending_CancelsEveryPlan_ReportsProvidersWithoutTransport()
+    {
+        var ledger = new BatchLedger(_folder);
+        BatchLedgerRecord Submitted(string id, LlmProviderKind kind, string inputFile, Guid plan) => new()
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = kind,
+            BatchId = id,
+            PlanId = plan,
+            SubmittedUtc = DateTime.UtcNow,
+            InputFileId = inputFile,
+            Items = new List<BatchLedgerItem> { new() { CustomId = "q" + id, Operation = "Thread", ModelId = "m" } }
+        };
+
+        await ledger.AppendAsync(Submitted("batch_open", LlmProviderKind.OpenAI, "file_in_1", _plan));
+        await ledger.AppendAsync(Submitted("batch_earlier_plan", LlmProviderKind.OpenAI, "file_in_2", Guid.NewGuid()));
+        await ledger.AppendAsync(Submitted("msgbatch_no_key", LlmProviderKind.Anthropic, string.Empty, Guid.NewGuid()));
+        Assert.Equal(3, BatchLedger.PendingBatchCountAllPlans(_folder));
+
+        var openAi = new FakeBatchTransport();
+        var notCancelled = await BatchingLlmProvider.CancelAllPendingAsync(ledger,
+            kind => kind == LlmProviderKind.OpenAI ? openAi : null).WaitAsync(Wait);
+
+        Assert.Equal(new[] { "msgbatch_no_key" }, notCancelled);
+        Assert.Equal(new[] { "batch_earlier_plan", "batch_open" }, openAi.CancelledIds.OrderBy(i => i, StringComparer.Ordinal));
+        Assert.Equal(new[] { "file_in_1", "file_in_2" }, openAi.DeletedFiles.Select(f => f.Item1).OrderBy(f => f, StringComparer.Ordinal));
+        Assert.Equal(1, BatchLedger.PendingBatchCountAllPlans(_folder));
+    }
 }

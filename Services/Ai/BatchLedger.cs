@@ -274,6 +274,19 @@ public partial class BatchLedger
     }
 
     /// <summary>
+    /// Number of batches of any plan that were submitted but neither collected nor cancelled (Start Over, WR-A05). Never
+    /// throws; an unreadable ledger counts as 0 (Start Over keeps it, CR-A05).
+    /// </summary>
+    public static int PendingBatchCountAllPlans(string caseFolder)
+    {
+        if (string.IsNullOrWhiteSpace(caseFolder))
+            return 0;
+
+        var state = new BatchLedger(caseFolder).Replay();
+        return state.SubmittedById.Values.Count(r => !state.CollectedIds.Contains(r.BatchId) && !state.CancelledIds.Contains(r.BatchId));
+    }
+
+    /// <summary>
     /// Path of the cached, classified results of one batch. Always inside {caseFolder}/batch-results (T-07-19).
     /// </summary>
     public string ResultsPathFor(string batchId) =>

@@ -326,10 +326,11 @@ public class BatchingLlmProvider : ILlmProvider
     }
 
     /// <summary>
-    /// Start Over: cancels this plan's pending provider batches (one transport per record's provider; a null transport is
-    /// skipped), appends Cancelled, then deletes uploaded batch files (best effort). <paramref name="include"/> limits both
-    /// the cancel and the file deletion to matching records; <paramref name="closeOnCancelFailure"/> records a batch
-    /// Cancelled even when the provider cancel call fails. Returns the batch ids recorded Cancelled (or attempted).
+    /// Cancels this plan's pending provider batches (one transport per record's provider; a null transport is skipped),
+    /// appends Cancelled, then deletes uploaded batch files (best effort). <paramref name="include"/> limits both the
+    /// cancel and the file deletion to matching records; <paramref name="closeOnCancelFailure"/> records a batch Cancelled
+    /// even when the provider cancel call fails. Returns the batch ids recorded Cancelled (or attempted). Start Over uses
+    /// <see cref="CancelAllPendingAsync"/> instead (WR-A05).
     /// </summary>
     public static async Task<List<string>> CancelPendingAsync(BatchLedger ledger,
         Func<LlmProviderKind, IBatchTransport?> transportFor, Guid planId, Func<BatchLedgerRecord, bool>? include = null,
@@ -338,18 +339,69 @@ public class BatchingLlmProvider : ILlmProvider
         ArgumentNullException.ThrowIfNull(ledger);
         ArgumentNullException.ThrowIfNull(transportFor);
 
-        var state = ledger.Replay();
+        var state = ReadForCancel(ledger);
+        var pending = state.Pending(planId).Where(r => include == null || include(r)).ToList();
+        var (cancelled, _) = await CancelRecordsAsync(ledger, pending, transportFor, closeOnCancelFailure, ct);
 
-        // CR-A05: never act on (or let Start Over delete) a ledger that could not be read
+        var deleteFrom = include == null
+            ? state.SubmittedById.Values.Where(r => r.PlanId == planId)
+            : state.SubmittedById.Values.Where(r => cancelled.Contains(r.BatchId, StringComparer.Ordinal));
+        await DeleteRecordFilesAsync(deleteFrom, transportFor, ct);
+
+        return cancelled;
+    }
+
+    /// <summary>
+    /// Start Over (WR-A05): cancels every pending batch in the ledger, whatever plan submitted it (a re-plan leaves batches of
+    /// earlier plan ids), and deletes the uploaded files of every batch it could reach. Returns the ids of pending batches
+    /// that could not be cancelled because no transport exists for their provider (no key); the caller then keeps the
+    /// ledger. A provider cancel call that throws propagates, as with <see cref="CancelPendingAsync"/>.
+    /// </summary>
+    public static async Task<List<string>> CancelAllPendingAsync(BatchLedger ledger,
+        Func<LlmProviderKind, IBatchTransport?> transportFor, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(ledger);
+        ArgumentNullException.ThrowIfNull(transportFor);
+
+        var state = ReadForCancel(ledger);
+        var pending = state.SubmittedById.Values
+            .Where(r => !state.CollectedIds.Contains(r.BatchId) && !state.CancelledIds.Contains(r.BatchId))
+            .OrderBy(r => r.SubmittedUtc)
+            .ThenBy(r => r.BatchId, StringComparer.Ordinal)
+            .ToList();
+        var (_, notCancelled) = await CancelRecordsAsync(ledger, pending, transportFor, closeOnCancelFailure: false, ct);
+
+        await DeleteRecordFilesAsync(
+            state.SubmittedById.Values.Where(r => !notCancelled.Contains(r.BatchId, StringComparer.Ordinal)), transportFor, ct);
+
+        return notCancelled;
+    }
+
+    // CR-A05: never act on (or let Start Over delete) a ledger that could not be read
+    private static BatchLedgerState ReadForCancel(BatchLedger ledger)
+    {
+        var state = ledger.Replay();
         if (!state.Readable)
             throw new IOException(BatchLedger.UnreadableMessage);
 
+        return state;
+    }
+
+    // Returns the ids recorded Cancelled and the ids skipped for want of a transport
+    private static async Task<(List<string> Cancelled, List<string> Skipped)> CancelRecordsAsync(BatchLedger ledger,
+        IEnumerable<BatchLedgerRecord> pending, Func<LlmProviderKind, IBatchTransport?> transportFor, bool closeOnCancelFailure,
+        CancellationToken ct)
+    {
         var cancelled = new List<string>();
-        foreach (var record in state.Pending(planId).Where(r => include == null || include(r)).ToList())
+        var skipped = new List<string>();
+        foreach (var record in pending)
         {
             var transport = transportFor(record.Provider);
             if (transport == null)
+            {
+                skipped.Add(record.BatchId);
                 continue;
+            }
 
             try
             {
@@ -369,7 +421,7 @@ public class BatchingLlmProvider : ILlmProvider
                     Utc = DateTime.UtcNow,
                     Provider = record.Provider,
                     BatchId = record.BatchId,
-                    PlanId = planId
+                    PlanId = record.PlanId
                 }, ct);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -378,10 +430,13 @@ public class BatchingLlmProvider : ILlmProvider
             }
         }
 
-        var deleteFrom = include == null
-            ? state.SubmittedById.Values.Where(r => r.PlanId == planId)
-            : state.SubmittedById.Values.Where(r => cancelled.Contains(r.BatchId, StringComparer.Ordinal));
-        foreach (var record in deleteFrom)
+        return (cancelled, skipped);
+    }
+
+    private static async Task DeleteRecordFilesAsync(IEnumerable<BatchLedgerRecord> records,
+        Func<LlmProviderKind, IBatchTransport?> transportFor, CancellationToken ct)
+    {
+        foreach (var record in records)
         {
             if (string.IsNullOrEmpty(record.InputFileId) && string.IsNullOrEmpty(record.OutputFileId))
                 continue;
@@ -393,8 +448,6 @@ public class BatchingLlmProvider : ILlmProvider
             // Best effort: the transport ignores delete failures; uploaded prompts should not outlive the case
             await transport.DeleteFilesAsync(NullIfEmpty(record.InputFileId), NullIfEmpty(record.OutputFileId), ct);
         }
-
-        return cancelled;
     }
 
     /// <summary>

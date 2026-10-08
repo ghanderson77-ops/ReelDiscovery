@@ -823,10 +823,10 @@ public partial class StepGenerateCorpus : IWizardStep
             return;
         }
 
-        // The journal can be large; counting its files (and the batch ledger) stays off the UI thread
-        var planId = plan?.PlanId ?? Guid.Empty;
+        // The journal can be large; counting its files (and the batch ledger) stays off the UI thread. WR-A05: pending
+        // batches of every plan, since Start Over deletes the whole ledger
         var (files, pending) = await Task.Run(() =>
-            (GenerationJournal.ListAllFiles(folder).Count, plan == null ? 0 : BatchLedger.PendingBatchCount(folder, planId)));
+            (GenerationJournal.ListAllFiles(folder).Count, BatchLedger.PendingBatchCountAllPlans(folder)));
         if (IsDisposed || _isGenerating || _isResetting)
             return;
 
@@ -842,13 +842,14 @@ public partial class StepGenerateCorpus : IWizardStep
         try
         {
             var cancelFailed = false;
-            if (plan != null && pending > 0)
-                cancelFailed = !await CancelPendingBatchesAsync(folder, planId);
+            if (pending > 0)
+                cancelFailed = !await CancelPendingBatchesAsync(folder);
             if (IsDisposed)
                 return;
 
-            // Deletes only journal-listed and planned relevant EML paths under Mailboxes plus two constant-name files (T-05-49)
-            var reset = await GenerationReset.StartOverAsync(folder, plan, Draft.Guide);
+            // Deletes only journal-listed and planned relevant EML paths under Mailboxes plus two constant-name files (T-05-49).
+            // WR-A05: a batch that could not be cancelled keeps its ledger record so it is never lost
+            var reset = await GenerationReset.StartOverAsync(folder, plan, Draft.Guide, keepBatchLedger: cancelFailed);
             if (IsDisposed)
                 return;
 
@@ -903,11 +904,11 @@ public partial class StepGenerateCorpus : IWizardStep
     }
 
     /// <summary>
-    /// Start Over (T-07-53): cancels this plan's provider batches before the ledger is deleted. Best effort: returns false
-    /// when a provider could not be reached, and Start Over continues (the provider ends an uncollected batch when it
-    /// expires, and its results are never billed into this case). Keys go only to the transport constructors (T-07-54).
+    /// Start Over (T-07-53): cancels every pending provider batch in the ledger, whatever plan submitted it (WR-A05), before
+    /// the ledger is deleted. Best effort: returns false when a provider could not be reached or has no key, and Start Over
+    /// continues but keeps the ledger. Keys go only to the transport constructors (T-07-54).
     /// </summary>
-    private async Task<bool> CancelPendingBatchesAsync(string folder, Guid planId)
+    private async Task<bool> CancelPendingBatchesAsync(string folder)
     {
         var transportFor = BatchTransportFactory ?? (kind =>
         {
@@ -917,8 +918,9 @@ public partial class StepGenerateCorpus : IWizardStep
 
         try
         {
-            await Task.Run(() => BatchingLlmProvider.CancelPendingAsync(new BatchLedger(folder), transportFor, planId, ct: CancellationToken.None));
-            return true;
+            var notCancelled = await Task.Run(() =>
+                BatchingLlmProvider.CancelAllPendingAsync(new BatchLedger(folder), transportFor, CancellationToken.None));
+            return notCancelled.Count == 0;
         }
         catch (OperationCanceledException)
         {

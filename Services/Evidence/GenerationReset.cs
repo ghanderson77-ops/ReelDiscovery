@@ -32,21 +32,24 @@ public static class GenerationReset
     /// <summary>
     /// Deletes every EML listed by the journal (any plan) and every planned copy path of every thread (relevant and non-relevant), then the journal (only when
     /// it was read in full) and the story file. Files that cannot be deleted are reported in Errors; only OperationCanceledException escapes.
+    /// <paramref name="keepBatchLedger"/> keeps the provider batch ledger and cached results (WR-A05: some pending batch
+    /// could not be cancelled, so the record of it must survive).
     /// </summary>
-    public static async Task<StartOverResult> StartOverAsync(string caseFolder, CorpusPlan? plan, CaseGuide? guide, CancellationToken ct = default)
+    public static async Task<StartOverResult> StartOverAsync(string caseFolder, CorpusPlan? plan, CaseGuide? guide,
+        CancellationToken ct = default, bool keepBatchLedger = false)
     {
         var result = new StartOverResult();
         if (string.IsNullOrWhiteSpace(caseFolder))
             return result;
 
         // Off the UI thread: thousands of deletes must not freeze the window
-        await Task.Run(() => DeleteAll(caseFolder, plan, guide, result, ct), ct).ConfigureAwait(false);
+        await Task.Run(() => DeleteAll(caseFolder, plan, guide, result, keepBatchLedger, ct), ct).ConfigureAwait(false);
         return result;
     }
 
     // Deletes only validated paths under Mailboxes plus two constant-name files (UI-SPEC U6, V12)
     private static void DeleteAll(string caseFolder, CorpusPlan? plan, CaseGuide? guide, StartOverResult result,
-        CancellationToken ct)
+        bool keepBatchLedger, CancellationToken ct)
     {
         var complete = GenerationJournal.TryListAllFiles(caseFolder, out var listed);
         var candidates = new List<string>(listed);
@@ -92,7 +95,11 @@ public static class GenerationReset
         // Constant names only (T-04-26); provider batches are cancelled by the step before this runs. CR-A05: a ledger
         // that could not be read may still list running batches, so it (and their cached results) is kept
         ct.ThrowIfCancellationRequested();
-        if (new BatchLedger(caseFolder).Replay().Readable)
+        if (keepBatchLedger)
+        {
+            // WR-A05: the caller reports the batches it could not cancel; the ledger keeps tracking them
+        }
+        else if (new BatchLedger(caseFolder).Replay().Readable)
         {
             TryDelete(Path.Combine(caseFolder, BatchLedger.FileName), BatchLedger.FileName, result);
             DeleteBatchResults(caseFolder, result);

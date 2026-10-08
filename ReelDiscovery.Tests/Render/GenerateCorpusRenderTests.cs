@@ -375,7 +375,8 @@ public class GenerateCorpusRenderTests
             Assert.StartsWith("Relevant threads run live first", step.BatchHintLabel.Text);
             Assert.Equal(Theme.Warning, step.BatchHintLabel.ForeColor);
             Assert.False(step.MediaNoticeLabel.Visible);
-            Assert.DoesNotContain("images and voicemail", step.EstimateTooltipText);
+            // No media clause; the fixed "always priced live" sentence names images and voicemail too
+            Assert.DoesNotContain("· images and voicemail ≈", step.EstimateTooltipText);
             Assert.Equal(step.LogicalToDeviceUnits(20), step.BatchHintLabel.Margin.Bottom);
             AssertCheckBoxFits(step);
         }, primary: 1, ready: ready,

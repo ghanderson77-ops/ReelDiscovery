@@ -137,22 +137,22 @@ Root layout, header, banners, tiles, Activity anatomy and interaction rules are 
 | 1 | Heading | `Ready to write the corpus` (unchanged) | `HeadingFont`, bottom 8 |
 | 2 | Body | unchanged (06 S1) | `BodyFont`, `TextMuted`, max width 520, bottom 8 |
 | 3 | Estimate line (changed) | `Estimated cost ≈${live} at live prices or ≈${batch} with batch pricing, ±50%, including prompt caching.` | `SmallFont`, `TextMuted`, max width 520, bottom 4 |
-| 4 | Batch checkbox (new) | `Use batch pricing (slower, about half the cost)` | `CheckBox`, `BodyFont`, `Theme.Text`, `AutoSize = true`, `FlatStyle.System`, `UseMnemonic = false`, bottom 4 (bottom 20 when no hint follows) |
+| 4 | Batch checkbox (new) | `Use batch pricing for non-relevant mail (slower, lower cost)` **[amended in 07-23/07-24 gap closure, D-07 amendment 2026-10-08]** | `CheckBox`, `BodyFont`, `Theme.Text`, `AutoSize = true`, `FlatStyle.System`, `UseMnemonic = false`, bottom 4 (bottom 20 when no hint follows) |
 | 5 | Batch hint (new, conditional) | see table below | `SmallFont`, max width 520, bottom 4 when the media notice follows, else 20 |
 | 6 | Media notice line | unchanged (06 S1) | `SmallFont`, `Theme.Warning`, max width 520, bottom 20 |
 | 7 | Button | `Generate Emails` (Primary, focused on entry; unchanged) | unchanged |
 
-Batch hint variants (`GenerationUiText.BatchHint(plannedEmails, batchChecked, threshold)`):
+Batch hint variants (`GenerationUiText.BatchHint(plannedEmails, batchChecked, threshold)`) **[amended in 07-23/07-24 gap closure, D-07 amendment 2026-10-08]**:
 
 | Condition | Copy | Color |
 |-----------|------|-------|
 | Unchecked, planned emails < 2,000 | hidden | — |
-| Unchecked, planned emails ≥ 2,000 [DEFAULT threshold, research A8] | `Batch pricing is recommended for a corpus this size. It waits on the provider between waves, so the run can take several hours.` | `TextMuted` |
-| Checked | `Batch runs wait on the provider between waves and can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.` | `Warning` |
+| Unchecked, planned emails ≥ 2,000 [DEFAULT threshold, research A8] | `Batch pricing is recommended for a corpus this size. Relevant threads still run live; non-relevant mail then waits on the provider, which can take several hours.` | `TextMuted` |
+| Checked | `Relevant threads run live first. Non-relevant mail then waits on the provider in large batches, which can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.` | `Warning` |
 
 - **Estimate line tooltip** (new; carries the per-model breakdown that no longer fits on one line next to two totals [DEFAULT]):
-  `Live: {Story model} ≈${s} · {Volume model} ≈${v}{mediaClause}. Batch: {Story model} ≈${sb} · {Volume model} ≈${vb}{mediaClause}. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings.` One model name when Story and Volume are the same (`Live: {model} ≈${l}`). `{mediaClause}` = ` · images and voicemail ≈${m}` when media is planned.
-- Both totals come from the single `GenerationCostEstimator.PriceWork` path (D-17). The batch total assumes no cache reads (research Pattern 5, conservative).
+  `Live: {Story model} ≈${s} · {Volume model} ≈${v}{mediaClause}. Batch: {Story model} ≈${sb} · {Volume model} ≈${vb}{mediaClause}. Relevant threads and their attachments, images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings on batched mail.` **[amended in 07-23/07-24 gap closure, D-07 amendment 2026-10-08]** One model name when Story and Volume are the same (`Live: {model} ≈${l}`). `{mediaClause}` = ` · images and voicemail ≈${m}` when media is planned.
+- Both totals come from the single `GenerationCostEstimator.PriceWork` path (D-17). In the batch total, relevant threads and their attachments, repairs, side-world and voice-cast calls are priced live; non-relevant mail and its attachments at batch prices with no cache reads (amended D-07). **[amended in 07-23/07-24 gap closure, D-07 amendment 2026-10-08]**
 - The checkbox state is read from and saved to the case on change (`CheckedChanged` writes the case draft; D-08). Default unchecked. Continue Generating, Retry Failed Items and Create Skipped Media reuse the saved choice; they show no checkbox.
 - The card never shows the checkbox on the Not-approved, Plan-changed or Unreadable cards.
 
@@ -169,7 +169,7 @@ Batch hint variants (`GenerationUiText.BatchHint(plannedEmails, batchChecked, th
 
 | Event | Text | Dot |
 |-------|------|-----|
-| Batch submitted | `Batch submitted: {Plural(n, "request")} to {provider} for {stage}` where `{stage}` = `wave {i}` / `non-relevant mail` / `attachments` | Accent |
+| Batch submitted | `Batch submitted: {Plural(n, "request")} to {provider} for {stage}` where `{stage}` = `non-relevant mail` (or `wave {i}` only for a batch an earlier build submitted per wave) / `attachments` **[amended in 07-23/07-24 gap closure, D-07 amendment 2026-10-08]** | Accent |
 | Batch finished, clean | `Batch finished: {Plural(n, "result")} collected after {duration}` (`{duration}` = `{m} min` or `{h} h {m} min`) | Success |
 | Batch finished with failures | `Batch finished: {s:N0} succeeded, {f:N0} failed or expired. The {Plural(f, "request")} run live at full price.` | Warning |
 | Batch failed at the provider | `Batch failed at {provider}: {reason}. Its {Plural(n, "request")} run live at full price.` | Warning |
@@ -178,7 +178,7 @@ Batch hint variants (`GenerationUiText.BatchHint(plannedEmails, batchChecked, th
 `{provider}` is `Anthropic` or `OpenAI`. `{reason}` in plain words [DEFAULT]: `the batch expired before it finished`, `the provider rejected the batch`, `the batch is over the provider's size limit`, `the request timed out`. Batch events are not double-clickable.
 
 **Row 5, status strip (batch texts added; `GenerationUiText.ProgressText`, Accent).**
-- `Wave {i} of {n} ({dates}): waiting on provider batch, {d:N0} of {Plural(t, "request")} done. Next check in {s} s.`
+- `Wave {i} of {n} ({dates}): waiting on provider batch, {d:N0} of {Plural(t, "request")} done. Next check in {s} s.` (only for a wave batch submitted by an earlier build; relevant waves now run live) **[amended in 07-23/07-24 gap closure, D-07 amendment 2026-10-08]**
 - `Non-relevant mail: waiting on provider batch, {d:N0} of {Plural(t, "request")} done. Next check in {s} s.`
 - `Collecting batches submitted before the app closed...`
 - The bar stays determinate over all work units (06 rule); it does not move while waiting. Poll interval 30 s, 60 s after 10 minutes of waiting (research Pattern 6); `{s}` counts down once per second through the existing 1 s UI timer.
@@ -373,7 +373,7 @@ Zero lines after the first are dropped. With nothing spent: `Nothing spent this 
 |---------|------|
 | Primary CTA | `Generate Emails` (unchanged); new: `Start Review` (BlindReviewDialog), `Regenerate Thread...` (QaFindingsDialog) |
 | Secondary actions | `View Findings`, `View Report`, `Run Audit`, `Run Blind Review...`, `Open Email`, `Close`, `Cancel` |
-| Batch opt-in | `Use batch pricing (slower, about half the cost)` |
+| Batch opt-in | `Use batch pricing for non-relevant mail (slower, lower cost)` **[amended in 07-23/07-24 gap closure, D-07 amendment 2026-10-08]** |
 | Empty state heading | `Ready to write the corpus` (Generate Corpus); QA rows: `Not run yet.` |
 | Empty state body | Ready-card body (06) + `Estimated cost ≈${live} at live prices or ≈${batch} with batch pricing, ±50%, including prompt caching.`; findings dialog: `No findings.` |
 | Error state (batch item) | `Batch finished: {s:N0} succeeded, {f:N0} failed or expired. The {Plural(f, "request")} run live at full price.` |

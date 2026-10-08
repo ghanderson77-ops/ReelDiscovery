@@ -824,7 +824,7 @@ public static class GenerationUiText
 
     public const int BatchRecommendThreshold = 2_000; // [DEFAULT] UI-SPEC U28, research A8
 
-    public const string BatchCheckboxText = "Use batch pricing (slower, about half the cost)";
+    public const string BatchCheckboxText = "Use batch pricing for non-relevant mail (slower, lower cost)";
 
     /// <summary>
     /// Ready-card estimate line: the live and batch totals of the one estimate (D-17).
@@ -847,24 +847,25 @@ public static class GenerationUiText
         var batch = sameModel
             ? $"{input.StoryModel} ≈{Money(input.BatchStoryCost + input.BatchVolumeCost)}"
             : $"{input.StoryModel} ≈{Money(input.BatchStoryCost)} · {input.VolumeModel} ≈{Money(input.BatchVolumeCost)}";
-        return $"Live: {live}{mediaClause}. Batch: {batch}{mediaClause}. Images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings.";
+        return $"Live: {live}{mediaClause}. Batch: {batch}{mediaClause}. Relevant threads and their attachments, images and voicemail are always priced live. Cache savings are included only where the shared prompt is long enough for the provider to cache it. The batch total assumes no cache savings on batched mail.";
     }
 
     /// <summary>
     /// Hint under the batch checkbox: hidden below the threshold while unchecked, a Muted recommendation at or above it,
-    /// and the Warning duration caution whenever batch is checked.
+    /// and the Warning duration caution whenever batch is checked. Relevant threads run live first (amended D-07); only
+    /// non-relevant mail waits on the provider.
     /// </summary>
     public static (string Text, SummaryTone Tone) BatchHint(int plannedEmails, bool batchChecked, int threshold)
     {
         if (batchChecked)
         {
-            return ("Batch runs wait on the provider between waves and can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.",
+            return ("Relevant threads run live first. Non-relevant mail then waits on the provider in large batches, which can take several hours. Keep this screen open; if the app closes, Continue Generating collects the finished batches without paying again.",
                 SummaryTone.Warning);
         }
 
         if (plannedEmails >= threshold)
         {
-            return ("Batch pricing is recommended for a corpus this size. It waits on the provider between waves, so the run can take several hours.",
+            return ("Batch pricing is recommended for a corpus this size. Relevant threads still run live; non-relevant mail then waits on the provider, which can take several hours.",
                 SummaryTone.Muted);
         }
 

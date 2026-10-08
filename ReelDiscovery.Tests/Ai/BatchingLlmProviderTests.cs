@@ -1061,4 +1061,45 @@ public class BatchingLlmProviderTests : IDisposable
             BatchingLlmProvider.CancelPendingAsync(ledger, _ => transport, _plan).WaitAsync(Wait));
         Assert.DoesNotContain("batch_open", new BatchLedger(_folder).Replay().CancelledIds);
     }
+
+    // ----- code review 07 (part A) -----
+
+    private static async Task Until(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + Wait;
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+                throw new TimeoutException("Condition not met in time");
+            await Task.Delay(20);
+        }
+    }
+
+    [Fact]
+    public async Task CRA01_DetachDuringSubmit_AcceptedBatchIsStillInTheLedger()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        transport.SubmitStarted = started;
+        transport.SubmitHold = hold.Task;
+        var provider = Create(Live(), transport);
+
+        Task<LlmProviderResponse> pending;
+        using (BatchStage.Enter("non-relevant mail"))
+            pending = provider.SendAsync(Req("a"));
+
+        // Stop while the upload is in flight: the waiter runs live, the submit itself is not cancelled
+        await started.Task.WaitAsync(Wait);
+        provider.Detach();
+        Assert.Equal("live:a", (await pending.WaitAsync(Wait)).Text);
+
+        hold.SetResult();
+        await Until(() => BatchLedger.PendingBatchCount(_folder, _plan) == 1);
+
+        Assert.Single(transport.Submissions);
+        var record = Assert.Single(new BatchLedger(_folder).Replay().Pending(_plan));
+        Assert.Equal(IdOf(Req("a")), Assert.Single(record.Items).CustomId);
+    }
 }

@@ -610,7 +610,12 @@ public class BatchingLlmProvider : ILlmProvider
     private async Task SubmitAsync(string label, List<PendingItem> chunk)
     {
         var requests = chunk.Select(i => new BatchItemRequest { CustomId = i.CustomId, Request = i.Request }).ToList();
-        var submit = await _transport.SubmitAsync(requests, _cts.Token);
+
+        // CR-A01: a Detach before any bytes leave runs the chunk live; once the upload starts, the submit and its ledger
+        // line always complete, so a batch the provider accepted (and bills) is never left untracked (RUN-04, D-09).
+        // The transports bound the call with their own network timeouts.
+        _cts.Token.ThrowIfCancellationRequested();
+        var submit = await _transport.SubmitAsync(requests, CancellationToken.None);
 
         if (!submit.Succeeded)
         {
@@ -671,6 +676,14 @@ public class BatchingLlmProvider : ILlmProvider
             e.Total = chunk.Count;
             e.NextCheckUtc = submittedUtc + _timings.PollInterval;
         }));
+
+        // Detached while submitting: the batch is in the ledger and a later Continue resumes it; nothing polls it now
+        if (_cts.IsCancellationRequested)
+        {
+            lock (_lock)
+                batch.Polling = false;
+            return;
+        }
 
         _ = Task.Run(() => PollLoopAsync(batch));
     }

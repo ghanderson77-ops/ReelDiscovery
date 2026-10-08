@@ -39,6 +39,12 @@ public class FakeBatchTransport : IBatchTransport
     public int PollsUntilEnded { get; set; } = 1;
     public TimeSpan SubmitDelay { get; set; }
 
+    /// <summary>Completed when a SubmitAsync call starts (before SubmitHold).</summary>
+    public TaskCompletionSource? SubmitStarted { get; set; }
+
+    /// <summary>When set, SubmitAsync waits on it (ignoring the token, like an upload already in flight).</summary>
+    public Task? SubmitHold { get; set; }
+
     public List<List<BatchItemRequest>> Submissions { get; } = new();
     public List<string> CancelledIds { get; } = new();
     public int StatusCalls { get; private set; }
@@ -46,6 +52,10 @@ public class FakeBatchTransport : IBatchTransport
 
     public async Task<BatchSubmitResult> SubmitAsync(IReadOnlyList<BatchItemRequest> items, CancellationToken ct = default)
     {
+        SubmitStarted?.TrySetResult();
+        if (SubmitHold != null)
+            await SubmitHold;
+
         if (SubmitDelay > TimeSpan.Zero)
             await Task.Delay(SubmitDelay, ct);
 

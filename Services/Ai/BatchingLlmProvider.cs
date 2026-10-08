@@ -206,7 +206,10 @@ public class BatchingLlmProvider : ILlmProvider
         {
             resume = _batches.Values.Where(b => b.Resumed && !b.Polling).ToList();
             foreach (var batch in resume)
+            {
                 batch.Polling = true;
+                batch.PollStarted = true;
+            }
         }
 
         foreach (var batch in resume)
@@ -482,10 +485,31 @@ public class BatchingLlmProvider : ILlmProvider
     {
         ArgumentNullException.ThrowIfNull(stageMatch);
 
-        var closed = await CancelPendingAsync(_ledger, kind => kind == _transport.Kind ? _transport : null, _planId,
-            include: r => r.Provider == _transport.Kind && stageMatch(r.StageLabel ?? string.Empty),
-            closeOnCancelFailure: true, ct: ct);
+        // The poll loop stops at its next check instead of collecting a cancelled batch nobody waits on. Closed before the
+        // provider cancel, so a poll that sees the cancelled batch never collects (or cleans up) it in the meantime
+        List<TrackedBatch> closing;
+        lock (_lock)
+        {
+            closing = _batches.Values.Where(b => !b.Closed && stageMatch(b.StageLabel ?? string.Empty)).ToList();
+            foreach (var batch in closing)
+                batch.Closed = true;
+        }
 
+        List<string> closed;
+        try
+        {
+            closed = await CancelPendingAsync(_ledger, kind => kind == _transport.Kind ? _transport : null, _planId,
+                include: r => r.Provider == _transport.Kind && stageMatch(r.StageLabel ?? string.Empty),
+                closeOnCancelFailure: true, ct: ct);
+        }
+        catch (Exception)
+        {
+            // Nothing was recorded closed: keep polling these batches so their waiters are never stranded
+            Reopen(closing);
+            throw;
+        }
+
+        Reopen(closing.Where(b => !closed.Contains(b.BatchId, StringComparer.Ordinal)));
         foreach (var batchId in closed)
         {
             TrackedBatch? batch;
@@ -494,7 +518,6 @@ public class BatchingLlmProvider : ILlmProvider
                 if (!_batches.TryGetValue(batchId, out batch))
                     continue;
 
-                // The poll loop stops at its next check instead of collecting a cancelled batch nobody waits on
                 batch.Closed = true;
             }
 
@@ -502,6 +525,28 @@ public class BatchingLlmProvider : ILlmProvider
         }
 
         return closed.Count;
+    }
+
+    // Undoes an early close; a poll loop that already stopped on it is started again (never while detached)
+    private void Reopen(IEnumerable<TrackedBatch> batches)
+    {
+        var restart = new List<TrackedBatch>();
+        lock (_lock)
+        {
+            foreach (var batch in batches)
+            {
+                batch.Closed = false;
+                if (!batch.Polling && (!batch.Resumed || batch.PollStarted) && _batches.ContainsKey(batch.BatchId)
+                    && !_cts.IsCancellationRequested)
+                {
+                    batch.Polling = true;
+                    restart.Add(batch);
+                }
+            }
+        }
+
+        foreach (var batch in restart)
+            _ = Task.Run(() => PollLoopAsync(batch));
     }
 
     private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
@@ -1454,6 +1499,9 @@ public class BatchingLlmProvider : ILlmProvider
         public DateTime SubmittedUtc { get; }
         public bool Resumed { get; }
         public bool Polling { get; set; }
+
+        /// <summary>A resumed batch whose polling ResumePending started (a submitted batch polls from the start).</summary>
+        public bool PollStarted { get; set; }
 
         /// <summary>Uploaded input file (OpenAI); deleted once the results are cached (WR-A03).</summary>
         public string InputFileId { get; init; } = string.Empty;

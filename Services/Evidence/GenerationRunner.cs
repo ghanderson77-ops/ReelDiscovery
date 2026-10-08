@@ -72,7 +72,7 @@ public class GenerationRunner
     // Review MEDIUM: bound attachment buffers held by repairs separately from provider slots
     public const int MaxConcurrentRepairs = 4;
 
-    public const int BatchMaxParallel = 10_000; // batch mode: queued requests cost nothing, so every unit of a wave starts at once (research Pattern 1)
+    public const int BatchMaxParallel = 10_000; // batch mode, non-relevant stage only: queued requests cost nothing, so every unit of a chunk starts at once (research Pattern 1, amended D-07)
 
     // Batch mode Stage B chunk: one provider batch of non-relevant mail per chunk (live mode keeps FillerChunkSize)
     public const int BatchFillerChunkSize = 2_000;
@@ -256,6 +256,7 @@ public class GenerationRunner
         var batch = input.Batch;
         if (batch != null)
         {
+            // Wave rows only show batches an earlier build submitted per wave (pre amended D-07)
             foreach (var wave in waves)
                 snapshot.MapBatchStage(WaveStageLabel(wave.Index), wave.Index);
             snapshot.MapBatchStage(NonRelevantStageLabel, fillerRow);
@@ -269,8 +270,8 @@ public class GenerationRunner
         var message = string.Empty;
         GenerationCheckpoint? final = null;
 
-        // Live mode keeps MaxParallelThreads (research anti-pattern: never raise live parallelism)
-        using var run = new PlanCallRun(ct, batch != null ? BatchMaxParallel : _maxParallel, RetryHint);
+        // Amended D-07: relevant waves, voice cast and side world are live in both modes, so they keep live parallelism (research anti-pattern: never raise live parallelism)
+        using var run = new PlanCallRun(ct, _maxParallel, RetryHint);
         try
         {
             await journal.AppendAsync(new JournalRecord
@@ -378,8 +379,9 @@ public class GenerationRunner
                 var relevantProfile = RenderProfile.Relevant(_llm);
                 List<Task<ThreadOutcome>> tasks;
 
-                // D-07: one batch per wave; the label keeps waves apart (the AsyncLocal flows into every unit task)
+                // Amended D-07: relevant waves run live in batch mode too (thread renders and every attachment they start, via the AsyncLocal); only non-relevant mail is batched
                 using (BatchStage.Enter(WaveStageLabel(wave.Index)))
+                using (BatchStage.EnterLive())
                 {
                     tasks = pending
                         .Select(id =>
@@ -528,7 +530,11 @@ public class GenerationRunner
 
             // D-10: results collected but never used are still billed; RunEnded carries them once (OrphansBilled)
             if (outcome == GenerationOutcome.Finished && batch != null)
+            {
+                // Amended D-07: wave batches an earlier build submitted are never consumed now; close them so Continue never waits on them (the provider may still bill items it completed; that spend is not itemized)
+                await CloseStaleWaveBatchesAsync(batch, snapshot).ConfigureAwait(false);
                 await AddOrphanSpendAsync(ctx, batch).ConfigureAwait(false);
+            }
 
             try
             {
@@ -641,6 +647,11 @@ public class GenerationRunner
             var written = 0;
             var warnings = 0;
             var failed = 0;
+
+            // Amended D-07: Stage B fans out at batch width, but its live attempts (D-10 fallbacks, retries) keep live parallelism
+            using var batchRun = input.Batch != null ? new PlanCallRun(run.UserToken, BatchMaxParallel, RetryHint) : null;
+            using var liveGate = input.Batch != null ? new SemaphoreSlim(_maxParallel, _maxParallel) : null;
+            var unitRun = batchRun ?? run;
             try
             {
                 // Filler has no ledger dependency: chunks only bound memory and checkpoint cadence (D-25)
@@ -653,6 +664,7 @@ public class GenerationRunner
                     var step = StepContext(ctx, fillerRow);
                     List<Task<ThreadOutcome>> tasks;
                     using (BatchStage.Enter(NonRelevantStageLabel))
+                    using (liveGate != null ? BatchStage.UseLiveGate(liveGate) : null)
                     {
                         tasks = chunk
                             .Select(thread =>
@@ -662,7 +674,7 @@ public class GenerationRunner
                                     ctx.Assignments.TryGetValue(thread.Id, out var a) ? a : new ThreadAssignment { ThreadId = thread.Id },
                                     ctx.People, new List<LedgerEntry>(), fillerRow);
                                 render.PreviousStatus = Status(state, thread.Id);
-                                return RunThreadAsync(ctx, uow, render, RenderProfile.For(thread, _llm, sideWorld), step, run);
+                                return RunThreadAsync(ctx, uow, render, RenderProfile.For(thread, _llm, sideWorld), step, unitRun);
                             })
                             .ToList();
                     }
@@ -674,6 +686,8 @@ public class GenerationRunner
 
                     if (run.IsFatal)
                         return (GenerationOutcome.Fatal, run.FatalError);
+                    if (unitRun.IsFatal)
+                        return (GenerationOutcome.Fatal, unitRun.FatalError);
 
                     ct.ThrowIfCancellationRequested();
                     await CheckpointAsync(ctx, final: false, GenerationOutcome.Finished, string.Empty).ConfigureAwait(false);
@@ -1095,6 +1109,20 @@ public class GenerationRunner
     private const string NonRelevantStageLabel = "non-relevant mail";
 
     private static string WaveStageLabel(int waveIndex) => $"wave {waveIndex}";
+
+    private static async Task CloseStaleWaveBatchesAsync(BatchingLlmProvider batch, GenerationSnapshot snapshot)
+    {
+        try
+        {
+            await batch.CancelPendingStagesAsync(label => label.StartsWith("wave ", StringComparison.Ordinal), CancellationToken.None)
+                .ConfigureAwait(false);
+            snapshot.SetPendingProviderBatches(batch.PendingBatchCount);
+        }
+        catch (Exception)
+        {
+            // RunAsync never throws; a stale wave batch left pending is retried at the next finished run
+        }
+    }
 
     // D-10 + T-07-36: orphan spend joins the unjournaled spend RunEnded carries; BillOrphansAsync returns it only once
     private static async Task AddOrphanSpendAsync(RunContext ctx, BatchingLlmProvider batch)

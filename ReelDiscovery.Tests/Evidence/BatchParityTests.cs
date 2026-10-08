@@ -402,8 +402,8 @@ public partial class BatchParityTests : IDisposable
 
         // Non-relevant first attempts really went through the provider batch; relevant threads never did (amended D-07)
         Assert.NotEmpty(batch.Transport!.Submissions);
-        Assert.Contains(batch.Transport.Submissions.SelectMany(s => s), i => i.Request.SchemaName == RenderSchema);
         var relevant = RelevantThreadIds();
+        Assert.Contains(batch.Transport.Submissions.SelectMany(s => s), i => ThreadOf(i.Request).Length > 0 && !relevant.Contains(ThreadOf(i.Request)));
         Assert.DoesNotContain(batch.Transport.Submissions.SelectMany(s => s), i => relevant.Contains(ThreadOf(i.Request)));
         lock (batch.Live.Requests)
         {

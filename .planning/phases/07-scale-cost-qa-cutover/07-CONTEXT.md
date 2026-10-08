@@ -42,9 +42,10 @@ Requirements: RUN-03, RUN-04, RUN-05, PROV-07, QA-01, QA-02, QA-03, OUT-03, PLAT
 - **D-06:** Phase 6 D-08 holds: the Volume tier writes ordinary filler. The leakage audit (D-14) is how that risk gets measured.
 
 ### Batch execution
-- **D-07:** When batch mode is on, **everything goes through the Batch API, wave by wave**:
-  - each relevant wave is one batch, submitted only after the previous wave's results are committed, so ledger and knowledge order stay correct;
-  - non-relevant mail and attachments follow in large batches.
+- **D-07 (amended 2026-10-08 after UAT):** When batch mode is on, **relevant waves run live** and **only non-relevant mail and its attachments go through the Batch API**, in large batches after the last relevant wave commits.
+  - Reason: one batch per relevant wave serialized 20+ provider batch cycles (observed ~28 min per OpenAI batch, SLA up to 24 h), so a 59-relevant-thread case would wait ~12 h before non-relevant mail even started. Relevant threads are a small share of spend; the bulk of the discount is in non-relevant mail.
+  - Relevant-wave ordering, ledger and knowledge rules are unchanged (live, wave by wave).
+  - Superseded original: "everything goes through the Batch API, wave by wave; each relevant wave is one batch".
 - **D-08:** Batch mode is a **per-run checkbox on the Ready card** next to the estimate, for example "Use batch pricing (slower, about half the cost)":
   - the card shows both the live and the batch total;
   - the choice is saved with the case, so Continue reuses it;

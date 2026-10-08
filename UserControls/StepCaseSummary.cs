@@ -1668,10 +1668,10 @@ public class StepCaseSummary : UserControl, IWizardStep
                 qa.ReviewVerdicts = verdicts.Where(v => sample.Contains(v.DocId) && BlindReviewer.IsCurrent(v, stamps)).ToList();
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
-                                       or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // The QA rows are a report view: whatever was read so far is shown, the rest reads as Not run
+            // The QA rows are a report view over hand-editable case data (WR-B02): whatever was read so far is shown,
+            // the rest reads as Not run. Callers end in async-void handlers, so nothing may escape here.
         }
 
         return qa;
@@ -1699,14 +1699,21 @@ public class StepCaseSummary : UserControl, IWizardStep
             return;
 
         var version = ++_qaVersion;
-        var inputs = QaInputs();
-        var qa = await Task.Run(() => LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor));
-        if (IsDisposed || version != _qaVersion)
-            return;
+        try
+        {
+            var inputs = QaInputs();
+            var qa = await Task.Run(() => LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor));
+            if (IsDisposed || version != _qaVersion)
+                return;
 
-        _qa = qa;
-        ApplyQaRows();
-        UpdateButtons();
+            _qa = qa;
+            ApplyQaRows();
+            UpdateButtons();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // WR-B02: a report-only refresh awaited from async-void handlers; the rows keep their last good values
+        }
     }
 
     private string ModelName(string modelId)
@@ -2264,9 +2271,10 @@ public class StepCaseSummary : UserControl, IWizardStep
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // The journal already records the invalidation; Generate Corpus re-projects on entry
+            // The journal already records the invalidation; Generate Corpus re-projects on entry. Any failure stops here
+            // (WR-B02): this runs from an async-void click handler
             if (!IsDisposed)
                 SetStatus(CaseGuideUiText.SaveFailedText(ex.Message), Theme.Danger);
         }

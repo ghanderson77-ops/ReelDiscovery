@@ -165,6 +165,20 @@ public class CaseSummaryQaTests
     // ----- generation cost and scans -----
 
     [Fact]
+    public void WRB02_LoadQa_UnexpectedException_IsContained_PartialSnapshotReturned()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+        SeedGenerated(fixture);
+
+        // Hand-edited case data can throw any type (NullReferenceException, KeyNotFoundException, JsonException...)
+        var qa = StepCaseSummary.LoadQa(fixture.Folder, fixture.Plan, fixture.Draft.Guide!, new ReviewProtocolProse(),
+            _ => throw new NullReferenceException("case.json field missing"));
+
+        Assert.NotNull(qa.Replay);
+        Assert.Null(qa.Scans);
+    }
+
+    [Fact]
     public void Generated_CostRowShowsBreakdown_AndRunButtonsAppear()
     {
         using var fixture = new GenerateCorpusRenderTests.StepFixture();

@@ -75,6 +75,49 @@ public class BlindReviewer
     }
 
     /// <summary>
+    /// CR-B02: per written email DocId, the journal time of the content a reviewer sees: the latest of its thread's
+    /// ThreadDone line and its written attachments' lines. Regenerate Thread followed by a new write moves the stamp.
+    /// </summary>
+    public static Dictionary<string, DateTime> WrittenStamps(JournalReplay? replay)
+    {
+        var stamps = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        foreach (var record in (replay?.LastByThread ?? new()).Values)
+        {
+            if (record == null || record.Type != JournalRecordType.ThreadDone)
+                continue;
+            foreach (var message in record.Messages ?? new())
+            {
+                if (message != null && !string.IsNullOrEmpty(message.DocId))
+                    stamps.TryAdd(message.DocId, record.Utc);
+            }
+        }
+
+        foreach (var attachment in (replay?.LastByAttachment ?? new()).Values)
+        {
+            if (attachment == null || attachment.Type != JournalRecordType.AttachmentDone)
+                continue;
+            if (stamps.TryGetValue(attachment.ParentDocId ?? string.Empty, out var stamp) && attachment.Utc > stamp)
+                stamps[attachment.ParentDocId!] = attachment.Utc;
+        }
+
+        return stamps;
+    }
+
+    /// <summary>
+    /// CR-B02: true when the verdict still judges the email as written now. A verdict without a stamp (written before the
+    /// stamp existed) counts as current; a stamped verdict must match the email's current stamp.
+    /// </summary>
+    public static bool IsCurrent(BlindReviewVerdict verdict, IReadOnlyDictionary<string, DateTime> stamps)
+    {
+        if (verdict == null)
+            return false;
+        if (verdict.WrittenUtc == null)
+            return true;
+
+        return stamps.TryGetValue(verdict.DocId ?? string.Empty, out var stamp) && stamp == verdict.WrittenUtc.Value;
+    }
+
+    /// <summary>
     /// The sampled emails as a reviewer sees them: header fields from the answer key (overlay-rendered subject and sender),
     /// body and sign-off from the journaled message, and each written attachment's title and first 1,500 characters.
     /// DocIds missing from the key are skipped; order follows <paramref name="docIds"/>.
@@ -104,6 +147,7 @@ public class BlindReviewer
             .GroupBy(kv => kv.Value.ParentDocId ?? string.Empty, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Select(kv => kv.Value).ToList(), StringComparer.Ordinal);
 
+        var stamps = WrittenStamps(replay);
         var docs = new List<BlindReviewDocument>();
         foreach (var docId in docIds ?? Array.Empty<string>())
         {
@@ -128,7 +172,8 @@ public class BlindReviewer
                 DateSent = row.DateSent,
                 Subject = subject,
                 Body = body,
-                KeyRelevant = row.Relevance == AnswerKeyBuilder.RelevantLabel
+                KeyRelevant = row.Relevance == AnswerKeyBuilder.RelevantLabel,
+                WrittenUtc = stamps.TryGetValue(docId, out var stamp) ? stamp : null
             };
 
             if (attachmentsByParent.TryGetValue(docId, out var attachments))
@@ -198,7 +243,6 @@ public class BlindReviewer
     {
         ArgumentNullException.ThrowIfNull(header);
         docs ??= Array.Empty<BlindReviewDocument>();
-        var requested = new HashSet<string>(docs.Select(d => d.DocId), StringComparer.Ordinal);
 
         var (existingHeader, existingVerdicts) = _store.LoadBlindReview();
         var samePass = existingHeader != null
@@ -206,7 +250,16 @@ public class BlindReviewer
                        && string.Equals(existingHeader.ReviewerProvider, header.ReviewerProvider, StringComparison.Ordinal)
                        && string.Equals(existingHeader.ReviewerModel, header.ReviewerModel, StringComparison.Ordinal);
 
-        var kept = samePass ? existingVerdicts.Where(v => requested.Contains(v.DocId)).ToList() : new List<BlindReviewVerdict>();
+        // CR-B02: a verdict on content that has since been regenerated is not kept, so the new text is reviewed again
+        var docById = new Dictionary<string, BlindReviewDocument>(StringComparer.Ordinal);
+        foreach (var doc in docs)
+        {
+            if (doc != null)
+                docById.TryAdd(doc.DocId ?? string.Empty, doc);
+        }
+        var kept = samePass
+            ? existingVerdicts.Where(v => docById.TryGetValue(v.DocId ?? string.Empty, out var doc) && JudgesCurrent(v, doc)).ToList()
+            : new List<BlindReviewVerdict>();
         if (!samePass)
         {
             await _store.AppendBlindReviewHeaderAsync(header, ct);
@@ -244,11 +297,14 @@ public class BlindReviewer
         }
 
         var (_, verdicts) = _store.LoadBlindReview();
-        var current = verdicts.Where(v => requested.Contains(v.DocId)).ToList();
+        var current = verdicts.Where(v => docById.TryGetValue(v.DocId ?? string.Empty, out var doc) && JudgesCurrent(v, doc)).ToList();
         result.Reviewed = current.Count;
         result.Disagreements = Disagreements(current);
         return result;
     }
+
+    private static bool JudgesCurrent(BlindReviewVerdict verdict, BlindReviewDocument doc) =>
+        verdict.WrittenUtc == null || verdict.WrittenUtc == doc.WrittenUtc;
 
     private async Task ReviewOneAsync(BlindReviewDocument doc, string systemPrompt, PlanCallRun run,
         BlindReviewRunResult result, object gate, Action onVerdict)
@@ -291,7 +347,8 @@ public class BlindReviewer
             IssueCodes = CleanCodes(outcome.Value.IssueCodes),
             Reason = BlindReviewPrompts.Truncate((outcome.Value.Reason ?? string.Empty).Trim(), MaxReasonChars),
             Utc = DateTime.UtcNow,
-            CostUsd = cost
+            CostUsd = cost,
+            WrittenUtc = doc.WrittenUtc
         };
 
         // Not cancellable: a verdict that was paid for is always kept (D-13)

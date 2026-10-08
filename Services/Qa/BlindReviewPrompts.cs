@@ -27,6 +27,12 @@ public class BlindReviewDocument
     /// The answer key's relevance; copied into the verdict for the disagreement list and never rendered into a prompt.
     /// </summary>
     public bool KeyRelevant { get; set; }
+
+    /// <summary>
+    /// Journal time of this email's written content (see <see cref="ReelDiscovery.Models.Qa.BlindReviewVerdict.WrittenUtc"/>);
+    /// copied into the verdict and never rendered into a prompt.
+    /// </summary>
+    public DateTime? WrittenUtc { get; set; }
 }
 
 public class BlindReviewAttachment

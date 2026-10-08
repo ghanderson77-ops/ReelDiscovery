@@ -13,6 +13,13 @@ public class BlindReviewVerdict
     public string Reason { get; set; } = string.Empty;
     public DateTime Utc { get; set; }
     public decimal CostUsd { get; set; }
+
+    /// <summary>
+    /// Journal time of the content the reviewer judged (the thread's ThreadDone line, or a later attachment write).
+    /// A regenerated thread gets a newer stamp, so this verdict no longer counts (CR-B02). Null on verdicts written
+    /// before the stamp existed; those are kept.
+    /// </summary>
+    public DateTime? WrittenUtc { get; set; }
 }
 
 /// <summary>

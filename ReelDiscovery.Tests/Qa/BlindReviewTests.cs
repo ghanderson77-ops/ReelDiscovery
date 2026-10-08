@@ -403,6 +403,52 @@ public class BlindReviewTests
     }
 
     [Fact]
+    public async Task CRB02_RegeneratedDoc_VerdictDropped_AndReviewedAgain()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var written = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
+            var docs = Docs(4);
+            foreach (var doc in docs)
+                doc.WrittenUtc = written;
+            var planId = Guid.NewGuid();
+            var (reviewer, fake, store) = Reviewer(folder);
+            fake.Respond = Responder(docs);
+            await reviewer.RunAsync(Header(planId, 4), docs, "protocol");
+            Assert.All(store.LoadBlindReview().Verdicts, v => Assert.Equal(written, v.WrittenUtc));
+
+            // Regenerate Thread + Continue rewrote RD-000002: same DocId, newer journal stamp
+            docs[1].WrittenUtc = written.AddHours(1);
+            var (again, fake2, _) = Reviewer(folder);
+            fake2.Respond = Responder(docs);
+            var result = await again.RunAsync(Header(planId, 4), docs, "protocol");
+
+            Assert.Single(fake2.Requests);
+            Assert.Contains("Subject number 002", fake2.Requests[0].UserPrompt);
+            Assert.Equal(4, result.Reviewed);
+            var verdict = store.LoadBlindReview().Verdicts.Single(v => v.DocId == "RD-000002");
+            Assert.Equal(written.AddHours(1), verdict.WrittenUtc);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public void CRB02_IsCurrent_MatchesStamp_LegacyVerdictKept()
+    {
+        var written = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
+        var stamps = new Dictionary<string, DateTime>(StringComparer.Ordinal) { ["RD-000001"] = written };
+
+        Assert.True(BlindReviewer.IsCurrent(new BlindReviewVerdict { DocId = "RD-000001", WrittenUtc = written }, stamps));
+        Assert.False(BlindReviewer.IsCurrent(new BlindReviewVerdict { DocId = "RD-000001", WrittenUtc = written.AddMinutes(-5) }, stamps));
+        Assert.False(BlindReviewer.IsCurrent(new BlindReviewVerdict { DocId = "RD-000009", WrittenUtc = written }, stamps));
+        Assert.True(BlindReviewer.IsCurrent(new BlindReviewVerdict { DocId = "RD-000001" }, stamps));
+    }
+
+    [Fact]
     public async Task Run_RefusalCountsError_AndContinues()
     {
         var folder = EvidenceTestData.TempCaseFolder();
@@ -535,6 +581,33 @@ public class BlindReviewTests
         Assert.Equal(BlindReviewPrompts.AttachmentTextLimit, first.Attachments[0].Text.Length);
         Assert.False(docs[1].KeyRelevant);
         Assert.Equal(new[] { "RD-000001" }, BlindReviewer.GeneratedEmailDocIds(replay));
+    }
+
+    [Fact]
+    public void CRB02_WrittenStamps_ThreadDoneOrLaterAttachment()
+    {
+        var threadUtc = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc);
+        var replay = new JournalReplay();
+        replay.LastByThread["T-0001"] = new JournalRecord
+        {
+            Type = JournalRecordType.ThreadDone,
+            ThreadId = "T-0001",
+            Utc = threadUtc,
+            Messages = new List<JournalMessage> { new() { DocId = "RD-000001" }, new() { DocId = "RD-000002" } }
+        };
+        replay.LastByAttachment["RD-000002.0001"] = new JournalRecord
+        {
+            Type = JournalRecordType.AttachmentDone,
+            AttachmentDocId = "RD-000002.0001",
+            ParentDocId = "RD-000002",
+            ThreadId = "T-0001",
+            Utc = threadUtc.AddMinutes(3)
+        };
+
+        var stamps = BlindReviewer.WrittenStamps(replay);
+
+        Assert.Equal(threadUtc, stamps["RD-000001"]);
+        Assert.Equal(threadUtc.AddMinutes(3), stamps["RD-000002"]);
     }
 
     private sealed class SyncProgress : IProgress<int>

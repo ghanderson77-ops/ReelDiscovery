@@ -1663,7 +1663,9 @@ public class StepCaseSummary : UserControl, IWizardStep
                 var sample = new HashSet<string>(qa.SampleOrder.Take(Math.Max(0, header.SampleSize)), StringComparer.Ordinal);
                 qa.ReviewHeader = header;
                 qa.ReviewSampleSize = sample.Count;
-                qa.ReviewVerdicts = verdicts.Where(v => sample.Contains(v.DocId)).ToList();
+                // CR-B02: a verdict on a thread regenerated since is not counted; the rerun reviews the new text
+                var stamps = BlindReviewer.WrittenStamps(qa.Replay);
+                qa.ReviewVerdicts = verdicts.Where(v => sample.Contains(v.DocId) && BlindReviewer.IsCurrent(v, stamps)).ToList();
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException

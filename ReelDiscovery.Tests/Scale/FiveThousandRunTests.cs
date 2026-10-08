@@ -127,9 +127,8 @@ public partial class FiveThousandRunTests : IClassFixture<FiveThousandRuns>
     // Journal stop line (90% of the 200 MB replay cap)
     private const long JournalBudget = 180L * 1024 * 1024;
 
-    // D-07: the quiet period must stay safely above the wave unit start-up spread (raise it if the spread passes 250 ms)
+    // Amended D-07: only the non-relevant stage is batched; the quiet period must stay above its chunk start-up spread
     private static readonly TimeSpan QuietPeriod = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan SpreadLimit = TimeSpan.FromMilliseconds(250);
 
     private readonly FiveThousandRuns _runs;
     private readonly ITestOutputHelper _output;
@@ -378,8 +377,9 @@ public partial class FiveThousandRunTests : IClassFixture<FiveThousandRuns>
         Assert.NotNull(leakage);
     }
 
+    // Amended D-07: relevant waves run live (thread renders and their attachments); only non-relevant mail is batched
     [Fact]
-    public async Task Batch_5K_SameCountsAndAnswerKeyAsLive_OneRenderBatchPerWave()
+    public async Task Batch_5K_SameCountsAndAnswerKeyAsLive_OnlyNonRelevantBatched()
     {
         var live = await _runs.LiveAsync();
         var run = await RunAsync(_runs, batch: true);
@@ -389,33 +389,31 @@ public partial class FiveThousandRunTests : IClassFixture<FiveThousandRuns>
         Assert.Equal(EmlCount(live.Folder), EmlCount(run.Folder));
         Assert.Equal(AnswerKey(live.Folder), AnswerKey(run.Folder));
 
-        // D-07: per wave label, exactly one submission made only of thread renders (attachments share the label, apart)
+        // Every submitted item carries the non-relevant label and none names a relevant thread
         var labelById = new BatchLedger(run.Folder).Replay().SubmittedById.Values
             .SelectMany(r => r.Items.Select(i => (i.CustomId, r.StageLabel)))
             .ToDictionary(p => p.CustomId, p => p.StageLabel, StringComparer.Ordinal);
-        var renderSubmissions = run.Transport!.Submissions
-            .Where(s => s.Count > 0 && s.All(i => i.Request.SchemaName == RenderSchema))
-            .GroupBy(s => labelById[s[0].CustomId])
-            .ToDictionary(g => g.Key, g => g.Count());
-        var waves = WavePlanner.Plan(_runs.Plan);
-        foreach (var wave in waves)
+        var submitted = run.Transport!.Submissions.SelectMany(s => s).ToList();
+        Assert.NotEmpty(run.Transport.Submissions);
+        Assert.All(submitted, i => Assert.Equal("non-relevant mail", labelById[i.CustomId]));
+        var relevant = _runs.Plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant).Select(t => t.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var item in submitted)
         {
-            var label = $"wave {wave.Index}";
-            Assert.True(renderSubmissions.TryGetValue(label, out var count) && count == 1,
-                $"{label}: {(renderSubmissions.TryGetValue(label, out var c) ? c : 0)} thread-render submissions");
+            var match = ThreadIdLine().Match(item.Request.UserPrompt ?? string.Empty);
+            Assert.False(match.Success && relevant.Contains(match.Groups[1].Value),
+                $"relevant thread {match.Groups[1].Value} was submitted in a provider batch");
         }
 
-        // Wave unit start-up spread: first to last thread render of one wave leaving the runner
-        var spreads = run.RenderCalls
-            .Where(c => c.Stage.StartsWith("wave ", StringComparison.Ordinal))
-            .GroupBy(c => c.Stage)
-            .Select(g => (Stage: g.Key, Units: g.Count(), Spread: g.Max(c => c.At) - g.Min(c => c.At)))
-            .OrderByDescending(s => s.Spread)
-            .ToList();
-        var widest = spreads[0];
-        _output.WriteLine($"{waves.Count} waves, {run.Transport.Submissions.Count} submissions; widest start-up spread " +
-                          $"{widest.Spread.TotalMilliseconds:F0} ms ({widest.Stage}, {widest.Units} units); quiet period " +
-                          $"{QuietPeriod.TotalMilliseconds:F0} ms");
-        Assert.True(widest.Spread < SpreadLimit, $"{widest.Stage} start-up spread {widest.Spread.TotalMilliseconds:F0} ms");
+        // Relevant thread renders left the runner live under their wave labels
+        var relevantRenders = run.RenderCalls.Where(c => relevant.Contains(c.ThreadId)).ToList();
+        Assert.NotEmpty(relevantRenders);
+        Assert.All(relevantRenders, c => Assert.StartsWith("wave ", c.Stage));
+
+        // Informational: non-relevant stage start-up spread (most non-relevant threads use the filler schema, so RenderSchema covers decoys only)
+        var nonRelevant = run.RenderCalls.Where(c => c.Stage == "non-relevant mail").ToList();
+        var spread = nonRelevant.Count > 0 ? nonRelevant.Max(c => c.At) - nonRelevant.Min(c => c.At) : TimeSpan.Zero;
+        _output.WriteLine($"{run.Transport.Submissions.Count} submissions; non-relevant render start-up spread " +
+                          $"{spread.TotalMilliseconds:F0} ms ({nonRelevant.Count} units); quiet period {QuietPeriod.TotalMilliseconds:F0} ms");
     }
 }

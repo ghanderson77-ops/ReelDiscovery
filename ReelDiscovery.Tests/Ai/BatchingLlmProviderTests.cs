@@ -1220,8 +1220,13 @@ public class BatchingLlmProviderTests : IDisposable
         var again = restarted.PriceOrphans();
         Assert.Equal(expected.TotalUsd, again.Cost.TotalUsd);
 
-        // Marked after the journal commit: billed once, never again
+        // Marked after the journal commit: billed once, never again; WR-A09: the session ticker gets it too
+        var tracker = new TokenUsageTracker();
+        restarted.UsageTracker = tracker;
+        Assert.Equal(0m, tracker.TotalCost);
         await restarted.MarkOrphansBilledAsync(again).WaitAsync(Wait);
+        Assert.Equal(expected.TotalUsd, tracker.TotalCost);
+        Assert.Equal(expected.BatchSavingsUsd, tracker.TotalBatchSavings);
         Assert.Contains("batch_new", new BatchLedger(_folder).Replay().OrphansBilledIds);
         Assert.True(restarted.PriceOrphans().IsEmpty);
         restarted.Detach();

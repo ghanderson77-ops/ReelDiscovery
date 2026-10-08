@@ -71,6 +71,9 @@ public class OrphanBill
     /// </summary>
     public List<string> UnpricedBatchIds { get; } = new();
 
+    /// <summary>Per priced item: its batch, catalog model, usage and cost (recorded on the session ticker, WR-A09).</summary>
+    public List<(string BatchId, AIModelConfig Model, TokenUsage Usage, CostBreakdown Cost)> Lines { get; } = new();
+
     public bool IsEmpty => ItemsByBatch.Count == 0;
 }
 
@@ -246,6 +249,7 @@ public class BatchingLlmProvider : ILlmProvider
             var input = 0;
             var output = 0;
             var priced = true;
+            var lines = new List<(string, AIModelConfig, TokenUsage, CostBreakdown)>();
             foreach (var (_, orphan) in group)
             {
                 // CR-A04: the batch's own provider and model; no catalog price means unbilled, never a recorded $0
@@ -259,7 +263,9 @@ public class BatchingLlmProvider : ILlmProvider
                 var usage = orphan.Result.Response!.ToUsage();
                 usage.IsBatch = true;
                 usage.Normalize();
-                cost.Add(model.CalculateCost(usage));
+                var itemCost = model.CalculateCost(usage);
+                cost.Add(itemCost);
+                lines.Add((group.Key, model, usage, itemCost));
                 input += usage.TotalInputTokens;
                 output += usage.OutputTokens;
             }
@@ -271,6 +277,7 @@ public class BatchingLlmProvider : ILlmProvider
             }
 
             bill.Cost.Add(cost);
+            bill.Lines.AddRange(lines);
             bill.InputTokens += input;
             bill.OutputTokens += output;
             bill.ItemsByBatch[group.Key] = group.Select(kv => kv.Key).ToList();
@@ -322,8 +329,23 @@ public class BatchingLlmProvider : ILlmProvider
 
                 _orphansBilled.Add(batchId);
             }
+
+            // WR-A09: the header ticker shows the same spend RunEnded journaled (D-16)
+            var tracker = UsageTracker;
+            if (tracker != null)
+            {
+                foreach (var line in bill.Lines.Where(l => string.Equals(l.BatchId, batchId, StringComparison.Ordinal)))
+                    tracker.RecordUsage(OrphanOperation, line.Model, line.Usage, line.Cost);
+            }
         }
     }
+
+    private const string OrphanOperation = "Batch results not used";
+
+    /// <summary>
+    /// Session ticker (WR-A09): orphan spend is recorded here when it is marked billed, after the journal carries it.
+    /// </summary>
+    public TokenUsageTracker? UsageTracker { get; set; }
 
     /// <summary>
     /// Cancels this plan's pending provider batches (one transport per record's provider; a null transport is skipped),

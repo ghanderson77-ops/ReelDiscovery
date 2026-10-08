@@ -109,7 +109,11 @@ public class WizardState
         Func<LlmProviderKind, string, AIModelConfig?> price = (kind, id) =>
             AvailableModelConfigs.FirstOrDefault(m => m.ModelId == id && m.Provider == kind);
         var batch = new BatchingLlmProvider(live, transport ?? LlmProviderFactory.CreateBatchTransport(provider, key),
-            new BatchLedger(caseFolder), planId, price, timings);
+            new BatchLedger(caseFolder), planId, price, timings)
+        {
+            // WR-A09: orphan spend reaches the header ticker as well as RunEnded
+            UsageTracker = UsageTracker
+        };
         return (new LlmGateway(batch, story, volume, UsageTracker), batch);
     }
 

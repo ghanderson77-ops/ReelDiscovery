@@ -266,7 +266,28 @@ Plans:
   1. The user can pick key witnesses and generate deposition transcript excerpts with numbered lines and pages.
   2. The user can generate Requests for Production and Interrogatories keyed to the issues, and Requests for Admission keyed to the key facts.
   3. All ancillary documents use the same names, dates, amounts and allegations as the core document, cast and facts, and export as .docx.
-**Plans**: TBD
+**Plans**: 19 plans
+
+Plans:
+- [ ] 08-01-PLAN.md — Discovery models, CaseDraft v4 Discovery settings, sidecar store with safe docx paths, staleness stamp (Wave 1)
+- [ ] 08-02-PLAN.md — CounselDirectory (party/firm/partner lookup), shared Phase 8 fixtures and docx validation helper (Wave 1)
+- [ ] 08-03-PLAN.md — CaseNumber + DepositionPlanner: witnesses, roles, dates, reporter, topic chunks, exhibit numbering (Wave 2)
+- [ ] 08-04-PLAN.md — WrittenDiscoveryPlanner: RFP/ROG/RFA slots keyed to issues/facts, parties, memo variants, titles (Wave 2)
+- [ ] 08-05-PLAN.md — CorpusDetector: usable-corpus probe, written-DocID exhibit candidates, ledger slice (Wave 2)
+- [ ] 08-06-PLAN.md — TranscriptLayout (25 lines/page engine) + TranscriptDocxBuilder (Courier New, exact spacing) (Wave 2)
+- [ ] 08-07-PLAN.md — Caption overload, DiscoveryBoilerplate (definitions/instructions/signature/COS), DiscoveryDocxBuilder (Wave 2)
+- [ ] 08-08-PLAN.md — TextScan regex promotion + DiscoveryValidator D1-D8 with keep-best and feedback (Wave 2)
+- [ ] 08-09-PLAN.md — DiscoveryUiText (all copy), DiscoveryRowInfo, RegenerateDiscoveryDialog at 144 DPI (Wave 2)
+- [ ] 08-10-PLAN.md — Discovery pricing on the single estimator, DiscoveryWorklist, DiscoveryStepModel (Wave 3)
+- [ ] 08-11-PLAN.md — DiscoveryPrompts (grounded, cacheable, name-safe) + strict DTO registration (Wave 3)
+- [ ] 08-12-PLAN.md — DepositionWriter: chunked testimony with retries and keep-best (Wave 4)
+- [ ] 08-13-PLAN.md — WrittenSetWriter: RFP/ROG/RFA sets with retries and keep-best (Wave 4)
+- [ ] 08-14-PLAN.md — StepDiscoveryDocuments layout, binding, lifecycle and render checks 1-7 (Wave 4)
+- [ ] 08-15-PLAN.md — DiscoveryGenerator: bounded run, persistence, fatal/cancel, regenerate, Save Again; Start Over regression (Wave 5)
+- [ ] 08-16-PLAN.md — Wizard integration: 9 steps, NavigateToStep(Type), IConfirmLeave, close-during-run (Wave 5)
+- [ ] 08-17-PLAN.md — Step run wiring: Generate, Cancel, Regenerate..., Save Again, Open in Word/Folder (Wave 6)
+- [ ] 08-18-PLAN.md — Case Summary Discovery row + discovery clause in the cost row without a corpus plan (Wave 6)
+- [ ] 08-19-PLAN.md — Phase gate: full suite + renders, Word/150% DPI/live-provider human verification, mark ANC complete (Wave 7, checkpoint)
 **UI hint**: yes
 
 ## Progress
@@ -283,4 +304,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
-| 8. Ancillary Discovery Documents | 0/TBD | Not started | - |
+| 8. Ancillary Discovery Documents | 0/19 | Planned | - |

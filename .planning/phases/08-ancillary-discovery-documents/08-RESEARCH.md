@@ -890,18 +890,24 @@ var perIssue = Apportion.Largest(total, weights, min: 1);
 | A8 | RFA ordering "Key significance first" means Hot and Key before Supporting | Pattern 5 | Different subset of facts chosen; low impact |
 | A9 | Memo-variant titles and InternalCorporate RFA availability | Pattern 5 | D-25 leaves titles to discretion; confirm in UI-SPEC |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does "pages-per-excerpt" include front/back matter?**
    - What we know: D-15 sets defaults of 15/25/40 and the "EXCERPT" label.
-   - What's unclear: whether 25 means testimony pages or total pages.
-   - Recommendation: testimony pages. Label the control "Testimony pages per excerpt" and mention front matter in the tooltip.
+   - **RESOLVED:** testimony pages only. The control is labelled "Testimony pages per excerpt" and its hint says front and back matter add about 7 pages (UI-SPEC U45). Implemented by `DepositionPlanner.Plan` (chunk pages sum to the testimony pages, Plan 08-03), `TranscriptLayout` (front/back matter laid out separately, Plan 08-06) and the step's pages field (Plan 08-14).
 2. **Where do discovery costs appear on Case Summary?**
    - What we know: D-06 says "fold into the Case Summary cost breakdown"; the cost row is journal-only today.
-   - Recommendation: add a "discovery documents" cost item to `GenerationUiText.CostRow` (keeping the total = journal spend + discovery spend), and compute it even without a plan. The UI-SPEC should confirm the copy.
+   - **RESOLVED:** one `discovery documents $d` clause in the Generation cost row, included in the total and computed even without a corpus plan (UI-SPEC S5/U46). Spend is stored per document (plus `UnattributedCostUsd` for cancelled/stopped work) in `discovery-documents.json`. Implemented in Plan 08-01 (model), Plan 08-15 (cost capture) and Plan 08-18 (`GenerationUiText.CostRow` + `StepCaseSummary.LoadQa`).
 3. **What happens when a .docx is open in Word during regenerate?**
-   - Recommendation: keep the new content in the sidecar, mark the row "Generated - close the file in Word, then click Write again" (or reuse Regenerate), and use the existing file-lock detection.
-4. **Does the UI-SPEC come first?** `workflow.ui_phase` and `ui_safety_gate` are true. The planner should expect an `08-UI-SPEC.md` (gsd-ui-phase) for the new step, the Case Summary row and the dialog before UI tasks are planned.
+   - **RESOLVED:** the regenerate dialog warns before paying when `FileLockDetector.IsOpenElsewhere` finds the file open; if the write still fails, the content is kept in the sidecar with `FileSaved = false`, the row shows `Not saved`, and `Save Again` rewrites the .docx from stored content with no model call (UI-SPEC U47). The existing `Helpers/FileLockDetector` is reused (no promotion of `StepCaseSummary.IsFileOpenElsewhere`). Implemented in Plans 08-15 (generator + `SaveAgainAsync`) and 08-17 (dialog warning, Save Again, `IsOpenElsewhere` probe).
+4. **Does the UI-SPEC come first?**
+   - **RESOLVED:** yes. `08-UI-SPEC.md` was approved on 2026-10-08 before planning; Plans 08-09, 08-14, 08-16, 08-17 and 08-18 implement S1-S5 verbatim.
+
+Additional planner resolutions (recommended defaults, --auto):
+- A5 (non-party witnesses): eligible, examined by the first plaintiff-side counsel, no defending attorney (Plan 08-03).
+- A8 (RFA order): Hot and Key before Supporting, then by date, then id (Plan 08-04).
+- A9 (memo titles, InternalCorporate RFAs): titles per UI-SPEC U48; memo-civil RFAs available as "Requests to admit" (Plans 08-04, 08-09).
+- Pattern-mapper flags: discovery prompts use their own name rules and never call `CaseGuidePrompts.AppendNameRules` (which says "fictional") — Plan 08-11; the shared regexes move into `Services/Evidence/TextScan.cs` with RenderValidator tests as the safety net — Plan 08-08; existing tests to update are listed in 08-VALIDATION.md.
 
 ## Environment Availability
 

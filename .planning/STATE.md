@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-23-PLAN.md
-last_updated: "2026-10-08T15:39:44.486Z"
+stopped_at: Completed 07-24-PLAN.md
+last_updated: "2026-10-08T15:54:45.000Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 130
-  completed_plans: 128
-  percent: 98
+  completed_plans: 129
+  percent: 99
 ---
 
 # Project State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 7 (Scale, Cost, QA & Cutover) — EXECUTING
-Plan: 23 of 24 (gap closure; 07-24 and 07-22 Task 4 live UAT pending)
-Status: Executing gap closure (07-23 done)
+Plan: 24 of 24 (gap closure done; 07-22 Task 4 live UAT re-run pending)
+Status: Executing — 07-23 and 07-24 gap closure done; awaiting user re-run of 07-22 Task 4 (UAT test 4)
 Last activity: 2026-10-08
 
 Progress: [██████████] 99%
@@ -179,6 +179,7 @@ Progress: [██████████] 99%
 | Phase 07 P20 | 15min | 2 tasks | 38 files |
 | Phase 07 P21 | 35min | 2 tasks | 4 files |
 | Phase 07 P23 | 45 min | 3 tasks | 8 files |
+| Phase 07 P24 | 35 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -528,6 +529,9 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-23: Amended D-07 live: in batch mode relevant waves run live at MaxParallelThreads; only non-relevant mail is batched
 - [Phase 07]: 07-23: Stage B live attempts (D-10 fallbacks, retries) gated at _maxParallel via BatchStage.UseLiveGate
 - [Phase 07]: 07-23: Finished batch runs close stale 'wave N' batches (best-effort cancel, recorded Cancelled even on failure) so PendingBatchCount returns to 0
+- [Phase 07]: 07-24: Batch total = relevant work, repairs, side world and voice cast at live prices + non-relevant mail at batch prices + media (amended D-07, D-17); PricedWork.LiveDocIds carries repairs
+- [Phase 07]: 07-24: Batch checkbox reads 'Use batch pricing for non-relevant mail (slower, lower cost)'; hints say relevant threads run live first
+- [Phase 07]: 07-24: API-step media notice reads 'Enter and test one above to enable them.'; later steps keep their API Configuration pointer
 
 ### Pending Todos
 
@@ -549,6 +553,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T15:39:44.479Z
-Stopped at: Completed 07-23-PLAN.md
+Last session: 2026-10-08T15:54:45.000Z
+Stopped at: Completed 07-24-PLAN.md (07-22 Task 4 UAT re-run pending)
 Resume file: None

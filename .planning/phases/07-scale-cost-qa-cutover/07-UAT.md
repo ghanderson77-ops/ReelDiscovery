@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: partial
 phase: 07-scale-cost-qa-cutover
 source: [07-10-SUMMARY.md, 07-11-SUMMARY.md, 07-19-SUMMARY.md, 07-22-SPIKE-NOTES.md]
 started: 2026-10-08T08:45:00
-updated: 2026-10-08T09:00:00
+updated: 2026-10-08T11:00:00
 ---
 
 ## Current Test
@@ -12,7 +12,7 @@ number: 4
 name: Batch run with restart (07-22 Task 4 step 4)
 expected: |
   Batch mode finishes a small case in a practical time.
-awaiting: gap closure
+awaiting: user re-run of 07-22 Task 4 step 4 (gaps closed by 07-23 and 07-24)
 
 ## Tests
 
@@ -25,8 +25,10 @@ severity: blocker
 ## Gaps
 
 - truth: "In batch mode, relevant waves run live and only non-relevant mail and its attachments are batched (amended D-07), so a batch run is not serialized behind one provider batch cycle per relevant wave"
-  status: failed
+  status: resolved
   reason: "User reported: Is each wave going to take up to 24 hours? 24 relevant waves each submitted as a separate batch; observed OpenAI batch ~28 min, SLA 24 h"
+  resolved_by: [07-23, 07-24]
+  resolution: "07-23 runs relevant waves live in batch mode and batches only non-relevant mail; 07-24 prices the batch total the same way and updates the Ready-card and UI-SPEC copy. Needs the user re-run of test 4."
   severity: blocker
   test: 4
   root_cause: "GenerationRunner batch mode (07-10) labels every relevant wave 'wave {i}' and submits its first attempts through BatchingLlmProvider; each wave waits for its batch before the next starts (original D-07). Relevant-wave calls (thread renders AND their attachments) must run under BatchStage.EnterLive() in batch mode; only the non-relevant stage (and its attachments) stays batch-eligible."
@@ -35,8 +37,10 @@ severity: blocker
   debug_session: ""
 
 - truth: "The media-gating warning on the API Configuration step does not tell the user to go to the step they are already on"
-  status: failed
+  status: resolved
   reason: "Found during 07-22 handover: API Configuration step shows 'Add one on the API Configuration step to enable them.' while on that step"
+  resolved_by: [07-24]
+  resolution: "API step now reads 'Images and voicemail need a tested OpenAI key. Enter and test one above to enable them.'"
   severity: cosmetic
   test: 1
   root_cause: "WizardState media gating message (Models/WizardState.cs ~line 50) is shared by the API step and later steps"

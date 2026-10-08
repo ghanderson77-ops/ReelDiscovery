@@ -174,6 +174,29 @@ public class AnthropicBatchWireTests
     }
 
     [Fact]
+    public async Task CRB01_Cancel_ServerError_Throws_WithoutKey()
+    {
+        var handler = new RoutingHandler();
+        handler.Route("/v1/messages/batches/msgbatch_x/cancel", 500,
+            "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"internal\"}}");
+
+        var ex = await Assert.ThrowsAsync<BatchCancelFailedException>(() => CreateTransport(handler).CancelAsync("msgbatch_x"));
+
+        Assert.Equal("msgbatch_x", ex.BatchId);
+        Assert.DoesNotContain(ApiKey, ex.Message);
+    }
+
+    [Fact]
+    public async Task CRB01_Cancel_NetworkFailure_Throws()
+    {
+        var handler = new RoutingHandler { ThrowOnSend = new HttpRequestException("boom") };
+
+        var ex = await Assert.ThrowsAsync<BatchCancelFailedException>(() => CreateTransport(handler).CancelAsync("msgbatch_x"));
+
+        Assert.Equal(LlmFailureKind.Network, ex.FailureKind);
+    }
+
+    [Fact]
     public async Task Status_NetworkFailure_IsClassifiedNotThrown()
     {
         var handler = new RoutingHandler { ThrowOnSend = new HttpRequestException("boom") };

@@ -30,7 +30,12 @@ public interface IBatchTransport
     /// </summary>
     Task<BatchResultsResult> GetResultsAsync(string batchId, CancellationToken ct = default);
 
-    /// <summary>Best-effort cancel; only OperationCanceledException from <paramref name="ct"/> escapes.</summary>
+    /// <summary>
+    /// Cancels one batch. A batch the provider no longer has or that has already ended (404/409, or a terminal status)
+    /// counts as cancelled and returns normally. Any other failure (network, timeout, 5xx, auth) throws
+    /// <see cref="BatchCancelFailedException"/> so Start Over can keep the ledger and warn (CR-B01); an
+    /// OperationCanceledException from <paramref name="ct"/> also escapes.
+    /// </summary>
     Task CancelAsync(string batchId, CancellationToken ct = default);
 
     /// <summary>
@@ -38,6 +43,23 @@ public interface IBatchTransport
     /// OperationCanceledException from <paramref name="ct"/> escapes.
     /// </summary>
     Task DeleteFilesAsync(string? inputFileId, string? outputFileId, CancellationToken ct = default);
+}
+
+/// <summary>
+/// A provider cancel call that did not take effect (CR-B01). The message is built from the safe failure text only (no
+/// request or response payload).
+/// </summary>
+public class BatchCancelFailedException : Exception
+{
+    public BatchCancelFailedException(string batchId, LlmFailureKind kind, string message)
+        : base(message)
+    {
+        BatchId = batchId;
+        FailureKind = kind;
+    }
+
+    public string BatchId { get; }
+    public LlmFailureKind FailureKind { get; }
 }
 
 public class BatchItemRequest

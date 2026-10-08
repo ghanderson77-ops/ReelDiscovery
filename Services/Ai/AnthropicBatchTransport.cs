@@ -130,9 +130,15 @@ public class AnthropicBatchTransport : IBatchTransport
         {
             throw; // Caller cancelled (user cancel or fatal run stop)
         }
-        catch (Exception)
+        catch (AnthropicApiException ex) when ((int)ex.StatusCode is 404 or 409)
         {
-            // Best-effort cancel: an already-ended or unknown batch (404/409) needs no action
+            // An unknown or already-ended batch needs no action: it can no longer bill
+        }
+        catch (Exception ex)
+        {
+            // CR-B01: a cancel that did not take effect must reach Start Over, which then keeps the ledger
+            var (kind, message) = MapFailure(ex);
+            throw new BatchCancelFailedException(batchId, kind, message);
         }
     }
 

@@ -249,6 +249,40 @@ public class OpenAIBatchWireTests
     }
 
     [Fact]
+    public async Task CRB01_Cancel_ServerError_Throws_WithoutKey()
+    {
+        var handler = new RoutingHandler();
+        handler.Route("/v1/batches/batch_1", 200, BatchJson("in_progress"));
+        handler.Route("/v1/batches/batch_1/cancel", 500, "{\"error\":{\"message\":\"server error\",\"type\":\"server_error\"}}");
+
+        var ex = await Assert.ThrowsAsync<BatchCancelFailedException>(() => CreateTransport(handler).CancelAsync("batch_1"));
+
+        Assert.Equal("batch_1", ex.BatchId);
+        Assert.DoesNotContain(ApiKey, ex.Message);
+    }
+
+    [Fact]
+    public async Task CRB01_Cancel_NetworkFailure_Throws()
+    {
+        var handler = new RoutingHandler { ThrowOnSend = new HttpRequestException("boom") };
+
+        var ex = await Assert.ThrowsAsync<BatchCancelFailedException>(() => CreateTransport(handler).CancelAsync("batch_1"));
+
+        Assert.Equal(LlmFailureKind.Network, ex.FailureKind);
+    }
+
+    [Fact]
+    public async Task CRB01_Cancel_EndedBatch_IsSuccess_NoCancelPosted()
+    {
+        var handler = new RoutingHandler();
+        handler.Route("/v1/batches/batch_1", 200, BatchJson("completed", "file-out"));
+
+        await CreateTransport(handler).CancelAsync("batch_1");
+
+        Assert.DoesNotContain("POST /v1/batches/batch_1/cancel", handler.Paths);
+    }
+
+    [Fact]
     public async Task DeleteFiles_BestEffort()
     {
         var handler = new RoutingHandler();

@@ -195,6 +195,10 @@ public class OpenAIBatchTransport : IBatchTransport
 #pragma warning disable OPENAI001 // BatchClient is [Experimental] in OpenAI 2.14.0
             // 2.14.0 exposes cancel on the operation only: rehydrate it from the id, then cancel
             var operation = await CreateBatchOperation.RehydrateAsync(_batches, batchId, ct);
+            // An ended batch (completed, failed, expired, cancelled) has nothing left to cancel
+            if (operation.HasCompleted)
+                return;
+
             await operation.CancelAsync(new RequestOptions { CancellationToken = ct });
 #pragma warning restore OPENAI001
         }
@@ -202,9 +206,15 @@ public class OpenAIBatchTransport : IBatchTransport
         {
             throw; // Caller cancelled (user cancel or fatal run stop)
         }
-        catch (Exception)
+        catch (ClientResultException ex) when (ex.Status is 404 or 409)
         {
-            // Best-effort cancel: an already-finished or unknown batch needs no action
+            // An unknown or already-ended batch needs no action: it can no longer bill
+        }
+        catch (Exception ex)
+        {
+            // CR-B01: a cancel that did not take effect must reach Start Over, which then keeps the ledger
+            var (kind, message) = MapFailure(ex);
+            throw new BatchCancelFailedException(batchId, kind, message);
         }
     }
 

@@ -366,7 +366,8 @@ public class BatchingLlmProvider : ILlmProvider
 
         var state = ReadForCancel(ledger);
         var pending = state.Pending(planId).Where(r => include == null || include(r)).ToList();
-        var (cancelled, _) = await CancelRecordsAsync(ledger, pending, transportFor, closeOnCancelFailure, ct);
+        var (cancelled, _) = await CancelRecordsAsync(ledger, pending, transportFor, closeOnCancelFailure,
+            skipOnCancelFailure: false, ct);
 
         var deleteFrom = include == null
             ? state.SubmittedById.Values.Where(r => r.PlanId == planId)
@@ -379,8 +380,8 @@ public class BatchingLlmProvider : ILlmProvider
     /// <summary>
     /// Start Over (WR-A05): cancels every pending batch in the ledger, whatever plan submitted it (a re-plan leaves batches of
     /// earlier plan ids), and deletes the uploaded files of every batch it could reach. Returns the ids of pending batches
-    /// that could not be cancelled because no transport exists for their provider (no key); the caller then keeps the
-    /// ledger. A provider cancel call that throws propagates, as with <see cref="CancelPendingAsync"/>.
+    /// that were not cancelled: no transport exists for their provider (no key), or the provider cancel call failed
+    /// (CR-B01). Those get no Cancelled line and the caller keeps the ledger; the remaining batches are still cancelled.
     /// </summary>
     public static async Task<List<string>> CancelAllPendingAsync(BatchLedger ledger,
         Func<LlmProviderKind, IBatchTransport?> transportFor, CancellationToken ct = default)
@@ -394,7 +395,8 @@ public class BatchingLlmProvider : ILlmProvider
             .OrderBy(r => r.SubmittedUtc)
             .ThenBy(r => r.BatchId, StringComparer.Ordinal)
             .ToList();
-        var (_, notCancelled) = await CancelRecordsAsync(ledger, pending, transportFor, closeOnCancelFailure: false, ct);
+        var (_, notCancelled) = await CancelRecordsAsync(ledger, pending, transportFor, closeOnCancelFailure: false,
+            skipOnCancelFailure: true, ct);
 
         await DeleteRecordFilesAsync(
             state.SubmittedById.Values.Where(r => !notCancelled.Contains(r.BatchId, StringComparer.Ordinal)), transportFor, ct);
@@ -412,10 +414,11 @@ public class BatchingLlmProvider : ILlmProvider
         return state;
     }
 
-    // Returns the ids recorded Cancelled and the ids skipped for want of a transport
+    // Returns the ids recorded Cancelled and the ids skipped for want of a transport (or, with skipOnCancelFailure, because
+    // the provider cancel failed). Without either flag a failed cancel propagates.
     private static async Task<(List<string> Cancelled, List<string> Skipped)> CancelRecordsAsync(BatchLedger ledger,
         IEnumerable<BatchLedgerRecord> pending, Func<LlmProviderKind, IBatchTransport?> transportFor, bool closeOnCancelFailure,
-        CancellationToken ct)
+        bool skipOnCancelFailure, CancellationToken ct)
     {
         var cancelled = new List<string>();
         var skipped = new List<string>();
@@ -431,6 +434,12 @@ public class BatchingLlmProvider : ILlmProvider
             try
             {
                 await transport.CancelAsync(record.BatchId, ct);
+            }
+            catch (Exception ex) when (skipOnCancelFailure && ex is not OperationCanceledException)
+            {
+                // CR-B01: the batch may still be running and billing; leave it pending in the ledger so it stays tracked
+                skipped.Add(record.BatchId);
+                continue;
             }
             catch (Exception ex) when (closeOnCancelFailure && ex is not OperationCanceledException)
             {
@@ -896,7 +905,15 @@ public class BatchingLlmProvider : ILlmProvider
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // RUN-04: a batch we cannot track must not exist; cancel it (best effort) and run its items live
-            await _transport.CancelAsync(submit.BatchId, CancellationToken.None);
+            try
+            {
+                await _transport.CancelAsync(submit.BatchId, CancellationToken.None);
+            }
+            catch (Exception cancelEx) when (cancelEx is not OperationCanceledException)
+            {
+                // Best effort: nothing more can be done for an untracked batch; its items still run live below
+            }
+
             ReleaseItems(chunk, Delivery.Errored());
             await DeleteFilesBestEffortAsync(submit.InputFileId, null);
             return;

@@ -1336,4 +1336,38 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Equal(new[] { "file_in_1", "file_in_2" }, openAi.DeletedFiles.Select(f => f.Item1).OrderBy(f => f, StringComparer.Ordinal));
         Assert.Equal(1, BatchLedger.PendingBatchCountAllPlans(_folder));
     }
+
+    [Fact]
+    public async Task CRB01_CancelAllPending_ProviderCancelFails_ReportedAndKeptPending_OthersStillCancelled()
+    {
+        var ledger = new BatchLedger(_folder);
+        BatchLedgerRecord Submitted(string id, LlmProviderKind kind, string inputFile) => new()
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = kind,
+            BatchId = id,
+            PlanId = _plan,
+            SubmittedUtc = DateTime.UtcNow,
+            InputFileId = inputFile,
+            Items = new List<BatchLedgerItem> { new() { CustomId = "q" + id, Operation = "Thread", ModelId = "m" } }
+        };
+
+        await ledger.AppendAsync(Submitted("batch_unreachable", LlmProviderKind.OpenAI, "file_in_1"));
+        await ledger.AppendAsync(Submitted("msgbatch_ok", LlmProviderKind.Anthropic, string.Empty));
+
+        var openAi = new FakeBatchTransport
+        {
+            CancelFailure = new BatchCancelFailedException("batch_unreachable", LlmFailureKind.Network, "timed out")
+        };
+        var anthropic = new FakeBatchTransport();
+        var notCancelled = await BatchingLlmProvider.CancelAllPendingAsync(ledger,
+            kind => kind == LlmProviderKind.OpenAI ? openAi : anthropic).WaitAsync(Wait);
+
+        Assert.Equal(new[] { "batch_unreachable" }, notCancelled);
+        Assert.Equal(new[] { "msgbatch_ok" }, anthropic.CancelledIds);
+        // The failed batch keeps its pending ledger line and its uploaded input file
+        Assert.Equal(1, BatchLedger.PendingBatchCountAllPlans(_folder));
+        Assert.Empty(openAi.DeletedFiles);
+    }
 }

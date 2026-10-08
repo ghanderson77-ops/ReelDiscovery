@@ -1011,6 +1011,11 @@ public class BatchingLlmProviderTests : IDisposable
         var waveInput = state.SubmittedById[waveSubmitted.BatchId].InputFileId;
         Assert.Equal(new[] { waveInput }, transport.DeletedFiles.Select(f => f.Item1));
 
+        // WR-A07: the closed batch raises a terminal event, so the Stages row stops waiting on it
+        var closedEvent = await events.WaitFor(e => e.Kind == BatchStatusKind.FailedAtProvider && e.BatchId == waveSubmitted.BatchId);
+        Assert.False(string.IsNullOrEmpty(closedEvent.Reason));
+        Assert.DoesNotContain(events.All, e => e.Kind == BatchStatusKind.FailedAtProvider && e.BatchId == fillerSubmitted.BatchId);
+
         // A unit still waiting on the closed batch runs live (D-10) instead of hanging
         var waveResponse = await wave.WaitAsync(Wait);
         Assert.Equal("live:w0", waveResponse.Text);

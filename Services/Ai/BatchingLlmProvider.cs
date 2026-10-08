@@ -476,7 +476,7 @@ public class BatchingLlmProvider : ILlmProvider
                 batch.Closed = true;
             }
 
-            ReleaseBatch(batch, Delivery.Errored());
+            ReleaseBatch(batch, Delivery.Errored(), ClosedReason);
         }
 
         return closed.Count;
@@ -893,7 +893,7 @@ public class BatchingLlmProvider : ILlmProvider
                     statusFailures = IsFatal(status.FailureKind) ? statusFailures + 1 : 0;
                     if (statusFailures >= MaxConsecutiveFailures)
                     {
-                        ReleaseBatch(batch, Delivery.FatalFailure(status.FailureKind, status.Message));
+                        ReleaseBatch(batch, Delivery.FatalFailure(status.FailureKind, status.Message), StoppedWaitingReason);
                         return;
                     }
 
@@ -927,7 +927,7 @@ public class BatchingLlmProvider : ILlmProvider
                         // Not marked Collected, so a later Continue can still collect and bill it
                         ReleaseBatch(batch, IsFatal(results.FailureKind)
                             ? Delivery.FatalFailure(results.FailureKind, results.Message)
-                            : Delivery.Errored());
+                            : Delivery.Errored(), StoppedWaitingReason);
                         return;
                     }
 
@@ -948,7 +948,7 @@ public class BatchingLlmProvider : ILlmProvider
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // A bookkeeping bug must not strand units: they run live
-            ReleaseBatch(batch, Delivery.Errored());
+            ReleaseBatch(batch, Delivery.Errored(), StoppedWaitingReason);
         }
         finally
         {
@@ -1176,11 +1176,22 @@ public class BatchingLlmProvider : ILlmProvider
         ReleaseItems(unsubmitted, Delivery.Errored());
     }
 
-    private void ReleaseBatch(TrackedBatch batch, Delivery delivery)
+    // WR-A07: plain words for the Activity row when the app stops waiting on a batch (T-07-52: fixed text only)
+    private const string StoppedWaitingReason = "the app stopped waiting on it";
+    private const string ClosedReason = "it was closed because this run no longer uses it";
+
+    /// <summary>
+    /// Stops tracking a batch and releases its waiters. With a <paramref name="reason"/> it also raises a terminal
+    /// FailedAtProvider event (WR-A07), so the Stages row and the pending count never stay on "Waiting on provider batch";
+    /// a caller that raises its own terminal event passes null.
+    /// </summary>
+    private void ReleaseBatch(TrackedBatch batch, Delivery delivery, string? reason = null)
     {
         var waiters = new List<TaskCompletionSource<Delivery>>();
+        bool wasTracked;
         lock (_lock)
         {
+            wasTracked = _batches.ContainsKey(batch.BatchId);
             _batches.Remove(batch.BatchId);
             foreach (var id in batch.ItemIds)
             {
@@ -1194,6 +1205,17 @@ public class BatchingLlmProvider : ILlmProvider
         }
 
         Complete(waiters, delivery);
+
+        if (reason != null && wasTracked)
+        {
+            Raise(Event(BatchStatusKind.FailedAtProvider, batch, e =>
+            {
+                e.Total = batch.ItemIds.Count;
+                e.Failed = batch.ItemIds.Count;
+                e.Reason = reason;
+                e.Duration = Now() - batch.SubmittedUtc;
+            }));
+        }
     }
 
     private void RemoveWaiter(string label, string id, TaskCompletionSource<Delivery> waiter)

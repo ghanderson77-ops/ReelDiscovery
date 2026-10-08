@@ -288,4 +288,64 @@ public class BatchLedgerTests : IDisposable
         var ok = await broken.SubmitAsync(new[] { Item("q1") });
         Assert.Equal(BatchState.Failed, (await broken.GetStatusAsync(ok.BatchId)).State);
     }
+
+    // ----- CR-A05: unreadable is not empty -----
+
+    [Fact]
+    public async Task CRA05_ReplayWhileAnAppendHandleIsOpen_StillReadsTheLedger()
+    {
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(Submitted("b1", _plan, "qa"));
+
+        // The handle AppendAsync holds while writing (ReadWrite, shared for Read only)
+        using (new FileStream(ledger.FilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+        {
+            var state = new BatchLedger(_folder).Replay();
+
+            Assert.True(state.Readable);
+            Assert.Single(state.Pending(_plan));
+        }
+    }
+
+    [Fact]
+    public async Task CRA05_LockedLedger_IsUnreadable_ProviderRunsLiveAndCancelRefuses()
+    {
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(Submitted("b1", _plan, "qa"));
+
+        using (new FileStream(ledger.FilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            var state = new BatchLedger(_folder).Replay();
+            Assert.False(state.Readable);
+            Assert.Empty(state.SubmittedById);
+
+            // Batch mode falls back to live instead of resubmitting what may already be paid for
+            var live = new FakeLlmProvider { Respond = r => FakeLlmProvider.Ok("live:" + r.UserPrompt) };
+            var transport = new FakeBatchTransport();
+            var provider = new BatchingLlmProvider(live, transport, new BatchLedger(_folder), _plan, _ => null,
+                new BatchTimings { QuietPeriod = TimeSpan.FromMilliseconds(20) });
+            try
+            {
+                Assert.True(provider.LiveOnly);
+                LlmProviderResponse response;
+                using (BatchStage.Enter("non-relevant mail"))
+                    response = await provider.SendAsync(new LlmProviderRequest
+                    {
+                        ModelId = "m", SchemaName = "Thread", SchemaJson = "{}", UserPrompt = "a", AllowBatch = true
+                    }).WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.Equal("live:a", response.Text);
+                Assert.Empty(transport.Submissions);
+            }
+            finally
+            {
+                provider.Detach();
+            }
+
+            // Start Over's cancel reports the failure instead of cancelling nothing
+            await Assert.ThrowsAsync<IOException>(() =>
+                BatchingLlmProvider.CancelPendingAsync(new BatchLedger(_folder), _ => transport, _plan));
+        }
+
+        Assert.True(new BatchLedger(_folder).Replay().Readable);
+    }
 }

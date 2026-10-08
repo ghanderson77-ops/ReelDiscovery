@@ -89,10 +89,18 @@ public static class GenerationReset
         var storyName = StorySoFarDocxBuilder.FileNameFor(folderName);
         TryDelete(Path.Combine(caseFolder, storyName), storyName, result);
 
-        // Constant names only (T-04-26); provider batches are cancelled by the step before this runs
+        // Constant names only (T-04-26); provider batches are cancelled by the step before this runs. CR-A05: a ledger
+        // that could not be read may still list running batches, so it (and their cached results) is kept
         ct.ThrowIfCancellationRequested();
-        TryDelete(Path.Combine(caseFolder, BatchLedger.FileName), BatchLedger.FileName, result);
-        DeleteBatchResults(caseFolder, result);
+        if (new BatchLedger(caseFolder).Replay().Readable)
+        {
+            TryDelete(Path.Combine(caseFolder, BatchLedger.FileName), BatchLedger.FileName, result);
+            DeleteBatchResults(caseFolder, result);
+        }
+        else
+        {
+            result.Errors.Add($"{BatchLedger.FileName}: {BatchLedger.UnreadableMessage}");
+        }
         TryDelete(Path.Combine(caseFolder, QaReportStore.ScansFileName), QaReportStore.ScansFileName, result);
         TryDelete(Path.Combine(caseFolder, QaReportStore.LeakageFileName), QaReportStore.LeakageFileName, result);
         TryDelete(Path.Combine(caseFolder, QaReportStore.BlindReviewFileName), QaReportStore.BlindReviewFileName, result);

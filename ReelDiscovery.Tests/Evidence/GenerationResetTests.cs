@@ -432,4 +432,30 @@ public class GenerationResetTests : IDisposable
         Assert.Equal(0, result.FilesDeleted);
         Assert.Empty(result.Errors);
     }
+
+    [Fact]
+    public async Task CRA05_StartOver_UnreadableBatchLedger_IsKept()
+    {
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = LlmProviderKind.OpenAI,
+            BatchId = "batch_running",
+            PlanId = _plan.PlanId,
+            SubmittedUtc = DateTime.UtcNow,
+            Items = new List<BatchLedgerItem> { new() { CustomId = "q1", Operation = "Thread", ModelId = "m" } }
+        });
+
+        StartOverResult result;
+
+        // Shared for Delete only: the file could be deleted but not read, so its batches are unknown
+        using (new FileStream(ledger.FilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Delete))
+            result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+
+        Assert.True(File.Exists(ledger.FilePath));
+        Assert.Contains(result.Errors, e => e.StartsWith(BatchLedger.FileName + ":", StringComparison.Ordinal));
+        Assert.Contains("batch_running", new BatchLedger(_folder).Replay().SubmittedById.Keys);
+    }
 }

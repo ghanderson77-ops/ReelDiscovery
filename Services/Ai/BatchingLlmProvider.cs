@@ -126,8 +126,23 @@ public class BatchingLlmProvider : ILlmProvider
         _priceLookup = priceLookup ?? throw new ArgumentNullException(nameof(priceLookup));
         _timings = timings ?? new BatchTimings();
 
-        Recover(_ledger.Replay());
+        // CR-A05: a ledger that exists but cannot be read is not "no batches": resubmitting would pay twice (D-09), so
+        // this session runs every call live and leaves the ledger alone
+        var state = _ledger.Replay();
+        if (!state.Readable)
+        {
+            LiveOnly = true;
+            return;
+        }
+
+        Recover(state);
     }
+
+    /// <summary>
+    /// True when the batch ledger could not be read at construction (CR-A05): every call runs live and nothing is
+    /// submitted, resumed or billed from the ledger in this session.
+    /// </summary>
+    public bool LiveOnly { get; }
 
     private static Func<LlmProviderKind, string, AIModelConfig?> ToProviderLookup(Func<string, AIModelConfig?> priceLookup)
     {
@@ -324,6 +339,11 @@ public class BatchingLlmProvider : ILlmProvider
         ArgumentNullException.ThrowIfNull(transportFor);
 
         var state = ledger.Replay();
+
+        // CR-A05: never act on (or let Start Over delete) a ledger that could not be read
+        if (!state.Readable)
+            throw new IOException(BatchLedger.UnreadableMessage);
+
         var cancelled = new List<string>();
         foreach (var record in state.Pending(planId).Where(r => include == null || include(r)).ToList())
         {
@@ -435,7 +455,7 @@ public class BatchingLlmProvider : ILlmProvider
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!request.AllowBatch || _cts.IsCancellationRequested)
+        if (!request.AllowBatch || LiveOnly || _cts.IsCancellationRequested)
             return await SendLiveAsync(request, ct);
 
         var label = BatchStage.Current;

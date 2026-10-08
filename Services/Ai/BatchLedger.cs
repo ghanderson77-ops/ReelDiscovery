@@ -51,6 +51,12 @@ public class BatchLedgerRecord
 /// </summary>
 public class BatchLedgerState
 {
+    /// <summary>
+    /// False when the ledger exists but could not be read (a lock that outlasted the retries, no access). Callers must not
+    /// treat that as "no batches" (CR-A05): batch mode falls back to live calls and Start Over keeps the file.
+    /// </summary>
+    public bool Readable { get; set; } = true;
+
     public Dictionary<string, BatchLedgerRecord> SubmittedById { get; set; } = new(StringComparer.Ordinal);
     public HashSet<string> CollectedIds { get; set; } = new(StringComparer.Ordinal);
     public HashSet<string> CancelledIds { get; set; } = new(StringComparer.Ordinal);
@@ -88,6 +94,12 @@ public partial class BatchLedger
     public const string ResultsFolderName = "batch-results";
 
     private const int MaxMoveAttempts = 5;
+
+    // CR-A05: attempts to read the ledger through a transient lock (waits 50 ms x attempt in between)
+    private const int MaxReadAttempts = 5;
+
+    public const string UnreadableMessage =
+        "The provider batch record could not be read, so it was kept. Try again once nothing else has the case folder open.";
 
     private static readonly JsonSerializerOptions LineOptions = new(CaseDraft.JsonOptions) { WriteIndented = false };
 
@@ -142,30 +154,52 @@ public partial class BatchLedger
     }
 
     /// <summary>
-    /// Rebuilds the ledger state from disk. Never throws: a missing or unreadable file gives an empty state, and torn,
-    /// garbage or unknown-type lines are skipped (T-07-20).
+    /// Rebuilds the ledger state from disk. Never throws: a missing file gives an empty state; a file that cannot be read
+    /// gives an empty state with <see cref="BatchLedgerState.Readable"/> false (CR-A05); torn, garbage or unknown-type
+    /// lines are skipped (T-07-20).
     /// </summary>
     public BatchLedgerState Replay()
     {
         var state = new BatchLedgerState();
 
-        string[] lines;
-        try
+        string text;
+        for (var attempt = 1; ; attempt++)
         {
-            if (!File.Exists(FilePath))
+            try
+            {
+                if (!File.Exists(FilePath))
+                    return state;
+
+                // CR-A05: shares ReadWrite (and Delete) so an append in progress (ours or another instance's) does not make
+                // the ledger look empty
+                using var stream = new FileStream(FilePath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                text = reader.ReadToEnd();
+                break;
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // Deleted between the check and the open: no ledger
                 return state;
-
-            lines = File.ReadAllLines(FilePath, Encoding.UTF8);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < MaxReadAttempts)
+            {
+                // Transient lock (OneDrive, antivirus, search indexer)
+                Thread.Sleep(50 * attempt);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException
+                                           or ArgumentException)
+            {
+                // Unreadable is not empty: callers fall back to live calls and never delete what they could not read
+                state.Readable = false;
+                return state;
+            }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException
-                                       or ArgumentException)
-        {
-            // Unreadable ledger: treat as empty; the caller falls back to live calls rather than failing the run
-            return state;
-        }
 
-        foreach (var line in lines)
+        foreach (var rawLine in text.Split('\n'))
         {
+            var line = rawLine.TrimEnd('\r');
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
@@ -228,7 +262,8 @@ public partial class BatchLedger
     }
 
     /// <summary>
-    /// Number of this plan's batches that were submitted but neither collected nor cancelled. Never throws.
+    /// Number of this plan's batches that were submitted but neither collected nor cancelled. Never throws; an unreadable
+    /// ledger counts as 0 (Start Over keeps it, CR-A05).
     /// </summary>
     public static int PendingBatchCount(string caseFolder, Guid planId)
     {

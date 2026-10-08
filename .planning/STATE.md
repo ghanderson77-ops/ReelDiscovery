@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-05-PLAN.md
-last_updated: "2026-10-08T23:31:53.904Z"
+stopped_at: Completed 08-06-PLAN.md
+last_updated: "2026-10-08T23:38:57.872Z"
 last_activity: 2026-10-08
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 135
+  completed_plans: 136
   percent: 91
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 6 of 19
+Plan: 7 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-08
 
-Progress: [██████████] 100%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -187,6 +187,7 @@ Progress: [██████████] 100%
 | Phase 08 P03 | 9min | 2 tasks | 5 files |
 | Phase 08 P04 | 20min | 2 tasks | 2 files |
 | Phase 08 P05 | 8min | 2 tasks | 3 files |
+| Phase 08 P06 | 8min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -557,6 +558,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-04: RFP/ROG custodians are Key Party/Staff/InHouseCounsel characters of the responding party who act in or know the issue's facts
 - [Phase 08]: 08-05: Missing, unreadable and plan-changed journals each return a distinct CorpusDetector reason
 - [Phase 08]: 08-05: Exhibit candidate FactIds fall back to thread FactIds; ParticipantIds are From+To+Cc distinct
+- [Phase 08]: 08-06: Transcript Wrap keeps first-line leading spaces (federal indentation); turn text is whitespace-collapsed before the prefix is added
+- [Phase 08]: 08-06: Exhibit is marked before the first turn referencing it; index shows '--' for an exhibit never introduced
+- [Phase 08]: 08-06: Memo transcripts use 'EXAMINATION OF', '(Exhibit N was marked...)' and 'interview concluded'
 
 ### Pending Todos
 
@@ -578,6 +582,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-08T23:31:53.898Z
-Stopped at: Completed 08-05-PLAN.md
+Last session: 2026-10-08T23:38:57.866Z
+Stopped at: Completed 08-06-PLAN.md
 Resume file: None

@@ -59,23 +59,24 @@ public class StepApiConfiguration : UserControl, IWizardStep
             ColumnCount = 2,
             RowCount = 13,
             Padding = new Padding(5),
-            // Keeps every row reachable (via the control's scrollbar) on small windows
-            MinimumSize = new Size(0, 520)
+            // Keeps every row reachable (via the control's scrollbar) on small windows. Scaled like the absolute rows
+            // (WR-B06), so the Instructions row keeps ~120 logical px above the 400 logical px of fixed rows at any DPI
+            MinimumSize = new Size(0, LogicalToDeviceUnits(520))
         };
 
         mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LogicalToDeviceUnits(150)));
         mainLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(28)));  // 0: OpenAI header
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 1: OpenAI key + Test + Clear
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 2: OpenAI status
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 3: Media status
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(24)));  // 2: OpenAI status
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(24)));  // 3: Media status
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(28)));  // 4: Anthropic header
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 5: Anthropic key + Test + Clear
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 6: Anthropic status
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));  // 7: Text provider
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));  // 8: Story model
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(24)));  // 6: Anthropic status
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(36)));  // 7: Text provider
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(36)));  // 8: Story model
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 9: Volume model + Configure Models
-        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));  // 10: Pricing
+        mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(24)));  // 10: Pricing
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // 11: Instructions
         mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(44)));  // 12: Disclaimer (last row, two lines at 150%)
 

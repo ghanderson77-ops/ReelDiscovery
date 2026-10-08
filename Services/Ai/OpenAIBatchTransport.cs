@@ -362,24 +362,10 @@ public class OpenAIBatchTransport : IBatchTransport
                 Message = detail != null ? "Batch request errored: " + detail : "Batch request errored"
             };
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Garbage or torn line in an untrusted provider file: skip it; the decorator re-runs missing ids
-            return null;
-        }
-        catch (FormatException)
-        {
-            // Body is JSON but not a chat completion shape the SDK can read: skip it like a garbage line
-            return null;
-        }
-        catch (InvalidOperationException)
-        {
-            // Body is JSON but not a chat completion shape the SDK can read: skip it like a garbage line
-            return null;
-        }
-        catch (KeyNotFoundException)
-        {
-            // Body is JSON but not a chat completion shape the SDK can read: skip it like a garbage line
+            // WR-A02: garbage, a torn line or a body the SDK cannot read (any exception type) in an untrusted provider
+            // file skips only this line; the decorator re-runs missing ids live instead of failing the whole batch
             return null;
         }
     }

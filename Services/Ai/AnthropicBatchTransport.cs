@@ -101,7 +101,9 @@ public class AnthropicBatchTransport : IBatchTransport
         {
             await foreach (var item in _client.Messages.Batches.ResultsStreaming(batchId, new BatchResultsParams(), ct))
             {
-                result.Items.Add(ToItemResult(item));
+                var parsed = SafeItemResult(item);
+                if (parsed != null)
+                    result.Items.Add(parsed);
             }
 
             result.Succeeded = true;
@@ -158,6 +160,33 @@ public class AnthropicBatchTransport : IBatchTransport
         // in_progress, canceling and anything newer stay pollable
         _ => BatchState.InProgress
     };
+
+    /// <summary>
+    /// WR-A02: one result the SDK or classifier cannot read becomes an Errored item (or is skipped when even its custom id
+    /// is unreadable), so a single bad line never fails the whole download; the decorator runs those ids live.
+    /// </summary>
+    private static BatchItemResult? SafeItemResult(MessageBatchIndividualResponse item)
+    {
+        try
+        {
+            return ToItemResult(item);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            try
+            {
+                var customId = item.CustomID;
+                return string.IsNullOrEmpty(customId)
+                    ? null
+                    : new BatchItemResult { CustomId = customId, Outcome = BatchItemOutcome.Errored, Message = "Batch result could not be read" };
+            }
+            catch (Exception inner) when (inner is not OperationCanceledException)
+            {
+                // No readable custom id: skip it; the decorator treats the missing id as expired and runs it live
+                return null;
+            }
+        }
+    }
 
     private static BatchItemResult ToItemResult(MessageBatchIndividualResponse item)
     {

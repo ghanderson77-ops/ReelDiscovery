@@ -14,38 +14,6 @@ public class LoadingOverlay : Panel
     private readonly string[] _messages;
     private string _currentBaseMessage = "";
 
-    private static readonly string[] StorylineMessages = new[]
-    {
-        "Gathering lore",
-        "Weaving plot threads",
-        "Consulting the muses",
-        "Brewing drama",
-        "Spinning tales",
-        "Crafting intrigue",
-        "Summoning storylines",
-        "Mining for narrative gold",
-        "Connecting the dots",
-        "Building tension",
-        "Plotting twists",
-        "Assembling the saga"
-    };
-
-    private static readonly string[] CharacterMessages = new[]
-    {
-        "Casting characters",
-        "Assigning personalities",
-        "Generating backstories",
-        "Creating personas",
-        "Building the ensemble",
-        "Recruiting talent",
-        "Defining relationships",
-        "Writing character bios",
-        "Assembling the cast",
-        "Designing identities",
-        "Forging personalities",
-        "Breathing life into names"
-    };
-
     private static readonly string[] EntityCheckMessages = new[]
     {
         "Checking for real names",
@@ -55,20 +23,13 @@ public class LoadingOverlay : Panel
 
     public enum LoadingType
     {
-        Storylines,
-        Characters,
         EntityCheck
     }
 
     public LoadingOverlay(LoadingType type)
     {
-        _messages = type switch
-        {
-            LoadingType.Storylines => StorylineMessages,
-            LoadingType.Characters => CharacterMessages,
-            LoadingType.EntityCheck => EntityCheckMessages,
-            _ => StorylineMessages
-        };
+        // Only the entity check uses the overlay since the legacy wizard steps were removed
+        _messages = EntityCheckMessages;
 
         // Enable double buffering to prevent flickering
         this.SetStyle(ControlStyles.OptimizedDoubleBuffer |

@@ -114,4 +114,46 @@ public class LogisticRegressionTests
     {
         Assert.Equal(0.5, LogisticRegression.Auc(new[] { 1, 1 }, new[] { 0.2, 0.8 }));
     }
+
+    // 20 perfectly correlated columns (one signal repeated) plus a weak second feature: lambda_max of the standardized
+    // covariance is about 20, so the fixed 0.5 step overshoots (stable needs a step below 8 / 20)
+    private static (double[][] X, int[] Y) Correlated()
+    {
+        var n = 200;
+        var x = new double[n][];
+        var y = new int[n];
+        for (var i = 0; i < n; i++)
+        {
+            var label = (int)(RenderAssignments.StableRank($"corr-{i}") % 2);
+            // The signal agrees with the label 80% of the time, so the classes overlap and the optimum is finite
+            var signal = i % 5 == 0 ? 1 - label : label;
+            var row = new double[21];
+            for (var j = 0; j < 20; j++)
+                row[j] = signal;
+            row[20] = i % 3;
+            x[i] = row;
+            y[i] = label;
+        }
+
+        return (x, y);
+    }
+
+    [Fact]
+    public void WRB04_CorrelatedColumns_LossNeverIncreases_AndTheFitLearns()
+    {
+        var (x, y) = Correlated();
+        var losses = Enumerable.Range(0, 60).Select(k => LogisticRegression.Fit(x, y, iterations: k).Loss(x, y)).ToList();
+
+        for (var k = 1; k < losses.Count; k++)
+            Assert.True(losses[k] <= losses[k - 1] + 1e-12, $"loss rose at iteration {k}: {losses[k - 1]} -> {losses[k]}");
+        Assert.True(losses[^1] < Math.Log(2) - 0.1, $"final loss {losses[^1]}");
+
+        var model = LogisticRegression.Fit(x, y);
+        Assert.All(model.Weights, w => Assert.True(double.IsFinite(w)));
+        var p = x.Select(model.PredictProbability).ToArray();
+        Assert.InRange(LogisticRegression.BalancedAccuracy(y, p), 0.75, 0.85);
+        var again = LogisticRegression.Fit(x, y);
+        Assert.Equal(model.Weights, again.Weights);
+        Assert.Equal(model.Bias, again.Bias);
+    }
 }

@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Discovery;
 
@@ -88,6 +87,6 @@ public class CaseNumberTests
         var draft = DiscoveryTestData.LitigationDraft();
         draft.CoreDocument = null;
         Assert.Matches(@"^[1-4]:\d{2}-cv-\d{5}$", CaseNumber.For(draft));
-        Assert.True(Regex.IsMatch(CaseNumber.For(draft), $@":{draft.CreatedUtc.Year % 100:00}-cv-"));
+        Assert.Contains($":{draft.CreatedUtc.Year % 100:00}-cv-", CaseNumber.For(draft));
     }
 }

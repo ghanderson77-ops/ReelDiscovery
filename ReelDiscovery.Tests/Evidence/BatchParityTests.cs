@@ -19,8 +19,9 @@ namespace ReelDiscovery.Tests.Evidence;
 
 /// <summary>
 /// D-05 / D-07 / D-09 / D-10 at the runner level: the same plan run live and through <see cref="BatchingLlmProvider"/>
-/// writes the same journal (apart from Utc and cost fields), byte-identical EMLs and the same answer key; one batch per
-/// wave, repairs live, restart resumes pending batches, orphans billed once.
+/// writes the same journal (apart from Utc and cost fields), byte-identical EMLs and the same answer key; relevant waves
+/// and repairs live at live parallelism, only non-relevant mail batched (amended D-07), restart resumes pending batches,
+/// stale wave batches closed, orphans billed once.
 /// </summary>
 public partial class BatchParityTests : IDisposable
 {
@@ -148,12 +149,14 @@ public partial class BatchParityTests : IDisposable
         return new Mode { Live = live, Gateway = new LlmGateway(live, _story, _volume) };
     }
 
-    private Mode BatchMode(string folder, Func<LlmProviderRequest, LlmProviderResponse> respond, FakeBatchTransport? transport = null)
+    // liveOverride wraps the recording fake (e.g. a concurrency probe); Mode.Live stays the fake for request assertions
+    private Mode BatchMode(string folder, Func<LlmProviderRequest, LlmProviderResponse> respond, FakeBatchTransport? transport = null,
+        Func<ILlmProvider, ILlmProvider>? liveOverride = null)
     {
         var live = new FakeLlmProvider(LlmProviderKind.Anthropic) { Respond = respond };
         transport ??= new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
         transport.Respond = item => respond(item.Request);
-        var batch = new BatchingLlmProvider(live, transport, new BatchLedger(folder), _plan.PlanId, Price, Fast());
+        var batch = new BatchingLlmProvider(liveOverride?.Invoke(live) ?? live, transport, new BatchLedger(folder), _plan.PlanId, Price, Fast());
         _providers.Add(batch);
         return new Mode { Live = live, Transport = transport, Batch = batch, Gateway = new LlmGateway(batch, _story, _volume) };
     }
@@ -309,6 +312,76 @@ public partial class BatchParityTests : IDisposable
         return map;
     }
 
+    private HashSet<string> RelevantThreadIds() =>
+        _plan.Threads.Where(WavePlanner.IsGeneratable).Select(t => t.Id).ToHashSet(StringComparer.Ordinal);
+
+    private List<string> RelevantAttachmentIds() =>
+        _plan.Threads.Where(WavePlanner.IsGeneratable)
+            .SelectMany(t => t.Messages.Where(m => m != null).SelectMany(m => m.Attachments))
+            .Select(a => a.DocId)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .ToList();
+
+    /// <summary>
+    /// Live provider wrapper: calls whose ambient <see cref="BatchStage.Current"/> matches are held 25 ms and counted, so a
+    /// test sees how many of them ran at once and which thread and schema each was for.
+    /// </summary>
+    private sealed class ConcurrencyProbe : ILlmProvider
+    {
+        private readonly ILlmProvider _inner;
+        private readonly Func<string, bool> _match;
+        private readonly object _lock = new();
+        private readonly List<(string ThreadId, string Schema)> _calls = new();
+        private int _inFlight;
+        private int _max;
+
+        public ConcurrencyProbe(ILlmProvider inner, Func<string, bool> match)
+        {
+            _inner = inner;
+            _match = match;
+        }
+
+        public LlmProviderKind Kind => _inner.Kind;
+        public int? MaxTokensCeiling => _inner.MaxTokensCeiling;
+        public int MaxConcurrency => Volatile.Read(ref _max);
+
+        public List<(string ThreadId, string Schema)> Calls
+        {
+            get
+            {
+                lock (_lock)
+                    return _calls.ToList();
+            }
+        }
+
+        public async Task<LlmProviderResponse> SendAsync(LlmProviderRequest request, CancellationToken ct = default)
+        {
+            if (!_match(BatchStage.Current))
+                return await _inner.SendAsync(request, ct);
+
+            lock (_lock)
+                _calls.Add((ThreadOf(request), request.SchemaName));
+            var now = Interlocked.Increment(ref _inFlight);
+            int seen;
+            while (now > (seen = Volatile.Read(ref _max)) && Interlocked.CompareExchange(ref _max, now, seen) != seen)
+            {
+            }
+
+            try
+            {
+                await Task.Delay(25, ct);
+                return await _inner.SendAsync(request, ct);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
+        }
+
+        public Task<LlmKeyTestResult> TestKeyAsync(string modelId, CancellationToken ct = default) =>
+            _inner.TestKeyAsync(modelId, ct);
+    }
+
     // ---------- D-05 parity ----------
 
     [Fact]
@@ -327,9 +400,16 @@ public partial class BatchParityTests : IDisposable
 
         AssertSameOutput(liveFolder, batchFolder);
 
-        // Most first attempts really went through the provider batch
+        // Non-relevant first attempts really went through the provider batch; relevant threads never did (amended D-07)
         Assert.NotEmpty(batch.Transport!.Submissions);
         Assert.Contains(batch.Transport.Submissions.SelectMany(s => s), i => i.Request.SchemaName == RenderSchema);
+        var relevant = RelevantThreadIds();
+        Assert.DoesNotContain(batch.Transport.Submissions.SelectMany(s => s), i => relevant.Contains(ThreadOf(i.Request)));
+        lock (batch.Live.Requests)
+        {
+            foreach (var id in relevant)
+                Assert.Contains(batch.Live.Requests, r => r.SchemaName == RenderSchema && ThreadOf(r) == id);
+        }
         var events = snapshot.Peek().Events;
         Assert.Contains(events, e => e.Kind == GenerationEventKind.BatchSubmitted);
         Assert.Contains(events, e => e.Kind == GenerationEventKind.BatchFinished);
@@ -340,15 +420,15 @@ public partial class BatchParityTests : IDisposable
         Assert.True(batchCost < liveCost, $"batch {batchCost} vs live {liveCost}");
     }
 
-    // ---------- D-07 one batch per wave ----------
+    // ---------- amended D-07: relevant waves live, only non-relevant mail batched ----------
 
     [Fact]
-    public async Task Batch_OneSubmissionPerWave_WavesNeverMix_NextWaveAfterCommit()
+    public async Task Batch_RelevantWavesRunLive_OnlyNonRelevantSubmitted()
     {
         var folder = NewFolder();
         var mode = BatchMode(folder, Responder());
-        var waveOf = WaveOf();
         var waves = WavePlanner.Plan(_plan);
+        var relevant = RelevantThreadIds();
         var checks = new List<string>();
         var runner = new GenerationRunner(mode.Gateway)
         {
@@ -357,7 +437,7 @@ public partial class BatchParityTests : IDisposable
                 if (i == 0)
                     return Task.CompletedTask;
 
-                // Wave i+1 starts only after every thread of the earlier waves is committed, and no later-wave batch exists
+                // Wave i+1 starts only after every thread of the earlier waves is committed; nothing was batched yet
                 var done = JournalRecords(folder).Where(r => r.Type == JournalRecordType.ThreadDone).Select(r => r.ThreadId).ToHashSet();
                 foreach (var id in waves.Take(i).SelectMany(w => w.ThreadIds))
                 {
@@ -365,12 +445,8 @@ public partial class BatchParityTests : IDisposable
                         checks.Add($"wave {i + 1} started before {id} was committed");
                 }
 
-                var labels = LabelByCustomId(folder).Values.ToHashSet();
-                foreach (var later in waves.Skip(i))
-                {
-                    if (labels.Contains($"wave {later.Index}"))
-                        checks.Add($"wave {later.Index} was submitted before wave {i + 1} started");
-                }
+                if (mode.Transport!.Submissions.Count > 0)
+                    checks.Add($"a provider batch was submitted before wave {i + 1} started");
 
                 return Task.CompletedTask;
             }
@@ -381,31 +457,54 @@ public partial class BatchParityTests : IDisposable
         Assert.Equal(GenerationOutcome.Finished, result.Outcome);
         Assert.Empty(checks);
 
-        var labelById = LabelByCustomId(folder);
-        var submissions = mode.Transport!.Submissions;
-        foreach (var submission in submissions)
-        {
-            // Every item of one provider batch has the same stage label
-            var labels = submission.Select(i => labelById[i.CustomId]).Distinct().ToList();
-            var label = Assert.Single(labels);
-            foreach (var item in submission.Where(i => ThreadOf(i.Request).Length > 0))
-            {
-                var thread = ThreadOf(item.Request);
-                var expected = waveOf.TryGetValue(thread, out var wave) && _plan.Threads.First(t => t.Id == thread).Relevance == ThreadRelevance.Relevant
-                    ? $"wave {wave}"
-                    : "non-relevant mail";
-                Assert.Equal(expected, label);
-            }
-        }
+        var submitted = mode.Transport!.Submissions.SelectMany(s => s).ToList();
+        Assert.NotEmpty(submitted);
+        Assert.All(LabelByCustomId(folder).Values, label => Assert.Equal("non-relevant mail", label));
+        Assert.DoesNotContain(submitted, i => relevant.Contains(ThreadOf(i.Request)));
+        foreach (var docId in RelevantAttachmentIds())
+            Assert.DoesNotContain(submitted, i => AttachmentIdOf(i.Request) == docId);
+    }
 
-        // Wave 1 thread texts went out together in one batch labelled "wave 1"
-        var wave1 = waves[0].ThreadIds.ToHashSet(StringComparer.Ordinal);
-        var wave1Renders = submissions
-            .Where(s => s.Any(i => i.Request.SchemaName == RenderSchema && wave1.Contains(ThreadOf(i.Request))))
-            .ToList();
-        var first = Assert.Single(wave1Renders);
-        Assert.Equal("wave 1", labelById[first[0].CustomId]);
-        Assert.Equal(wave1.Count, first.Count(i => i.Request.SchemaName == RenderSchema));
+    [Fact]
+    public async Task Batch_RelevantWaves_UseLiveParallelism()
+    {
+        var relevant = RelevantThreadIds();
+        Assert.True(WavePlanner.Plan(_plan).Any(w => w.ThreadIds.Count(relevant.Contains) >= 4),
+            "the fixture needs a wave with at least 4 relevant threads, or this test passes trivially");
+
+        var folder = NewFolder();
+        var probe = (ConcurrencyProbe?)null;
+        var mode = BatchMode(folder, Responder(), liveOverride: inner =>
+            probe = new ConcurrencyProbe(inner, stage => stage.StartsWith("wave ", StringComparison.Ordinal)));
+        var result = await Run(new GenerationRunner(mode.Gateway), Input(folder, mode));
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        var rendered = probe!.Calls.Where(c => c.Schema == RenderSchema).Select(c => c.ThreadId).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(relevant.OrderBy(id => id, StringComparer.Ordinal),
+            rendered.Where(relevant.Contains).OrderBy(id => id, StringComparer.Ordinal));
+        Assert.InRange(probe.MaxConcurrency, 2, GenerationRunner.MaxParallelThreads);
+    }
+
+    [Fact]
+    public async Task Batch_WholeBatchFails_LiveFallbackConcurrency_AtMostMaxParallel()
+    {
+        var liveFolder = NewFolder();
+        var live = LiveMode(Responder());
+        Assert.Equal(GenerationOutcome.Finished, (await Run(new GenerationRunner(live.Gateway), Input(liveFolder, live))).Outcome);
+
+        var folder = NewFolder();
+        var transport = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic, FailWholeBatch = true };
+        var probe = (ConcurrencyProbe?)null;
+        var mode = BatchMode(folder, Responder(), transport, inner =>
+            probe = new ConcurrencyProbe(inner, stage => stage == "non-relevant mail"));
+        var result = await Run(new GenerationRunner(mode.Gateway), Input(folder, mode));
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        Assert.NotEmpty(transport.Submissions);
+        var nonRelevant = _plan.Threads.Count(t => t.Relevance != ThreadRelevance.Relevant && t.Messages.Any(m => m != null));
+        Assert.True(probe!.Calls.Count >= nonRelevant, $"{probe.Calls.Count} live non-relevant calls for {nonRelevant} threads");
+        Assert.InRange(probe.MaxConcurrency, 1, GenerationRunner.MaxParallelThreads);
+        Assert.Equal(NormalizedJournal(liveFolder), NormalizedJournal(folder));
     }
 
     // ---------- revision 1 W9: repairs never wait in a batch ----------
@@ -440,11 +539,11 @@ public partial class BatchParityTests : IDisposable
         var live = LiveMode(Responder());
         await Run(new GenerationRunner(live.Gateway), Input(liveFolder, live));
 
-        // The first-attempt render of one wave-1 thread errors inside the batch
-        var thread = WavePlanner.Plan(_plan)[0].ThreadIds[0];
+        // The first-attempt render of the first non-relevant thread errors inside the batch (relevant waves are live)
+        var thread = _plan.Threads.First(t => t.Relevance != ThreadRelevance.Relevant && t.Messages?.Any(m => m != null) == true).Id;
         LlmProviderRequest render;
         lock (live.Live.Requests)
-            render = live.Live.Requests.First(r => r.SchemaName == RenderSchema && ThreadOf(r) == thread);
+            render = live.Live.Requests.First(r => ThreadOf(r) == thread && AttachmentIdOf(r) == null);
         var errored = RequestIdentity.CustomIdFor(LlmProviderKind.Anthropic, render);
 
         var batchFolder = NewFolder();
@@ -456,14 +555,14 @@ public partial class BatchParityTests : IDisposable
         Assert.Equal(GenerationOutcome.Finished, result.Outcome);
         Assert.Contains(transport.Submissions.SelectMany(s => s), i => i.CustomId == errored);
         lock (mode.Live.Requests)
-            Assert.Contains(mode.Live.Requests, r => r.SchemaName == RenderSchema && ThreadOf(r) == thread);
+            Assert.Contains(mode.Live.Requests, r => ThreadOf(r) == thread && AttachmentIdOf(r) == null);
         Assert.Equal(NormalizedJournal(liveFolder), NormalizedJournal(batchFolder));
     }
 
     // ---------- RUN-04 / D-09 restart ----------
 
     [Fact]
-    public async Task Restart_CancelWhileWave1Waits_ContinueResumes_NoResubmit_SameJournal()
+    public async Task Restart_CancelWhileNonRelevantWaits_ContinueResumes_NoResubmit_SameJournal()
     {
         // Reference: an uninterrupted batch run
         var reference = NewFolder();
@@ -476,16 +575,20 @@ public partial class BatchParityTests : IDisposable
         using var cts = new CancellationTokenSource();
         first.Batch!.StatusChanged += e =>
         {
-            if (e.Kind == BatchStatusKind.Submitted && e.StageLabel == "wave 1")
+            if (e.Kind == BatchStatusKind.Submitted && e.StageLabel == "non-relevant mail")
                 cts.Cancel();
         };
 
         var cancelled = await Run(new GenerationRunner(first.Gateway), Input(folder, first), ct: cts.Token);
         Assert.Equal(GenerationOutcome.Cancelled, cancelled.Outcome);
-        var wave1Batch = Assert.Single(transport.Submissions);
-        var wave1Ids = wave1Batch.Select(i => i.CustomId).ToHashSet(StringComparer.Ordinal);
+        var pendingBatch = Assert.Single(transport.Submissions);
+        var pendingIds = pendingBatch.Select(i => i.CustomId).ToHashSet(StringComparer.Ordinal);
+        var pendingThreads = pendingBatch.Select(i => ThreadOf(i.Request)).Where(t => t.Length > 0).ToHashSet(StringComparer.Ordinal);
+        Assert.NotEmpty(pendingThreads);
         Assert.Equal(1, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
-        Assert.DoesNotContain(JournalRecords(folder), r => r.Type == JournalRecordType.ThreadDone);
+        var done = JournalRecords(folder).Where(r => r.Type == JournalRecordType.ThreadDone).Select(r => r.ThreadId).ToHashSet();
+        Assert.All(RelevantThreadIds(), id => Assert.Contains(id, done));
+        Assert.DoesNotContain(done, pendingThreads.Contains);
 
         // The provider finishes the batch while the app is closed; a new session continues over the same folder
         transport.PollsUntilEnded = 0;
@@ -494,10 +597,78 @@ public partial class BatchParityTests : IDisposable
         var result = await Run(new GenerationRunner(second.Gateway), Input(folder, second), snapshot);
 
         Assert.Equal(GenerationOutcome.Finished, result.Outcome);
-        Assert.DoesNotContain(transport.Submissions.Skip(1).SelectMany(s => s), i => wave1Ids.Contains(i.CustomId));
+        Assert.DoesNotContain(transport.Submissions.Skip(1).SelectMany(s => s), i => pendingIds.Contains(i.CustomId));
         Assert.Contains(snapshot.Peek().Events, e => e.Kind == GenerationEventKind.BatchCollectedAfterRestart);
         Assert.Equal(0, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
         Assert.Equal(NormalizedJournal(reference, skipRunLines: true), NormalizedJournal(folder, skipRunLines: true));
+    }
+
+    // ---------- amended D-07: a wave batch from an earlier build never blocks a run ----------
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinishedRun_ClosesStaleWaveBatch_PendingCountZero(bool cancelFails)
+    {
+        // The first-attempt render of a wave-1 thread, exactly as the runner sends it
+        var liveFolder = NewFolder();
+        var live = LiveMode(Responder());
+        await Run(new GenerationRunner(live.Gateway), Input(liveFolder, live));
+        var thread = WavePlanner.Plan(_plan)[0].ThreadIds[0];
+        LlmProviderRequest render;
+        lock (live.Live.Requests)
+            render = live.Live.Requests.First(r => r.SchemaName == RenderSchema && ThreadOf(r) == thread);
+        render.AllowBatch = true;
+        var staleId = RequestIdentity.CustomIdFor(LlmProviderKind.Anthropic, render);
+
+        // Reference spend of a clean batch run (no stale batch)
+        var reference = NewFolder();
+        var clean = BatchMode(reference, Responder());
+        Assert.Equal(GenerationOutcome.Finished, (await Run(new GenerationRunner(clean.Gateway), Input(reference, clean))).Outcome);
+        var referenceEnded = JournalRecords(reference).Last(r => r.Type == JournalRecordType.RunEnded);
+
+        // Session 1 (an earlier build): that render went into a "wave 1" provider batch that never ends
+        var folder = NewFolder();
+        var transport = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+        transport.NeverEndIds.Add(staleId);
+        var old = BatchMode(folder, Responder(), transport);
+        var submitted = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        old.Batch!.StatusChanged += e =>
+        {
+            if (e.Kind == BatchStatusKind.Submitted)
+                submitted.TrySetResult(e.BatchId);
+        };
+        using (var cts = new CancellationTokenSource())
+        {
+            Task<LlmProviderResponse> waiting;
+            using (BatchStage.Enter("wave 1"))
+                waiting = old.Batch.SendAsync(render, cts.Token);
+            var staleBatch = await submitted.Task.WaitAsync(RunGuard);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting.WaitAsync(RunGuard));
+            old.Batch.Detach();
+            Assert.Equal(1, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
+
+            // Session 2: the run writes the thread live without waiting on the stale batch, then closes it
+            if (cancelFails)
+                transport.CancelFailure = new InvalidOperationException("provider down");
+            var mode = BatchMode(folder, Responder(), transport);
+            var result = await Run(new GenerationRunner(mode.Gateway), Input(folder, mode));
+
+            Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+            lock (mode.Live.Requests)
+                Assert.Contains(mode.Live.Requests, r => r.SchemaName == RenderSchema && ThreadOf(r) == thread);
+            if (!cancelFails)
+                Assert.Contains(staleBatch, transport.CancelledIds);
+            Assert.Contains(staleBatch, new BatchLedger(folder).Replay().CancelledIds);
+            Assert.Equal(0, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
+            Assert.Equal(0, mode.Batch!.PendingBatchCount);
+
+            var ended = JournalRecords(folder).Last(r => r.Type == JournalRecordType.RunEnded);
+            Assert.Equal(referenceEnded.CostUsd, ended.CostUsd);
+            Assert.Equal(referenceEnded.InputTokens, ended.InputTokens);
+            Assert.Equal(referenceEnded.OutputTokens, ended.OutputTokens);
+        }
     }
 
     // ---------- D-10 orphan billing ----------

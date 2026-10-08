@@ -1159,4 +1159,35 @@ public class GenerationJournalTests : IDisposable
 
         Assert.Equal("Anthropic", replay.WriterProvider);
     }
+
+    [Fact]
+    public void WRA11_Normalize_BatchSavingsCappedAtTheCategorySum()
+    {
+        var record = new JournalRecord
+        {
+            Type = JournalRecordType.ThreadDone,
+            CostDetail = new CostBreakdown { InputUsd = 0.10m, OutputUsd = 0.20m, BatchSavingsUsd = 5m }
+        };
+
+        record.Normalize();
+
+        Assert.Equal(0.30m, record.CostDetail!.BatchSavingsUsd);
+        Assert.Equal(0m, record.CostDetail.TotalUsd);
+    }
+
+    [Fact]
+    public async Task WRA11_Replay_DetailLargerThanCost_CountsAsUnsplit_ItemsStillAddUp()
+    {
+        var done = Done("T-0003");
+        done.CostUsd = 0.10m;
+        done.CostDetail = new CostBreakdown { InputUsd = 0.40m, OutputUsd = 0.60m };
+        await new GenerationJournal(_folder).AppendAsync(done);
+
+        var replay = GenerationJournal.Replay(_folder, _plan);
+
+        Assert.Equal(0.10m, replay.SpentCostUsd);
+        Assert.Equal(0m, replay.SpentDetail.TotalUsd);
+        Assert.Equal(0.10m, replay.UnsplitSpentUsd);
+        AssertItemsAddUp(replay);
+    }
 }

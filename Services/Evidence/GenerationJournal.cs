@@ -351,10 +351,12 @@ public class GenerationJournal
         replay.SpentCostUsd += text + media;
         replay.MediaSpentCostUsd += media;
 
-        if (record.CostDetail != null)
+        // WR-A11: a detail that claims more than the line's text spend (tampered or inconsistent) is not used, so
+        // SpentDetail.TotalUsd + media + unsplit always equals SpentCostUsd
+        if (record.CostDetail != null && record.CostDetail.TotalUsd >= 0m && record.CostDetail.TotalUsd <= text)
         {
             replay.SpentDetail.Add(record.CostDetail);
-            replay.UnsplitSpentUsd += Math.Max(0m, text - record.CostDetail.TotalUsd);
+            replay.UnsplitSpentUsd += text - record.CostDetail.TotalUsd;
         }
         else
         {

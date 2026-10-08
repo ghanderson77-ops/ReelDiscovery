@@ -200,7 +200,10 @@ public partial class JournalRecord
             CostDetail.CacheWriteUsd = Math.Max(0m, CostDetail.CacheWriteUsd);
             CostDetail.CacheReadUsd = Math.Max(0m, CostDetail.CacheReadUsd);
             CostDetail.OutputUsd = Math.Max(0m, CostDetail.OutputUsd);
-            CostDetail.BatchSavingsUsd = Math.Max(0m, CostDetail.BatchSavingsUsd);
+
+            // WR-A11: savings never exceed what they discount, so the detail total is never negative
+            var gross = CostDetail.InputUsd + CostDetail.CacheWriteUsd + CostDetail.CacheReadUsd + CostDetail.OutputUsd;
+            CostDetail.BatchSavingsUsd = Math.Clamp(CostDetail.BatchSavingsUsd, 0m, gross);
         }
     }
 

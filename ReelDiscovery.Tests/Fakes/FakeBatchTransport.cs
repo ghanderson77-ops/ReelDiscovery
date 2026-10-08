@@ -30,6 +30,12 @@ public class FakeBatchTransport : IBatchTransport
     /// <summary>When true, every status call reports the batch as Failed.</summary>
     public bool FailWholeBatch { get; set; }
 
+    /// <summary>When set, CancelAsync throws it (after nothing is recorded).</summary>
+    public Exception? CancelFailure { get; set; }
+
+    /// <summary>Batches whose first item custom id is in this set stay InProgress regardless of PollsUntilEnded.</summary>
+    public HashSet<string> NeverEndIds { get; } = new(StringComparer.Ordinal);
+
     public int PollsUntilEnded { get; set; } = 1;
     public TimeSpan SubmitDelay { get; set; }
 
@@ -80,7 +86,7 @@ public class FakeBatchTransport : IBatchTransport
                 return Task.FromResult(new BatchStatusResult { Succeeded = true, State = BatchState.Cancelled, Total = total });
 
             var polls = _polls[batchId]++;
-            if (polls < PollsUntilEnded)
+            if (polls < PollsUntilEnded || (items.Count > 0 && NeverEndIds.Contains(items[0].CustomId)))
                 return Task.FromResult(new BatchStatusResult { Succeeded = true, State = BatchState.InProgress, Total = total });
 
             var failed = items.Count(i => ErroredIds.Contains(i.CustomId) || ExpiredIds.Contains(i.CustomId));
@@ -146,6 +152,10 @@ public class FakeBatchTransport : IBatchTransport
     public Task CancelAsync(string batchId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        var failure = CancelFailure;
+        if (failure != null)
+            throw failure;
+
         lock (_lock)
             CancelledIds.Add(batchId);
 

@@ -778,4 +778,287 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.DoesNotContain("batch_other_plan", state.CancelledIds);
         Assert.Equal(new[] { "file_in_1", "file_in_2" }, openAi.DeletedFiles.Select(f => f.Item1).OrderBy(f => f, StringComparer.Ordinal));
     }
+
+    // ----- amended D-07: live scopes, live gate, closing stale stages -----
+
+    /// <summary>Live provider that holds every call for a while and records the peak number of concurrent calls.</summary>
+    private sealed class SlowLive : ILlmProvider
+    {
+        private int _inFlight;
+        private int _max;
+        private int _calls;
+
+        public LlmProviderKind Kind => LlmProviderKind.OpenAI;
+        public int? MaxTokensCeiling => null;
+        public int MaxConcurrency => Volatile.Read(ref _max);
+        public int Calls => Volatile.Read(ref _calls);
+
+        public async Task<LlmProviderResponse> SendAsync(LlmProviderRequest request, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref _calls);
+            var now = Interlocked.Increment(ref _inFlight);
+            int seen;
+            while (now > (seen = Volatile.Read(ref _max)) && Interlocked.CompareExchange(ref _max, now, seen) != seen)
+            {
+            }
+
+            try
+            {
+                await Task.Delay(20, ct);
+                return FakeLlmProvider.Ok("live:" + request.UserPrompt);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
+        }
+
+        public Task<LlmKeyTestResult> TestKeyAsync(string modelId, CancellationToken ct = default) =>
+            Task.FromResult(new LlmKeyTestResult { Succeeded = true });
+    }
+
+    [Fact]
+    public async Task EnterLive_UsesAlreadyCollectedResult_NoLiveCall_NoSubmission()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var a = Create(Live(), transport);
+        var aEvents = new EventLog();
+        aEvents.Attach(a);
+
+        using (var cts = new CancellationTokenSource())
+        {
+            Task<LlmProviderResponse> task;
+            using (BatchStage.Enter("wave 1"))
+                task = a.SendAsync(Req("r0"), cts.Token);
+
+            await aEvents.WaitFor(BatchStatusKind.Submitted);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task.WaitAsync(Wait));
+        }
+
+        a.Detach();
+        transport.PollsUntilEnded = 0;
+
+        var live = Live();
+        var b = Create(live, transport, priceLookup: _ => new AIModelConfig
+        {
+            ModelId = "gpt-test", InputTokenPricePerMillion = 2m, OutputTokenPricePerMillion = 8m, BatchDiscountPercent = 50m
+        });
+        var bEvents = new EventLog();
+        bEvents.Attach(b);
+        Assert.Equal(1, b.ResumePending());
+        await bEvents.WaitFor(BatchStatusKind.CollectedAfterRestart);
+
+        LlmProviderResponse response;
+        using (BatchStage.Enter("wave 1"))
+        using (BatchStage.EnterLive())
+            response = await b.SendAsync(Req("r0")).WaitAsync(Wait);
+
+        Assert.Equal("batch:r0", response.Text);
+        Assert.True(response.IsBatch);
+        Assert.Empty(live.Requests);
+        Assert.Single(transport.Submissions);
+        Assert.Contains(IdOf(Req("r0")), new BatchLedger(_folder).Replay().ConsumedCustomIds);
+
+        var (orphans, input, _) = await b.BillOrphansAsync().WaitAsync(Wait);
+        Assert.Equal(0m, orphans.TotalUsd);
+        Assert.Equal(0, input);
+    }
+
+    [Fact]
+    public async Task EnterLive_InFlightItem_GoesLiveWithoutWaiting()
+    {
+        var live = Live();
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var provider = Create(live, transport);
+        var events = new EventLog();
+        events.Attach(provider);
+
+        using var cts = new CancellationTokenSource();
+        Task<LlmProviderResponse> waiting;
+        using (BatchStage.Enter("wave 1"))
+            waiting = provider.SendAsync(Req("r0"), cts.Token);
+        await events.WaitFor(BatchStatusKind.Submitted);
+
+        LlmProviderResponse response;
+        using (BatchStage.Enter("wave 1"))
+        using (BatchStage.EnterLive())
+            response = await provider.SendAsync(Req("r0")).WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal("live:r0", response.Text);
+        Assert.Single(transport.Submissions);
+        Assert.Single(live.Requests);
+
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting.WaitAsync(Wait));
+    }
+
+    [Fact]
+    public async Task EnterLive_AllowBatchFalse_NeverConsumesCollectedResult()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var a = Create(Live(), transport);
+        var events = new EventLog();
+        events.Attach(a);
+
+        using (var cts = new CancellationTokenSource())
+        {
+            Task<LlmProviderResponse> task;
+            using (BatchStage.Enter("wave 1"))
+                task = a.SendAsync(Req("r0"), cts.Token);
+
+            await events.WaitFor(BatchStatusKind.Submitted);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task.WaitAsync(Wait));
+        }
+
+        transport.PollsUntilEnded = 0;
+        await events.WaitFor(BatchStatusKind.Finished);
+        a.Detach();
+
+        var live = Live();
+        var b = Create(live, transport);
+        LlmProviderResponse response;
+        using (BatchStage.EnterLive())
+            response = await b.SendAsync(Req("r0", allowBatch: false)).WaitAsync(Wait);
+
+        Assert.Equal("live:r0", response.Text);
+        Assert.Single(live.Requests);
+        Assert.Empty(new BatchLedger(_folder).Replay().ConsumedCustomIds);
+    }
+
+    [Fact]
+    public async Task LiveGate_LimitsConcurrentLiveSends()
+    {
+        var gated = new SlowLive();
+        var provider = Create(gated, Transport());
+        using var gate = new SemaphoreSlim(2, 2);
+
+        List<Task<LlmProviderResponse>> tasks;
+        using (BatchStage.UseLiveGate(gate))
+            tasks = Enumerable.Range(0, 10).Select(i => Task.Run(() => provider.SendAsync(Req("g" + i, allowBatch: false)))).ToList();
+        var responses = await Task.WhenAll(tasks).WaitAsync(Wait);
+
+        Assert.All(responses, r => Assert.StartsWith("live:", r.Text));
+        Assert.Equal(2, gated.MaxConcurrency);
+
+        var ungated = new SlowLive();
+        var free = Create(ungated, Transport());
+        var freeTasks = Enumerable.Range(0, 10).Select(i => Task.Run(() => free.SendAsync(Req("u" + i, allowBatch: false)))).ToList();
+        await Task.WhenAll(freeTasks).WaitAsync(Wait);
+        Assert.True(ungated.MaxConcurrency > 2, $"ungated max concurrency {ungated.MaxConcurrency}");
+    }
+
+    [Fact]
+    public async Task LiveGate_AppliesToD10Fallback()
+    {
+        var gated = new SlowLive();
+        var transport = Transport();
+        transport.FailWholeBatch = true;
+        var provider = Create(gated, transport);
+        using var gate = new SemaphoreSlim(2, 2);
+
+        List<Task<LlmProviderResponse>> tasks;
+        using (BatchStage.Enter("non-relevant mail"))
+        using (BatchStage.UseLiveGate(gate))
+            tasks = Enumerable.Range(0, 8).Select(i => provider.SendAsync(Req("f" + i))).ToList();
+        var responses = await Task.WhenAll(tasks).WaitAsync(Wait);
+
+        Assert.All(responses, r => Assert.StartsWith("live:", r.Text));
+        Assert.Equal(8, gated.Calls);
+        Assert.InRange(gated.MaxConcurrency, 1, 2);
+        Assert.Single(transport.Submissions);
+    }
+
+    [Fact]
+    public async Task CancelPendingStagesAsync_CancelsOnlyMatchingLabels_RecordsCancelled()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var live = Live();
+        var provider = Create(live, transport);
+        var events = new EventLog();
+        events.Attach(provider);
+
+        using var cts = new CancellationTokenSource();
+        Task<LlmProviderResponse> wave, filler;
+        using (BatchStage.Enter("wave 1"))
+            wave = provider.SendAsync(Req("w0"));
+        using (BatchStage.Enter("non-relevant mail"))
+            filler = provider.SendAsync(Req("n0"), cts.Token);
+
+        var waveSubmitted = await events.WaitFor(e => e.Kind == BatchStatusKind.Submitted && e.StageLabel == "wave 1");
+        var fillerSubmitted = await events.WaitFor(e => e.Kind == BatchStatusKind.Submitted && e.StageLabel == "non-relevant mail");
+        Assert.Equal(2, provider.PendingBatchCount);
+
+        var closed = await provider.CancelPendingStagesAsync(label => label.StartsWith("wave ", StringComparison.Ordinal)).WaitAsync(Wait);
+
+        Assert.Equal(1, closed);
+        Assert.Equal(new[] { waveSubmitted.BatchId }, transport.CancelledIds);
+        var state = new BatchLedger(_folder).Replay();
+        Assert.Contains(waveSubmitted.BatchId, state.CancelledIds);
+        Assert.Equal(new[] { fillerSubmitted.BatchId }, state.Pending(_plan).Select(r => r.BatchId));
+        Assert.Equal(1, provider.PendingBatchCount);
+        Assert.Equal(1, BatchLedger.PendingBatchCount(_folder, _plan));
+
+        var waveInput = state.SubmittedById[waveSubmitted.BatchId].InputFileId;
+        Assert.Equal(new[] { waveInput }, transport.DeletedFiles.Select(f => f.Item1));
+
+        // A unit still waiting on the closed batch runs live (D-10) instead of hanging
+        var waveResponse = await wave.WaitAsync(Wait);
+        Assert.Equal("live:w0", waveResponse.Text);
+
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => filler.WaitAsync(Wait));
+    }
+
+    [Fact]
+    public async Task CancelPendingStagesAsync_CancelThrows_StillRecordsCancelled()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var provider = Create(Live(), transport);
+        var events = new EventLog();
+        events.Attach(provider);
+
+        using var cts = new CancellationTokenSource();
+        Task<LlmProviderResponse> wave;
+        using (BatchStage.Enter("wave 2"))
+            wave = provider.SendAsync(Req("w0"), cts.Token);
+        var submitted = await events.WaitFor(BatchStatusKind.Submitted);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wave.WaitAsync(Wait));
+
+        transport.CancelFailure = new InvalidOperationException("provider down");
+        var closed = await provider.CancelPendingStagesAsync(label => label.StartsWith("wave ", StringComparison.Ordinal)).WaitAsync(Wait);
+
+        Assert.Equal(1, closed);
+        Assert.Contains(submitted.BatchId, new BatchLedger(_folder).Replay().CancelledIds);
+        Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, _plan));
+        Assert.Equal(0, provider.PendingBatchCount);
+    }
+
+    [Fact]
+    public async Task CancelPending_DefaultArguments_PropagateCancelFailure()
+    {
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = LlmProviderKind.OpenAI,
+            BatchId = "batch_open",
+            PlanId = _plan,
+            SubmittedUtc = DateTime.UtcNow,
+            Items = new List<BatchLedgerItem> { new() { CustomId = "q1", Operation = "Thread", ModelId = "m" } }
+        });
+
+        var transport = new FakeBatchTransport { CancelFailure = new InvalidOperationException("provider down") };
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            BatchingLlmProvider.CancelPendingAsync(ledger, _ => transport, _plan).WaitAsync(Wait));
+        Assert.DoesNotContain("batch_open", new BatchLedger(_folder).Replay().CancelledIds);
+    }
 }

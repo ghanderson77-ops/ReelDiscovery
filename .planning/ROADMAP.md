@@ -287,7 +287,7 @@ Plans:
 - [x] 08-16-PLAN.md — Wizard integration: 9 steps, NavigateToStep(Type), IConfirmLeave, close-during-run (Wave 5)
 - [x] 08-17-PLAN.md — Step run wiring: Generate, Cancel, Regenerate..., Save Again, Open in Word/Folder (Wave 6)
 - [x] 08-18-PLAN.md — Case Summary Discovery row + discovery clause in the cost row without a corpus plan (Wave 6)
-- [ ] 08-19-PLAN.md — Phase gate: full suite + renders, Word/150% DPI/live-provider human verification, mark ANC complete (Wave 7, checkpoint)
+- [x] 08-19-PLAN.md — Phase gate: full suite + renders, Word/150% DPI/live-provider human verification, mark ANC complete (Wave 7, checkpoint)
 **UI hint**: yes
 
 ## Progress

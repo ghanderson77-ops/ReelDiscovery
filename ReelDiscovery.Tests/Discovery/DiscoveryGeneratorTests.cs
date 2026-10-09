@@ -329,6 +329,31 @@ public partial class DiscoveryGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task Cancel_MidDeposition_RecordsSpendOfFinishedChunks()
+    {
+        // CR-02: the first chunk is paid for, then the user cancels before the second
+        using var cts = new CancellationTokenSource();
+        Script(deposition: chunk =>
+        {
+            cts.Cancel();
+            return Ok(CleanDeposition(chunk));
+        });
+        var items = Items(DepKey);
+        Assert.True(_plan!.Chunks.Count >= 2);
+
+        var result = await NewGenerator().RunAsync(_draft, null, items, null, null, cts.Token);
+
+        Assert.True(result.Cancelled);
+        Assert.Single(_fake.Requests);
+        Assert.True(result.CostUsd > 0m);
+        var set = LoadSet();
+        Assert.Null(set.Find(DepKey));
+        Assert.Equal(result.CostUsd, set.UnattributedCostUsd);
+        Assert.Equal(result.CostUsd, set.TotalCostUsd);
+        Assert.False(File.Exists(DocxPath(items[0])));
+    }
+
+    [Fact]
     public async Task FileOpenInWord_ContentKeptNotSaved_SaveAgainWritesWithoutModelCall()
     {
         Script();

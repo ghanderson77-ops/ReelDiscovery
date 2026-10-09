@@ -23,6 +23,9 @@ public class WrittenSetWriteOutcome
     // A fatal provider error (bad key, spend limit) stopped the run before this document finished; leave it pending
     public bool NotRun { get; set; }
 
+    // The user cancelled before this document finished; Cost still holds every completed attempt (T-08-47)
+    public bool Cancelled { get; set; }
+
     public CostBreakdown Cost { get; set; } = new();
 }
 
@@ -30,7 +33,7 @@ public class WrittenSetWriteOutcome
 /// One written-discovery unit of work (D-04, D-17..D-20, D-26, D-28): slots are written in calls of at most
 /// <see cref="WrittenDiscoveryPlanner.MaxSlotsPerCall"/> on the Story tier with the shared system prompt, each call checked
 /// by <see cref="DiscoveryValidator"/>, retried with feedback up to <see cref="MaxAttempts"/> times and the best attempt
-/// kept. Code owns numbering, keys, prefixes and all boilerplate. Never throws except on user cancellation.
+/// kept. Code owns numbering, keys, prefixes and all boilerplate. Never throws; a user cancel returns the spend so far with Cancelled set.
 /// </summary>
 public sealed partial class WrittenSetWriter
 {
@@ -87,7 +90,17 @@ public sealed partial class WrittenSetWriter
                     AllowBatch = false
                 };
 
-                var outcome = await PlanCallRunner.RunAsync<DiscoveryPrompts.RequestSetDto>(_llm, request, run);
+                PlanCallOutcome<DiscoveryPrompts.RequestSetDto> outcome;
+                try
+                {
+                    outcome = await PlanCallRunner.RunAsync<DiscoveryPrompts.RequestSetDto>(_llm, request, run);
+                }
+                catch (OperationCanceledException)
+                {
+                    // User cancel: hand back the spend of the finished attempts so the generator records it (the
+                    // in-flight call's cost is unknown)
+                    return new WrittenSetWriteOutcome { NotRun = true, Cancelled = true, Cost = cost };
+                }
                 cost.Add(outcome.Cost);
 
                 // Left pending: the next run writes it (D-05)

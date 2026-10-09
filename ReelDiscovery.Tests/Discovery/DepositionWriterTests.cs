@@ -431,7 +431,7 @@ public class DepositionWriterTests
     }
 
     [Fact]
-    public async Task UserCancellation_Propagates()
+    public async Task UserCancellation_BeforeFirstCall_ReturnsCancelledWithNoCost()
     {
         var f = CreateFixture();
         f.Script((chunk, _) => Ok(CleanDto(f, chunk)));
@@ -439,8 +439,34 @@ public class DepositionWriterTests
         cts.Cancel();
         using var run = new PlanCallRun(cts.Token, 1, "Click Retry.");
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Write(f, run));
+        var outcome = await Write(f, run);
+
+        Assert.True(outcome.Cancelled);
+        Assert.True(outcome.NotRun);
+        Assert.Null(outcome.Content);
+        Assert.Equal(0m, outcome.Cost.TotalUsd);
         Assert.Empty(f.Fake.Requests);
+    }
+
+    [Fact]
+    public async Task UserCancellation_AfterFirstChunk_ReturnsSpendOfFinishedChunk()
+    {
+        // CR-02: the finished chunk was paid for and must come back to the generator
+        var f = CreateFixture(priced: true);
+        using var cts = new CancellationTokenSource();
+        f.Script((chunk, _) =>
+        {
+            cts.Cancel();
+            return Ok(CleanDto(f, chunk));
+        });
+        using var run = new PlanCallRun(cts.Token, 1, "Click Retry.");
+
+        var outcome = await Write(f, run);
+
+        Assert.True(outcome.Cancelled);
+        Assert.Null(outcome.Content);
+        Assert.Single(f.Fake.Requests);
+        Assert.True(outcome.Cost.TotalUsd > 0m);
     }
 
     [Fact]

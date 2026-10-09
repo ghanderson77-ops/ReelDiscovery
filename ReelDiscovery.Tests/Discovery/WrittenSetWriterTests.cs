@@ -331,7 +331,7 @@ public partial class WrittenSetWriterTests
     }
 
     [Fact]
-    public async Task UserCancellation_Propagates()
+    public async Task UserCancellation_ReturnsCancelledWithNoCost()
     {
         var f = CreateFixture(DiscoveryKind.RequestsForProduction, 5);
         f.Script((slots, _) => Ok(CleanDto(f, slots)));
@@ -339,7 +339,12 @@ public partial class WrittenSetWriterTests
         cts.Cancel();
         using var run = new PlanCallRun(cts.Token, 1, "Click Retry.");
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Write(f, run));
+        var outcome = await Write(f, run);
+
+        Assert.True(outcome.Cancelled);
+        Assert.True(outcome.NotRun);
+        Assert.Null(outcome.Content);
+        Assert.Equal(0m, outcome.Cost.TotalUsd);
         Assert.Empty(f.Fake.Requests);
     }
 }

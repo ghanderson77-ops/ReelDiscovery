@@ -283,17 +283,19 @@ public sealed class DiscoveryGenerator
         List<DiscoveryViolation> warnings;
         CostBreakdown cost;
         bool notRun;
+        bool cancelled;
         bool refused;
         bool timedOut;
         List<string> notes;
 
-        // User cancel propagates from the writers (OperationCanceledException)
+        // A user cancel comes back from the writers as NotRun + Cancelled with the spend so far (CR-02)
         if (item.Kind == DiscoveryKind.Deposition && item.Deposition != null)
         {
             var outcome = await new DepositionWriter(_llm).WriteAsync(context.Draft, item.Deposition, context.Set.CaseNumber,
                 context.SystemPrompt, guidance, run, OnPart);
             deposition = outcome.Content;
             (warnings, cost, notRun, refused, timedOut) = (outcome.Warnings, outcome.Cost, outcome.NotRun, outcome.Refused, outcome.TimedOut);
+            cancelled = outcome.Cancelled;
             notes = item.Deposition.Notes;
         }
         else if (item.Kind != DiscoveryKind.Deposition && item.Written != null)
@@ -302,12 +304,14 @@ public sealed class DiscoveryGenerator
                 context.SystemPrompt, guidance, run, OnPart);
             written = outcome.Content;
             (warnings, cost, notRun, refused, timedOut) = (outcome.Warnings, outcome.Cost, outcome.NotRun, outcome.Refused, outcome.TimedOut);
+            cancelled = outcome.Cancelled;
             notes = item.Written.Notes;
         }
         else
         {
             // A work item without a plan cannot be written
             (warnings, cost, notRun, refused, timedOut) = (new List<DiscoveryViolation>(), new CostBreakdown(), false, false, false);
+            cancelled = false;
             notes = new List<string>();
         }
 
@@ -331,6 +335,10 @@ public sealed class DiscoveryGenerator
                     context.Result.CostUsd += cost.TotalUsd;
                 });
             }
+
+            // Recorded first, then the cancel propagates so RunAsync reports Cancelled
+            if (cancelled)
+                throw new OperationCanceledException(run.UserToken);
             return;
         }
 

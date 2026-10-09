@@ -460,6 +460,66 @@ public partial class DiscoveryGeneratorTests : IDisposable
         Assert.Contains("focus on payment", _fake.Requests[firstCount].UserPrompt);
     }
 
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("blank")]
+    [InlineData("unknown")]
+    public async Task CX02_RegenerateReturnsNoUsableRequests_FailedPreviousDocumentKept(string mode)
+    {
+        Script();
+        await NewGenerator().RunAsync(_draft, null, Items());
+        var before = LoadSet().Find(RfpKey)!;
+        var item = Items(RfpKey).Single();
+        var bytesBefore = File.ReadAllBytes(DocxPath(item));
+        var firstCount = _fake.Requests.Count;
+
+        // Every attempt parses but carries nothing usable
+        Script(written: slots =>
+        {
+            var dto = new DiscoveryPrompts.RequestSetDto();
+            if (mode == "blank")
+                dto.Requests.AddRange(slots.Select(s => new DiscoveryPrompts.RequestDto { Slot = s, Text = "   " }));
+            else if (mode == "unknown")
+                dto.Requests.Add(new DiscoveryPrompts.RequestDto { Slot = 999, Text = RfpText });
+            return Ok(dto);
+        });
+        var result = await NewGenerator().RunAsync(_draft, null, new[] { item });
+
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(0, result.Saved);
+        Assert.Equal(WrittenSetWriter.MaxAttempts, _fake.Requests.Count - firstCount);
+        var after = LoadSet().Find(RfpKey)!;
+        Assert.Equal(DiscoveryGenerator.ReasonNoContent, after.FailureReason);
+        Assert.True(after.HasContent);
+        Assert.Equal(before.Status, after.Status);
+        Assert.Equal(before.Written!.Requests.Select(r => r.Text), after.Written!.Requests.Select(r => r.Text));
+        Assert.Equal(bytesBefore, File.ReadAllBytes(DocxPath(item)));
+    }
+
+    [Fact]
+    public async Task CX02_RegenerateDepositionWithNoTestimony_FailedPreviousTranscriptKept()
+    {
+        Script();
+        await NewGenerator().RunAsync(_draft, null, Items());
+        var before = LoadSet().Find(DepKey)!;
+        var item = Items(DepKey).Single();
+        var bytesBefore = File.ReadAllBytes(DocxPath(item));
+
+        // Every chunk parses but has no turns (or only blank ones)
+        Script(deposition: _ => Ok(new DiscoveryPrompts.DepositionChunkDto
+        {
+            Turns = new List<DiscoveryPrompts.TurnDto> { new() { Kind = TurnKind.Q, Text = " " } }
+        }));
+        var result = await NewGenerator().RunAsync(_draft, null, new[] { item });
+
+        Assert.Equal(1, result.Failed);
+        var after = LoadSet().Find(DepKey)!;
+        Assert.Equal(DiscoveryGenerator.ReasonNoContent, after.FailureReason);
+        Assert.True(after.HasContent);
+        Assert.Equal(before.Deposition!.Turns.Count, after.Deposition!.Turns.Count);
+        Assert.Equal(bytesBefore, File.ReadAllBytes(DocxPath(item)));
+    }
+
     [Fact]
     public async Task RegenerateSucceeds_ReplacesContent_ClearsFailure_KeepsExhibitNumbers()
     {

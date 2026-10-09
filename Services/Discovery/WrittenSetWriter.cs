@@ -41,6 +41,7 @@ public sealed partial class WrittenSetWriter
     public const int MaxAttempts = 3;
 
     private const string TimeoutPrefix = "The request timed out";
+    private const string NoRequestsError = "The model returned no requests.";
 
     private readonly ILlmGateway _llm;
 
@@ -134,13 +135,27 @@ public sealed partial class WrittenSetWriter
                     // A refusal or timeout may succeed on the next attempt; the gateway already retried transient errors
                     refused = outcome.Refused;
                     timedOut = outcome.Error.StartsWith(TimeoutPrefix, StringComparison.Ordinal);
-                    error = outcome.Error.Length > 0 ? outcome.Error : "The model returned no requests.";
+                    error = outcome.Error.Length > 0 ? outcome.Error : NoRequestsError;
                     continue;
                 }
 
                 var returned = CleanRequests(outcome.Value, batch, label);
                 var violations = DiscoveryValidator.CheckRequests(returned.Select(r => (r.Slot, Joined(r.Prefix, r.Text))).ToList(), ctx,
                     outcome.Value.PeopleNamed ?? new List<string>());
+
+                // CX-02: an empty list, blank texts or only unknown slots is no content, never a "best attempt" that
+                // could replace a saved document with boilerplate
+                if (!returned.Any(r => ctx.ExpectedSlots.Contains(r.Slot)))
+                {
+                    if (best != null)
+                        break;
+
+                    refused = false;
+                    timedOut = false;
+                    error = NoRequestsError;
+                    feedback = violations;
+                    continue;
+                }
 
                 if (DiscoveryValidator.IsBetter(violations, bestViolations))
                 {
@@ -158,7 +173,7 @@ public sealed partial class WrittenSetWriter
             }
 
             // A set missing a whole call's worth of requests is not kept
-            if (best == null)
+            if (best == null || best.Count == 0)
                 return new WrittenSetWriteOutcome { Error = error, Refused = refused, TimedOut = timedOut, Cost = cost };
 
             foreach (var (slot, text) in best)

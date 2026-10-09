@@ -46,6 +46,7 @@ public sealed class DepositionWriter
     private const int MinTurnsPerTopic = 2;
 
     private const string TimeoutPrefix = "The request timed out";
+    private const string NoTestimonyError = "The model returned no testimony.";
 
     private readonly ILlmGateway _llm;
 
@@ -146,12 +147,26 @@ public sealed class DepositionWriter
                     // A refusal or timeout may succeed on the next attempt; the gateway already retried transient errors
                     refused = outcome.Refused;
                     timedOut = outcome.Error.StartsWith(TimeoutPrefix, StringComparison.Ordinal);
-                    error = outcome.Error.Length > 0 ? outcome.Error : "The model returned no testimony.";
+                    error = outcome.Error.Length > 0 ? outcome.Error : NoTestimonyError;
                     continue;
                 }
 
                 var turns = NormalizeTurns(outcome.Value, chunk, speakerIds, examiningId, defendingId, witnessId, reporterId);
                 var violations = DiscoveryValidator.CheckDepositionChunk(turns, outcome.Value.PeopleNamed ?? new List<string>(), ctx);
+
+                // CX-02: an attempt with no testimony turns is no content, never a "best attempt" that could replace a
+                // saved transcript with an empty topic
+                if (turns.Count == 0)
+                {
+                    if (best != null)
+                        break;
+
+                    refused = false;
+                    timedOut = false;
+                    error = NoTestimonyError;
+                    feedback = violations;
+                    continue;
+                }
 
                 if (DiscoveryValidator.IsBetter(violations, bestViolations))
                 {
@@ -167,7 +182,7 @@ public sealed class DepositionWriter
             }
 
             // A transcript missing a topic is not kept
-            if (best == null)
+            if (best == null || best.Count == 0)
                 return new DepositionWriteOutcome { Error = error, Refused = refused, TimedOut = timedOut, Cost = cost };
 
             content.Turns.AddRange(best);

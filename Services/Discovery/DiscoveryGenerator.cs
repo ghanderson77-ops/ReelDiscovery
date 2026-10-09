@@ -23,6 +23,9 @@ public class DiscoveryProgress
 
     public int Finished { get; set; }
     public bool Stopping { get; set; }
+
+    // True on the report sent after the document's record (and .docx) is saved
+    public bool Done { get; set; }
 }
 
 /// <summary>
@@ -485,7 +488,7 @@ public sealed class DiscoveryGenerator
     private static void Finish(RunContext context, DiscoveryWorkItem item, int index)
     {
         var finished = Interlocked.Increment(ref context.Finished);
-        Send(context, new DiscoveryProgress { Index = index, Total = context.Total, Key = item.Key, Finished = finished });
+        Send(context, new DiscoveryProgress { Index = index, Total = context.Total, Key = item.Key, Finished = finished, Done = true });
     }
 
     private static void Report(RunContext context, DiscoveryWorkItem item, int index, int part, int partCount) =>

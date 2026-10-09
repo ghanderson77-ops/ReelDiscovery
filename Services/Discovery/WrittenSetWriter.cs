@@ -121,7 +121,8 @@ public sealed partial class WrittenSetWriter
                 }
 
                 var returned = CleanRequests(outcome.Value, batch, label);
-                var violations = DiscoveryValidator.CheckRequests(returned.Select(r => (r.Slot, Joined(r.Prefix, r.Text))).ToList(), ctx);
+                var violations = DiscoveryValidator.CheckRequests(returned.Select(r => (r.Slot, Joined(r.Prefix, r.Text))).ToList(), ctx,
+                    outcome.Value.PeopleNamed ?? new List<string>());
 
                 if (DiscoveryValidator.IsBetter(violations, bestViolations))
                 {

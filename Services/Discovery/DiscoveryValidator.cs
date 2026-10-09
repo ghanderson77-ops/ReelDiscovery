@@ -94,9 +94,11 @@ public static partial class DiscoveryValidator
 
     /// <summary>
     /// D4, D2, D3 and D8 over numbered written discovery requests; D5 for admissions and D7 for interrogatories. For D5
-    /// the caller passes each slot's code-owned prefix joined to the model text.
+    /// the caller passes each slot's code-owned prefix joined to the model text. <paramref name="peopleNamed"/> is the
+    /// model's own list of people it named: each unknown one is a D2 on the slot whose text mentions it (0 when none does).
     /// </summary>
-    public static List<DiscoveryViolation> CheckRequests(IReadOnlyList<(int Slot, string Text)> requests, DiscoveryCheckContext ctx)
+    public static List<DiscoveryViolation> CheckRequests(IReadOnlyList<(int Slot, string Text)> requests, DiscoveryCheckContext ctx,
+        IReadOnlyList<string>? peopleNamed = null)
     {
         var result = new List<DiscoveryViolation>();
         if (ctx == null)
@@ -122,6 +124,20 @@ public static partial class DiscoveryValidator
         }
 
         var names = NameSets.From(ctx);
+
+        // The NameBigram/HonorificName scans miss invented names whose first name is not in the cast (as depositions do)
+        foreach (var name in peopleNamed ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(name) || names.IsKnownName(name))
+                continue;
+            var clean = TextScan.Whitespace().Replace(name.Trim(), " ");
+            var slot = list.Where(r => !string.IsNullOrEmpty(r.Text) && RenderValidator.ContainsWord(r.Text, clean))
+                .Select(r => r.Slot)
+                .DefaultIfEmpty(0)
+                .First();
+            result.Add(UnknownPerson(slot, clean));
+        }
+
         foreach (var (slot, raw) in list)
         {
             var text = raw ?? string.Empty;

@@ -99,6 +99,26 @@ public class DiscoveryValidatorTests
         Assert.Equal(1, v.Number);
     }
 
+    [Fact]
+    public void D2_RequestsPeopleNamed_UnknownFlaggedOnItsSlot_KnownClean()
+    {
+        // WR-02: "Gordon" is no cast first name, so only the model's peopleNamed list catches "Gordon Pike"
+        var ctx = RequestContext(DiscoveryKind.RequestsForProduction, 2);
+        var requests = new[] { (1, "All documents concerning the schedule."), (2, "All emails from Gordon Pike to Harmon.") };
+
+        var unlisted = DiscoveryValidator.CheckRequests(requests, ctx);
+        var listed = DiscoveryValidator.CheckRequests(requests, ctx, new[] { "Gordon Pike", "Michael Scott", "Quist" });
+
+        Assert.DoesNotContain(unlisted, x => x.Rule == DiscoveryRule.D2UnknownPerson);
+        var v = Assert.Single(listed, x => x.Rule == DiscoveryRule.D2UnknownPerson);
+        Assert.Equal("Gordon Pike", v.Value);
+        Assert.Equal(2, v.Number);
+
+        // A name in no request text still counts, on number 0
+        var elsewhere = DiscoveryValidator.CheckRequests(requests, ctx, new[] { "Dana Whitlock" });
+        Assert.Contains(elsewhere, x => x.Rule == DiscoveryRule.D2UnknownPerson && x.Number == 0 && x.Value == "Dana Whitlock");
+    }
+
     // ---- D3: canonical values ----
 
     [Fact]

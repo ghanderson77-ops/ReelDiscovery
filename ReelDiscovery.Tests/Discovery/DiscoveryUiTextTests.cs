@@ -575,6 +575,8 @@ public class DiscoveryUiTextTests
             DiscoveryUiText.SettingsLineWritten(25, "Brightline", "Harmon", false));
         Assert.Equal("Uses the current settings: 1 request, requested by Brightline from Harmon.",
             DiscoveryUiText.SettingsLineWritten(1, "Brightline", "Harmon", true));
+        Assert.Equal("Uses the current settings: 25 requests, served by Brightline on Harmon Construction Group, Inc.",
+            DiscoveryUiText.SettingsLineWritten(25, "Brightline", "Harmon Construction Group, Inc.", false));
         Assert.Equal("Guidance (optional)", DiscoveryUiText.GuidanceCaption);
         Assert.Equal("For example: spend more time on the change order and less on scheduling.", DiscoveryUiText.GuidancePlaceholder(true));
         Assert.Equal("For example: focus more requests on the payment dispute.", DiscoveryUiText.GuidancePlaceholder(false));

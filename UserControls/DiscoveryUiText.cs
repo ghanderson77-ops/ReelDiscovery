@@ -454,8 +454,11 @@ public static class DiscoveryUiText
     }
 
     public static string SettingsLineWritten(int requests, string by, string on, bool memo) =>
-        "Uses the current settings: " + Plural(requests, "request", "requests")
-        + (memo ? $", requested by {by} from {on}." : $", served by {by} on {on}.");
+        EndSentence("Uses the current settings: " + Plural(requests, "request", "requests")
+            + (memo ? $", requested by {by} from {on}" : $", served by {by} on {on}"));
+
+    // A party such as "Harmon Construction Group, Inc." already ends the sentence
+    private static string EndSentence(string text) => text.EndsWith('.') ? text : text + ".";
 
     public static string GuidancePlaceholder(bool isDeposition) => isDeposition
         ? "For example: spend more time on the change order and less on scheduling."

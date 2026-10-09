@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-15-PLAN.md
-last_updated: "2026-10-09T00:57:30.322Z"
+stopped_at: Completed 08-16-PLAN.md
+last_updated: "2026-10-09T01:01:48.028Z"
 last_activity: 2026-10-09
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 145
-  percent: 97
+  completed_plans: 146
+  percent: 98
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 16 of 19
+Plan: 17 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-09
 
-Progress: [██████████] 97%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -197,6 +197,7 @@ Progress: [██████████] 97%
 | Phase 08 P13 | 10min | 1 tasks | 2 files |
 | Phase 08 P14 | 20min | 3 tasks | 4 files |
 | Phase 08 P15 | 25min | 2 tasks | 3 files |
+| Phase 08 P16 | 15min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -597,6 +598,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-15: A .docx write failure keeps the paid content in the sidecar with FileSaved = false; a Word lock leaves FailureReason empty (Not saved), other write errors set ReasonWriteFailed
 - [Phase 08]: 08-15: A fatal stop writes no record for unstarted documents; any billed spend goes to the existing record or UnattributedCostUsd
 - [Phase 08]: 08-15: A deposition success replaces that witness's ExhibitAssignments with the plan's Assignments (planner reuses saved numbers on regenerate)
+- [Phase 08]: 08-16: Leaving a step is guarded through IConfirmLeave; ShowStep no longer names StepCaseSummary
+- [Phase 08]: 08-16: No CaseStage for the discovery step (D-09); StepTypeForStage unchanged, so reopening never lands on it
 
 ### Pending Todos
 
@@ -618,6 +621,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-09T00:57:30.316Z
-Stopped at: Completed 08-15-PLAN.md
+Last session: 2026-10-09T01:01:48.022Z
+Stopped at: Completed 08-16-PLAN.md
 Resume file: None

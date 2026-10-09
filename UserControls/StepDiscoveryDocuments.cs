@@ -50,8 +50,8 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
     private DiscoveryCorpus _corpus = DiscoveryCorpus.None();
     private bool _isGenerating;
     private bool _loading;
-    // Assigned by the run code (StepDiscoveryDocuments.Run.cs, Plan 08-17)
-    private CancellationTokenSource? _cts = null;
+    // Set by EnterRunState while a run is active
+    private CancellationTokenSource? _cts;
     private readonly ToolTip _toolTip = new();
     private readonly System.Windows.Forms.Timer _debounce = new() { Interval = 250 };
     private readonly System.Windows.Forms.Timer _capTimer = new() { Interval = CapHintMilliseconds };
@@ -376,7 +376,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
     private CardPanel BuildDepositionsCard(int smallGap)
     {
         var (card, layout) = NewCard();
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Header (caption | selection hint)
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Card header (caption | selection hint)
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 1: Witness grid (or the no-witness text)
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 2: Pages row (label | field)
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 3: Pages hint
@@ -464,7 +464,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
     private CardPanel BuildWrittenCard(int gap, int smallGap)
     {
         var (card, layout) = NewCard();
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Header (caption)
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Card header (caption)
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 1: RFP row (checkbox | count)
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 2: ROG row (checkbox | count)
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 3: RFA row (checkbox | count)
@@ -523,7 +523,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
     private CardPanel BuildDocumentsCard(int smallGap)
     {
         var (card, layout) = NewCard();
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Header (caption | spent hint)
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 0: Card header (caption | spent hint)
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // 1: Documents grid (or the empty text)
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 2: Selected-row detail
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));     // 3: Row buttons
@@ -1133,6 +1133,33 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
             if (_isGenerating)
                 Thread.Sleep(15);
         }
+    }
+
+    /// <summary>
+    /// Run chrome on: the token source the run cancels through, inputs locked, Cancel Generation in the run slot, Back and
+    /// Next disabled. The run code (Plan 08-17) calls this as a run starts.
+    /// </summary>
+    internal void EnterRunState(CancellationTokenSource cts)
+    {
+        _cts = cts;
+        _isGenerating = true;
+        PaintRunChrome();
+        PaintHeaderButton();
+        RaiseStateChanged();
+    }
+
+    /// <summary>
+    /// Run chrome off once the run has unwound; the run code disposes its token source.
+    /// </summary>
+    internal void ExitRunState()
+    {
+        _cts = null;
+        _isGenerating = false;
+        if (IsDisposed)
+            return;
+        PaintRunChrome();
+        PaintHeaderButton();
+        RaiseStateChanged();
     }
 
     private void StopRun()
@@ -1814,6 +1841,8 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
     internal CheckBox RfpCheck => _chkRfp;
     internal CheckBox RogCheck => _chkRog;
     internal CheckBox RfaCheck => _chkRfa;
+    // Which request rows the variant shows (D-25); Visible reads false until the step is on screen
+    internal IReadOnlyList<bool> KindRowsShown => WrittenKinds.Select(IsKindVisible).ToList();
     internal TableLayoutPanel RogRow => _rowRog;
     internal TableLayoutPanel RfaRow => _rowRfa;
     internal ComboBox ServedByCombo => _cmbServedBy;

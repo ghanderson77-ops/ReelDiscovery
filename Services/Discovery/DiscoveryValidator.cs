@@ -19,6 +19,9 @@ public class DiscoveryCheckContext
     public int Part { get; set; }
     public int TargetTurns { get; set; }
     public List<int> ExpectedExhibits { get; set; } = new();
+
+    // Every exhibit number assigned to this deponent (any part); other "Exhibit N" mentions are stray
+    public HashSet<int> KnownExhibits { get; set; } = new();
     public DateOnly? DepositionDate { get; set; }
 
     // Code-provided people (reporter, videographer) and document numbers (exhibit DocIds) that are not in the guide
@@ -52,6 +55,12 @@ public static partial class DiscoveryValidator
     // A line that starts "a. ", "b) ", "1. " or "2) "
     [GeneratedRegex(@"(?m)^\s*(?:[a-z]|\d{1,2})[.)]\s", RegexOptions.None, 1000)]
     private static partial Regex SubpartLine();
+
+    // "Exhibit 14", "Exhibit No. 14"
+    [GeneratedRegex(@"\bExhibit[ \t]+(?:No\.?[ \t]*)?(\d{1,4})\b", RegexOptions.IgnoreCase, 1000)]
+    private static partial Regex ExhibitMention();
+
+    private const string ExhibitLabel = "Exhibit ";
 
     /// <summary>
     /// D1 (length, exhibits), D2, D3, D6 and D8 over one deposition chunk.
@@ -87,6 +96,7 @@ public static partial class DiscoveryValidator
 
         result.AddRange(CheckPeople(text, ctx.Part, names));
         result.AddRange(CheckValues(text, ctx.Part, ctx));
+        result.AddRange(CheckExhibitMentions(text, ctx));
         result.AddRange(CheckDates(text, ctx.Part, ctx));
         result.AddRange(CheckRealNames(text, ctx.Part, ctx));
         return Distinct(result);
@@ -189,12 +199,15 @@ public static partial class DiscoveryValidator
             DiscoveryRule.D1ExhibitNotShown => $"Show Exhibit {n} to the witness in this part.",
             DiscoveryRule.D2UnknownPerson => $"\"{v.Value}\" is not in the cast; use only the people listed.",
             DiscoveryRule.D3AmountVariant => $"\"{v.Value}\" is close to the case amount {v.Canonical}; use the exact amount.",
-            DiscoveryRule.D3UnknownIdentifier => $"\"{v.Value}\" is not a case document number; use only the listed identifiers.",
+            DiscoveryRule.D3UnknownIdentifier => v.Value.StartsWith(ExhibitLabel, StringComparison.OrdinalIgnoreCase)
+                ? $"\"{v.Value}\" is not an exhibit in this deposition; refer only to the listed exhibits."
+                : $"\"{v.Value}\" is not a case document number; use only the listed identifiers.",
             DiscoveryRule.D4MissingRequest => $"Request {n} is missing; return every slot exactly once.",
             DiscoveryRule.D4ExtraRequest => v.Expected > 0
                 ? $"Request {n} appears {v.Actual.ToString(Inv)} times; return every slot exactly once."
                 : $"Request {n} was not asked for; return only the listed slots.",
             DiscoveryRule.D5MissingFactDetail => CanonicalValueScanner.TryParseAmount(v.Value, out _)
+                || TextScan.DateMatchesIn(v.Value, 1).Count > 0
                 ? $"Admission {n} must state {v.Value}."
                 : $"Admission {n} must name {v.Value}.",
             DiscoveryRule.D6AfterDepositionDate => $"{v.Value} is after the deposition date; nothing after it can be mentioned.",
@@ -307,10 +320,25 @@ public static partial class DiscoveryValidator
         return result;
     }
 
+    // Exhibit numbers mentioned in testimony that were never assigned to this deponent (a D3-style identifier)
+    private static IEnumerable<DiscoveryViolation> CheckExhibitMentions(string text, DiscoveryCheckContext ctx)
+    {
+        var result = new List<DiscoveryViolation>();
+        var known = new HashSet<int>(ctx.KnownExhibits ?? new HashSet<int>());
+        known.UnionWith(ctx.ExpectedExhibits ?? new List<int>());
+        foreach (Match m in ExhibitMention().Matches(text))
+        {
+            if (int.TryParse(m.Groups[1].Value, NumberStyles.None, Inv, out var number) && !known.Contains(number))
+                result.Add(new DiscoveryViolation { Rule = DiscoveryRule.D3UnknownIdentifier, Number = ctx.Part, Value = ExhibitLabel + number.ToString(Inv) });
+        }
+
+        return result;
+    }
+
     // ---------- D5: RFA fidelity ----------
 
-    // A fact-keyed admission states every canonical amount of its fact and names each of the fact's actors (full, first or
-    // last name); genuineness admissions prove a document, not a fact, so they are skipped
+    // A fact-keyed admission states the fact's date (when dated), every canonical amount of its fact and names each of the
+    // fact's actors (full, first or last name); genuineness admissions prove a document, not a fact, so they are skipped
     private static IEnumerable<DiscoveryViolation> CheckFactDetail(string text, int slot, DiscoveryCheckContext ctx)
     {
         var result = new List<DiscoveryViolation>();
@@ -322,6 +350,15 @@ public static partial class DiscoveryValidator
         var fact = guide.FindFact(factId);
         if (fact == null)
             return result;
+
+        if (DateOnly.TryParseExact(fact.Date?.Trim(), "yyyy-MM-dd", Inv, DateTimeStyles.None, out var factDate)
+            && !TextScan.DateMatchesIn(text, factDate.Year, includeNumeric: true).Any(d => d.Date == factDate))
+        {
+            result.Add(new DiscoveryViolation
+            {
+                Rule = DiscoveryRule.D5MissingFactDetail, Number = slot, Value = CaseGuideDocxExporter.LongDate(fact.Date!.Trim()), Canonical = fact.Id
+            });
+        }
 
         var scannedAmounts = CanonicalValueScanner.Scan(text).Where(s => s.Kind == ScannedKind.Amount).ToList();
         foreach (var value in (guide.Values ?? new List<CanonicalValue>())
@@ -358,7 +395,7 @@ public static partial class DiscoveryValidator
 
         // Year-less dates are ambiguous; year 1 keeps them below every deposition date so they are never flagged. Over-strict
         // checks become warnings to tune (research Pitfall 7), so only dated mentions are checked
-        foreach (var (match, date) in TextScan.DateMatchesIn(text, defaultYear: 1))
+        foreach (var (match, date) in TextScan.DateMatchesIn(text, defaultYear: 1, includeNumeric: true))
         {
             if (date > depositionDate)
                 result.Add(new DiscoveryViolation { Rule = DiscoveryRule.D6AfterDepositionDate, Number = number, Value = match });

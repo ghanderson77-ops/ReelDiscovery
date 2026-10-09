@@ -291,7 +291,7 @@ internal static class DiscoveryPrompts
             case DiscoveryKind.RequestsForAdmission:
                 sb.Append("- Each request admits one discrete fact.\n");
                 sb.Append("- Write only the words that follow the given prefix; do not repeat the prefix.\n");
-                sb.Append("- State the listed amount and actor names exactly.\n");
+                sb.Append("- State the listed fact date, amount and actor names exactly.\n");
                 sb.Append("- A genuineness slot describes the document after the prefix by its date and subject.\n");
                 break;
         }

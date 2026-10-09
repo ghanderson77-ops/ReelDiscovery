@@ -181,7 +181,7 @@ public class DiscoveryValidatorTests
     {
         var ctx = RfaContext();
 
-        var violations = DiscoveryValidator.CheckRequests(new[] { (3, "Admit that Michael Scott approved a back-charge.") }, ctx);
+        var violations = DiscoveryValidator.CheckRequests(new[] { (3, $"Admit that on {FactDate(ctx)} Michael Scott approved a back-charge.") }, ctx);
 
         var v = Assert.Single(violations, x => x.Rule == DiscoveryRule.D5MissingFactDetail);
         Assert.Equal(3, v.Number);
@@ -193,18 +193,53 @@ public class DiscoveryValidatorTests
     {
         var ctx = RfaContext();
 
-        var violations = DiscoveryValidator.CheckRequests(new[] { (3, "Admit that Harmon withheld $487,250.00.") }, ctx);
+        var violations = DiscoveryValidator.CheckRequests(new[] { (3, $"Admit that on {FactDate(ctx)} Harmon withheld $487,250.00.") }, ctx);
 
         var v = Assert.Single(violations, x => x.Rule == DiscoveryRule.D5MissingFactDetail);
         Assert.Equal("Michael Scott", v.Value);
     }
 
     [Theory]
-    [InlineData("Admit that Mr. Scott approved a back-charge of $487,250.00.")]
-    [InlineData("Admit that Scott approved a back-charge of $487,250.")]
-    public void D5_ActorSurnameAndAmount_Clean(string text)
+    [InlineData("Admit that on {0} Mr. Scott approved a back-charge of $487,250.00.")]
+    [InlineData("Admit that Scott approved a back-charge of $487,250 on {0}.")]
+    public void D5_ActorSurnameAmountAndDate_Clean(string format)
     {
-        var violations = DiscoveryValidator.CheckRequests(new[] { (3, text) }, RfaContext());
+        var ctx = RfaContext();
+        var text = string.Format(System.Globalization.CultureInfo.InvariantCulture, format, FactDate(ctx));
+
+        var violations = DiscoveryValidator.CheckRequests(new[] { (3, text) }, ctx);
+
+        Assert.DoesNotContain(violations, x => x.Rule == DiscoveryRule.D5MissingFactDetail);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void D5_WrongOrMissingFactDate_Flagged(bool mentionWrongDate)
+    {
+        // WR-03 (a): a fact-keyed admission must carry the fact's own date
+        var ctx = RfaContext();
+        var factDate = DateOnly.ParseExact(ctx.Draft.Guide!.FindFact("F-010")!.Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var wrong = factDate.AddDays(9).ToString("MMMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        var text = mentionWrongDate
+            ? $"Admit that on {wrong} Michael Scott approved a back-charge of $487,250.00."
+            : "Admit that Michael Scott approved a back-charge of $487,250.00.";
+
+        var violations = DiscoveryValidator.CheckRequests(new[] { (3, text) }, ctx);
+
+        var v = Assert.Single(violations, x => x.Rule == DiscoveryRule.D5MissingFactDetail);
+        Assert.Equal(FactDate(ctx), v.Value);
+        Assert.Equal($"Admission 3 must state {FactDate(ctx)}.", DiscoveryValidator.FeedbackLine(v));
+    }
+
+    [Fact]
+    public void D5_NumericFactDate_Clean()
+    {
+        var ctx = RfaContext();
+        var factDate = DateOnly.ParseExact(ctx.Draft.Guide!.FindFact("F-010")!.Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var numeric = $"{factDate.Month}/{factDate.Day}/{factDate.Year}";
+
+        var violations = DiscoveryValidator.CheckRequests(new[] { (3, $"Admit that on {numeric} Michael Scott approved a back-charge of $487,250.00.") }, ctx);
 
         Assert.DoesNotContain(violations, x => x.Rule == DiscoveryRule.D5MissingFactDetail);
     }
@@ -236,6 +271,7 @@ public class DiscoveryValidatorTests
     [Theory]
     [InlineData("We met on July 2, 2025 to discuss it.", "July 2, 2025")]
     [InlineData("The record dated 2025-07-02 shows it.", "2025-07-02")]
+    [InlineData("I signed it on 7/2/2025, I think.", "7/2/2025")]
     public void D6_DateAfterDeposition_Flagged(string text, string expected)
     {
         var violations = DiscoveryValidator.CheckDepositionChunk(TextTurns(text), Array.Empty<string>(), DepoContext());
@@ -251,6 +287,24 @@ public class DiscoveryValidatorTests
             TextTurns("We met on July 2 and again on May 1, 2025."), Array.Empty<string>(), DepoContext());
 
         Assert.DoesNotContain(violations, x => x.Rule == DiscoveryRule.D6AfterDepositionDate);
+    }
+
+    // ---- stray exhibit numbers ----
+
+    [Fact]
+    public void D3_ExhibitNotAssignedToDeponent_Flagged_AssignedClean()
+    {
+        // WR-03 (c): "Exhibit 14" belongs to another witness; 3 (this part) and 5 (an earlier part) are this deponent's
+        var ctx = DepoContext();
+        ctx.ExpectedExhibits = new List<int> { 3 };
+        ctx.KnownExhibits = new HashSet<int> { 3, 5 };
+
+        var violations = DiscoveryValidator.CheckDepositionChunk(
+            TextTurns("Please look at Exhibit 3.", "As in Exhibit 5, yes.", "And Exhibit No. 14?"), Array.Empty<string>(), ctx);
+
+        var v = Assert.Single(violations, x => x.Rule == DiscoveryRule.D3UnknownIdentifier);
+        Assert.Equal("Exhibit 14", v.Value);
+        Assert.Contains("is not an exhibit in this deposition", DiscoveryValidator.FeedbackLine(v));
     }
 
     // ---- D7: interrogatory subparts ----
@@ -377,6 +431,9 @@ public class DiscoveryValidatorTests
     };
 
     // Slot 3 keyed to F-010 (actor Michael Scott), with the $487,250.00 value linked to it
+    private static string FactDate(DiscoveryCheckContext ctx) =>
+        ReelDiscovery.Services.Case.CaseGuideDocxExporter.LongDate(ctx.Draft.Guide!.FindFact("F-010")!.Date);
+
     private static DiscoveryCheckContext RfaContext()
     {
         var ctx = RequestContext(DiscoveryKind.RequestsForAdmission, 0);

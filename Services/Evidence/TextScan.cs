@@ -42,14 +42,19 @@ internal static partial class TextScan
     [GeneratedRegex(@"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sept?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?[ \t]+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?[ \t]+(\d{4})\b)?", RegexOptions.None, 1000)]
     internal static partial Regex MonthDate();
 
+    // en-US numeric "6/15/2024" (month first, four-digit year); opt-in, discovery testimony only
+    [GeneratedRegex(@"(?<![\d/])(\d{1,2})/(\d{1,2})/(\d{4})(?![\d/])", RegexOptions.None, 1000)]
+    internal static partial Regex NumericDate();
+
     private static readonly string[] MonthPrefixes = { "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec" };
 
     // Valid dates in order of appearance; a month-day date without a year takes the message's year
     internal static List<DateOnly> DatesIn(string sentence, int defaultYear) =>
         DateMatchesIn(sentence, defaultYear).Select(f => f.Date).ToList();
 
-    // Valid dates with the matched text, in order of appearance (DiscoveryValidator reports the text)
-    internal static List<(string Text, DateOnly Date)> DateMatchesIn(string sentence, int defaultYear)
+    // Valid dates with the matched text, in order of appearance (DiscoveryValidator reports the text); numeric M/D/YYYY
+    // dates only when asked for
+    internal static List<(string Text, DateOnly Date)> DateMatchesIn(string sentence, int defaultYear, bool includeNumeric = false)
     {
         var found = new List<(int Index, string Text, DateOnly Date)>();
         foreach (Match m in IsoDate().Matches(sentence))
@@ -64,6 +69,15 @@ internal static partial class TextScan
             var year = m.Groups[3].Success ? m.Groups[3].Value : defaultYear.ToString(Inv);
             if (month > 0 && TryDate(year, month.ToString(Inv), m.Groups[2].Value, out var d))
                 found.Add((m.Index, m.Value, d));
+        }
+
+        if (includeNumeric)
+        {
+            foreach (Match m in NumericDate().Matches(sentence))
+            {
+                if (TryDate(m.Groups[3].Value, m.Groups[1].Value, m.Groups[2].Value, out var d))
+                    found.Add((m.Index, m.Value, d));
+            }
         }
 
         return found.OrderBy(f => f.Index).Select(f => (f.Text, f.Date)).ToList();

@@ -220,6 +220,7 @@ public sealed class DepositionWriter
             Part = part,
             TargetTurns = chunk.TargetTurns,
             ExpectedExhibits = new List<int>(chunk.ExhibitNumbers),
+            KnownExhibits = plan.Exhibits.Where(e => e != null).Select(e => e.Number).ToHashSet(),
             DepositionDate = plan.Schedule.Date
         };
 

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-09-PLAN.md
-last_updated: "2026-10-09T00:02:23.117Z"
+stopped_at: Completed 08-10-PLAN.md
+last_updated: "2026-10-09T00:10:30.023Z"
 last_activity: 2026-10-09
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 139
-  percent: 93
+  completed_plans: 140
+  percent: 94
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 10 of 19
+Plan: 11 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-09
 
-Progress: [█████████░] 93%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -191,6 +191,7 @@ Progress: [█████████░] 93%
 | Phase 08 P07 | 25min | 2 tasks | 6 files |
 | Phase 08 P08 | 15min | 2 tasks | 4 files |
 | Phase 08 P09 | 12min | 2 tasks | 6 files |
+| Phase 08 P10 | 6min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -574,6 +575,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-09: ResolveState treats a non-failed document without content as Not generated (nothing to Save Again from)
 - [Phase 08]: 08-09: Case Summary row with only failed documents reads 'Not generated · {f} failed' in Danger
 - [Phase 08]: 08-09: UI-SPEC S2 amended: guidance placeholder hidden while the focused empty field has focus; shows once focus leaves
+- [Phase 08]: 08-10: Written work item RequestCount = planned slot count and CallCount = ceil(slots / 25), so the estimate follows the lowered RFA count
+- [Phase 08]: 08-10: ForDocument force-enables the document's own written kind on a settings copy so a cleared saved set can still be regenerated
+- [Phase 08]: 08-10: Build uses draft.Discovery or the non-mutating Defaults(draft); only ApplyDefaults writes the draft
 
 ### Pending Todos
 
@@ -595,6 +599,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-09T00:02:23.111Z
-Stopped at: Completed 08-09-PLAN.md
+Last session: 2026-10-09T00:10:30.018Z
+Stopped at: Completed 08-10-PLAN.md
 Resume file: None

@@ -1,12 +1,19 @@
+using System.Globalization;
+using ReelDiscovery.Helpers;
+using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Discovery;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Services.Discovery;
 using ReelDiscovery.Tests.Corpus;
+using ReelDiscovery.Tests.Discovery;
+using ReelDiscovery.Tests.Evidence;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Case;
 
-// Covers only the pure StepCaseSummary line helpers; no control is instantiated.
+// Covers the pure StepCaseSummary line helpers and (08-18) the Discovery documents row on a step that is never shown.
 public class CaseSummaryLogicTests
 {
     [Theory]
@@ -202,5 +209,280 @@ public class CaseSummaryLogicTests
         // Keep This Plan for the edited guide: the row counts the plan as current again
         draft.Corpus.DismissedStaleGuideHash = draft.Guide.ComputeHash();
         Assert.False(StepCaseSummary.PlanRowStale(draft));
+    }
+
+    // ----- Discovery documents row (08-UI-SPEC S4) -----
+
+    internal static readonly DateTime DiscoveryGeneratedUtc = new(2025, 6, 2, 12, 0, 0, DateTimeKind.Utc);
+
+    internal static string DiscoveryDateText =>
+        DiscoveryGeneratedUtc.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.GetCultureInfo("en-US"));
+
+    /// <summary>
+    /// A discovery document as a finished run leaves it: content, stamped hashes, file saved and the .docx on disk.
+    /// </summary>
+    internal static DiscoveryDocument SeedDiscoveryDocument(CaseDraft draft, string folder, DiscoveryKind kind, string key,
+        string witnessId = "", bool writeFile = true, decimal cost = 0.50m)
+    {
+        var doc = new DiscoveryDocument
+        {
+            Key = key,
+            Kind = kind,
+            WitnessId = witnessId,
+            FileName = key + ".docx",
+            Status = DiscoveryStatus.Generated,
+            FileSaved = true,
+            RequestCount = kind == DiscoveryKind.Deposition ? 0 : 12,
+            TestimonyPages = kind == DiscoveryKind.Deposition ? 25 : 0,
+            CostUsd = cost,
+            GeneratedUtc = DiscoveryGeneratedUtc
+        };
+        if (kind == DiscoveryKind.Deposition)
+            doc.Deposition = new DepositionContent { WitnessId = witnessId, WitnessName = "Witness " + key, Date = "2025-06-01" };
+        else
+            doc.Written = new WrittenDiscoveryContent();
+        DiscoveryStaleness.Stamp(doc, draft, null);
+        if (writeFile)
+        {
+            Directory.CreateDirectory(DiscoveryStore.FolderPath(folder));
+            File.WriteAllBytes(Path.Combine(DiscoveryStore.FolderPath(folder), doc.FileName), new byte[] { 1 });
+        }
+        return doc;
+    }
+
+    /// <summary>
+    /// One clean set, one with warnings and one failed: "2 documents · ... · 1 with warnings · 1 failed".
+    /// </summary>
+    internal static void SeedDiscoveryWarningsAndFailed(CaseDraft draft, string folder)
+    {
+        var set = new DiscoveryDocumentSet { CaseId = draft.CaseId };
+        set.Upsert(SeedDiscoveryDocument(draft, folder, DiscoveryKind.RequestsForProduction, "RFP"));
+        var rog = SeedDiscoveryDocument(draft, folder, DiscoveryKind.Interrogatories, "ROG");
+        rog.Status = DiscoveryStatus.GeneratedWithWarnings;
+        set.Upsert(rog);
+        var rfa = SeedDiscoveryDocument(draft, folder, DiscoveryKind.RequestsForAdmission, "RFA", writeFile: false);
+        rfa.Written = null;
+        rfa.Status = DiscoveryStatus.Failed;
+        rfa.FailureReason = "Timed out";
+        set.Upsert(rfa);
+        DiscoveryStore.SaveAsync(folder, set).GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Every problem clause: warnings, out of date, not saved, file missing and failed, plus one clean deposition.
+    /// </summary>
+    internal static void SeedDiscoveryEveryProblem(CaseDraft draft, string folder)
+    {
+        var witnesses = DiscoveryTestData.WitnessIds(draft);
+        var set = new DiscoveryDocumentSet { CaseId = draft.CaseId };
+        set.Upsert(SeedDiscoveryDocument(draft, folder, DiscoveryKind.Deposition, "DEP-" + witnesses[0], witnesses[0]));
+        var notSaved = SeedDiscoveryDocument(draft, folder, DiscoveryKind.Deposition, "DEP-" + witnesses[1], witnesses[1],
+            writeFile: false);
+        notSaved.FileSaved = false;
+        set.Upsert(notSaved);
+        set.Upsert(SeedDiscoveryDocument(draft, folder, DiscoveryKind.Deposition, "DEP-" + witnesses[2], witnesses[2],
+            writeFile: false));
+        var rfp = SeedDiscoveryDocument(draft, folder, DiscoveryKind.RequestsForProduction, "RFP");
+        rfp.Status = DiscoveryStatus.GeneratedWithWarnings;
+        set.Upsert(rfp);
+        var rog = SeedDiscoveryDocument(draft, folder, DiscoveryKind.Interrogatories, "ROG");
+        rog.GuideHash = "guide-edited-since";
+        set.Upsert(rog);
+        var rfa = SeedDiscoveryDocument(draft, folder, DiscoveryKind.RequestsForAdmission, "RFA", writeFile: false);
+        rfa.Written = null;
+        rfa.Status = DiscoveryStatus.Failed;
+        rfa.FailureReason = "Timed out";
+        set.Upsert(rfa);
+        DiscoveryStore.SaveAsync(folder, set).GetAwaiter().GetResult();
+    }
+
+    private sealed class DiscoveryStepFixture : IDisposable
+    {
+        private readonly string _root;
+
+        public DiscoveryStepFixture()
+        {
+            _root = Path.Combine(Path.GetTempPath(), "rd-summary-discovery-" + Guid.NewGuid().ToString("N"));
+            var store = new CaseStore(Path.Combine(_root, "Cases"), Path.Combine(_root, "AppData"));
+            var draft = DiscoveryTestData.LitigationDraft();
+            DiscoveryStepModel.ApplyDefaults(draft);
+            draft.AdvanceStage(CaseStage.Summary);
+            Folder = store.EnsureFolder(draft);
+            Assert.True(store.SaveNow(draft), store.LastSaveError);
+            Draft = draft;
+            State = new WizardState { Case = draft, CaseStore = store };
+        }
+
+        public WizardState State { get; }
+        public CaseDraft Draft { get; }
+        public string Folder { get; }
+
+        public void Dispose()
+        {
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+            catch (IOException)
+            {
+                // A file handle may linger briefly; the temp folder is harmless
+            }
+        }
+    }
+
+    private static StepCaseSummary CreateStep(DiscoveryStepFixture fixture, List<string>? opened = null)
+    {
+        var step = new StepCaseSummary();
+        step.OpenFile = path => opened?.Add(path);
+        step.OpenFolder = path => opened?.Add(path);
+        step.LoadForRender(fixture.State);
+        return step;
+    }
+
+    [Fact]
+    public void DiscoveryRow_NoSidecar_NotGenerated()
+    {
+        using var fixture = new DiscoveryStepFixture();
+
+        GenerateCorpusStepTests.RunSta(() =>
+        {
+            using var step = CreateStep(fixture);
+
+            Assert.Equal(DiscoveryUiText.SummaryTitle, step.DiscoveryLine1.Text);
+            Assert.Equal(DiscoveryUiText.SummaryLine2, step.DiscoveryLine2.Text);
+            Assert.Equal("Not generated", step.DiscoveryLine3.Text);
+            Assert.Equal(Theme.BorderStrong, step.DiscoveryDotColor);
+            Assert.Equal(Theme.TextMuted, step.DiscoveryLine3.ForeColor);
+            Assert.False(step.OpenDiscoveryButton.Visible);
+            Assert.True(step.DiscoveryDocumentsButton.Visible);
+            Assert.Equal("Open Discovery Folder", step.OpenDiscoveryButton.Text);
+            Assert.Equal("Discovery Documents", step.DiscoveryDocumentsButton.Text);
+            Assert.True(step.DiscoveryLine3.AutoEllipsis);
+        });
+    }
+
+    [Fact]
+    public void DiscoveryRow_WarningsAndFailed_DangerWithTooltip()
+    {
+        using var fixture = new DiscoveryStepFixture();
+        SeedDiscoveryWarningsAndFailed(fixture.Draft, fixture.Folder);
+
+        GenerateCorpusStepTests.RunSta(() =>
+        {
+            using var step = CreateStep(fixture);
+
+            Assert.Equal($"2 documents · last generated {DiscoveryDateText} · 1 with warnings · 1 failed", step.DiscoveryLine3.Text);
+            Assert.Equal(Theme.Danger, step.DiscoveryLine3.ForeColor);
+            Assert.Equal(Theme.Danger, step.DiscoveryDotColor);
+            var tooltip = step.TooltipOf(step.DiscoveryLine3);
+            Assert.StartsWith(step.DiscoveryLine3.Text, tooltip);
+            Assert.Contains("Requests for Production (12): ", tooltip);
+            Assert.Contains("Interrogatories (12): ", tooltip);
+            Assert.Contains("Requests for Admission (12): ", tooltip);
+            Assert.True(step.OpenDiscoveryButton.Visible);
+            Assert.True(step.DiscoveryDocumentsButton.Visible);
+        });
+    }
+
+    [Fact]
+    public void DiscoveryRow_CostRowIncludesDiscoverySpend_WithoutCorpusPlan()
+    {
+        using var fixture = new DiscoveryStepFixture();
+        SeedDiscoveryWarningsAndFailed(fixture.Draft, fixture.Folder);
+
+        GenerateCorpusStepTests.RunSta(() =>
+        {
+            using var step = CreateStep(fixture);
+            Assert.Equal("$1.50 spent · discovery documents $1.50", step.GenerationCostLine3.Text);
+        });
+    }
+
+    [Fact]
+    public void DiscoveryDocumentsButton_NavigatesThroughTheSeam()
+    {
+        using var fixture = new DiscoveryStepFixture();
+
+        GenerateCorpusStepTests.RunSta(() =>
+        {
+            using var step = CreateStep(fixture);
+            var calls = 0;
+            step.NavigateToDiscoveryOverride = () => calls++;
+
+            step.NavigateToDiscovery();
+
+            Assert.Equal(1, calls);
+        });
+    }
+
+    [Fact]
+    public void OpenDiscoveryFolder_OpensTheCaseDiscoveryFolder()
+    {
+        using var fixture = new DiscoveryStepFixture();
+        SeedDiscoveryWarningsAndFailed(fixture.Draft, fixture.Folder);
+
+        GenerateCorpusStepTests.RunSta(() =>
+        {
+            var opened = new List<string>();
+            using var step = CreateStep(fixture, opened);
+
+            step.OpenDiscoveryFolder();
+
+            Assert.Equal(new[] { Path.GetFullPath(DiscoveryStore.FolderPath(fixture.Folder)) }, opened);
+        });
+    }
+
+    [Fact]
+    public void OpenDiscoveryFolder_MissingFolder_OpensNothing()
+    {
+        using var fixture = new DiscoveryStepFixture();
+
+        GenerateCorpusStepTests.RunSta(() =>
+        {
+            var opened = new List<string>();
+            using var step = CreateStep(fixture, opened);
+
+            step.OpenDiscoveryFolder();
+
+            Assert.Empty(opened);
+        });
+    }
+
+    [Fact]
+    public void Source_DiscoveryGroupBetweenQualityChecksAndCaseGuide()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "UserControls", "StepCaseSummary.cs"));
+        var blind = source.IndexOf("(_rowBlindReview, \"\"),", StringComparison.Ordinal);
+        var heading = source.IndexOf("(null, \"Discovery\"),", StringComparison.Ordinal);
+        var row = source.IndexOf("(_rowDiscovery, \"\"),", StringComparison.Ordinal);
+        var guide = source.IndexOf("(null, \"Case guide\"),", StringComparison.Ordinal);
+        Assert.True(blind > 0 && blind < heading && heading < row && row < guide, "Discovery group order");
+        Assert.Contains("NavigateToStep(typeof(StepDiscoveryDocuments))", source);
+    }
+
+    [Fact]
+    public void Source_ExportAllNeverTouchesDiscovery()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "UserControls", "StepCaseSummary.cs")).Replace("\r\n", "\n");
+        var start = source.IndexOf("private async Task ExportAllAsync()", StringComparison.Ordinal);
+        Assert.True(start > 0);
+        var end = source.IndexOf("\n    }\n", start, StringComparison.Ordinal);
+        Assert.True(end > start);
+        Assert.DoesNotContain("Discovery", source[start..end]);
+
+        // D-30: nothing about discovery documents enters the answer key or the review protocol
+        foreach (var file in new[] { "AnswerKeyBuilder.cs", "ReviewProtocolBuilder.cs" })
+        {
+            var text = File.ReadAllText(Path.Combine(FindRepoRoot(), "Services", "Corpus", file));
+            Assert.DoesNotContain("DiscoveryStore", text);
+            Assert.DoesNotContain("DiscoveryDocument", text);
+        }
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "ReelDiscovery.csproj")))
+            dir = dir.Parent;
+        return dir?.FullName ?? throw new InvalidOperationException("Could not locate ReelDiscovery.csproj");
     }
 }

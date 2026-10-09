@@ -481,6 +481,163 @@ public class CaseSummaryRenderTests
         });
     }
 
+    // ----- Render check 9 (08-UI-SPEC S4-S5, DPI rule 40): Discovery group and the plan-independent cost row -----
+
+    [Fact]
+    public void DiscoveryRow_NotGenerated()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                using var fixture = new SummaryFixture(DiscoveryDraft());
+
+                DiscoveryCapture capture = null!;
+                var result = Render(fixture, "case-summary-discovery-not-generated", size,
+                    control => capture = CaptureDiscovery((StepCaseSummary)control));
+
+                AssertRendered(result);
+                AssertDiscoveryRowFits(capture);
+                Assert.Equal("Not generated", capture.Line3);
+                Assert.Equal(Helpers.Theme.BorderStrong, capture.Dot);
+                Assert.Equal(new[] { "Discovery Documents" }, capture.VisibleButtons);
+                Assert.Equal("Nothing spent yet", capture.CostLine3);
+            }
+        });
+    }
+
+    [Fact]
+    public void DiscoveryRow_ProblemState()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                var draft = DiscoveryDraft();
+                using var fixture = new SummaryFixture(draft);
+                CaseSummaryLogicTests.SeedDiscoveryEveryProblem(draft, draft.FolderPath);
+
+                DiscoveryCapture capture = null!;
+                var result = Render(fixture, "case-summary-discovery-problems", size,
+                    control => capture = CaptureDiscovery((StepCaseSummary)control));
+
+                AssertRendered(result);
+                AssertDiscoveryRowFits(capture);
+                Assert.Equal($"5 documents · last generated {CaseSummaryLogicTests.DiscoveryDateText} · 1 with warnings · 1 out of date"
+                             + " · 1 not saved · 1 file missing · 1 failed", capture.Line3);
+                Assert.Equal(Helpers.Theme.Danger, capture.Color);
+                Assert.Equal(Helpers.Theme.Danger, capture.Dot);
+                Assert.Equal(new[] { "Open Discovery Folder", "Discovery Documents" }, capture.VisibleButtons);
+                // Six documents listed under the full line
+                Assert.Equal(1 + 1 + 6, capture.Tooltip.Split(Environment.NewLine).Length);
+            }
+        });
+    }
+
+    [Fact]
+    public void CostRow_NoCorpusPlan_WithDiscoverySpend()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                var draft = DiscoveryDraft();
+                using var fixture = new SummaryFixture(draft);
+                CaseSummaryLogicTests.SeedDiscoveryWarningsAndFailed(draft, draft.FolderPath);
+
+                DiscoveryCapture capture = null!;
+                var notPlanned = false;
+                var result = Render(fixture, "case-summary-cost-no-corpus-discovery", size, control =>
+                {
+                    notPlanned = AllControls(control).OfType<Label>().Any(l => l.Text == CorpusUiText.NotPlannedLine && l.Visible);
+                    capture = CaptureDiscovery((StepCaseSummary)control);
+                });
+
+                AssertRendered(result);
+                AssertDiscoveryRowFits(capture);
+                Assert.True(notPlanned);
+                Assert.Equal("$1.50 spent · discovery documents $1.50", capture.CostLine3);
+                Assert.Equal("Spent so far: $1.50\nDiscovery documents: $1.50", capture.CostTooltip);
+                Assert.Equal(Helpers.Theme.Success, capture.CostDot);
+            }
+        });
+    }
+
+    private static CaseDraft DiscoveryDraft()
+    {
+        var draft = Discovery.DiscoveryTestData.LitigationDraft();
+        DiscoveryStepModel.ApplyDefaults(draft);
+        return draft;
+    }
+
+    /// <summary>
+    /// The Discovery documents row and the Generation cost row: text, colors, tooltips, visible buttons and the layout facts
+    /// DPI rule 40 checks.
+    /// </summary>
+    private sealed class DiscoveryCapture
+    {
+        public string Line3 = string.Empty;
+        public Color Color;
+        public Color Dot;
+        public string Tooltip = string.Empty;
+        public List<string> VisibleButtons = new();
+        public string CostLine3 = string.Empty;
+        public string CostTooltip = string.Empty;
+        public Color CostDot;
+
+        // Discovery line 3: single-line text height, label height, label right edge, button column left edge
+        public int LineHeight;
+        public int Height;
+        public int Right;
+        public int ButtonsLeft;
+
+        // (caption, preferred width, actual width)
+        public List<(string Caption, int Preferred, int Width)> Buttons = new();
+    }
+
+    private static DiscoveryCapture CaptureDiscovery(StepCaseSummary step)
+    {
+        RowsHost(step).ScrollControlIntoView(step.DiscoveryLine3.Parent!);
+        Application.DoEvents();
+
+        var label = step.DiscoveryLine3;
+        var row = (TableLayoutPanel)label.Parent!;
+        var buttons = row.Controls.OfType<FlowLayoutPanel>().Single();
+        var capture = new DiscoveryCapture
+        {
+            Line3 = label.Text,
+            Color = label.ForeColor,
+            Dot = step.DiscoveryDotColor,
+            Tooltip = step.TooltipOf(label),
+            CostLine3 = step.GenerationCostLine3.Text,
+            CostTooltip = step.GenerationCostTooltip,
+            CostDot = step.GenerationCostDotColor,
+            LineHeight = TextRenderer.MeasureText("Ag", label.Font).Height,
+            Height = label.Height,
+            Right = label.Right,
+            ButtonsLeft = buttons.Left
+        };
+        foreach (var button in new[] { step.OpenDiscoveryButton, step.DiscoveryDocumentsButton })
+        {
+            if (!button.Visible)
+                continue;
+            capture.VisibleButtons.Add(button.Text);
+            capture.Buttons.Add((button.Text, button.GetPreferredSize(Size.Empty).Width, button.Width));
+        }
+        return capture;
+    }
+
+    // DPI rule 40: line 3 is one line (ellipsis + tooltip), the buttons never ellipsize and never overlap line 3
+    private static void AssertDiscoveryRowFits(DiscoveryCapture capture)
+    {
+        Assert.True(capture.Height < 2 * capture.LineHeight,
+            $"line 3 '{capture.Line3}' is {capture.Height}px, more than one line ({capture.LineHeight}px)");
+        Assert.True(capture.Right <= capture.ButtonsLeft,
+            $"line 3 '{capture.Line3}' ends at {capture.Right}, past the button column at {capture.ButtonsLeft}");
+        foreach (var (caption, preferred, width) in capture.Buttons)
+            Assert.True(width >= preferred, $"'{caption}' is {width}px, needs {preferred}px");
+    }
+
     /// <summary>
     /// What the four new rows show (Generation cost, Consistency scans, Leakage audit, Blind review): line 3 text, color,
     /// dot and tooltip; the visible QA buttons; and the layout facts DPI rule 28 checks.

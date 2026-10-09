@@ -101,7 +101,9 @@ public class BatchingLlmProvider : ILlmProvider
     private readonly object _lock = new();
 
     // All below guarded by _lock
-    private readonly Dictionary<string, StageQueue> _queues = new(StringComparer.Ordinal);
+    // CX-01: keyed by (stage label, model id). OpenAI accepts one model per batch input file, so a chunk mixing decoys
+    // (Story tier) and filler (Volume tier) under one label would fail validation and run live; done for every provider
+    private readonly Dictionary<(string Label, string ModelId), StageQueue> _queues = new();
     private readonly Dictionary<string, PendingItem> _inflight = new(StringComparer.Ordinal);
     private readonly Dictionary<string, AvailableResult> _available = new(StringComparer.Ordinal);
     private readonly HashSet<string> _failedIds = new(StringComparer.Ordinal);
@@ -588,6 +590,7 @@ public class BatchingLlmProvider : ILlmProvider
             return await SendLiveAsync(request, ct);
 
         var label = BatchStage.Current;
+        var key = (label, request.ModelId ?? string.Empty);
         var id = RequestIdentity.CustomIdFor(_live.Kind, request);
 
         if (BatchStage.IsLive)
@@ -641,10 +644,10 @@ public class BatchingLlmProvider : ILlmProvider
                 }
                 else
                 {
-                    if (!_queues.TryGetValue(label, out var queue))
+                    if (!_queues.TryGetValue(key, out var queue))
                     {
                         queue = new StageQueue();
-                        _queues[label] = queue;
+                        _queues[key] = queue;
                         startFlush = true;
                     }
 
@@ -662,7 +665,7 @@ public class BatchingLlmProvider : ILlmProvider
         }
 
         if (startFlush)
-            _ = Task.Run(() => FlushLoopAsync(label));
+            _ = Task.Run(() => FlushLoopAsync(key));
 
         if (ready != null)
         {
@@ -681,7 +684,7 @@ public class BatchingLlmProvider : ILlmProvider
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // D-09: the caller stops waiting; the provider batch keeps running and stays in the ledger
-            RemoveWaiter(label, id, waiter!);
+            RemoveWaiter(key, id, waiter!);
             throw;
         }
 
@@ -742,8 +745,9 @@ public class BatchingLlmProvider : ILlmProvider
 
     // ----- queue and flush (D-07) -----
 
-    private async Task FlushLoopAsync(string label)
+    private async Task FlushLoopAsync((string Label, string ModelId) key)
     {
+        var label = key.Label;
         List<PendingItem>? taken = null;
         try
         {
@@ -754,7 +758,7 @@ public class BatchingLlmProvider : ILlmProvider
 
                 lock (_lock)
                 {
-                    if (!_queues.TryGetValue(label, out var queue))
+                    if (!_queues.TryGetValue(key, out var queue))
                         return;
 
                     // Every caller of an item cancelled before the flush: nobody wants it, so never pay for it
@@ -766,7 +770,7 @@ public class BatchingLlmProvider : ILlmProvider
 
                     if (queue.Items.Count == 0)
                     {
-                        _queues.Remove(label);
+                        _queues.Remove(key);
                         return;
                     }
 
@@ -777,8 +781,8 @@ public class BatchingLlmProvider : ILlmProvider
                         continue;
                     }
 
-                    // New arrivals start a fresh queue and flush loop for this label
-                    _queues.Remove(label);
+                    // New arrivals start a fresh queue and flush loop for this label and model
+                    _queues.Remove(key);
                     taken = new List<PendingItem>();
                     foreach (var item in queue.Items)
                     {
@@ -807,7 +811,7 @@ public class BatchingLlmProvider : ILlmProvider
             if (taken != null)
                 ReleaseUnsubmitted(taken);
             else
-                ReleaseQueue(label);
+                ReleaseQueue(key);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1237,12 +1241,12 @@ public class BatchingLlmProvider : ILlmProvider
     }
 
     // WR-A04: detached before the flush took the queue; anyone still queued under this label runs live
-    private void ReleaseQueue(string label)
+    private void ReleaseQueue((string Label, string ModelId) key)
     {
         List<PendingItem> queued;
         lock (_lock)
         {
-            if (!_queues.Remove(label, out var queue))
+            if (!_queues.Remove(key, out var queue))
                 return;
 
             queued = queue.Items.ToList();
@@ -1302,14 +1306,14 @@ public class BatchingLlmProvider : ILlmProvider
         }
     }
 
-    private void RemoveWaiter(string label, string id, TaskCompletionSource<Delivery> waiter)
+    private void RemoveWaiter((string Label, string ModelId) key, string id, TaskCompletionSource<Delivery> waiter)
     {
         lock (_lock)
         {
             if (_inflight.TryGetValue(id, out var inflight) && inflight.Waiters.Remove(waiter))
                 return;
 
-            if (_queues.TryGetValue(label, out var queue) && queue.ById.TryGetValue(id, out var queued))
+            if (_queues.TryGetValue(key, out var queue) && queue.ById.TryGetValue(id, out var queued))
                 queued.Waiters.Remove(waiter);
         }
     }

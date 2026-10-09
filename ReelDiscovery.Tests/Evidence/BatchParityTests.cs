@@ -405,6 +405,9 @@ public partial class BatchParityTests : IDisposable
         var relevant = RelevantThreadIds();
         Assert.Contains(batch.Transport.Submissions.SelectMany(s => s), i => ThreadOf(i.Request).Length > 0 && !relevant.Contains(ThreadOf(i.Request)));
         Assert.DoesNotContain(batch.Transport.Submissions.SelectMany(s => s), i => relevant.Contains(ThreadOf(i.Request)));
+
+        // CX-01: one model per provider batch (OpenAI rejects mixed-model input files)
+        Assert.All(batch.Transport.Submissions, s => Assert.Single(s.Select(i => i.Request.ModelId).Distinct()));
         lock (batch.Live.Requests)
         {
             foreach (var id in relevant)
@@ -581,11 +584,14 @@ public partial class BatchParityTests : IDisposable
 
         var cancelled = await Run(new GenerationRunner(first.Gateway), Input(folder, first), ct: cts.Token);
         Assert.Equal(GenerationOutcome.Cancelled, cancelled.Outcome);
-        var pendingBatch = Assert.Single(transport.Submissions);
-        var pendingIds = pendingBatch.Select(i => i.CustomId).ToHashSet(StringComparer.Ordinal);
-        var pendingThreads = pendingBatch.Select(i => ThreadOf(i.Request)).Where(t => t.Length > 0).ToHashSet(StringComparer.Ordinal);
+        // CX-01: decoys (Story tier) and filler (Volume tier) are separate provider batches under the same label
+        var pendingBatches = transport.Submissions.ToList();
+        Assert.NotEmpty(pendingBatches);
+        Assert.All(pendingBatches, s => Assert.Single(s.Select(i => i.Request.ModelId).Distinct()));
+        var pendingIds = pendingBatches.SelectMany(s => s).Select(i => i.CustomId).ToHashSet(StringComparer.Ordinal);
+        var pendingThreads = pendingBatches.SelectMany(s => s).Select(i => ThreadOf(i.Request)).Where(t => t.Length > 0).ToHashSet(StringComparer.Ordinal);
         Assert.NotEmpty(pendingThreads);
-        Assert.Equal(1, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
+        Assert.Equal(pendingBatches.Count, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
         var done = JournalRecords(folder).Where(r => r.Type == JournalRecordType.ThreadDone).Select(r => r.ThreadId).ToHashSet();
         Assert.All(RelevantThreadIds(), id => Assert.Contains(id, done));
         Assert.DoesNotContain(done, pendingThreads.Contains);
@@ -597,7 +603,7 @@ public partial class BatchParityTests : IDisposable
         var result = await Run(new GenerationRunner(second.Gateway), Input(folder, second), snapshot);
 
         Assert.Equal(GenerationOutcome.Finished, result.Outcome);
-        Assert.DoesNotContain(transport.Submissions.Skip(1).SelectMany(s => s), i => pendingIds.Contains(i.CustomId));
+        Assert.DoesNotContain(transport.Submissions.Skip(pendingBatches.Count).SelectMany(s => s), i => pendingIds.Contains(i.CustomId));
         Assert.Contains(snapshot.Peek().Events, e => e.Kind == GenerationEventKind.BatchCollectedAfterRestart);
         Assert.Equal(0, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
         Assert.Equal(NormalizedJournal(reference, skipRunLines: true), NormalizedJournal(folder, skipRunLines: true));

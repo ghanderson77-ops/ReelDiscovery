@@ -231,6 +231,46 @@ public class BatchingLlmProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task CX01_SameStageDifferentModels_OneModelPerSubmission()
+    {
+        var transport = Transport();
+        var provider = Create(Live(), transport);
+        var events = new EventLog();
+        events.Attach(provider);
+
+        // Decoys (Story tier) and ordinary filler (Volume tier) share the non-relevant label
+        List<Task<LlmProviderResponse>> tasks;
+        using (BatchStage.Enter("non-relevant mail"))
+        {
+            tasks = new[] { "story-model", "volume-model", "story-model", "volume-model", "volume-model" }
+                .Select((model, i) =>
+                {
+                    var request = Req($"r{i}");
+                    request.ModelId = model;
+                    return provider.SendAsync(request);
+                })
+                .ToList();
+        }
+
+        var responses = await Task.WhenAll(tasks).WaitAsync(Wait);
+
+        Assert.Equal(2, transport.Submissions.Count);
+        Assert.All(transport.Submissions, s => Assert.Single(s.Select(i => i.Request.ModelId).Distinct()));
+        Assert.Equal(new[] { 2, 3 }, transport.Submissions.Select(s => s.Count).OrderBy(c => c).ToArray());
+        Assert.All(responses, r => Assert.True(r.IsBatch));
+
+        // The stage label (status display, run-end close) is unchanged
+        var records = new BatchLedger(_folder).Replay().SubmittedById.Values.ToList();
+        Assert.Equal(2, records.Count);
+        Assert.All(records, r =>
+        {
+            Assert.Equal("non-relevant mail", r.StageLabel);
+            Assert.Single(r.Items.Select(i => i.ModelId).Distinct());
+        });
+        Assert.All(events.All.Where(e => e.Kind == BatchStatusKind.Submitted), e => Assert.Equal("non-relevant mail", e.StageLabel));
+    }
+
+    [Fact]
     public async Task RequestCap_SplitsIntoSeveralBatches()
     {
         var transport = Transport();

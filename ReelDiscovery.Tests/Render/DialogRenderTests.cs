@@ -216,6 +216,63 @@ public class DialogRenderTests
         });
     }
 
+    // Render state 8 (08-UI-SPEC): a deposition with every optional line, and a written set without the warning
+    [Theory]
+    [InlineData(true, "dialog-regenerate-deposition")]
+    [InlineData(false, "dialog-regenerate-written")]
+    public void RegenerateDiscoveryDialog_RendersWithoutClipping(bool deposition, string name)
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var height = 0;
+            var workingHeight = 0;
+            var focused = false;
+            var warning = false;
+            var buttons = new List<(string Text, int Top)>();
+            var result = RenderHarness.RenderForm(() => deposition
+                ? new RegenerateDiscoveryDialog("Deposition of Michael Scott",
+                    "Brightline Windows v. Harmon Construction - Deposition of Michael Scott (Excerpt).docx", true,
+                    DiscoveryUiText.SettingsLineDeposition(25, "2025-06-10"), fileOpen: true, 0.42m)
+                : new RegenerateDiscoveryDialog("Requests for Production (25)",
+                    "Brightline Windows v. Harmon Construction - Requests for Production.docx", false,
+                    DiscoveryUiText.SettingsLineWritten(25, "Brightline Windows LLC", "Harmon Construction Group, Inc.", memo: false),
+                    fileOpen: false, 0.18m), name, form =>
+            {
+                height = form.ClientSize.Height;
+                workingHeight = Screen.FromControl(form).WorkingArea.Height;
+                var dialog = (RegenerateDiscoveryDialog)form;
+                focused = form.ActiveControl == dialog.GuidanceBox;
+                warning = dialog.WarningShown;
+                buttons = Descendants(form).OfType<Button>().OrderBy(b => b.Left).Select(b => (b.Text, b.Top)).ToList();
+                Assert.Contains(Descendants(form).OfType<Label>(), l => l.Text == DiscoveryUiText.RegenerateHeadline(
+                    deposition ? "Deposition of Michael Scott" : "Requests for Production (25)"));
+                Assert.All(Descendants(form).OfType<Label>(), l => Assert.False(l.UseMnemonic));
+            });
+
+            AssertRendered(result, height, workingHeight);
+            Assert.True(focused);
+            Assert.Equal(deposition, warning);
+            Assert.Equal(new[] { "Cancel", "Regenerate Document" }, buttons.Select(b => b.Text).ToArray());
+            // Buttons read left to right and sit on one row
+            Assert.Single(buttons.Select(b => b.Top).Distinct());
+        });
+    }
+
+    [Fact]
+    public void RegenerateDiscoveryDialog_TruncatesGuidance()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            using var dialog = new RegenerateDiscoveryDialog("Interrogatories (18)", "a.docx", false, "", false, 0m);
+            Assert.Equal(RegenerateDiscoveryDialog.MaxGuidanceLength, dialog.GuidanceBox.MaxLength);
+            // Text set in code bypasses MaxLength; the property still cuts it
+            dialog.GuidanceBox.Text = "  " + new string('x', 1_500) + "  ";
+            Assert.Equal(1_000, dialog.Guidance.Length);
+            dialog.GuidanceBox.Text = "  focus on the payment dispute  ";
+            Assert.Equal("focus on the payment dispute", dialog.Guidance);
+        });
+    }
+
     [Fact]
     public void RegenerateTabDialog_RejectsIssues()
     {

@@ -323,7 +323,7 @@ Same construction as `RegenerateTabDialog`:
 | 6 | Estimate | `Estimated cost ≈${c}, ±50%.` | `SmallFont`, `TextMuted`, top 12, bottom 16 |
 | 7 | Buttons | `Cancel` (Default, `DialogResult.Cancel`) · `Regenerate Document` (Primary, `DialogResult.OK`) | `AddButtons` |
 
-- Initial focus: the guidance field.
+- Initial focus: the guidance field. WinForms hides a TextBox's placeholder while that box has focus, so on open the field shows a caret and no example text; the placeholder appears once focus leaves the empty field. The `Guidance (optional)` caption above keeps the field self-explanatory (amended in execution 08-09 after the 144-DPI inspection).
 - On OK, the step starts a one-document run with the guidance appended to the prompt (code limits it to 1,000 characters [DEFAULT]). The run uses the same status line, bar, `Cancel Generation` button and rules as S1. The old file and the old sidecar record are replaced only after the new content passes or keeps its best attempt. A failed regenerate leaves the previous version in place, and the row shows `Failed` with the detail `Failed: {reason}. The previous version is kept.` [DEFAULT].
 
 ### S3. Confirmations (MessageBox; default button = the safe choice, `Button2`)

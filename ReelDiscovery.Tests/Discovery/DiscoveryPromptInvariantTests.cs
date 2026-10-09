@@ -95,6 +95,35 @@ public class DiscoveryPromptInvariantTests
             Assert.DoesNotContain("Acme", prompt);
     }
 
+    [Fact]
+    public void Substitution_D8RetryFeedback_NeverCarriesOriginalOrAlias()
+    {
+        // WR-01: the retry prompt names only the substitute, never the real name or a configured alias
+        var draft = DiscoveryTestData.LitigationDraft();
+        var sub = draft.Substitutions.First(s => s.Apply);
+        sub.Aliases = new List<string> { "Acme Corp", "ACME Industries" };
+        var plan = DepositionPlanner.Plan(draft, new[] { "CH-003" }, 25, null, null).Single();
+        var written = WrittenDiscoveryPlanner.Plan(draft, DiscoveryKind.Interrogatories, new DiscoverySettings { RogCount = 18 }, null)!;
+
+        var feedback = new[] { sub.Original }.Concat(sub.Aliases)
+            .Select(found => new DiscoveryViolation { Rule = DiscoveryRule.D8RealEntityName, Number = 1, Value = found, Canonical = sub.Substitute })
+            .ToList();
+        var prompts = new[]
+        {
+            DiscoveryPrompts.BuildDepositionPrompt(draft, plan, plan.Chunks[0], Array.Empty<DepositionTurn>(), Array.Empty<string>(), string.Empty, feedback),
+            DiscoveryPrompts.BuildWrittenPrompt(draft, written, written.Slots, string.Empty, feedback)
+        };
+
+        foreach (var prompt in prompts)
+        {
+            Assert.Contains(DiscoveryValidator.FeedbackHeader, prompt);
+            Assert.Contains(sub.Substitute, prompt);
+            Assert.DoesNotContain(sub.Original, prompt, StringComparison.OrdinalIgnoreCase);
+            foreach (var alias in sub.Aliases)
+                Assert.DoesNotContain(alias, prompt, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     // ---- deposition prompts ----
 
     [Fact]

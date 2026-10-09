@@ -324,7 +324,8 @@ public class DiscoveryValidatorTests
         Assert.StartsWith("Problems in the previous attempt (fix all of them and rewrite the whole part):", text);
         Assert.Equal(4, lines.Count(l => l.StartsWith("- ", StringComparison.Ordinal)));
         Assert.Contains("- Part 2 has 30 turns; write about 100.", lines);
-        Assert.Contains("- Use \"Apex Fabrication Co.\" instead of \"Acme Corporation\".", lines);
+        Assert.Contains("- Part or request 0 uses a real-world name; use \"Apex Fabrication Co.\" instead.", lines);
+        Assert.DoesNotContain("Acme", text);
     }
 
     [Fact]

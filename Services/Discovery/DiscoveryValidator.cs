@@ -183,7 +183,8 @@ public static partial class DiscoveryValidator
                 : $"Admission {n} must name {v.Value}.",
             DiscoveryRule.D6AfterDepositionDate => $"{v.Value} is after the deposition date; nothing after it can be mentioned.",
             DiscoveryRule.D7Subparts => $"Interrogatory {n} has lettered or numbered parts; ask one question.",
-            DiscoveryRule.D8RealEntityName => $"Use \"{v.Canonical}\" instead of \"{v.Value}\".",
+            // The real name (Value) never goes back to the model: it may be a configured alias it never wrote (T-08-32)
+            DiscoveryRule.D8RealEntityName => $"Part or request {n} uses a real-world name; use \"{v.Canonical}\" instead.",
             _ => v.Value
         };
     }

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-16-PLAN.md
-last_updated: "2026-10-09T01:01:48.028Z"
+stopped_at: Completed 08-17-PLAN.md
+last_updated: "2026-10-09T01:12:11.673Z"
 last_activity: 2026-10-09
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 146
-  percent: 98
+  completed_plans: 147
+  percent: 99
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 17 of 19
+Plan: 18 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-09
 
-Progress: [██████████] 98%
+Progress: [██████████] 99%
 
 ## Performance Metrics
 
@@ -198,6 +198,7 @@ Progress: [██████████] 98%
 | Phase 08 P14 | 20min | 3 tasks | 4 files |
 | Phase 08 P15 | 25min | 2 tasks | 3 files |
 | Phase 08 P16 | 15min | 2 tasks | 6 files |
+| Phase 08 P17 | 25min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -600,6 +601,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-15: A deposition success replaces that witness's ExhibitAssignments with the plan's Assignments (planner reuses saved numbers on regenerate)
 - [Phase 08]: 08-16: Leaving a step is guarded through IConfirmLeave; ShowStep no longer names StepCaseSummary
 - [Phase 08]: 08-16: No CaseStage for the discovery step (D-09); StepTypeForStage unchanged, so reopening never lands on it
+- [Phase 08]: 08-17: DiscoveryProgress gained Done (set on the finish report); start and finish reports were otherwise identical
+- [Phase 08]: 08-17: Running status line uses the grid's short title, not the work item's caption title
+- [Phase 08]: 08-17: Row actions are internal Task/void methods wired to Click so tests drive them without showing the step
 
 ### Pending Todos
 
@@ -621,6 +625,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-09T01:01:48.022Z
-Stopped at: Completed 08-16-PLAN.md
+Last session: 2026-10-09T01:12:11.667Z
+Stopped at: Completed 08-17-PLAN.md
 Resume file: None

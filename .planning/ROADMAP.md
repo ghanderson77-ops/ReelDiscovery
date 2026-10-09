@@ -285,7 +285,7 @@ Plans:
 - [x] 08-14-PLAN.md — StepDiscoveryDocuments layout, binding, lifecycle and render checks 1-7 (Wave 4)
 - [x] 08-15-PLAN.md — DiscoveryGenerator: bounded run, persistence, fatal/cancel, regenerate, Save Again; Start Over regression (Wave 5)
 - [x] 08-16-PLAN.md — Wizard integration: 9 steps, NavigateToStep(Type), IConfirmLeave, close-during-run (Wave 5)
-- [ ] 08-17-PLAN.md — Step run wiring: Generate, Cancel, Regenerate..., Save Again, Open in Word/Folder (Wave 6)
+- [x] 08-17-PLAN.md — Step run wiring: Generate, Cancel, Regenerate..., Save Again, Open in Word/Folder (Wave 6)
 - [ ] 08-18-PLAN.md — Case Summary Discovery row + discovery clause in the cost row without a corpus plan (Wave 6)
 - [ ] 08-19-PLAN.md — Phase gate: full suite + renders, Word/150% DPI/live-provider human verification, mark ANC complete (Wave 7, checkpoint)
 **UI hint**: yes
@@ -304,4 +304,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
-| 8. Ancillary Discovery Documents | 16/19 | In Progress | - |
+| 8. Ancillary Discovery Documents | 17/19 | In Progress | - |

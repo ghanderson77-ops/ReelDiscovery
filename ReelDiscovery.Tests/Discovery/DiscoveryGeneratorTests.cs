@@ -8,6 +8,7 @@ using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Discovery;
 using ReelDiscovery.Tests.Case;
 using ReelDiscovery.Tests.Fakes;
+using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Discovery;
 
@@ -369,6 +370,43 @@ public partial class DiscoveryGeneratorTests : IDisposable
         Assert.True(written.Length > 3);
         Assert.Equal((byte)'P', written[0]);
         Assert.Equal((byte)'K', written[1]);
+    }
+
+    [Fact]
+    public async Task WriteFailure_IsNotSaved_NotRewrittenByGenerate_SaveAgainClearsIt()
+    {
+        // CR-01: a non-lock write failure (a directory squats on the .docx path) keeps the paid content
+        Script();
+        var items = Items(RfpKey);
+        var path = DocxPath(items[0]);
+        Directory.CreateDirectory(path);
+
+        var result = await NewGenerator().RunAsync(_draft, null, items);
+
+        Assert.Equal(1, result.NotSaved);
+        Assert.Equal(0, result.Failed);
+        var record = LoadSet().Find(RfpKey)!;
+        Assert.True(record.HasContent);
+        Assert.False(record.FileSaved);
+        Assert.True(DiscoveryGenerator.IsWriteFailure(record.FailureReason));
+
+        // The row is Not saved (Save Again), never Failed, so Generate Documents does not pay for it again
+        var model = DiscoveryStepModel.Build(_draft, LoadSet(), DiscoveryCorpus.None(), CaseTestData.StoryModel(), _folder);
+        var row = model.Rows.Single(r => r.Key == RfpKey);
+        Assert.Equal(DiscoveryRowState.NotSaved, row.State);
+        Assert.False(row.PreviousKept);
+        Assert.StartsWith("Not saved: the Word file could not be written", DiscoveryUiText.RowStatusFull(row));
+        Assert.DoesNotContain(model.ToWrite, i => i.Key == RfpKey);
+
+        var requests = _fake.Requests.Count;
+        Directory.Delete(path);
+        var saved = await DiscoveryGenerator.SaveAgainAsync(_draft, RfpKey);
+
+        Assert.True(saved.Saved);
+        Assert.Equal(requests, _fake.Requests.Count);
+        var after = LoadSet().Find(RfpKey)!;
+        Assert.True(after.FileSaved);
+        Assert.Equal(string.Empty, after.FailureReason);
     }
 
     [Fact]

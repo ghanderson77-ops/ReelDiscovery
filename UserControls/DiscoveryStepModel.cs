@@ -289,7 +289,7 @@ public class DiscoveryStepModel
             RequestCount = requests,
             Warnings = doc?.Warnings ?? new List<DiscoveryViolation>(),
             FailureReason = doc?.FailureReason ?? string.Empty,
-            PreviousKept = hasContent && !string.IsNullOrWhiteSpace(doc!.FailureReason),
+            PreviousKept = hasContent && !string.IsNullOrWhiteSpace(doc!.FailureReason) && !DiscoveryGenerator.IsWriteFailure(doc.FailureReason),
             FileName = doc != null && !string.IsNullOrWhiteSpace(doc.FileName) ? doc.FileName : item?.FileName ?? string.Empty,
             Stale = stale,
             PlannerNotes = doc?.PlannerNotes is { Count: > 0 } notes ? notes : PlanNotes(item),

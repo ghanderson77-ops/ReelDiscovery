@@ -109,6 +109,13 @@ public sealed class DiscoveryGenerator
     public static string ReasonWriteFailed(string message) => $"{WriteFailedPrefix}{(message ?? string.Empty).Trim().TrimEnd('.')}";
 
     /// <summary>
+    /// True when <paramref name="reason"/> records a .docx write failure (content kept, Save Again rewrites it) rather
+    /// than a model failure.
+    /// </summary>
+    public static bool IsWriteFailure(string? reason) =>
+        !string.IsNullOrEmpty(reason) && reason.StartsWith(WriteFailedPrefix, StringComparison.Ordinal);
+
+    /// <summary>
     /// Writes every work item. <paramref name="guidance"/> maps a document key to the user's regenerate guidance.
     /// Existing content is replaced only by a successful write; a failed regenerate keeps the previous version (U54).
     /// </summary>
@@ -249,7 +256,7 @@ public sealed class DiscoveryGenerator
         }
 
         document.FileSaved = true;
-        if (document.FailureReason.StartsWith(WriteFailedPrefix, StringComparison.Ordinal))
+        if (IsWriteFailure(document.FailureReason))
             document.FailureReason = string.Empty;
 
         try

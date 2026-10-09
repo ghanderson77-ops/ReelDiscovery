@@ -1,5 +1,6 @@
 using System.Globalization;
 using ReelDiscovery.Models.Discovery;
+using ReelDiscovery.Services.Discovery;
 
 namespace ReelDiscovery.UserControls;
 
@@ -245,6 +246,10 @@ public static class DiscoveryUiText
             return DiscoveryRowState.Writing;
         if (doc == null)
             return DiscoveryRowState.NotGenerated;
+        // Paid content whose .docx could not be written is Not saved (Save Again, no model call), never Failed: a Failed
+        // row would be written, and billed, again by Generate Documents
+        if (doc.HasContent && !doc.FileSaved && DiscoveryGenerator.IsWriteFailure(doc.FailureReason))
+            return DiscoveryRowState.NotSaved;
         if (!string.IsNullOrWhiteSpace(doc.FailureReason) || doc.Status == DiscoveryStatus.Failed)
             return DiscoveryRowState.Failed;
         if (!doc.HasContent)
@@ -308,7 +313,9 @@ public static class DiscoveryUiText
                 return $"Out of date with the case guide: {StaleWhat(row.Stale)} changed after this document was written. Click Regenerate... to write it again.";
 
             case DiscoveryRowState.NotSaved:
-                return $"Not saved: {row.FileName} is open in Word. Close it, then click Save Again.";
+                return DiscoveryGenerator.IsWriteFailure(row.FailureReason)
+                    ? $"Not saved: {Reason(row.FailureReason)}. Click Save Again to write it from the saved content."
+                    : $"Not saved: {row.FileName} is open in Word. Close it, then click Save Again.";
 
             case DiscoveryRowState.FileMissing:
                 return $"File missing: {row.FileName} is not in the Discovery folder. Click Save Again to write it from the saved content.";

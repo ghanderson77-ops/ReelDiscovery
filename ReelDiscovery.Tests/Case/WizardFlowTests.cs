@@ -1,6 +1,7 @@
 using ReelDiscovery.Forms;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Services.Case;
 using ReelDiscovery.Tests.Render;
 using ReelDiscovery.UserControls;
 
@@ -15,7 +16,8 @@ public class WizardFlowTests
     private static readonly Type[] CaseSteps =
     {
         typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
-        typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepCaseSummary)
+        typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepDiscoveryDocuments),
+        typeof(StepCaseSummary)
     };
 
     [Fact]
@@ -93,13 +95,108 @@ public class WizardFlowTests
     [Fact]
     public void CorpusStepsSitBetweenGuideAndSummary()
     {
-        // D-12: Corpus Settings is step 5 of 8, Review Plan step 6 and Generate Corpus step 7 (UI-SPEC S4)
+        // D-12: Corpus Settings is step 5 of 9, Review Plan step 6 and Generate Corpus step 7 (UI-SPEC S4)
         var types = WizardForm.StepTypes.ToList();
-        Assert.Equal(8, types.Count);
+        Assert.Equal(9, types.Count);
         Assert.Equal(4, types.IndexOf(typeof(StepCorpusSettings)));
         Assert.Equal(5, types.IndexOf(typeof(StepReviewPlan)));
         Assert.Equal(6, types.IndexOf(typeof(StepGenerateCorpus)));
-        Assert.Equal(7, types.IndexOf(typeof(StepCaseSummary)));
+        Assert.Equal(8, types.IndexOf(typeof(StepCaseSummary)));
+    }
+
+    [Fact]
+    public void DiscoveryStepSitsBetweenCorpusAndSummary()
+    {
+        // D-07: Discovery Documents is the optional step 8 of 9, between Generate Corpus and Case Summary
+        var types = WizardForm.StepTypes.ToList();
+        Assert.Equal(9, types.Count);
+        Assert.Equal(6, types.IndexOf(typeof(StepGenerateCorpus)));
+        Assert.Equal(7, types.IndexOf(typeof(StepDiscoveryDocuments)));
+        Assert.Equal(8, types.IndexOf(typeof(StepCaseSummary)));
+    }
+
+    [Fact]
+    public void DiscoveryStep_HasNoCaseStage()
+    {
+        // D-09: no new CaseStage; reopening a case lands on a corpus stage or Summary, never on the discovery step
+        Assert.Equal(7, Enum.GetValues<CaseStage>().Length);
+        foreach (var stage in Enum.GetValues<CaseStage>())
+            Assert.NotEqual(typeof(StepDiscoveryDocuments), WizardForm.StepTypeForStage(stage));
+    }
+
+    [Fact]
+    public void LeaveConfirmation_IsGeneralizedThroughIConfirmLeave()
+    {
+        // Research Pattern 1: steps that guard leaving implement IConfirmLeave instead of another `is StepX` check
+        Assert.True(typeof(IConfirmLeave).IsAssignableFrom(typeof(StepCaseSummary)));
+        Assert.True(typeof(IConfirmLeave).IsAssignableFrom(typeof(StepDiscoveryDocuments)));
+
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "Forms", "WizardForm.cs"));
+        Assert.Contains("is IConfirmLeave", source);
+        Assert.DoesNotContain("is StepCaseSummary summary && !summary.ConfirmLeave()", source);
+    }
+
+    [Fact]
+    public void DiscoveryRun_IsStoppedOnClose()
+    {
+        // D-05 / T-08-48: a discovery run counts as active, close asks C-D2 and the run is cancelled and awaited
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "Forms", "WizardForm.cs"));
+
+        var active = source.IndexOf("private bool IsRunActive()", StringComparison.Ordinal);
+        var stop = source.IndexOf("private void StopActiveRun()", StringComparison.Ordinal);
+        Assert.True(active >= 0 && stop > active, "IsRunActive body not found");
+        Assert.Contains("StepDiscoveryDocuments { IsGenerating: true }", source[active..stop]);
+
+        var waiting = source.IndexOf("private void WaitWhileStopping", StringComparison.Ordinal);
+        Assert.True(waiting > stop, "StopActiveRun body not found");
+        Assert.Contains("discovery.CancelAndWaitForRun", source[stop..waiting]);
+
+        var closing = source.IndexOf("protected override void OnFormClosing", StringComparison.Ordinal);
+        Assert.True(closing >= 0, "OnFormClosing not found");
+        Assert.Contains("StepDiscoveryDocuments => DiscoveryUiText.CD2CloseDuringRun()", source[closing..]);
+    }
+
+    [Fact]
+    public void NavigateToStep_ByType_OpensDiscoveryDocuments()
+    {
+        // D-08: Case Summary reaches the Discovery Documents step by type, never by index
+        RenderHarness.RunSta(() =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "rd-flow-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var store = new CaseStore(Path.Combine(root, "Cases"), Path.Combine(root, "AppData"));
+                var draft = CaseTestData.SampleGuidedDraft();
+                draft.AdvanceStage(CaseStage.Summary);
+                store.EnsureFolder(draft);
+                Assert.True(store.SaveNow(draft), store.LastSaveError);
+
+                using var form = WizardForm.CreateForRender(new WizardState { Case = draft, CaseStore = store });
+                form.NavigateToStep(typeof(StepDiscoveryDocuments));
+
+                // ShowStep is async (entering a step saves the case): pump until the header shows the new step
+                var title = form.Controls.Find("lblStepTitle", searchAllChildren: true).OfType<Label>().Single();
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                while (!title.Text.StartsWith("Step 8 of 9", StringComparison.Ordinal) && DateTime.UtcNow < deadline)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(20);
+                }
+
+                Assert.Equal("Step 8 of 9: Discovery Documents", title.Text);
+            }
+            finally
+            {
+                try
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                catch (IOException)
+                {
+                    // A file handle may linger briefly after the form closes; the temp folder is harmless
+                }
+            }
+        });
     }
 
     [Fact]

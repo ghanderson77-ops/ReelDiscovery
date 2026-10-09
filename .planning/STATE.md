@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-13-PLAN.md
-last_updated: "2026-10-09T00:26:01.368Z"
+stopped_at: Completed 08-14-PLAN.md
+last_updated: "2026-10-09T00:47:38.100Z"
 last_activity: 2026-10-09
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 143
-  percent: 96
+  completed_plans: 144
+  percent: 97
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 14 of 19
+Plan: 15 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-09
 
-Progress: [██████████] 96%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -195,6 +195,7 @@ Progress: [██████████] 96%
 | Phase 08 P11 | 15min | 2 tasks | 3 files |
 | Phase 08 P12 | 15min | 1 tasks | 2 files |
 | Phase 08 P13 | 10min | 1 tasks | 2 files |
+| Phase 08 P14 | 20min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -588,6 +589,10 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-13: A refusal or timeout on a written-set batch is retried (up to 3 attempts) while no usable attempt exists; a batch with no usable attempt fails the whole set
 - [Phase 08]: 08-13: Request texts empty after label/prefix cleanup are dropped before validation so the slot reads as missing (D4) and is omitted
 - [Phase 08]: 08-13: Duplicated RFA prefixes are stripped with or without the trailing comma; stored Text is prefix + space + model text
+- [Phase 08]: 08-14: While a run is active the status line wraps to two lines and the estimate line hides, so the part counter shows; outcome lines stay one line (UI-SPEC S1 Card 3 amended)
+- [Phase 08]: 08-14: EnterRunState(cts)/ExitRunState() own the discovery run chrome (inputs locked, Cancel Generation slot, Back/Next off); 08-17 calls them
+- [Phase 08]: 08-14: Discovery inputs write CaseDraft.Discovery, set UserTouched and queue a background save; ValidateStepAsync commits, saves and always returns true
+- [Phase 08]: 08-14: Witness grid carries the 15 px text inset on its text columns because a column Padding.Empty inherits the grid inset and hid the check boxes
 
 ### Pending Todos
 
@@ -609,6 +614,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-09T00:26:01.362Z
-Stopped at: Completed 08-13-PLAN.md
+Last session: 2026-10-09T00:47:38.094Z
+Stopped at: Completed 08-14-PLAN.md
 Resume file: None

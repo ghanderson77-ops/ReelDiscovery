@@ -432,4 +432,38 @@ public class GenerationCostEstimatorTests
         Assert.True(work.IncludeSideWorld);
         Assert.True(work.IncludeVoiceCast);
     }
+
+    [Fact]
+    public void PriceDiscovery_NullModelOrNoWork_IsZero()
+    {
+        Assert.Equal(0m, GenerationCostEstimator.PriceDiscoveryDeposition(4, 25, null));
+        Assert.Equal(0m, GenerationCostEstimator.PriceDiscoveryWrittenSet(2, 40, null));
+        Assert.Equal(0m, GenerationCostEstimator.PriceDiscoveryDeposition(0, 25, Story));
+        Assert.Equal(0m, GenerationCostEstimator.PriceDiscoveryWrittenSet(2, 0, Story));
+    }
+
+    [Fact]
+    public void PriceDiscoveryDeposition_ChunkInputAndPageOutput_WithQaOverhead()
+    {
+        var expected = S(4 * 7_000, 25 * 560) * 1.15m;
+
+        Assert.Equal(expected, GenerationCostEstimator.PriceDiscoveryDeposition(4, 25, Story));
+    }
+
+    [Fact]
+    public void PriceDiscoveryDeposition_MorePagesOrChunks_CostMore()
+    {
+        var baseCost = GenerationCostEstimator.PriceDiscoveryDeposition(4, 25, Story);
+
+        Assert.True(GenerationCostEstimator.PriceDiscoveryDeposition(4, 50, Story) > baseCost);
+        Assert.True(GenerationCostEstimator.PriceDiscoveryDeposition(8, 25, Story) > baseCost);
+    }
+
+    [Fact]
+    public void PriceDiscoveryWrittenSet_CallInputAndRequestOutput_WithQaOverhead()
+    {
+        var expected = S(2 * 6_000, 40 * 150) * 1.15m;
+
+        Assert.Equal(expected, GenerationCostEstimator.PriceDiscoveryWrittenSet(2, 40, Story));
+    }
 }

@@ -51,11 +51,11 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Ancillary Discovery Documents
 
-- [ ] **ANC-01**: User can optionally generate deposition transcript excerpts for chosen key witnesses, formatted with numbered lines and pages
-- [ ] **ANC-02**: User can optionally generate Requests for Production keyed to the issues
-- [ ] **ANC-03**: User can optionally generate Requests for Admission keyed to the key facts
-- [ ] **ANC-04**: User can optionally generate Interrogatories keyed to the issues
-- [ ] **ANC-05**: Ancillary documents are consistent with the core document, cast and facts, and are exported as .docx
+- [x] **ANC-01**: User can optionally generate deposition transcript excerpts for chosen key witnesses, formatted with numbered lines and pages
+- [x] **ANC-02**: User can optionally generate Requests for Production keyed to the issues
+- [x] **ANC-03**: User can optionally generate Requests for Admission keyed to the key facts
+- [x] **ANC-04**: User can optionally generate Interrogatories keyed to the issues
+- [x] **ANC-05**: Ancillary documents are consistent with the core document, cast and facts, and are exported as .docx
 
 ### Corpus Planning
 
@@ -202,11 +202,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GUIDE-09 | Phase 3 | Complete |
 | GUIDE-10 | Phase 3 | Complete |
 | GUIDE-11 | Phase 3 | Complete |
-| ANC-01 | Phase 8 | Pending |
-| ANC-02 | Phase 8 | Pending |
-| ANC-03 | Phase 8 | Pending |
-| ANC-04 | Phase 8 | Pending |
-| ANC-05 | Phase 8 | Pending |
+| ANC-01 | Phase 8 | Complete |
+| ANC-02 | Phase 8 | Complete |
+| ANC-03 | Phase 8 | Complete |
+| ANC-04 | Phase 8 | Complete |
+| ANC-05 | Phase 8 | Complete |
 | PLAN-01 | Phase 4 | Complete |
 | PLAN-02 | Phase 4 | Complete |
 | PLAN-03 | Phase 4 | Complete |

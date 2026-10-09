@@ -19,7 +19,7 @@ namespace ReelDiscovery.UserControls;
 /// Case Summary step (UI-SPEC S2, D-12): where the case is saved, what it contains, Word exports,
 /// Open Case Folder / Move Case Folder, and Finish (saves and closes, no discard prompt).
 /// </summary>
-public class StepCaseSummary : UserControl, IWizardStep
+public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
 {
     private const string Subtitle = "Everything is saved automatically in the case folder.";
     private const string ClosingHint = "Click Finish to close. To continue later, open this case from Recent cases on the Describe the Case step.";
@@ -2078,7 +2078,7 @@ public class StepCaseSummary : UserControl, IWizardStep
     /// <summary>
     /// Leaving the step during a review asks C-Q3: No keeps the user here, Yes stops the review and leaves.
     /// </summary>
-    internal bool ConfirmLeave()
+    public bool ConfirmLeave()
     {
         if (!_reviewRunning)
             return true;

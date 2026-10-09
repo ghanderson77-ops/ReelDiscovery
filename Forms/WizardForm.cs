@@ -301,12 +301,14 @@ public partial class WizardForm : Form
     internal static IReadOnlyList<Type> StepTypes { get; } = new[]
     {
         typeof(StepApiConfiguration), typeof(StepCaseScenario), typeof(StepCoreDocument), typeof(StepCaseGuide),
-        typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepCaseSummary)
+        typeof(StepCorpusSettings), typeof(StepReviewPlan), typeof(StepGenerateCorpus), typeof(StepDiscoveryDocuments),
+        typeof(StepCaseSummary)
     };
 
     /// <summary>
     /// The step that shows a case at the given stage. Unknown values (a hand-edited case.json) open the scenario (T-03-60).
     /// </summary>
+    // D-09: typeof(StepDiscoveryDocuments) has no CaseStage; it is reached by Next or from Case Summary
     internal static Type StepTypeForStage(CaseStage stage) => stage switch
     {
         CaseStage.CoreDocument => typeof(StepCoreDocument),
@@ -359,9 +361,10 @@ public partial class WizardForm : Form
     {
         if (index < 0 || index >= _steps.Count) return;
 
-        // Leaving Case Summary during a blind review asks C-Q3; No stays on the step (07-UI-SPEC S2 R4)
+        // Leaving a step during a run asks first: Case Summary blind review (C-Q3, 07-UI-SPEC S2 R4), Discovery
+        // Documents run (C-D1). No stays on the step
         if (index != _currentStepIndex && _currentStepIndex >= 0 && _currentStepIndex < _steps.Count
-            && _steps[_currentStepIndex] is StepCaseSummary summary && !summary.ConfirmLeave())
+            && _steps[_currentStepIndex] is IConfirmLeave leaver && !leaver.ConfirmLeave())
             return;
 
         // Hide current step
@@ -466,6 +469,17 @@ public partial class WizardForm : Form
         }
     }
 
+    /// <summary>
+    /// Opens a step by its type (D-08: Case Summary reaches Discovery Documents). Does nothing for the API step.
+    /// </summary>
+    public void NavigateToStep(Type stepType)
+    {
+        // Map by step type, never by index: steps may be inserted later
+        var index = _steps.FindIndex(s => s.GetType() == stepType);
+        if (index > 0)
+            ShowStep(index);
+    }
+
     public void EnableNavigation(bool enabled)
     {
         _btnBack.Enabled = enabled && _currentStepIndex > 0;
@@ -508,7 +522,7 @@ public partial class WizardForm : Form
         // Every case step commits its pending edits synchronously before its first await
         if (_currentStepIndex >= 0 && _currentStepIndex < _steps.Count
             && _steps[_currentStepIndex] is (StepCaseScenario or StepCoreDocument or StepCaseGuide or StepCorpusSettings or StepReviewPlan or StepGenerateCorpus
-                or StepCaseSummary)
+                or StepDiscoveryDocuments or StepCaseSummary)
                 and IWizardStep step)
         {
             _ = step.OnLeaveStepAsync();
@@ -527,7 +541,7 @@ public partial class WizardForm : Form
 
         return _steps[_currentStepIndex] is StepCoreDocument { IsGenerating: true } or StepCaseGuide { IsGenerating: true }
             or StepReviewPlan { IsPlanning: true } or StepGenerateCorpus { IsGenerating: true }
-            or StepCaseSummary { IsReviewRunning: true };
+            or StepDiscoveryDocuments { IsGenerating: true } or StepCaseSummary { IsReviewRunning: true };
     }
 
     // Disposing the running step cancels its token, so no further calls are billed (WR-07, T-03-61).
@@ -546,6 +560,9 @@ public partial class WizardForm : Form
         else if (step is StepGenerateCorpus generate)
             // In-flight threads are discarded; finished ones are already journaled and saved (RUN-06)
             WaitWhileStopping(() => generate.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
+        else if (step is StepDiscoveryDocuments discovery)
+            // No further discovery calls are billed; finished documents are already saved (D-05)
+            WaitWhileStopping(() => discovery.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
         else if (step is StepCaseSummary summary)
             // Verdicts already paid for are on disk; no further review calls are billed (D-13)
             WaitWhileStopping(() => summary.CancelAndWaitForReview(TimeSpan.FromSeconds(10)));
@@ -591,6 +608,8 @@ public partial class WizardForm : Form
                         StepGenerateCorpus s => GenerationUiText.CG3CloseDuringRun(s.PendingProviderBatches > 0),
                         // C-Q3: closing the app during a blind review
                         StepCaseSummary => QaUiText.CQ3LeaveDuringReview(),
+                        // C-D2: closing the app during a discovery documents run
+                        StepDiscoveryDocuments => DiscoveryUiText.CD2CloseDuringRun(),
                         _ => CaseGuideUiText.C12CloseDuringRun()
                     };
                     if (MessageBox.Show(this, runText, runTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question,

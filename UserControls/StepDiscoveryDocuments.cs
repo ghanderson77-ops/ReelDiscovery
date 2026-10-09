@@ -27,7 +27,7 @@ internal enum DiscoveryRenderState
 /// Discovery Documents step (08-UI-SPEC S1): optional; this file holds layout, binding and lifecycle;
 /// StepDiscoveryDocuments.Run.cs holds generation.
 /// </summary>
-public partial class StepDiscoveryDocuments : UserControl, IWizardStep
+public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirmLeave
 {
     private const string CheckColumn = "Check";
     private const string WitnessColumn = "Witness";

@@ -1078,9 +1078,11 @@ public static class GenerationUiText
     /// <summary>
     /// Case Summary "Generation cost" row (S2 R1): line 3 lists the total and every non-zero clause (2 decimals);
     /// spend recorded without a breakdown appears as "not itemized" so the clauses always add up to the total.
+    /// Discovery documents spend (08-UI-SPEC S5) is one lump clause after images and voicemail; callers pass a
+    /// <paramref name="total"/> that already includes it.
     /// </summary>
     public static SummaryRowContent CostRow(bool anySpend, decimal total, decimal input, decimal cacheWrite,
-        decimal cacheRead, decimal output, decimal batchSavings, decimal media, decimal unsplit)
+        decimal cacheRead, decimal output, decimal batchSavings, decimal media, decimal unsplit, decimal discovery = 0m)
     {
         var row = new SummaryRowContent
         {
@@ -1095,7 +1097,7 @@ public static class GenerationUiText
             return row;
         }
 
-        var items = CostItems(input, cacheWrite, cacheRead, output, batchSavings, media, unsplit);
+        var items = CostItems(input, cacheWrite, cacheRead, output, batchSavings, media, unsplit, discovery);
         row.Line3 = $"{Dollars(total, "0.00")} spent"
             + string.Concat(items.Select(item => $" · {item.Clause} {item.Sign}{Dollars(item.Amount, "0.00")}"));
         row.Line3Tooltip = string.Join("\n", new[] { $"Spent so far: {Dollars(total, "0.00")}" }
@@ -1106,7 +1108,8 @@ public static class GenerationUiText
 
     // Non-zero cost components in display order: (row clause, tooltip line, sign, amount)
     private static List<(string Clause, string Line, string Sign, decimal Amount)> CostItems(decimal input,
-        decimal cacheWrite, decimal cacheRead, decimal output, decimal batchSavings, decimal media, decimal unsplit)
+        decimal cacheWrite, decimal cacheRead, decimal output, decimal batchSavings, decimal media, decimal unsplit,
+        decimal discovery = 0m)
     {
         var all = new List<(string Clause, string Line, string Sign, decimal Amount)>
         {
@@ -1117,6 +1120,7 @@ public static class GenerationUiText
             // U+2212 minus sign: the discount is subtracted from the total
             ("batch discount", "Batch discount", "−", batchSavings),
             ("images and voicemail", "Images and voicemail", "", media),
+            ("discovery documents", "Discovery documents", "", discovery),
             ("not itemized", "Not itemized", "", unsplit)
         };
         return all.Where(item => item.Amount != 0m).ToList();

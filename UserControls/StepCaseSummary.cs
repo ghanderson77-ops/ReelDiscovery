@@ -10,6 +10,7 @@ using ReelDiscovery.Models.Qa;
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Services.Discovery;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Services.Qa;
 
@@ -1049,7 +1050,8 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     {
         BindState(state);
         var inputs = QaInputs();
-        _qa = LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor);
+        _qa = LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor,
+            DiscoverySpend(inputs.Folder, inputs.CaseId));
         RefreshAll();
     }
 
@@ -1604,11 +1606,14 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     /// <summary>
     /// The cost row and QA rows' data: one journal replay, the three QA reports, the blind-review sample order and the
     /// not-run estimate. Never throws for unreadable files: a report is a convenience view and reads as Not run.
+    /// The cost row includes <paramref name="discoverySpend"/> and is computed even without a corpus plan (08-UI-SPEC S5).
     /// </summary>
     internal static QaSnapshot LoadQa(string folder, CorpusPlan? plan, CaseGuide guide, ReviewProtocolProse prose,
-        Func<string, AIModelConfig?> reviewerModelFor)
+        Func<string, AIModelConfig?> reviewerModelFor, decimal discoverySpend)
     {
         var qa = new QaSnapshot { Plan = plan };
+        // Discovery documents cost money without any corpus (research Pitfall 9): the row never waits for a plan
+        qa.Cost = GenerationUiText.CostRow(discoverySpend > 0m, discoverySpend, 0m, 0m, 0m, 0m, 0m, 0m, 0m, discoverySpend);
         if (string.IsNullOrEmpty(folder) || plan == null)
             return qa;
 
@@ -1617,8 +1622,9 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
             var replay = GenerationJournal.Replay(folder, plan);
             qa.Replay = replay;
             var detail = replay.SpentDetail ?? new CostBreakdown();
-            qa.Cost = GenerationUiText.CostRow(replay.SpentCostUsd > 0m, replay.SpentCostUsd, detail.InputUsd, detail.CacheWriteUsd,
-                detail.CacheReadUsd, detail.OutputUsd, detail.BatchSavingsUsd, replay.MediaSpentCostUsd, replay.UnsplitSpentUsd);
+            var total = replay.SpentCostUsd + discoverySpend;
+            qa.Cost = GenerationUiText.CostRow(total > 0m, total, detail.InputUsd, detail.CacheWriteUsd, detail.CacheReadUsd,
+                detail.OutputUsd, detail.BatchSavingsUsd, replay.MediaSpentCostUsd, replay.UnsplitSpentUsd, discoverySpend);
             qa.WriterProvider = replay.WriterProvider ?? string.Empty;
             qa.Queued = new HashSet<string>(replay.InvalidatedThreadIds, StringComparer.Ordinal);
             qa.NotRunModel = reviewerModelFor(qa.WriterProvider);
@@ -1678,7 +1684,7 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     }
 
     // Inputs for LoadQa, gathered on the UI thread (EnsureLoaded caches the plan on the draft)
-    private (string Folder, CorpusPlan? Plan, CaseGuide Guide, ReviewProtocolProse Prose, Func<string, AIModelConfig?> ModelFor) QaInputs()
+    private (string Folder, CorpusPlan? Plan, CaseGuide Guide, ReviewProtocolProse Prose, Func<string, AIModelConfig?> ModelFor, Guid CaseId) QaInputs()
     {
         var draft = Draft;
         var plan = CorpusPlanStore.EnsureLoaded(draft).Plan;
@@ -1687,8 +1693,12 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         if (prose == null || (string.IsNullOrWhiteSpace(prose.Purpose) && prose.Issues.Count == 0))
             prose = ReviewProtocolBuilder.FallbackProse(draft);
         var state = _state;
-        return (CaseFolder, plan, draft.Guide ?? new CaseGuide(), prose, writer => state.ChooseReviewer(writer).Model);
+        return (CaseFolder, plan, draft.Guide ?? new CaseGuide(), prose, writer => state.ChooseReviewer(writer).Model, draft.CaseId);
     }
+
+    // Sum of CostUsd in discovery-documents.json (D-06); DiscoveryStore never throws and caps the file size (T-08-55)
+    private static decimal DiscoverySpend(string folder, Guid caseId) =>
+        string.IsNullOrEmpty(folder) ? 0m : DiscoveryStore.LoadOrNew(folder, caseId).TotalCostUsd;
 
     /// <summary>
     /// Re-reads the journal and the QA reports off the UI thread, then applies the rows. A newer refresh wins.
@@ -1702,7 +1712,8 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         try
         {
             var inputs = QaInputs();
-            var qa = await Task.Run(() => LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor));
+            var qa = await Task.Run(() => LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor,
+                DiscoverySpend(inputs.Folder, inputs.CaseId)));
             if (IsDisposed || version != _qaVersion)
                 return;
 

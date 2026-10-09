@@ -17,6 +17,12 @@ public class BatchTimings
 
     /// <summary>Wall clock for submitted/next-check times and the slow-poll switch; tests substitute a fixed clock.</summary>
     public Func<DateTime> Clock { get; set; } = () => DateTime.UtcNow;
+
+    /// <summary>
+    /// CX-07: how long <see cref="BatchingLlmProvider.DetachAsync"/> waits for submissions already in flight (upload, batch
+    /// creation and their Submitted ledger line). Remote batch execution is never waited on.
+    /// </summary>
+    public TimeSpan DrainTimeout { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 public enum BatchStatusKind
@@ -114,6 +120,9 @@ public class BatchingLlmProvider : ILlmProvider
     // limit (OpenAI enqueued tokens) applies across every queued batch of a model, not per input file
     private readonly Dictionary<string, long> _queuedTokens = new(StringComparer.Ordinal);
     private TaskCompletionSource _capacityFreed = NewSignal();
+
+    // CX-07: running flush loops (they own every submission), so DetachAsync can wait for in-flight submits
+    private readonly List<Task> _flushes = new();
 
     /// <summary>Prices orphans by model id only (tests and single-provider catalogs).</summary>
     public BatchingLlmProvider(ILlmProvider live, IBatchTransport transport, BatchLedger ledger, Guid planId,
@@ -644,7 +653,6 @@ public class BatchingLlmProvider : ILlmProvider
         TaskCompletionSource<Delivery>? waiter = null;
         AvailableResult? ready = null;
         var goLive = false;
-        var startFlush = false;
         lock (_lock)
         {
             if (_cts.IsCancellationRequested)
@@ -675,7 +683,10 @@ public class BatchingLlmProvider : ILlmProvider
                     {
                         queue = new StageQueue();
                         _queues[key] = queue;
-                        startFlush = true;
+
+                        // Started under the lock, so a DetachAsync that cancels after this point always sees it (CX-07)
+                        _flushes.RemoveAll(t => t.IsCompleted);
+                        _flushes.Add(Task.Run(() => FlushLoopAsync(key)));
                     }
 
                     if (!queue.ById.TryGetValue(id, out var queued))
@@ -690,9 +701,6 @@ public class BatchingLlmProvider : ILlmProvider
                 }
             }
         }
-
-        if (startFlush)
-            _ = Task.Run(() => FlushLoopAsync(key));
 
         if (ready != null)
         {
@@ -768,6 +776,33 @@ public class BatchingLlmProvider : ILlmProvider
         }
 
         Complete(stranded, Delivery.Errored());
+    }
+
+    /// <summary>
+    /// CX-07: <see cref="Detach"/>, then waits (up to <see cref="BatchTimings.DrainTimeout"/>) for submissions already in
+    /// flight to finish, so every batch the provider accepted has its Submitted ledger line before the run reports
+    /// stopped. Never waits on remote batch execution; never throws.
+    /// </summary>
+    public async Task DetachAsync()
+    {
+        Detach();
+
+        Task[] flushes;
+        lock (_lock)
+            flushes = _flushes.Where(t => !t.IsCompleted).ToArray();
+
+        if (flushes.Length == 0)
+            return;
+
+        try
+        {
+            // Flush loops catch their own failures; after the cancel only an upload already started keeps one running
+            await Task.WhenAll(flushes).WaitAsync(_timings.DrainTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // A submit stuck past the bound still records its batch when it returns; the run must not hang on it
+        }
     }
 
     // ----- queue and flush (D-07) -----

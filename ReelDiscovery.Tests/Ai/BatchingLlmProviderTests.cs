@@ -1327,6 +1327,77 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Equal(IdOf(Req("a")), Assert.Single(record.Items).CustomId);
     }
 
+    [Fact]
+    public async Task CX07_DetachAsync_WaitsForTheInFlightSubmitAndItsLedgerLine()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        transport.SubmitStarted = started;
+        transport.SubmitHold = hold.Task;
+        var provider = Create(Live(), transport);
+
+        Task<LlmProviderResponse> pending;
+        using (BatchStage.Enter("non-relevant mail"))
+            pending = provider.SendAsync(Req("a"));
+
+        await started.Task.WaitAsync(Wait);
+        var detach = provider.DetachAsync();
+        Assert.Equal("live:a", (await pending.WaitAsync(Wait)).Text);
+
+        // The upload is still in flight: the run may not report stopped yet
+        await Task.Delay(200);
+        Assert.False(detach.IsCompleted);
+
+        hold.SetResult();
+        await detach.WaitAsync(Wait);
+
+        // No polling: the accepted batch is already in the ledger when DetachAsync returns
+        var record = Assert.Single(new BatchLedger(_folder).Replay().Pending(_plan));
+        Assert.Equal(IdOf(Req("a")), Assert.Single(record.Items).CustomId);
+    }
+
+    [Fact]
+    public async Task CX07_DetachAsync_IsBounded_NeverWaitsOnRemoteExecution()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var timings = Fast();
+        timings.DrainTimeout = TimeSpan.FromMilliseconds(200);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = Create(Live(), transport, timings);
+        var events = new EventLog();
+        events.Attach(provider);
+
+        // One batch submitted and still running at the provider: never waited on
+        using (var cts = new CancellationTokenSource())
+        {
+            Task<LlmProviderResponse> running;
+            using (BatchStage.Enter("non-relevant mail"))
+                running = provider.SendAsync(Req("running"), cts.Token);
+            await events.WaitFor(BatchStatusKind.Submitted);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running.WaitAsync(Wait));
+        }
+
+        // A second upload that hangs past the bound
+        transport.SubmitStarted = started;
+        transport.SubmitHold = hold.Task;
+        Task<LlmProviderResponse> stuck;
+        using (BatchStage.Enter("non-relevant mail"))
+            stuck = provider.SendAsync(Req("stuck"));
+        await started.Task.WaitAsync(Wait);
+
+        await provider.DetachAsync().WaitAsync(Wait);
+        Assert.Equal("live:stuck", (await stuck.WaitAsync(Wait)).Text);
+
+        // The late submit still records its batch when it returns
+        hold.SetResult();
+        await Until(() => BatchLedger.PendingBatchCount(_folder, _plan) == 2);
+    }
+
     // "Regenerate thread" re-sends the same request (same custom id) after an older batch's result was consumed
     private async Task<string> RegeneratedLedgerAsync(bool collectSecond)
     {

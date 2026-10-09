@@ -561,11 +561,12 @@ public class GenerationRunner
             // Always runs, so the snapshot never stays "running" without a RunEnded event
             FinishSnapshot(snapshot, final, outcome, message);
 
-            // D-09: stop polling; provider batches still running stay in the ledger for the next Continue
+            // D-09: stop polling; provider batches still running stay in the ledger for the next Continue. CX-07: a
+            // submission already in flight finishes (with its Submitted line) before the run reports stopped
             if (batch != null)
             {
                 batch.StatusChanged -= snapshot.RecordBatchStatus;
-                batch.Detach();
+                await batch.DetachAsync().ConfigureAwait(false);
             }
         }
 

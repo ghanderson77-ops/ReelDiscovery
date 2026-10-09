@@ -609,6 +609,38 @@ public partial class BatchParityTests : IDisposable
         Assert.Equal(NormalizedJournal(reference, skipRunLines: true), NormalizedJournal(folder, skipRunLines: true));
     }
 
+    [Fact]
+    public async Task CX07_StopDuringSubmit_RunReturnsOnlyOnceTheSubmittedLineIsDurable()
+    {
+        var folder = NewFolder();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transport = new FakeBatchTransport
+        {
+            Kind = LlmProviderKind.Anthropic,
+            PollsUntilEnded = 1_000_000,
+            SubmitStarted = started,
+            SubmitHold = hold.Task
+        };
+        var mode = BatchMode(folder, Responder(), transport);
+        using var cts = new CancellationTokenSource();
+
+        var run = Run(new GenerationRunner(mode.Gateway), Input(folder, mode), ct: cts.Token);
+
+        // Stop while the non-relevant upload is in flight
+        await started.Task.WaitAsync(RunGuard);
+        cts.Cancel();
+        await Task.Delay(300);
+        Assert.False(run.IsCompleted, "the run reported stopped before the in-flight submission was recorded");
+
+        hold.SetResult();
+        var result = await run;
+
+        Assert.Equal(GenerationOutcome.Cancelled, result.Outcome);
+        Assert.NotEmpty(transport.Submissions);
+        Assert.Equal(transport.Submissions.Count, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
+    }
+
     // ---------- amended D-07: a wave batch from an earlier build never blocks a run ----------
 
     [Theory]

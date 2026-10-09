@@ -187,9 +187,9 @@ public sealed class DiscoveryGenerator
         {
             result.Cancelled = true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // The Discovery folder could not be created or the case folder is unusable
+            // The Discovery folder could not be created, the case folder is unusable or the sidecar could not be saved
             result.FatalMessage = $"The discovery documents could not be saved: {ex.Message.Trim().TrimEnd('.')}.";
         }
 
@@ -249,8 +249,9 @@ public sealed class DiscoveryGenerator
             result.StillOpen = true;
             return result;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Write errors and build failures (OpenXml, layout) alike: the stored content stays for another try
             result.Error = ReasonWriteFailed(ex.Message);
             return result;
         }
@@ -395,22 +396,24 @@ public sealed class DiscoveryGenerator
             GeneratedUtc = DateTime.UtcNow,
             Deposition = deposition,
             Written = written,
-            TestimonyPages = deposition != null ? TranscriptLayout.Build(deposition).TestimonyPageCount : 0,
             RequestCount = written?.Requests.Count ?? 0
         };
-        DiscoveryStaleness.Stamp(record, context.Draft, context.Corpus);
 
         var fileSaved = false;
         var failureReason = string.Empty;
         var path = DiscoveryStore.DocxPath(context.Folder, item.FileName);
-        if (path == null)
+        try
         {
-            // Only validated names under Discovery\ become paths (T-08-43)
-            failureReason = ReasonWriteFailed("invalid file name");
-        }
-        else
-        {
-            try
+            // Layout, stamping and OpenXml can fail on a hand-edited guide; the paid content must still be recorded (WR-05)
+            record.TestimonyPages = deposition != null ? TranscriptLayout.Build(deposition).TestimonyPageCount : 0;
+            DiscoveryStaleness.Stamp(record, context.Draft, context.Corpus);
+
+            if (path == null)
+            {
+                // Only validated names under Discovery\ become paths (T-08-43)
+                failureReason = ReasonWriteFailed("invalid file name");
+            }
+            else
             {
                 var bytes = BuildBytes(record);
 
@@ -418,16 +421,17 @@ public sealed class DiscoveryGenerator
                 await CaseStore.WriteAtomicAsync(path, bytes, CancellationToken.None);
                 fileSaved = true;
             }
-            catch (Exception ex) when (FileLockDetector.IsFileOpenElsewhere(ex, path))
-            {
-                // Open in Word: shown as Not saved, Save Again rewrites it from the stored content (U47)
-                fileSaved = false;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                fileSaved = false;
-                failureReason = ReasonWriteFailed(ex.Message);
-            }
+        }
+        catch (Exception ex) when (path != null && FileLockDetector.IsFileOpenElsewhere(ex, path))
+        {
+            // Open in Word: shown as Not saved, Save Again rewrites it from the stored content (U47)
+            fileSaved = false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Disk full, access denied or a build failure: Not saved with the reason, Save Again retries (CR-01)
+            fileSaved = false;
+            failureReason = ReasonWriteFailed(ex.Message);
         }
 
         record.FileSaved = fileSaved;

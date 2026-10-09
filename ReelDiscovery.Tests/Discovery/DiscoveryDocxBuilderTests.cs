@@ -135,6 +135,27 @@ public class DiscoveryDocxBuilderTests
     }
 
     [Fact]
+    public void CX04_Build_Rfa_StoredTextAlreadyJoinedOrDoubled_PrefixPrintedOnce()
+    {
+        const string prefix = "Admit that on July 15, 2024,";
+        const string body = "Michael Scott told Harmon's project team to hold all Brightline payments.";
+        var draft = DiscoveryTestData.LitigationDraft();
+        var content = Content(draft, DiscoveryKind.RequestsForAdmission, "party-1", "party-2", "2:25-cv-01873",
+            // What WrittenSetWriter stores (and Save Again rebuilds from)
+            Request(1, $"{prefix} {body}", prefix),
+            // Content saved with the prefix twice
+            Request(2, $"{prefix} {prefix} {body}", prefix),
+            // Older content without the prefix in Text
+            Request(3, body, prefix));
+
+        var (errors, paragraphs) = DocxTestHelper.OpenAndValidate(DiscoveryDocxBuilder.Build(content));
+
+        Assert.Empty(errors);
+        for (var n = 1; n <= 3; n++)
+            Assert.Contains($"REQUEST FOR ADMISSION NO. {n}: {prefix} {body}", paragraphs);
+    }
+
+    [Fact]
     public void Build_MemoCriminalRider_UsesMemoHeaderAndValidates()
     {
         var draft = DiscoveryTestData.MemoCriminalDraft();

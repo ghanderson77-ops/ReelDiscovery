@@ -207,6 +207,27 @@ public partial class WrittenSetWriterTests
     }
 
     [Fact]
+    public async Task CX04_Rfa_WordOutput_HasThePrefixExactlyOnce()
+    {
+        var f = CreateFixture(DiscoveryKind.RequestsForAdmission);
+        f.Script((slots, _) => Ok(CleanDto(f, slots)));
+        using var run = NewRun();
+
+        var content = (await Write(f, run)).Content!;
+        var (errors, paragraphs) = DocxTestHelper.OpenAndValidate(DiscoveryDocxBuilder.Build(content));
+
+        Assert.Empty(errors);
+        var prefixed = content.Requests.Where(r => r.Prefix.Length > 0).ToList();
+        Assert.NotEmpty(prefixed);
+        foreach (var request in prefixed)
+        {
+            var paragraph = Assert.Single(paragraphs, p => p.StartsWith($"{content.RequestLabel} {request.Number}: ", StringComparison.Ordinal));
+            Assert.Equal($"{content.RequestLabel} {request.Number}: {request.Text}", paragraph);
+            Assert.Single(Regex.Matches(paragraph, Regex.Escape(request.Prefix.Trim())));
+        }
+    }
+
+    [Fact]
     public async Task LeadingRequestLabel_IsStripped()
     {
         var f = CreateFixture(DiscoveryKind.RequestsForProduction, 6);

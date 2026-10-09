@@ -50,10 +50,7 @@ public static class DiscoveryDocxBuilder
         for (var i = 0; i < requests.Count; i++)
         {
             // Numbered by position so the printed numbers are always consecutive; the code prefix is never dropped
-            var request = requests[i];
-            var prefix = (request.Prefix ?? string.Empty).Trim();
-            var text = prefix.Length > 0 ? $"{prefix} {request.Text}" : request.Text;
-            word.Paragraph(text, new ParaFormat
+            word.Paragraph(RequestText(requests[i]), new ParaFormat
             {
                 BoldLead = $"{content.RequestLabel} {i + 1}: ",
                 Align = JustificationValues.Both,
@@ -67,6 +64,38 @@ public static class DiscoveryDocxBuilder
         word.Paragraph(content.CertificateText, BodyFormat());
 
         return word.Save(content.Title, landscape: false);
+    }
+
+    /// <summary>
+    /// CX-04: the printed request with its code-owned prefix exactly once. The writer stores Text with the prefix already
+    /// joined (and older content may lack it), so every leading copy of the prefix is removed and it is joined once here.
+    /// </summary>
+    public static string RequestText(DiscoveryRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var text = (request.Text ?? string.Empty).Trim();
+        var prefix = (request.Prefix ?? string.Empty).Trim();
+        if (prefix.Length == 0)
+            return text;
+
+        // With or without the prefix's trailing comma, repeated any number of times
+        var bare = prefix.TrimEnd(',').TrimEnd();
+        var changed = true;
+        while (changed && text.Length > 0)
+        {
+            changed = false;
+            foreach (var candidate in new[] { prefix, bare })
+            {
+                if (candidate.Length > 0 && text.StartsWith(candidate, StringComparison.OrdinalIgnoreCase))
+                {
+                    text = text[candidate.Length..].TrimStart(',', ' ', '\t').Trim();
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        return text.Length == 0 ? prefix : prefix + " " + text;
     }
 
     // Memo variants (D-25): matter header lines centered in bold instead of a pleading caption

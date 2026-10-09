@@ -350,6 +350,7 @@ public class CaseSummaryLogicTests
 
             Assert.Equal(DiscoveryUiText.SummaryTitle, step.DiscoveryLine1.Text);
             Assert.Equal(DiscoveryUiText.SummaryLine2, step.DiscoveryLine2.Text);
+            Assert.Equal(DiscoveryUiText.SummaryLine2, step.TooltipOf(step.DiscoveryLine2));
             Assert.Equal("Not generated", step.DiscoveryLine3.Text);
             Assert.Equal(Theme.BorderStrong, step.DiscoveryDotColor);
             Assert.Equal(Theme.TextMuted, step.DiscoveryLine3.ForeColor);

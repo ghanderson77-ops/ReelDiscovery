@@ -65,6 +65,9 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     private Button _btnViewBlindReview = null!;
     private Button _btnRunBlindReview = null!;
     private Button _btnCancelReview = null!;
+    private ContentRow _rowDiscovery = null!;
+    private Button _btnOpenDiscovery = null!;
+    private Button _btnDiscoveryDocs = null!;
     private readonly Dictionary<CaseExportKind, ContentRow> _exportRows = new();
     private readonly HashSet<CaseExportKind> _failedExports = new();
 
@@ -431,6 +434,14 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         _rowLeakage = CreateRow("Leakage audit", hasLine3: true, hasButtons: true, buttonHeight, new[] { "View Report", "Run Audit" });
         _rowBlindReview = CreateRow("Blind review", hasLine3: true, hasButtons: true, buttonHeight,
             new[] { "View Findings", "Run Blind Review...", "Cancel Review" });
+        _rowDiscovery = CreateRow(DiscoveryUiText.SummaryTitle, hasLine3: true, hasButtons: true, buttonHeight,
+            new[] { "Open Discovery Folder", "Discovery Documents" });
+        _btnOpenDiscovery = _rowDiscovery.Buttons[0];
+        _btnDiscoveryDocs = _rowDiscovery.Buttons[1];
+        _btnOpenDiscovery.Visible = false;
+        _rowDiscovery.Line2.Text = DiscoveryUiText.SummaryLine2;
+        // Line 2 ellipsizes at 150% scaling before "Not part of the answer key." (D-30); the tooltip keeps the full sentence
+        _toolTip.SetToolTip(_rowDiscovery.Line2, DiscoveryUiText.SummaryLine2);
         _btnViewScans = _rowScans.Buttons[0];
         _btnViewLeakage = _rowLeakage.Buttons[0];
         _btnRunAudit = _rowLeakage.Buttons[1];
@@ -451,7 +462,8 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         _btnOpenProtocol = _rowProtocol.Buttons[0];
         _rowCaseFile.Line2.Text = CaseGuideUiText.CaseFileDescription;
 
-        // Case file (ungrouped) · Corpus group · Quality checks group (07-UI-SPEC S2) · Case guide group; null = group heading
+        // Case file (ungrouped) · Corpus · Quality checks (07-UI-SPEC S2) · Discovery (08-UI-SPEC S4) · Case guide;
+        // null = group heading
         var items = new (ContentRow? Row, string Heading)[]
         {
             (_rowCaseFile, ""),
@@ -466,6 +478,8 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
             (_rowScans, ""),
             (_rowLeakage, ""),
             (_rowBlindReview, ""),
+            (null, "Discovery"),
+            (_rowDiscovery, ""),
             (null, "Case guide"),
             (_exportRows[CaseExportKind.CoreDocument], ""),
             (_exportRows[CaseExportKind.Cast], ""),
@@ -545,6 +559,8 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         _btnViewBlindReview.Click += async (s, e) => await ViewFindingsAsync(QaFindingsMode.BlindReview);
         _btnRunBlindReview.Click += async (s, e) => await RunBlindReviewAsync();
         _btnCancelReview.Click += (s, e) => CancelReview();
+        _btnOpenDiscovery.Click += (s, e) => OpenDiscoveryFolder();
+        _btnDiscoveryDocs.Click += (s, e) => NavigateToDiscovery();
         foreach (var kind in ExportKinds)
         {
             var row = _exportRows[kind];
@@ -1008,7 +1024,7 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         }
         foreach (var button in _rowPlan.Buttons.Concat(_rowAnswerKey.Buttons).Concat(_rowProtocol.Buttons)
                      .Concat(_rowMailboxes.Buttons).Concat(_rowStory.Buttons).Concat(_rowScans.Buttons).Concat(_rowLeakage.Buttons)
-                     .Concat(_rowBlindReview.Buttons))
+                     .Concat(_rowBlindReview.Buttons).Concat(_rowDiscovery.Buttons))
             button.Enabled = !_busy;
         // Cancel Review is never gated: a running review can always be stopped
         _btnCancelReview.Enabled = true;
@@ -1050,8 +1066,7 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     {
         BindState(state);
         var inputs = QaInputs();
-        _qa = LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor,
-            DiscoverySpend(inputs.Folder, inputs.CaseId));
+        _qa = LoadQaWithDiscovery(inputs);
         RefreshAll();
     }
 
@@ -1347,6 +1362,62 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     }
 
     /// <summary>
+    /// Full path of the case's Discovery folder, or null when the case folder is empty or the path does not resolve
+    /// directly under it (T-08-54).
+    /// </summary>
+    internal static string? DiscoveryPath(string caseFolder)
+    {
+        if (string.IsNullOrWhiteSpace(caseFolder))
+            return null;
+
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(caseFolder));
+        var path = Path.GetFullPath(DiscoveryStore.FolderPath(root));
+        var expected = root + Path.DirectorySeparatorChar + DiscoveryStore.FolderName;
+        return string.Equals(path, expected, StringComparison.OrdinalIgnoreCase) ? path : null;
+    }
+
+    /// <summary>
+    /// Opens "{case folder}\Discovery" in Explorer: the verified case folder + the constant folder name, never a path read
+    /// from discovery-documents.json (ASVS V12, T-08-54). A missing folder re-reads the row instead.
+    /// </summary>
+    internal void OpenDiscoveryFolder()
+    {
+        var path = DiscoveryPath(CaseFolder);
+        if (path == null || !Directory.Exists(path))
+        {
+            _ = RefreshQaAsync();
+            return;
+        }
+
+        try
+        {
+            OpenFolder(path);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            SetStatus($"Could not open the Discovery folder: {ex.Message.Trim().TrimEnd('.')}.", Theme.Danger);
+        }
+    }
+
+    /// <summary>
+    /// Navigation seam for Discovery Documents (tests); null = the wizard's step navigation.
+    /// </summary>
+    internal Action? NavigateToDiscoveryOverride;
+
+    /// <summary>
+    /// Discovery Documents button (D-08): back to the Discovery Documents step.
+    /// </summary>
+    internal void NavigateToDiscovery()
+    {
+        if (NavigateToDiscoveryOverride != null)
+        {
+            NavigateToDiscoveryOverride();
+            return;
+        }
+        (FindForm() as WizardForm)?.NavigateToStep(typeof(StepDiscoveryDocuments));
+    }
+
+    /// <summary>
     /// Opens the story-so-far .docx: verified case folder + the derived file name, never a name from case.json.
     /// A missing file refreshes the row and says how to write it again.
     /// </summary>
@@ -1541,6 +1612,9 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         public JournalReplay? Replay;
         public AnswerKeyOverlay? Overlay;
         public SummaryRowContent Cost = GenerationUiText.CostRow(false, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m);
+
+        // Discovery documents row (08-UI-SPEC S4), read from discovery-documents.json with the cost row
+        public SummaryRowContent Discovery = DiscoveryRow(new List<DiscoveryRowInfo>(), folderHasDocuments: false);
         public List<string> Generated = new();
         public ScanReport? Scans;
         public bool ScansOutOfDate;
@@ -1684,7 +1758,7 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     }
 
     // Inputs for LoadQa, gathered on the UI thread (EnsureLoaded caches the plan on the draft)
-    private (string Folder, CorpusPlan? Plan, CaseGuide Guide, ReviewProtocolProse Prose, Func<string, AIModelConfig?> ModelFor, Guid CaseId) QaInputs()
+    private (string Folder, CorpusPlan? Plan, CaseGuide Guide, ReviewProtocolProse Prose, Func<string, AIModelConfig?> ModelFor, CaseDraft Draft) QaInputs()
     {
         var draft = Draft;
         var plan = CorpusPlanStore.EnsureLoaded(draft).Plan;
@@ -1693,12 +1767,30 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         if (prose == null || (string.IsNullOrWhiteSpace(prose.Purpose) && prose.Issues.Count == 0))
             prose = ReviewProtocolBuilder.FallbackProse(draft);
         var state = _state;
-        return (CaseFolder, plan, draft.Guide ?? new CaseGuide(), prose, writer => state.ChooseReviewer(writer).Model, draft.CaseId);
+        return (CaseFolder, plan, draft.Guide ?? new CaseGuide(), prose, writer => state.ChooseReviewer(writer).Model, draft);
     }
 
-    // Sum of CostUsd in discovery-documents.json (D-06); DiscoveryStore never throws and caps the file size (T-08-55)
-    private static decimal DiscoverySpend(string folder, Guid caseId) =>
-        string.IsNullOrEmpty(folder) ? 0m : DiscoveryStore.LoadOrNew(folder, caseId).TotalCostUsd;
+    /// <summary>
+    /// LoadQa plus the Discovery documents row; discovery-documents.json is read once for both the row and its spend (D-06).
+    /// Runs off the UI thread; DiscoveryStore never throws and caps the file size (T-08-55).
+    /// </summary>
+    private static QaSnapshot LoadQaWithDiscovery(
+        (string Folder, CorpusPlan? Plan, CaseGuide Guide, ReviewProtocolProse Prose, Func<string, AIModelConfig?> ModelFor, CaseDraft Draft) inputs)
+    {
+        var folder = inputs.Folder;
+        var set = string.IsNullOrEmpty(folder) ? null : DiscoveryStore.LoadOrNew(folder, inputs.Draft.CaseId);
+        var qa = LoadQa(folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor, set?.TotalCostUsd ?? 0m);
+        if (set != null)
+        {
+            // A report view over the untrusted sidecar: SavedRows never throws (a malformed set yields no rows)
+            qa.Discovery = DiscoveryRow(DiscoveryStepModel.SavedRows(inputs.Draft, set, folder), DiscoveryStore.HasDocuments(folder));
+        }
+        return qa;
+    }
+
+    // Discovery documents row content (08-UI-SPEC S4); "Not generated" for an empty list
+    private static SummaryRowContent DiscoveryRow(IReadOnlyList<DiscoveryRowInfo> rows, bool folderHasDocuments) =>
+        DiscoveryUiText.SummaryRow(rows, folderHasDocuments);
 
     /// <summary>
     /// Re-reads the journal and the QA reports off the UI thread, then applies the rows. A newer refresh wins.
@@ -1712,8 +1804,7 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         try
         {
             var inputs = QaInputs();
-            var qa = await Task.Run(() => LoadQa(inputs.Folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor,
-                DiscoverySpend(inputs.Folder, inputs.CaseId)));
+            var qa = await Task.Run(() => LoadQaWithDiscovery(inputs));
             if (IsDisposed || version != _qaVersion)
                 return;
 
@@ -1759,6 +1850,12 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         _btnViewBlindReview.Visible = !_reviewRunning && blind.ShowPrimary;
         _btnRunBlindReview.Visible = !_reviewRunning && qa.HasEmails;
         _btnCancelReview.Visible = _reviewRunning;
+
+        // Discovery documents (08-UI-SPEC S4): line 3 ellipsizes, the tooltip has the full line and one line per document
+        ApplySummaryRow(_rowDiscovery, qa.Discovery);
+        _toolTip.SetToolTip(_rowDiscovery.Line3!, qa.Discovery.Line3Tooltip.Length > 0 ? qa.Discovery.Line3Tooltip : qa.Discovery.Line3);
+        _btnOpenDiscovery.Visible = qa.Discovery.ShowPrimary;
+        _btnDiscoveryDocs.Visible = qa.Discovery.ShowSecondary;
     }
 
     private void ApplyQaRow(ContentRow row, SummaryRowContent content)
@@ -2347,6 +2444,14 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     internal Button ViewBlindReviewButton => _btnViewBlindReview;
     internal Button RunBlindReviewButton => _btnRunBlindReview;
     internal Button CancelReviewButton => _btnCancelReview;
+
+    // Discovery row test accessors (08-18)
+    internal Label DiscoveryLine1 => _rowDiscovery.Line1;
+    internal Label DiscoveryLine2 => _rowDiscovery.Line2;
+    internal Label DiscoveryLine3 => _rowDiscovery.Line3!;
+    internal Color DiscoveryDotColor => _rowDiscovery.DotColor;
+    internal Button OpenDiscoveryButton => _btnOpenDiscovery;
+    internal Button DiscoveryDocumentsButton => _btnDiscoveryDocs;
     internal string TooltipOf(Control control) => _toolTip.GetToolTip(control) ?? string.Empty;
 
     protected override void Dispose(bool disposing)

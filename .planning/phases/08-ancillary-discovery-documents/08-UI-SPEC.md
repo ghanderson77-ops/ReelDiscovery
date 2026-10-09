@@ -348,7 +348,7 @@ Case guide:      Core document · Cast · Key Facts & Events · Canonical values
 ```
 
 - **Title:** `Discovery documents`.
-- **Line 2:** `Deposition excerpts and written discovery written from the case guide, saved as Word files in the Discovery folder. Not part of the answer key.` (D-30)
+- **Line 2:** `Deposition excerpts and written discovery written from the case guide, saved as Word files in the Discovery folder. Not part of the answer key.` (D-30) Line 2 ellipsizes at 150% scaling (both Large and `WizardMin`) before the D-30 sentence, so its tooltip carries the full text (amended by Plan 08-18 after the 144-DPI render inspection).
 - **Line 3** (`DiscoveryUiText.SummaryLine(...)`):
 
 | State | Line 3 | Tone / dot |

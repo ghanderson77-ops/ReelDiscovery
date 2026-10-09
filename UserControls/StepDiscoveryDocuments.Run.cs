@@ -94,7 +94,8 @@ public partial class StepDiscoveryDocuments
     /// </summary>
     internal async Task RegenerateSelectedAsync()
     {
-        if (_state == null || _isGenerating || !KeyReady())
+        // Planned only after the corpus probe, so exhibit numbers are never fixed without the corpus (CR-03)
+        if (_state == null || _isGenerating || _probing || !KeyReady())
             return;
 
         var row = SelectedRow();
@@ -228,7 +229,7 @@ public partial class StepDiscoveryDocuments
 
         // A field typed within the debounce window counts; the model then lists what to write
         CommitPendingInput();
-        if (!_model.HasGuide || !_model.CanGenerate(KeyReady(), FieldsValid()))
+        if (_probing || !_model.HasGuide || !_model.CanGenerate(KeyReady(), FieldsValid()))
             return;
 
         // Writes only Not generated and Failed rows; nothing regenerates silently (D-11, D-27). No confirmation: the cost

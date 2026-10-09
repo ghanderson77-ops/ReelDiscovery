@@ -275,9 +275,18 @@ public class StepDiscoveryDocumentsTests
                 Assert.False(step.Model.CorpusUsable);
                 Assert.Equal(DiscoveryUiText.Notice(memo: false, corpusUsable: false), step.NoticeLabel.Text);
 
+                // CR-03: Generate waits for the probe, so a fast click never plans exhibits without the corpus
+                Assert.True(step.IsProbingCorpus);
+                Assert.False(step.RunButton.Enabled);
+                var click = step.RunClickAsync();
+                Assert.True(click.IsCompleted);
+                Assert.False(step.IsGenerating);
+
                 GenerateCorpusStepTests.Pump(enter);
                 Assert.True(step.Model.CorpusUsable);
                 Assert.Equal(DiscoveryUiText.Notice(memo: false, corpusUsable: true), step.NoticeLabel.Text);
+                Assert.False(step.IsProbingCorpus);
+                Assert.True(step.RunButton.Enabled);
             });
         }
         finally

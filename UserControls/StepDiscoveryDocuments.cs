@@ -50,6 +50,10 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
     private DiscoveryCorpus _corpus = DiscoveryCorpus.None();
     private bool _isGenerating;
     private bool _loading;
+
+    // True while the entry's corpus probe runs: Generate and Regenerate wait for it so a run never plans depositions
+    // without the corpus exhibits (CR-03)
+    private bool _probing;
     // Set by EnterRunState while a run is active
     private CancellationTokenSource? _cts;
     private readonly ToolTip _toolTip = new();
@@ -1089,6 +1093,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
             DiscoveryStepModel.ApplyDefaults(Draft);
         _set = LoadSet();
         _corpus = DiscoveryCorpus.None();
+        _probing = Draft.Guide != null;
 
         // Paint at once without corpus enrichment; the journal/plan read never runs on the UI thread (T-08-42)
         _model = BuildModel();
@@ -1101,7 +1106,17 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
 
         var draft = Draft;
         var caseId = draft.CaseId;
-        var corpus = await Task.Run(() => CorpusDetector.Detect(draft));
+        DiscoveryCorpus corpus;
+        try
+        {
+            corpus = await Task.Run(() => CorpusDetector.Detect(draft));
+        }
+        finally
+        {
+            // A newer entry owns the flag once this one is stale
+            if (_enterVersion == version)
+                _probing = false;
+        }
 
         // Leaving the step, switching case or starting a run during the probe discards its result
         if (IsDisposed || _enterVersion != version || Draft.CaseId != caseId || _isGenerating)
@@ -1115,6 +1130,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
     public Task OnLeaveStepAsync()
     {
         _enterVersion++;
+        _probing = false;
         // A field typed within the debounce window still reaches the settings
         if (_debounce.Enabled && _state != null)
             CommitPendingInput();
@@ -1688,7 +1704,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
         _btnRegenerate.Visible = !saveAgain;
         _btnSaveAgain.Enabled = !_isGenerating;
         _btnOpenWord.Enabled = !_isGenerating && row != null && row.FileExists;
-        _btnRegenerate.Enabled = !_isGenerating && row != null
+        _btnRegenerate.Enabled = !_isGenerating && !_probing && row != null
             && row.State is not (DiscoveryRowState.NotGenerated or DiscoveryRowState.Writing) && KeyReady();
     }
 
@@ -1724,7 +1740,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
         {
             _btnRun.Text = DiscoveryUiText.GenerateButton;
             ButtonHelper.StyleButton(_btnRun, ButtonStyle.Primary);
-            _btnRun.Enabled = _model.HasGuide && _model.CanGenerate(KeyReady(), FieldsValid());
+            _btnRun.Enabled = _model.HasGuide && !_probing && _model.CanGenerate(KeyReady(), FieldsValid());
         }
         _progress.Visible = _isGenerating;
         SizeStatus();
@@ -1824,6 +1840,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
             DiscoveryStepModel.ApplyDefaults(Draft);
         _set = LoadSet();
         _corpus = DiscoveryCorpus.None();
+        _probing = false;
         _model = model ?? BuildModel();
         _isGenerating = render == DiscoveryRenderState.Running;
         PopulateInputs();
@@ -1866,6 +1883,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
     internal DataGridView WitnessGrid => _gridWitnesses;
     internal DataGridView DocumentsGrid => _gridDocuments;
     internal Button RunButton => _btnRun;
+    internal bool IsProbingCorpus => _probing;
     internal Button RegenerateButton => _btnRegenerate;
     internal Button SaveAgainButton => _btnSaveAgain;
     internal Button OpenWordButton => _btnOpenWord;

@@ -389,4 +389,207 @@ public partial class StepDiscoveryDocumentsRunTests
             File.Delete(path);
         }
     }
+
+    // ----- Regenerate... -----
+
+    private static void GenerateAll(Fixture f, StepDiscoveryDocuments step)
+    {
+        Enter(f, step);
+        Script(f);
+        Pump(step.RunClickAsync());
+        Assert.Equal(DiscoveryUiText.StatusDone(2), step.StatusLabel.Text);
+    }
+
+    private static List<string> AllTexts(Control root)
+    {
+        var texts = new List<string>();
+        void Walk(Control c)
+        {
+            if (!string.IsNullOrEmpty(c.Text))
+                texts.Add(c.Text);
+            foreach (Control child in c.Controls)
+                Walk(child);
+        }
+        Walk(root);
+        return texts;
+    }
+
+    private static string DocxFor(Fixture f, string key) =>
+        DiscoveryStore.DocxPath(f.Folder, f.LoadSet().Find(key)!.FileName)!;
+
+    [Fact]
+    public void Regenerate_Deposition_DialogStatesSettings_CancelStartsNothing_OkRunsOneWithGuidance()
+    {
+        Run((f, step) =>
+        {
+            GenerateAll(f, step);
+            var depTitle = Title(step, DepKey);
+            var fileName = f.LoadSet().Find(DepKey)!.FileName;
+            step.SelectDocument(DepKey);
+            Assert.True(step.RegenerateButton.Enabled);
+            var requests = f.Fake.Requests.Count;
+
+            List<string>? texts = null;
+            var warning = true;
+            step.ShowDialogOverride = d =>
+            {
+                texts = AllTexts(d);
+                warning = d.WarningShown;
+                return DialogResult.Cancel;
+            };
+            Pump(step.RegenerateSelectedAsync());
+
+            Assert.NotNull(texts);
+            Assert.False(warning);
+            Assert.Contains(DiscoveryUiText.RegenerateHeadline(depTitle), texts!);
+            Assert.Contains(DiscoveryUiText.RegenerateBody(fileName, isDeposition: true), texts!);
+            Assert.Contains(texts!, t => t.StartsWith("Uses the current settings: 10 testimony pages", StringComparison.Ordinal));
+            Assert.Contains(texts!, t => t.StartsWith("Estimated cost ", StringComparison.Ordinal));
+            Assert.Equal(requests, f.Fake.Requests.Count);
+            Assert.False(step.IsGenerating);
+
+            // The dialog warns when Word holds the file open
+            using (new FileStream(DocxFor(f, DepKey), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Pump(step.RegenerateSelectedAsync());
+            Assert.True(warning);
+            Assert.Equal(requests, f.Fake.Requests.Count);
+
+            const string guidance = "Spend more time on the change order.";
+            step.ShowDialogOverride = d =>
+            {
+                d.GuidanceBox.Text = guidance;
+                return DialogResult.OK;
+            };
+            Pump(step.RegenerateSelectedAsync());
+
+            var added = f.Fake.Requests.Skip(requests).ToList();
+            Assert.Equal(f.Plan!.Chunks.Count, added.Count);
+            Assert.All(added, r => Assert.True(IsDeposition(r)));
+            Assert.All(added, r => Assert.Contains(guidance, r.UserPrompt, StringComparison.Ordinal));
+            Assert.Equal(DiscoveryUiText.StatusDone(1), step.StatusLabel.Text);
+            Assert.Equal("Generated", Statuses(step)[DepKey]);
+        });
+    }
+
+    [Fact]
+    public void Regenerate_DisabledWithoutTestedKey_AndNothingRunsWithoutDialog()
+    {
+        Run((f, step) =>
+        {
+            GenerateAll(f, step);
+            step.KeyReady = () => false;
+            step.SelectDocument(RfpKey);
+            Assert.False(step.RegenerateButton.Enabled);
+
+            var requests = f.Fake.Requests.Count;
+            var shown = 0;
+            step.ShowDialogOverride = d =>
+            {
+                shown++;
+                return DialogResult.OK;
+            };
+            Pump(step.RegenerateSelectedAsync());
+            Assert.Equal(0, shown);
+            Assert.Equal(requests, f.Fake.Requests.Count);
+        });
+    }
+
+    // ----- Save Again -----
+
+    [Fact]
+    public void SaveAgain_NotSaved_StillOpenThenSaved_NoModelCall()
+    {
+        Run((f, step) =>
+        {
+            Enter(f, step);
+            Script(f);
+            var rfp = step.Model.ToWrite.Single(i => i.Key == RfpKey);
+            var path = DiscoveryStore.DocxPath(f.Folder, rfp.FileName)!;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, new byte[] { 1, 2, 3 });
+
+            using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                Pump(step.RunClickAsync());
+                Assert.Equal(DiscoveryUiText.StatusDoneWithProblems(0, 0, 1), step.StatusLabel.Text);
+                Assert.Equal(DiscoveryUiText.RowStatusCell(DiscoveryRowState.NotSaved), Statuses(step)[RfpKey]);
+                step.SelectDocument(RfpKey);
+                Assert.True(step.SaveAgainButton.Enabled);
+
+                Pump(step.SaveAgainSelectedAsync());
+                Assert.Equal(DiscoveryUiText.StillOpen(rfp.FileName), step.StatusLabel.Text);
+                Assert.Equal(Theme.Warning, step.StatusLabel.ForeColor);
+            }
+
+            var requests = f.Fake.Requests.Count;
+            Pump(step.SaveAgainSelectedAsync());
+
+            Assert.Equal(DiscoveryUiText.Saved(rfp.FileName), step.StatusLabel.Text);
+            Assert.Equal(Theme.Success, step.StatusLabel.ForeColor);
+            Assert.Equal(requests, f.Fake.Requests.Count);
+            Assert.Equal("Generated", Statuses(step)[RfpKey]);
+            Assert.True(File.ReadAllBytes(path).Length > 3);
+        });
+    }
+
+    // ----- Open in Word / Open Discovery Folder -----
+
+    [Fact]
+    public void OpenInWord_TraversalName_NothingOpened()
+    {
+        Run((f, step) =>
+        {
+            GenerateAll(f, step);
+            var set = f.LoadSet();
+            set.Find(RfpKey)!.FileName = @"..\evil.docx";
+            GenerateCorpusStepTests.Pump(DiscoveryStore.SaveAsync(f.Folder, set));
+            // A file where the traversal would land: it must never be opened
+            File.WriteAllBytes(Path.Combine(f.Folder, "evil.docx"), new byte[] { 1 });
+
+            Enter(f, step);
+            step.SelectDocument(RfpKey);
+            Assert.False(step.OpenWordButton.Enabled);
+            step.OpenSelectedInWord();
+            Assert.Empty(f.Opened);
+        });
+    }
+
+    [Fact]
+    public void OpenInWord_ValidFile_OpensFullPathInsideDiscovery_FailureShowsDanger()
+    {
+        Run((f, step) =>
+        {
+            GenerateAll(f, step);
+            step.SelectDocument(DepKey);
+            Assert.True(step.OpenWordButton.Enabled);
+
+            step.OpenSelectedInWord();
+            var expected = DocxFor(f, DepKey);
+            Assert.Equal(new[] { expected }, f.Opened);
+            Assert.StartsWith(Path.GetFullPath(DiscoveryStore.FolderPath(f.Folder)) + Path.DirectorySeparatorChar, expected,
+                StringComparison.OrdinalIgnoreCase);
+
+            step.OpenFile = _ => throw new System.ComponentModel.Win32Exception("No application is associated");
+            step.OpenSelectedInWord();
+            var fileName = f.LoadSet().Find(DepKey)!.FileName;
+            Assert.Equal(DiscoveryUiText.OpenFailed(fileName, "No application is associated"), step.StatusLabel.Text);
+            Assert.Equal(Theme.Danger, step.StatusLabel.ForeColor);
+        });
+    }
+
+    [Fact]
+    public void OpenDiscoveryFolder_OnlyWithDocuments_FullDiscoveryPath()
+    {
+        Run((f, step) =>
+        {
+            Enter(f, step);
+            step.OpenDiscoveryFolder();
+            Assert.Empty(f.OpenedFolders);
+
+            Script(f);
+            Pump(step.RunClickAsync());
+            step.OpenDiscoveryFolder();
+            Assert.Equal(new[] { Path.GetFullPath(DiscoveryStore.FolderPath(f.Folder)) }, f.OpenedFolders);
+        });
+    }
 }

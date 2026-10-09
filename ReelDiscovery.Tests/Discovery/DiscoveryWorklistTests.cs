@@ -44,6 +44,32 @@ public class DiscoveryWorklistTests
     }
 
     [Fact]
+    public void Build_WitnessesWithSameName_GetDistinctFileNames()
+    {
+        // WR-08: two witnesses whose names differ only in case would share (and overwrite) one .docx on Windows
+        var draft = DiscoveryTestData.LitigationDraft();
+        var settings = TwoWitnesses(draft);
+        var first = draft.Guide!.FindCast(settings.WitnessIds[0])!;
+        var second = draft.Guide.FindCast(settings.WitnessIds[1])!;
+        second.FirstName = first.FirstName.ToUpperInvariant();
+        second.LastName = first.LastName;
+
+        var items = DiscoveryWorklist.Build(draft, settings, null, null).Where(i => i.Kind == DiscoveryKind.Deposition).ToList();
+
+        Assert.Equal(2, items.Count);
+        Assert.Equal(2, items.Select(i => i.FileName).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(items, i => Assert.True(DiscoveryStore.IsDiscoveryFileName(i.FileName), i.FileName));
+        Assert.Contains($"({items[1].WitnessId}).docx", items[1].FileName);
+
+        // A saved record keeps owning its name; the other witness is the one renamed, also when regenerated alone
+        var set = new DiscoveryDocumentSet();
+        set.Upsert(new DiscoveryDocument { Key = items[1].Key, Kind = DiscoveryKind.Deposition, WitnessId = items[1].WitnessId, FileName = items[0].FileName });
+        var again = DiscoveryWorklist.Build(draft, settings, null, set).Where(i => i.Kind == DiscoveryKind.Deposition).ToList();
+        Assert.Equal(items[0].FileName, again.Single(i => i.Key == items[1].Key).FileName);
+        Assert.NotEqual(items[0].FileName, again.Single(i => i.Key == items[0].Key).FileName, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Build_SavedValidFileName_IsKept_UnsafeOneReplaced()
     {
         var draft = DiscoveryTestData.LitigationDraft();

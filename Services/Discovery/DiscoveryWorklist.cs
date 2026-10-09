@@ -80,6 +80,8 @@ public static class DiscoveryWorklist
                 if (plan != null)
                     items.Add(FromWritten(draft, plan, set));
             }
+
+            Disambiguate(items, set);
         }
         catch (Exception)
         {
@@ -108,7 +110,11 @@ public static class DiscoveryWorklist
                     return null;
                 var plan = DepositionPlanner.Plan(draft, new[] { document.WitnessId.Trim() }, settings.PagesPerExcerpt,
                     corpus, set?.ExhibitAssignments).FirstOrDefault();
-                return plan == null ? null : FromDeposition(draft, plan, set);
+                if (plan == null)
+                    return null;
+                var item = FromDeposition(draft, plan, set);
+                Disambiguate(new List<DiscoveryWorkItem> { item }, set);
+                return item;
             }
 
             // The set's checkbox may be cleared since it was written; regenerating it still uses the current count and parties
@@ -126,7 +132,11 @@ public static class DiscoveryWorklist
                     break;
             }
             var written = WrittenDiscoveryPlanner.Plan(draft, document.Kind, copy, corpus);
-            return written == null ? null : FromWritten(draft, written, set);
+            if (written == null)
+                return null;
+            var writtenItem = FromWritten(draft, written, set);
+            Disambiguate(new List<DiscoveryWorkItem> { writtenItem }, set);
+            return writtenItem;
         }
         catch (Exception)
         {
@@ -204,6 +214,36 @@ public static class DiscoveryWorklist
         return DiscoveryStore.IsDiscoveryFileName(saved)
             ? saved!
             : DiscoveryStore.FileNameFor(CaseFolderPart(draft), documentPart);
+    }
+
+    /// <summary>
+    /// WR-08: every document gets its own .docx. A file name already used by another document (saved or earlier in this
+    /// list; Windows compares names case-insensitively) gets the witness id, or the key, added before the extension,
+    /// then a counter if that is taken too. A document keeps a name its own record already owns.
+    /// </summary>
+    private static void Disambiguate(List<DiscoveryWorkItem> items, DiscoveryDocumentSet? set)
+    {
+        var owners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var doc in set?.Documents ?? new List<DiscoveryDocument>())
+        {
+            if (doc != null && !string.IsNullOrWhiteSpace(doc.Key) && DiscoveryStore.IsDiscoveryFileName(doc.FileName))
+                owners.TryAdd(doc.FileName, doc.Key);
+        }
+
+        foreach (var item in items)
+        {
+            if (owners.TryGetValue(item.FileName, out var owner) && !string.Equals(owner, item.Key, StringComparison.Ordinal))
+            {
+                var stem = item.FileName[..^".docx".Length];
+                var tag = CaseFolderNaming.Sanitize(item.WitnessId.Length > 0 ? item.WitnessId : item.Key);
+                var candidate = $"{stem} ({tag}).docx";
+                for (var n = 2; n < 1000 && (owners.ContainsKey(candidate) || !DiscoveryStore.IsDiscoveryFileName(candidate)); n++)
+                    candidate = $"{stem} ({tag} {n.ToString(System.Globalization.CultureInfo.InvariantCulture)}).docx";
+                item.FileName = candidate;
+            }
+
+            owners.TryAdd(item.FileName, item.Key);
+        }
     }
 
     private static DiscoverySettings Copy(DiscoverySettings s) => new()

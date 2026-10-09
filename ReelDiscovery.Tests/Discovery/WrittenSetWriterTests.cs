@@ -95,7 +95,7 @@ public partial class WrittenSetWriterTests
             case DiscoveryKind.Interrogatories:
                 return RogText;
             case DiscoveryKind.RequestsForAdmission:
-                var guide = f.Draft.Guide;
+                var guide = f.Draft.Guide ?? new CaseGuide();
                 var fact = guide.FindFact(slot.FactId);
                 if (slot.IsGenuineness || fact == null)
                     return "the document described is a true and correct copy.";

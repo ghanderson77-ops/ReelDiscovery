@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-10-PLAN.md
-last_updated: "2026-10-09T00:10:30.023Z"
+stopped_at: Completed 08-11-PLAN.md
+last_updated: "2026-10-09T00:15:58.951Z"
 last_activity: 2026-10-09
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 140
-  percent: 94
+  completed_plans: 141
+  percent: 95
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 11 of 19
+Plan: 12 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-09
 
-Progress: [█████████░] 94%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -192,6 +192,7 @@ Progress: [█████████░] 94%
 | Phase 08 P08 | 15min | 2 tasks | 4 files |
 | Phase 08 P09 | 12min | 2 tasks | 6 files |
 | Phase 08 P10 | 6min | 3 tasks | 6 files |
+| Phase 08 P11 | 15min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -578,6 +579,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-10: Written work item RequestCount = planned slot count and CallCount = ceil(slots / 25), so the estimate follows the lowered RFA count
 - [Phase 08]: 08-10: ForDocument force-enables the document's own written kind on a settings copy so a cleared saved set can still be regenerated
 - [Phase 08]: 08-10: Build uses draft.Discovery or the non-mutating Defaults(draft); only ApplyDefaults writes the draft
+- [Phase 08]: 08-11: Honorific instruction is given on every topic's first part; the opening chunk also says to start with the witness's background and role
+- [Phase 08]: 08-11: Previous turns (last 6) and covered topics are emitted whenever supplied
+- [Phase 08]: 08-11: Replacement names section lists only applied substitutes; originals never appear in any prompt
 
 ### Pending Todos
 
@@ -599,6 +603,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-09T00:10:30.018Z
-Stopped at: Completed 08-10-PLAN.md
+Last session: 2026-10-09T00:15:58.945Z
+Stopped at: Completed 08-11-PLAN.md
 Resume file: None

@@ -279,7 +279,7 @@ Plans:
 - [x] 08-08-PLAN.md — TextScan regex promotion + DiscoveryValidator D1-D8 with keep-best and feedback (Wave 2)
 - [x] 08-09-PLAN.md — DiscoveryUiText (all copy), DiscoveryRowInfo, RegenerateDiscoveryDialog at 144 DPI (Wave 2)
 - [x] 08-10-PLAN.md — Discovery pricing on the single estimator, DiscoveryWorklist, DiscoveryStepModel (Wave 3)
-- [ ] 08-11-PLAN.md — DiscoveryPrompts (grounded, cacheable, name-safe) + strict DTO registration (Wave 3)
+- [x] 08-11-PLAN.md — DiscoveryPrompts (grounded, cacheable, name-safe) + strict DTO registration (Wave 3)
 - [ ] 08-12-PLAN.md — DepositionWriter: chunked testimony with retries and keep-best (Wave 4)
 - [ ] 08-13-PLAN.md — WrittenSetWriter: RFP/ROG/RFA sets with retries and keep-best (Wave 4)
 - [ ] 08-14-PLAN.md — StepDiscoveryDocuments layout, binding, lifecycle and render checks 1-7 (Wave 4)
@@ -304,4 +304,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
-| 8. Ancillary Discovery Documents | 10/19 | In Progress | - |
+| 8. Ancillary Discovery Documents | 11/19 | In Progress | - |

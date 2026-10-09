@@ -171,3 +171,7 @@ status: all_fixed
 _Fixed: 2026-10-09_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 1_
+
+## Follow-up (orchestrator, 2026-10-09)
+
+CX-07 close-path gap closed: WizardForm.StopActiveRun now waits `StepGenerateCorpus.CloseWaitTimeout` (batch DrainTimeout + 30 s, returns as soon as the run unwinds) instead of 10 s, so closing the app mid-upload still records the Submitted ledger line. Test: `WizardFlowTests.CorpusRun_CloseWaitsPastBatchDrain`.

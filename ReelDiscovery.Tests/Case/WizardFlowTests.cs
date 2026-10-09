@@ -157,6 +157,19 @@ public class WizardFlowTests
     }
 
     [Fact]
+    public void CorpusRun_CloseWaitsPastBatchDrain()
+    {
+        // CX-07: closing waits longer than the batch drain bound, so an in-flight upload is ledgered before exit
+        Assert.True(StepGenerateCorpus.CloseWaitTimeout > new ReelDiscovery.Services.Ai.BatchTimings().DrainTimeout);
+
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "Forms", "WizardForm.cs"));
+        var stop = source.IndexOf("private void StopActiveRun()", StringComparison.Ordinal);
+        var waiting = source.IndexOf("private void WaitWhileStopping", StringComparison.Ordinal);
+        Assert.True(stop >= 0 && waiting > stop, "StopActiveRun body not found");
+        Assert.Contains("generate.CancelAndWaitForRun(StepGenerateCorpus.CloseWaitTimeout)", source[stop..waiting]);
+    }
+
+    [Fact]
     public void NavigateToStep_ByType_OpensDiscoveryDocuments()
     {
         // D-08: Case Summary reaches the Discovery Documents step by type, never by index

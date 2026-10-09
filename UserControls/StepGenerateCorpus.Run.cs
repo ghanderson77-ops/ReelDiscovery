@@ -345,6 +345,12 @@ public partial class StepGenerateCorpus : IWizardStep
     }
 
     /// <summary>
+    /// How long closing waits for a run to unwind: longer than the batch drain bound, so an upload the provider may
+    /// already have accepted gets its Submitted ledger line before the process exits (CX-07). Returns early once done.
+    /// </summary>
+    internal static readonly TimeSpan CloseWaitTimeout = new BatchTimings().DrainTimeout + TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Closing during a run (C-G3): cancels the run and pumps messages until it has unwound. In-flight threads are
     /// discarded; finished ones are journaled and their final checkpoint is applied. Returns false on timeout.
     /// </summary>

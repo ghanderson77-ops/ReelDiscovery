@@ -558,8 +558,9 @@ public partial class WizardForm : Form
             // A planning run is cancelled and awaited, so no further calls are billed (T-04-61)
             WaitWhileStopping(() => review.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
         else if (step is StepGenerateCorpus generate)
-            // In-flight threads are discarded; finished ones are already journaled and saved (RUN-06)
-            WaitWhileStopping(() => generate.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));
+            // In-flight threads are discarded; finished ones are already journaled and saved (RUN-06).
+            // Waits past the batch drain bound so an in-flight upload is recorded in the ledger before exit (CX-07).
+            WaitWhileStopping(() => generate.CancelAndWaitForRun(StepGenerateCorpus.CloseWaitTimeout));
         else if (step is StepDiscoveryDocuments discovery)
             // No further discovery calls are billed; finished documents are already saved (D-05)
             WaitWhileStopping(() => discovery.CancelAndWaitForRun(TimeSpan.FromSeconds(10)));

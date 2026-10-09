@@ -74,6 +74,10 @@ public sealed class DepositionWriter
 
         for (var i = 0; i < chunks.Count; i++)
         {
+            // A fatal error elsewhere stopped the run before this part: left pending, the next run writes it (D-05)
+            if (run.IsFatal)
+                return new DepositionWriteOutcome { NotRun = true, Error = run.FatalError, Cost = cost };
+
             var chunk = chunks[i];
             onPart?.Invoke(i + 1, chunks.Count);
 
@@ -91,6 +95,14 @@ public sealed class DepositionWriter
 
             for (var attempt = 1; attempt <= MaxAttempts; attempt++)
             {
+                // No retries after a fatal stop: a part that already has an attempt keeps it
+                if (attempt > 1 && run.IsFatal)
+                {
+                    if (best != null)
+                        break;
+                    return new DepositionWriteOutcome { NotRun = true, Error = run.FatalError, Cost = cost };
+                }
+
                 var request = new LlmRequest
                 {
                     Tier = LlmTier.Story,
@@ -115,9 +127,15 @@ public sealed class DepositionWriter
                 }
                 cost.Add(outcome.Cost);
 
-                // Left pending: the next run writes it (D-05)
-                if (run.IsFatal)
+                // A fatal stop only discards a call that produced nothing: a returned value was paid for and is kept (WR-04)
+                if (outcome.Value == null && run.IsFatal)
+                {
+                    if (best != null)
+                        break;
+
+                    // Left pending: the next run writes it (D-05)
                     return new DepositionWriteOutcome { NotRun = true, Error = run.FatalError, Cost = cost };
+                }
 
                 if (outcome.Value == null)
                 {

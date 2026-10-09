@@ -222,6 +222,48 @@ public partial class WrittenSetWriterTests
     }
 
     [Fact]
+    public async Task FatalElsewhereWhileFinalCallReturns_ContentKept()
+    {
+        // WR-04: another document's fatal error lands while this set's only call returns a valid, paid value
+        var f = CreateFixture(DiscoveryKind.RequestsForProduction, 8, priced: true);
+        using var run = NewRun();
+        f.Script((slots, _) =>
+        {
+            run.SetFatal("Spend limit reached.");
+            return Ok(Dto(slots.Select(s => (s.Number, RfpText)).ToList()));
+        });
+
+        var outcome = await Write(f, run);
+
+        Assert.True(run.IsFatal);
+        Assert.False(outcome.NotRun);
+        Assert.NotNull(outcome.Content);
+        Assert.Equal(Enumerable.Range(1, 8), outcome.Content!.Requests.Select(r => r.Number));
+        Assert.True(outcome.Cost.TotalUsd > 0m);
+        Assert.Single(f.Fake.Requests);
+    }
+
+    [Fact]
+    public async Task FatalElsewhereBeforeSecondCall_NotRunWithFirstCallCost()
+    {
+        // WR-04: a fatal stop between calls leaves the set pending without a pointless second call
+        var f = CreateFixture(DiscoveryKind.RequestsForProduction, 40, priced: true);
+        using var run = NewRun();
+        f.Script((slots, _) =>
+        {
+            run.SetFatal("Spend limit reached.");
+            return Ok(Dto(slots.Select(s => (s.Number, RfpText)).ToList()));
+        });
+
+        var outcome = await Write(f, run);
+
+        Assert.True(outcome.NotRun);
+        Assert.Null(outcome.Content);
+        Assert.Single(f.Fake.Requests);
+        Assert.True(outcome.Cost.TotalUsd > 0m);
+    }
+
+    [Fact]
     public async Task MissingAndExtraSlot_RetriedWithFeedback_ThenClean()
     {
         var f = CreateFixture(DiscoveryKind.RequestsForProduction, 8);

@@ -67,6 +67,10 @@ public sealed partial class WrittenSetWriter
 
         for (var i = 0; i < batches.Count; i++)
         {
+            // A fatal error elsewhere stopped the run before this part: left pending, the next run writes it (D-05)
+            if (run.IsFatal)
+                return new WrittenSetWriteOutcome { NotRun = true, Error = run.FatalError, Cost = cost };
+
             var batch = batches[i];
             onPart?.Invoke(i + 1, batches.Count);
 
@@ -80,6 +84,14 @@ public sealed partial class WrittenSetWriter
 
             for (var attempt = 1; attempt <= MaxAttempts; attempt++)
             {
+                // No retries after a fatal stop: a part that already has an attempt keeps it
+                if (attempt > 1 && run.IsFatal)
+                {
+                    if (best != null)
+                        break;
+                    return new WrittenSetWriteOutcome { NotRun = true, Error = run.FatalError, Cost = cost };
+                }
+
                 var request = new LlmRequest
                 {
                     Tier = LlmTier.Story,
@@ -103,9 +115,15 @@ public sealed partial class WrittenSetWriter
                 }
                 cost.Add(outcome.Cost);
 
-                // Left pending: the next run writes it (D-05)
-                if (run.IsFatal)
+                // A fatal stop only discards a call that produced nothing: a returned value was paid for and is kept (WR-04)
+                if (outcome.Value == null && run.IsFatal)
+                {
+                    if (best != null)
+                        break;
+
+                    // Left pending: the next run writes it (D-05)
                     return new WrittenSetWriteOutcome { NotRun = true, Error = run.FatalError, Cost = cost };
+                }
 
                 if (outcome.Value == null)
                 {

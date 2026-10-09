@@ -326,6 +326,57 @@ public class DepositionWriterTests
     }
 
     [Fact]
+    public async Task Overflow_NeverTrimsExhibitMarkerTurnOrItsAnswer()
+    {
+        var f = CreateFixture();
+        var last = f.Plan.Chunks[^1];
+        Assert.NotEmpty(f.Plan.Exhibits);
+        var number = f.Plan.Exhibits[0].Number;
+        foreach (var chunk in f.Plan.Chunks)
+            chunk.ExhibitNumbers.Remove(number);
+        last.ExhibitNumbers.Add(number);
+
+        var count = last.TargetTurns * 3 / 2 * 2;
+        var markerIndex = count - 4;
+        f.Script((chunk, _) =>
+        {
+            if (chunk.Index != last.Index)
+                return Ok(CleanDto(f, chunk));
+
+            // Long overflowing chunk whose only exhibit is marked near the end, well inside the trimmed region
+            var dto = CleanDto(f, chunk, turns: count, answer: LongAnswerText);
+            foreach (var turn in dto.Turns)
+                turn.ExhibitNumber = 0;
+            dto.Turns[markerIndex].ExhibitNumber = number;
+            return Ok(dto);
+        });
+        using var run = NewRun();
+
+        var outcome = await Write(f, run);
+
+        var content = Assert.IsType<DepositionContent>(outcome.Content);
+        var marker = content.Turns.FindIndex(t => t.ExhibitNumber == number);
+        Assert.True(marker >= 0);
+        Assert.Equal(TurnKind.Q, content.Turns[marker].Kind);
+        Assert.True(marker + 1 < content.Turns.Count);
+        Assert.Equal(TurnKind.A, content.Turns[marker + 1].Kind);
+
+        // Trimming still happened around the protected pair
+        Assert.True(content.Turns.Count(t => t.TopicIndex == last.TopicIndex) < count);
+
+        var layout = TranscriptLayout.Build(content);
+        Assert.True(layout.ExhibitMarked.TryGetValue(number, out var at));
+        Assert.True(at!.Page > 0 && at.Line > 0);
+
+        // No question is left unanswered by the trim
+        for (var i = 0; i < content.Turns.Count - 1; i++)
+        {
+            if (content.Turns[i].Kind == TurnKind.Q && content.Turns[i + 1].TopicIndex == content.Turns[i].TopicIndex)
+                Assert.Equal(TurnKind.A, content.Turns[i + 1].Kind);
+        }
+    }
+
+    [Fact]
     public async Task FatalProviderError_ReturnsNotRunWithCost()
     {
         var f = CreateFixture(priced: true);

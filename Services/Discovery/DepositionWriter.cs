@@ -287,8 +287,9 @@ public sealed class DepositionWriter
 
     /// <summary>
     /// T-08-36: drops turns from the end of the last topic until the testimony fits in 125% of the target pages. When the
-    /// last topic is down to <see cref="MinTurnsPerTopic"/> turns trimming moves to the topic before it. A dangling
-    /// question at a topic's new end goes too.
+    /// last topic is down to <see cref="MinTurnsPerTopic"/> turns trimming moves to the topic before it. Exhibit marker
+    /// turns and the answers to marked questions are never trimmed (D-21); a question left unanswered by a trim goes too.
+    /// If only protected turns remain, the overflow is accepted.
     /// </summary>
     private static void TrimOverflow(DepositionContent content)
     {
@@ -304,27 +305,53 @@ public sealed class DepositionWriter
         for (var ti = topics.Count - 1; ti >= 0 && lines > maxLines; ti--)
         {
             var topic = topics[ti];
-            while (lines > maxLines)
+            var cursor = content.Turns.FindLastIndex(t => t.TopicIndex == topic);
+            while (lines > maxLines && cursor >= 0 && content.Turns.Count(t => t.TopicIndex == topic) > MinTurnsPerTopic)
             {
-                var last = content.Turns.FindLastIndex(t => t.TopicIndex == topic);
-                if (last < 0 || content.Turns.Count(t => t.TopicIndex == topic) <= MinTurnsPerTopic)
+                // Walk back past exhibit marker turns (and the answers to marked questions): they are never trimmed
+                var j = cursor;
+                while (j >= 0 && content.Turns[j].TopicIndex == topic && IsProtected(content.Turns, j))
+                    j--;
+                if (j < 0 || content.Turns[j].TopicIndex != topic)
                     break;
 
                 // Estimate from the turn's own lines, then confirm with a full recount once the estimate says it fits
-                lines -= TranscriptLayout.FormatTurn(content.Turns[last], content).Count;
-                content.Turns.RemoveAt(last);
+                var removed = content.Turns[j];
+                lines -= TranscriptLayout.FormatTurn(removed, content).Count;
+                content.Turns.RemoveAt(j);
+                cursor = j - 1;
+
+                // Everything after j in this topic is protected, so a question before a removed answer is now unanswered
+                if (removed.Kind == TurnKind.A && cursor >= 0 && content.Turns[cursor].TopicIndex == topic
+                    && content.Turns[cursor].Kind == TurnKind.Q && !IsProtected(content.Turns, cursor)
+                    && content.Turns.Count(t => t.TopicIndex == topic) > MinTurnsPerTopic)
+                {
+                    lines -= TranscriptLayout.FormatTurn(content.Turns[cursor], content).Count;
+                    content.Turns.RemoveAt(cursor);
+                    cursor--;
+                }
+
                 if (lines <= maxLines)
                     lines = TranscriptLayout.CountTestimonyLines(content);
             }
 
             var end = content.Turns.FindLastIndex(t => t.TopicIndex == topic);
-            if (end >= 0 && content.Turns[end].Kind == TurnKind.Q && content.Turns.Count(t => t.TopicIndex == topic) > MinTurnsPerTopic)
+            if (end >= 0 && content.Turns[end].Kind == TurnKind.Q && !IsProtected(content.Turns, end)
+                && content.Turns.Count(t => t.TopicIndex == topic) > MinTurnsPerTopic)
             {
                 content.Turns.RemoveAt(end);
                 lines = TranscriptLayout.CountTestimonyLines(content);
             }
         }
+
+        // Still over budget only when exhibit turns remain: the overflow is accepted rather than losing an exhibit
     }
+
+    // An exhibit marker turn, or the answer that directly follows a marked question
+    private static bool IsProtected(List<DepositionTurn> turns, int index) =>
+        turns[index].ExhibitNumber != 0
+        || (turns[index].Kind == TurnKind.A && index > 0 && turns[index - 1].Kind == TurnKind.Q && turns[index - 1].ExhibitNumber != 0
+            && turns[index - 1].TopicIndex == turns[index].TopicIndex);
 
     private static List<DiscoveryViolation> Dedupe(List<DiscoveryViolation> violations) =>
         violations

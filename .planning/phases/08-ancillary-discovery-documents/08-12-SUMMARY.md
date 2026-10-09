@@ -73,6 +73,11 @@ completed: 2026-10-08
 
 Also added: an `OnPart_ReportsEachChunk` test (11 tests, above the minimum of 9).
 
+**3. [Rule 1 - Bug] Overflow trimming no longer removes exhibit markers (coordinator follow-up)**
+- **Issue:** Trimming could remove a turn carrying an exhibit marker. The exhibit then stayed in the exhibit list with no page:line in the layout.
+- **Fix:** Trimming skips marker turns and the answer that follows a marked question. A question left unanswered by a trim is removed with its answer. If only protected turns remain, the overflow is accepted.
+- **Test:** `Overflow_NeverTrimsExhibitMarkerTurnOrItsAnswer` checks that the exhibit is kept with a page:line in the layout and that no question is left unanswered. DepositionWriterTests 12/12 pass; Tests.Discovery. 438/438 pass.
+
 ## Known Stubs
 
 None.

@@ -230,8 +230,8 @@ Accent is never used for links, headings, card borders, captions, the witness `F
 2: Selected-row detail (SmallFont, AutoEllipsis, top 8)   // AutoSize
 3: Row buttons, right-aligned, 8 apart, top 8             // AutoSize
 4: Divider (1 px Theme.Border, top 12, bottom 12)         // AutoSize
-5: Estimate line (SmallFont, TextMuted, wraps)            // AutoSize
-6: Status line (SmallFont, AutoEllipsis, top 4)           // AutoSize, hidden when empty
+5: Estimate line (SmallFont, TextMuted, wraps)            // AutoSize, hidden while running
+6: Status line (SmallFont, AutoEllipsis, top 4)           // AutoSize, hidden when empty; 2 lines while running
 7: SlimProgressBar (Fill width, height 6, top 4)          // AutoSize, visible only while running
 8: Run button, right-aligned, top 8                       // AutoSize
 ```
@@ -295,6 +295,7 @@ Accent is never used for links, headings, card borders, captions, the witness `F
 | Fatal (Auth / SpendLimit, D-05) | `Generation stopped: {message}. Finished documents are saved. Fix the problem on the API Configuration step, then click Generate Documents.` | Danger |
 
   The line is hidden before the first run of the session. An outcome line stays until the next run or a Save Again / Open in Word message replaces it.
+  - **Height (amended in execution 08-14 after the 144-DPI inspection):** while a run is active the status line wraps to at most two lines (then ellipsizes, tooltip = full text) and the estimate line is hidden, because one line in a third of the page cut the `, part {p} of {q}...` counter at both Large and WizardMin and the estimate is not actionable during a run. Outcome and file messages stay one line with `AutoEllipsis` + tooltip so the Documents grid keeps three rows at `WizardMin` (rule 36).
 - **Run button:**
   - Idle: `Generate Documents` (**Primary**). It writes every selected row that is `Not generated` or `Failed`. It never touches Generated, Warnings or Out of date rows; those need `Regenerate...`, so nothing is regenerated silently (D-11, D-27). It is enabled only when at least one such row exists, every visible field is valid, the parties differ (when any written set is checked) and a tested key exists. No confirmation, because the cost is on screen (07 U-precedent).
   - Running: the same slot shows `Cancel Generation` (**Danger**), which asks C-D1.

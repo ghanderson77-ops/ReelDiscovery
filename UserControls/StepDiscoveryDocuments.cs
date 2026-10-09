@@ -386,6 +386,10 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
 
         _gridWitnesses = NewGrid();
         _gridWitnesses.ReadOnly = false;
+        // A column's Padding.Empty means "inherit", so the grid-wide 15 px text inset would push the 28-wide check cell's
+        // box out of view; the inset moves onto the text columns instead (Content x = 16 is unchanged)
+        var textInset = _gridWitnesses.DefaultCellStyle.Padding;
+        _gridWitnesses.DefaultCellStyle.Padding = Padding.Empty;
         var check = new DataGridViewCheckBoxColumn
         {
             Name = CheckColumn,
@@ -399,7 +403,9 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
         check.DefaultCellStyle.Padding = Padding.Empty;
         _gridWitnesses.Columns.Add(check);
         AddFillColumn(_gridWitnesses, WitnessColumn, "Witness", 96);
+        _gridWitnesses.Columns[WitnessColumn]!.DefaultCellStyle.Padding = textInset;
         var side = AddTextColumn(_gridWitnesses, SideColumn, "Side", 80);
+        side.DefaultCellStyle.Padding = textInset;
         // DPI rule 35: Side fits Non-party, Complainant and Subject without ellipsis
         using (var body = Theme.BodyFont())
         {
@@ -605,13 +611,14 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
         _lblEstimate = WrapLabel(layout, Theme.SmallFont(), Theme.TextMuted, new Padding(_inset, 0, _inset, 0));
         layout.Controls.Add(_lblEstimate, 0, 5);
 
+        // While running it wraps to two lines (SizeStatus): one line in a third of the page cuts the part counter
         _lblStatus = new Label
         {
             AutoSize = false,
             AutoEllipsis = true,
             UseMnemonic = false,
             Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
+            TextAlign = ContentAlignment.TopLeft,
             Margin = new Padding(_inset, LogicalToDeviceUnits(4), _inset, 0),
             Font = Theme.SmallFont(),
             ForeColor = Theme.TextMuted,
@@ -965,6 +972,29 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
             _lblNotice.MaximumSize = new Size(width, 0);
     }
 
+    /// <summary>
+    /// Status line height: one line, or two while running when the text wraps at the card width; longer text ellipsizes.
+    /// </summary>
+    private void SizeStatus()
+    {
+        var parent = _lblStatus.Parent;
+        if (parent == null)
+            return;
+        // GDI line spacing, which can be a pixel taller than Font.Height at 150%
+        var flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix;
+        var oneLine = TextRenderer.MeasureText("A", _lblStatus.Font, new Size(int.MaxValue, int.MaxValue), flags).Height;
+        var twoLines = TextRenderer.MeasureText("A" + Environment.NewLine + "A", _lblStatus.Font, new Size(int.MaxValue, int.MaxValue), flags).Height;
+        var width = Math.Max(1, parent.ClientSize.Width - _lblStatus.Margin.Horizontal);
+        var needed = string.IsNullOrEmpty(_lblStatus.Text)
+            ? oneLine
+            : TextRenderer.MeasureText(_lblStatus.Text, _lblStatus.Font, new Size(width, int.MaxValue), flags).Height;
+        // Two lines only while running, where the hidden estimate line frees the room; outcome lines keep one line
+        // (tone + tooltip) so the Documents grid keeps three rows at WizardMin (DPI rule 36)
+        var height = _isGenerating && needed > oneLine ? twoLines : oneLine;
+        if (_lblStatus.Height != height)
+            _lblStatus.Height = height;
+    }
+
     private void CenterStateContent()
     {
         _stateContent.Location = new Point(
@@ -989,7 +1019,12 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
         }
         _stateCard.Resize += (s, e) => CenterStateContent();
         _stateContent.SizeChanged += (s, e) => CenterStateContent();
-        _lblStatus.TextChanged += (s, e) => _toolTip.SetToolTip(_lblStatus, _lblStatus.Text);
+        _lblStatus.TextChanged += (s, e) =>
+        {
+            _toolTip.SetToolTip(_lblStatus, _lblStatus.Text);
+            SizeStatus();
+        };
+        _lblStatus.Parent!.SizeChanged += (s, e) => SizeStatus();
 
         _gridWitnesses.CurrentCellDirtyStateChanged += (s, e) =>
         {
@@ -1692,6 +1727,9 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep
             _btnRun.Enabled = _model.HasGuide && _model.CanGenerate(KeyReady(), FieldsValid());
         }
         _progress.Visible = _isGenerating;
+        SizeStatus();
+        // The estimate is for starting a run; while one runs the status line and bar take its place
+        _lblEstimate.Visible = _model.HasGuide && !_isGenerating;
         _btnOpenFolder.Enabled = !_isGenerating;
         if (_model.HasGuide)
         {

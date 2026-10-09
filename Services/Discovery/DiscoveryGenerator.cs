@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Discovery;
@@ -95,6 +96,20 @@ public sealed class DiscoveryGenerator
 
     // Single writer for the sidecar: parallel documents finishing together never lose an update (T-08-44)
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    // CX-03: one sidecar read-modify-write at a time per case folder, across Save Again calls and runs. Save Again loads
+    // the whole set, awaits the Word write and saves it back; without this, two overlapping saves lose an update. (The
+    // step also blocks Generate and Regenerate while a Save Again is pending: a run keeps its own in-memory set.)
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> SidecarLocks = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Test seam: awaited by <see cref="SaveAgainAsync"/> under the sidecar lock, after the sidecar was loaded and before
+    /// the Word file is written. Receives the case folder.
+    /// </summary>
+    internal static Func<string, Task>? SaveAgainLoadedHook;
+
+    private static SemaphoreSlim SidecarLock(string folder) =>
+        SidecarLocks.GetOrAdd(Path.TrimEndingDirectorySeparator(folder.Trim()), _ => new SemaphoreSlim(1, 1));
 
     public DiscoveryGenerator(ILlmGateway llm)
     {
@@ -215,6 +230,21 @@ public sealed class DiscoveryGenerator
         }
 
         var folder = draft.FolderPath;
+        var gate = SidecarLock(folder);
+        await gate.WaitAsync(CancellationToken.None);
+        try
+        {
+            return await SaveAgainLockedAsync(draft, folder, key, result);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    // Holds the folder's sidecar lock: the set is loaded, the file written and the set saved with no other writer between
+    private static async Task<SaveAgainResult> SaveAgainLockedAsync(CaseDraft draft, string folder, string key, SaveAgainResult result)
+    {
         var load = DiscoveryStore.Load(folder, draft.CaseId);
         if (!load.Succeeded)
         {
@@ -229,6 +259,10 @@ public sealed class DiscoveryGenerator
             result.Error = "This document has no saved content to write.";
             return result;
         }
+
+        var hook = SaveAgainLoadedHook;
+        if (hook != null)
+            await hook(folder);
 
         result.FileName = document.FileName;
         var path = DiscoveryStore.DocxPath(folder, document.FileName);
@@ -477,6 +511,8 @@ public sealed class DiscoveryGenerator
     private async Task MutateAsync(RunContext context, Action<DiscoveryDocumentSet> change)
     {
         await _writeLock.WaitAsync(CancellationToken.None);
+        var gate = SidecarLock(context.Folder);
+        await gate.WaitAsync(CancellationToken.None);
         try
         {
             change(context.Set);
@@ -484,6 +520,7 @@ public sealed class DiscoveryGenerator
         }
         finally
         {
+            gate.Release();
             _writeLock.Release();
         }
     }

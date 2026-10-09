@@ -55,6 +55,9 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
     // without the corpus exhibits (CR-03)
     private bool _probing;
 
+    // CX-03: a Save Again is rewriting the sidecar; Generate, Regenerate and Save Again stay off until it finishes
+    private bool _savingAgain;
+
     // Why discovery-documents.json could not be read (newer version, corrupt, other case); empty when it reads or is
     // missing. Generate and Regenerate stay off so the generator's refusal is shown up front (WR-06)
     private string _setError = string.Empty;
@@ -1739,9 +1742,9 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
         var saveAgain = row != null && row.State is DiscoveryRowState.NotSaved or DiscoveryRowState.FileMissing;
         _btnSaveAgain.Visible = saveAgain;
         _btnRegenerate.Visible = !saveAgain;
-        _btnSaveAgain.Enabled = !_isGenerating;
+        _btnSaveAgain.Enabled = !_isGenerating && !_savingAgain;
         _btnOpenWord.Enabled = !_isGenerating && row != null && row.FileExists;
-        _btnRegenerate.Enabled = !_isGenerating && !_probing && _setError.Length == 0 && row != null
+        _btnRegenerate.Enabled = !_isGenerating && !_savingAgain && !_probing && _setError.Length == 0 && row != null
             && row.State is not (DiscoveryRowState.NotGenerated or DiscoveryRowState.Writing) && KeyReady();
     }
 
@@ -1777,7 +1780,8 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
         {
             _btnRun.Text = DiscoveryUiText.GenerateButton;
             ButtonHelper.StyleButton(_btnRun, ButtonStyle.Primary);
-            _btnRun.Enabled = _model.HasGuide && !_probing && _setError.Length == 0 && _model.CanGenerate(KeyReady(), FieldsValid());
+            _btnRun.Enabled = _model.HasGuide && !_probing && !_savingAgain && _setError.Length == 0
+                              && _model.CanGenerate(KeyReady(), FieldsValid());
         }
         _progress.Visible = _isGenerating;
         SizeStatus();
@@ -1921,6 +1925,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
     internal DataGridView DocumentsGrid => _gridDocuments;
     internal Button RunButton => _btnRun;
     internal bool IsProbingCorpus => _probing;
+    internal bool IsSavingAgain => _savingAgain;
     internal Button RegenerateButton => _btnRegenerate;
     internal Button SaveAgainButton => _btnSaveAgain;
     internal Button OpenWordButton => _btnOpenWord;

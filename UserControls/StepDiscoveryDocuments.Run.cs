@@ -94,8 +94,9 @@ public partial class StepDiscoveryDocuments
     /// </summary>
     internal async Task RegenerateSelectedAsync()
     {
-        // Planned only after the corpus probe, so exhibit numbers are never fixed without the corpus (CR-03)
-        if (_state == null || _isGenerating || _probing || _setError.Length > 0 || !KeyReady())
+        // Planned only after the corpus probe, so exhibit numbers are never fixed without the corpus (CR-03). CX-03: never
+        // while a Save Again is rewriting the sidecar
+        if (_state == null || _isGenerating || _savingAgain || _probing || _setError.Length > 0 || !KeyReady())
             return;
 
         var row = SelectedRow();
@@ -140,14 +141,32 @@ public partial class StepDiscoveryDocuments
     /// </summary>
     internal async Task SaveAgainSelectedAsync()
     {
-        if (_state == null || _isGenerating)
+        if (_state == null || _isGenerating || _savingAgain)
             return;
 
         var row = SelectedRow();
         if (row == null || _set.Find(row.Key) == null)
             return;
 
-        var result = await DiscoveryGenerator.SaveAgainAsync(Draft, row.Key);
+        // CX-03: Save Again rewrites the whole sidecar; Generate, Regenerate and another Save Again wait until it is done
+        SaveAgainResult result;
+        _savingAgain = true;
+        PaintRunChrome();
+        PaintSelection();
+        try
+        {
+            result = await DiscoveryGenerator.SaveAgainAsync(Draft, row.Key);
+        }
+        finally
+        {
+            _savingAgain = false;
+            if (!IsDisposed)
+            {
+                PaintRunChrome();
+                PaintSelection();
+            }
+        }
+
         if (IsDisposed)
             return;
 
@@ -229,7 +248,7 @@ public partial class StepDiscoveryDocuments
 
         // A field typed within the debounce window counts; the model then lists what to write
         CommitPendingInput();
-        if (_probing || _setError.Length > 0 || !_model.HasGuide || !_model.CanGenerate(KeyReady(), FieldsValid()))
+        if (_savingAgain || _probing || _setError.Length > 0 || !_model.HasGuide || !_model.CanGenerate(KeyReady(), FieldsValid()))
             return;
 
         // Writes only Not generated and Failed rows; nothing regenerates silently (D-11, D-27). No confirmation: the cost
@@ -243,7 +262,7 @@ public partial class StepDiscoveryDocuments
     /// </summary>
     private async Task RunDocumentsAsync(IReadOnlyList<DiscoveryWorkItem> items, IReadOnlyDictionary<string, string>? guidance)
     {
-        if (_isGenerating || items.Count == 0)
+        if (_isGenerating || _savingAgain || items.Count == 0)
             return;
 
         ILlmGateway gateway;

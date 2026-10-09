@@ -435,6 +435,56 @@ public partial class DiscoveryGeneratorTests : IDisposable
     }
 
     [Fact]
+    public async Task CX03_OverlappingSaveAgain_SerializedSoNeitherUpdateIsLost()
+    {
+        Script();
+        var items = Items();
+        foreach (var item in items)
+            Directory.CreateDirectory(DocxPath(item));
+        var result = await NewGenerator().RunAsync(_draft, null, items);
+        Assert.Equal(2, result.NotSaved);
+        foreach (var item in items)
+            Directory.Delete(DocxPath(item));
+
+        // The first Save Again holds its loaded snapshot while the second is started
+        var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        DiscoveryGenerator.SaveAgainLoadedHook = async folder =>
+        {
+            if (!string.Equals(folder, _draft.FolderPath, StringComparison.OrdinalIgnoreCase) || Interlocked.Increment(ref calls) != 1)
+                return;
+            loaded.TrySetResult();
+            await release.Task;
+        };
+        try
+        {
+            var first = DiscoveryGenerator.SaveAgainAsync(_draft, DepKey);
+            await loaded.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            var second = DiscoveryGenerator.SaveAgainAsync(_draft, RfpKey);
+
+            // The second read-modify-write waits for the first instead of loading the same stale sidecar
+            await Task.Delay(200);
+            Assert.False(second.IsCompleted);
+
+            release.SetResult();
+            Assert.True((await first.WaitAsync(TimeSpan.FromSeconds(30))).Saved);
+            Assert.True((await second.WaitAsync(TimeSpan.FromSeconds(30))).Saved);
+        }
+        finally
+        {
+            DiscoveryGenerator.SaveAgainLoadedHook = null;
+        }
+
+        var set = LoadSet();
+        foreach (var key in new[] { DepKey, RfpKey })
+        {
+            Assert.True(set.Find(key)!.FileSaved, key);
+            Assert.Equal(string.Empty, set.Find(key)!.FailureReason);
+        }
+    }
+
+    [Fact]
     public async Task RegenerateFails_KeepsPreviousContentAndFile_AddsCost_SendsGuidance()
     {
         Script();

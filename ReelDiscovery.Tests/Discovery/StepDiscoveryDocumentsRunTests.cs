@@ -532,6 +532,72 @@ public partial class StepDiscoveryDocumentsRunTests
         });
     }
 
+    [Fact]
+    public void CX03_SaveAgainPending_GenerateRegenerateAndSaveAgainBlocked()
+    {
+        Run((f, step) =>
+        {
+            Enter(f, step);
+            Script(f);
+            var rfp = step.Model.ToWrite.Single(i => i.Key == RfpKey);
+            var path = DiscoveryStore.DocxPath(f.Folder, rfp.FileName)!;
+
+            // A directory squats on the .docx path: the RFP is Not saved, the deposition is generated
+            Directory.CreateDirectory(path);
+            Pump(step.RunClickAsync());
+            Assert.Equal(DiscoveryUiText.RowStatusCell(DiscoveryRowState.NotSaved), Statuses(step)[RfpKey]);
+            Directory.Delete(path);
+
+            var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            DiscoveryGenerator.SaveAgainLoadedHook = async folder =>
+            {
+                if (!string.Equals(folder, f.Folder, StringComparison.OrdinalIgnoreCase))
+                    return;
+                loaded.TrySetResult();
+                await release.Task;
+            };
+            try
+            {
+                step.SelectDocument(RfpKey);
+                var saving = step.SaveAgainSelectedAsync();
+                Pump(loaded.Task);
+
+                Assert.True(step.IsSavingAgain);
+                Assert.False(step.RunButton.Enabled);
+                Assert.False(step.SaveAgainButton.Enabled);
+                Assert.False(step.RegenerateButton.Enabled);
+
+                // Clicks while the save is pending do nothing: no run, no model call, no second save
+                var requests = f.Fake.Requests.Count;
+                step.SelectDocument(DepKey);
+                var shown = 0;
+                step.ShowDialogOverride = _ =>
+                {
+                    shown++;
+                    return DialogResult.OK;
+                };
+                Pump(step.RunClickAsync());
+                Pump(step.RegenerateSelectedAsync());
+                Assert.False(step.IsGenerating);
+                Assert.Equal(0, shown);
+                Assert.Equal(requests, f.Fake.Requests.Count);
+
+                release.SetResult();
+                Pump(saving);
+            }
+            finally
+            {
+                DiscoveryGenerator.SaveAgainLoadedHook = null;
+            }
+
+            Assert.False(step.IsSavingAgain);
+            Assert.Equal(DiscoveryUiText.Saved(rfp.FileName), step.StatusLabel.Text);
+            Assert.Equal("Generated", Statuses(step)[RfpKey]);
+            Assert.True(step.RegenerateButton.Enabled);
+        });
+    }
+
     // ----- Open in Word / Open Discovery Folder -----
 
     [Fact]

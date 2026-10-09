@@ -95,7 +95,7 @@ public partial class StepDiscoveryDocuments
     internal async Task RegenerateSelectedAsync()
     {
         // Planned only after the corpus probe, so exhibit numbers are never fixed without the corpus (CR-03)
-        if (_state == null || _isGenerating || _probing || !KeyReady())
+        if (_state == null || _isGenerating || _probing || _setError.Length > 0 || !KeyReady())
             return;
 
         var row = SelectedRow();
@@ -151,7 +151,7 @@ public partial class StepDiscoveryDocuments
         if (IsDisposed)
             return;
 
-        _set = LoadSet();
+        _set = LoadSet(keepOnFailure: true);
         RefreshModel();
         var fileName = result.FileName.Length > 0 ? result.FileName : row.FileName;
         if (result.Saved)
@@ -229,7 +229,7 @@ public partial class StepDiscoveryDocuments
 
         // A field typed within the debounce window counts; the model then lists what to write
         CommitPendingInput();
-        if (_probing || !_model.HasGuide || !_model.CanGenerate(KeyReady(), FieldsValid()))
+        if (_probing || _setError.Length > 0 || !_model.HasGuide || !_model.CanGenerate(KeyReady(), FieldsValid()))
             return;
 
         // Writes only Not generated and Failed rows; nothing regenerates silently (D-11, D-27). No confirmation: the cost
@@ -308,7 +308,7 @@ public partial class StepDiscoveryDocuments
         if (IsDisposed)
             return;
 
-        _set = LoadSet();
+        _set = LoadSet(keepOnFailure: true);
         RefreshModel();
 
         if (error != null)
@@ -362,7 +362,9 @@ public partial class StepDiscoveryDocuments
         {
             // The record is saved: the row takes its outcome from the sidecar
             _writing.Remove(p.Key);
-            _set = LoadSet();
+
+            // A reload racing another document's temp-file-then-move write keeps the last good set (no flash to Not generated)
+            _set = LoadSet(keepOnFailure: true);
             _model = BuildModel();
             PaintRunRows();
             return;

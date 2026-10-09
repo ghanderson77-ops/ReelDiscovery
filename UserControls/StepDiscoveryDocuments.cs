@@ -54,6 +54,10 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
     // True while the entry's corpus probe runs: Generate and Regenerate wait for it so a run never plans depositions
     // without the corpus exhibits (CR-03)
     private bool _probing;
+
+    // Why discovery-documents.json could not be read (newer version, corrupt, other case); empty when it reads or is
+    // missing. Generate and Regenerate stay off so the generator's refusal is shown up front (WR-06)
+    private string _setError = string.Empty;
     // Set by EnterRunState while a run is active
     private CancellationTokenSource? _cts;
     private readonly ToolTip _toolTip = new();
@@ -1245,10 +1249,39 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
             SetStatus(CaseGuideUiText.SaveFailedText(_state.CaseStore.LastSaveError), Theme.Danger);
     }
 
-    private DiscoveryDocumentSet LoadSet() =>
-        string.IsNullOrWhiteSpace(Draft.FolderPath)
-            ? new DiscoveryDocumentSet { CaseId = Draft.CaseId }
-            : DiscoveryStore.LoadOrNew(Draft.FolderPath, Draft.CaseId);
+    /// <summary>
+    /// Reads the sidecar. An unreadable file records its reason in _setError and yields an empty set, unless
+    /// <paramref name="keepOnFailure"/> keeps the current set (a reload racing a temp-file-then-move write).
+    /// </summary>
+    private DiscoveryDocumentSet LoadSet(bool keepOnFailure = false)
+    {
+        if (string.IsNullOrWhiteSpace(Draft.FolderPath))
+        {
+            _setError = string.Empty;
+            return new DiscoveryDocumentSet { CaseId = Draft.CaseId };
+        }
+
+        var load = DiscoveryStore.Load(Draft.FolderPath, Draft.CaseId);
+        if (load.Succeeded)
+        {
+            _setError = string.Empty;
+            return load.Set!;
+        }
+
+        if (load.Missing)
+        {
+            _setError = string.Empty;
+            return new DiscoveryDocumentSet { CaseId = Draft.CaseId };
+        }
+
+        if (keepOnFailure && _set != null)
+            return _set;
+
+        _setError = load.Reason;
+        if (_setError.Length == 0)
+            _setError = DiscoveryUiText.SidecarUnreadableFallback;
+        return new DiscoveryDocumentSet { CaseId = Draft.CaseId };
+    }
 
     private DiscoveryStepModel BuildModel() =>
         DiscoveryStepModel.Build(Draft, _set, _corpus, _state.StoryModelConfig, Draft.FolderPath, FileExists);
@@ -1484,7 +1517,11 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
         _stateCard.Visible = !hasGuide;
         if (hasGuide)
         {
-            _lblNotice.Text = DiscoveryUiText.Notice(_model.IsMemo, _model.CorpusUsable);
+            var unreadable = _setError.Length > 0;
+            _lblNotice.Text = unreadable
+                ? DiscoveryUiText.SidecarUnreadableNotice(_setError)
+                : DiscoveryUiText.Notice(_model.IsMemo, _model.CorpusUsable);
+            _lblNotice.ForeColor = unreadable ? Theme.Danger : Theme.TextMuted;
             _lblNotice.Visible = true;
         }
         else
@@ -1704,7 +1741,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
         _btnRegenerate.Visible = !saveAgain;
         _btnSaveAgain.Enabled = !_isGenerating;
         _btnOpenWord.Enabled = !_isGenerating && row != null && row.FileExists;
-        _btnRegenerate.Enabled = !_isGenerating && !_probing && row != null
+        _btnRegenerate.Enabled = !_isGenerating && !_probing && _setError.Length == 0 && row != null
             && row.State is not (DiscoveryRowState.NotGenerated or DiscoveryRowState.Writing) && KeyReady();
     }
 
@@ -1740,7 +1777,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
         {
             _btnRun.Text = DiscoveryUiText.GenerateButton;
             ButtonHelper.StyleButton(_btnRun, ButtonStyle.Primary);
-            _btnRun.Enabled = _model.HasGuide && !_probing && _model.CanGenerate(KeyReady(), FieldsValid());
+            _btnRun.Enabled = _model.HasGuide && !_probing && _setError.Length == 0 && _model.CanGenerate(KeyReady(), FieldsValid());
         }
         _progress.Visible = _isGenerating;
         SizeStatus();

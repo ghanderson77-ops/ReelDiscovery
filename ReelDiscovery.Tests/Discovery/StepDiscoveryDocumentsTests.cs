@@ -322,6 +322,43 @@ public class StepDiscoveryDocumentsTests
         }
     }
 
+    [Fact]
+    public void OnEnter_UnreadableSidecar_ShowsReason_GenerateOff()
+    {
+        // WR-06: a newer-version sidecar is not "nothing generated"; its reason shows and Generate stays off
+        Run(DiscoveryTestData.LitigationDraft(), (f, step) =>
+        {
+            File.WriteAllText(DiscoveryStore.SetPath(f.Draft.FolderPath!), $"{{\"FormatVersion\":99,\"CaseId\":\"{f.Draft.CaseId}\"}}");
+
+            Enter(step);
+
+            Assert.Contains("newer version", step.NoticeLabel.Text);
+            Assert.Equal(Theme.Danger, step.NoticeLabel.ForeColor);
+            Assert.NotEmpty(step.Model.ToWrite);
+            Assert.False(step.RunButton.Enabled);
+            var click = step.RunClickAsync();
+            Assert.True(click.IsCompleted);
+            Assert.False(step.IsGenerating);
+
+            // Once the file is gone the step is usable again
+            File.Delete(DiscoveryStore.SetPath(f.Draft.FolderPath!));
+            Enter(step);
+            Assert.Equal(DiscoveryUiText.Notice(memo: false, corpusUsable: false), step.NoticeLabel.Text);
+            Assert.True(step.RunButton.Enabled);
+        });
+    }
+
+    [Fact]
+    public void SummaryRowUnreadable_ShowsReasonInDanger()
+    {
+        var row = DiscoveryUiText.SummaryRowUnreadable("The discovery documents file was saved by a newer version of ReelDiscovery.", false);
+
+        Assert.Equal("The discovery documents file was saved by a newer version of ReelDiscovery.", row.Line3);
+        Assert.Equal(SummaryTone.Danger, row.Line3Tone);
+        Assert.Equal(SummaryTone.Danger, row.DotTone);
+        Assert.Equal(DiscoveryUiText.SidecarUnreadableFallback, DiscoveryUiText.SummaryRowUnreadable("", false).Line3);
+    }
+
     // ----- Inputs -----
 
     [Fact]

@@ -5,6 +5,7 @@ using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Discovery;
 using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Models.Qa;
 using ReelDiscovery.Services.Ai;
@@ -1778,9 +1779,15 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         (string Folder, CorpusPlan? Plan, CaseGuide Guide, ReviewProtocolProse Prose, Func<string, AIModelConfig?> ModelFor, CaseDraft Draft) inputs)
     {
         var folder = inputs.Folder;
-        var set = string.IsNullOrEmpty(folder) ? null : DiscoveryStore.LoadOrNew(folder, inputs.Draft.CaseId);
+        var load = string.IsNullOrEmpty(folder) ? null : DiscoveryStore.Load(folder, inputs.Draft.CaseId);
+        var set = load == null ? null : load.Set ?? new DiscoveryDocumentSet { CaseId = inputs.Draft.CaseId };
         var qa = LoadQa(folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor, set?.TotalCostUsd ?? 0m);
-        if (set != null)
+        if (load != null && !load.Succeeded && !load.Missing)
+        {
+            // An unreadable sidecar says so instead of reading as "Not generated" with no spend (WR-06)
+            qa.Discovery = DiscoveryUiText.SummaryRowUnreadable(load.Reason, DiscoveryStore.HasDocuments(folder));
+        }
+        else if (set != null)
         {
             // A report view over the untrusted sidecar: SavedRows never throws (a malformed set yields no rows)
             qa.Discovery = DiscoveryRow(DiscoveryStepModel.SavedRows(inputs.Draft, set, folder), DiscoveryStore.HasDocuments(folder));

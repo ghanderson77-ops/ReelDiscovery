@@ -549,6 +549,39 @@ public static class DiscoveryUiText
         return content;
     }
 
+    /// <summary>
+    /// Case Summary row when discovery-documents.json exists but cannot be read (newer version, corrupt, other case,
+    /// oversized): the reason in Danger, never "Not generated" (WR-06).
+    /// </summary>
+    public static SummaryRowContent SummaryRowUnreadable(string reason, bool folderHasDocuments)
+    {
+        var line3 = SidecarUnreadableText(reason);
+        return new SummaryRowContent
+        {
+            Line2 = SummaryLine2,
+            Line3 = line3,
+            Line3Tone = SummaryTone.Danger,
+            DotTone = SummaryTone.Danger,
+            Line3Tooltip = line3,
+            ShowPrimary = folderHasDocuments,
+            ShowSecondary = true
+        };
+    }
+
+    /// <summary>
+    /// Notice line on the step when the sidecar cannot be read; Generate Documents and Regenerate... stay off (WR-06).
+    /// </summary>
+    public static string SidecarUnreadableNotice(string reason) =>
+        SidecarUnreadableText(reason) + " Generating is off until the file is fixed or moved out of the case folder.";
+
+    public const string SidecarUnreadableFallback = "The discovery documents file could not be read.";
+
+    private static string SidecarUnreadableText(string? reason)
+    {
+        var text = TrimPeriod(reason);
+        return text.Length > 0 ? text + "." : SidecarUnreadableFallback;
+    }
+
     // --- Shared formatting ---
 
     /// <summary>

@@ -126,6 +126,39 @@ public static class GenerationCostEstimator
     // [ASSUMED] byte-stable system prompt (~330 tokens) + JSON schema (~270) per evidence call (research A3); re-measure from live usage in 07-22
     public const int StablePrefixTokens = 600;
 
+    // [ASSUMED] discovery heuristics (research A3); recalibrate on the first live run
+    // One deposition chunk call: guide slice + witness facts + exhibits + prior Q/A tail
+    public const int DepositionChunkInput = 7_000;
+
+    // ~4,500 output tokens per 8-page chunk
+    public const int DepositionOutputPerPage = 560;
+
+    // One written-discovery call: guide slice + facts + slots (up to 25 per call)
+    public const int WrittenSetInput = 6_000;
+    public const int OutputPerRequest = 150;
+
+    /// <summary>
+    /// Discovery documents (Phase 8, D-28): Story tier, live calls; same Price path as the corpus estimate.
+    /// A null model or no work gives zero.
+    /// </summary>
+    public static decimal PriceDiscoveryDeposition(int chunkCount, int testimonyPages, AIModelConfig? storyModel)
+    {
+        if (storyModel == null || chunkCount <= 0 || testimonyPages <= 0)
+            return 0m;
+        return Price(storyModel, chunkCount * DepositionChunkInput, testimonyPages * DepositionOutputPerPage, false) * QaOverhead;
+    }
+
+    /// <summary>
+    /// Discovery documents (Phase 8, D-28): Story tier, live calls; same Price path as the corpus estimate.
+    /// A null model or no work gives zero.
+    /// </summary>
+    public static decimal PriceDiscoveryWrittenSet(int callCount, int requestCount, AIModelConfig? storyModel)
+    {
+        if (storyModel == null || callCount <= 0 || requestCount <= 0)
+            return 0m;
+        return Price(storyModel, callCount * WrittenSetInput, requestCount * OutputPerRequest, false) * QaOverhead;
+    }
+
     // Phase 5 Review Plan estimate; D-29 overload below splits Story / Volume / media
     /// <summary>
     /// count x live price(typical in, typical out) x QaOverhead per group; a null model gives a zero estimate.

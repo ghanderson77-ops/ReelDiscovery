@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-17-PLAN.md
-last_updated: "2026-10-09T01:12:11.673Z"
+stopped_at: Completed 08-18-PLAN.md
+last_updated: "2026-10-09T01:25:43.447Z"
 last_activity: 2026-10-09
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 147
+  completed_plans: 148
   percent: 99
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 18 of 19
+Plan: 19 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-09
 
@@ -199,6 +199,7 @@ Progress: [██████████] 99%
 | Phase 08 P15 | 25min | 2 tasks | 3 files |
 | Phase 08 P16 | 15min | 2 tasks | 6 files |
 | Phase 08 P17 | 25min | 2 tasks | 6 files |
+| Phase 08 P18 | 20min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -604,6 +605,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-17: DiscoveryProgress gained Done (set on the finish report); start and finish reports were otherwise identical
 - [Phase 08]: 08-17: Running status line uses the grid's short title, not the work item's caption title
 - [Phase 08]: 08-17: Row actions are internal Task/void methods wired to Click so tests drive them without showing the step
+- [Phase 08]: 08-18: QaInputs carries the draft; LoadQaWithDiscovery reads discovery-documents.json once for the cost row spend and the Discovery row, inside the existing Task.Run
+- [Phase 08]: 08-18: Discovery row line 2 has a full-text tooltip because it ellipsizes at 144 DPI before the D-30 sentence (UI-SPEC S4 amended)
 
 ### Pending Todos
 
@@ -625,6 +628,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-09T01:12:11.667Z
-Stopped at: Completed 08-17-PLAN.md
+Last session: 2026-10-09T01:25:43.441Z
+Stopped at: Completed 08-18-PLAN.md
 Resume file: None

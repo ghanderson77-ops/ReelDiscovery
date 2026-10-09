@@ -21,7 +21,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Attachments & Non-Relevant Corpus** - Case-driven attachments plus daily business, ancillary, newsletter/spam/personal and near-miss decoy traffic through the same pipeline (completed 2026-10-05)
 - [x] **Phase 7: Scale, Cost, QA & Cutover** - Batch APIs, prompt caching, cost accounting, blind-review and leakage QA, 5K-scale runs, and removal of the old wizard flow
  (completed 2026-10-08)
-- [ ] **Phase 8: Ancillary Discovery Documents** - Optional depositions, RFPs, RFAs and interrogatories grounded in the case guide and exported as .docx
+- [x] **Phase 8: Ancillary Discovery Documents** - Optional depositions, RFPs, RFAs and interrogatories grounded in the case guide and exported as .docx (completed 2026-10-09)
 
 ## Phase Details
 
@@ -304,4 +304,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 5. Relevant Evidence Generation & Narrative Ledger | 17/17 | Complete    | 2026-10-03 |
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
-| 8. Ancillary Discovery Documents | 18/19 | In Progress | - |
+| 8. Ancillary Discovery Documents | 19/19 | Complete    | 2026-10-09 |

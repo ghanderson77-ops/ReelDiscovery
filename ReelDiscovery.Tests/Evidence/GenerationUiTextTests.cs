@@ -1880,6 +1880,29 @@ public class GenerationUiTextTests
     }
 
     [Fact]
+    public void CostRow_DiscoveryClause_AfterMedia_BeforeNotItemized()
+    {
+        var row = GenerationUiText.CostRow(true, 5.50m, 1m, 0m, 0m, 2m, 0m, 0.5m, 0m, discovery: 2m);
+        Assert.Equal("$5.50 spent · input $1.00 · output $2.00 · images and voicemail $0.50 · discovery documents $2.00", row.Line3);
+        Assert.Equal("Spent so far: $5.50\nInput: $1.00\nOutput: $2.00\nImages and voicemail: $0.50\nDiscovery documents: $2.00",
+            row.Line3Tooltip);
+
+        var withUnsplit = GenerationUiText.CostRow(true, 6.50m, 1m, 0m, 0m, 2m, 0m, 0.5m, 1m, discovery: 2m);
+        Assert.EndsWith(" · images and voicemail $0.50 · discovery documents $2.00 · not itemized $1.00", withUnsplit.Line3);
+        Assert.EndsWith("\nImages and voicemail: $0.50\nDiscovery documents: $2.00\nNot itemized: $1.00", withUnsplit.Line3Tooltip);
+        AssertNoBannedWords(row.Line3);
+        AssertNoBannedWords(row.Line3Tooltip);
+    }
+
+    [Fact]
+    public void CostRow_ZeroDiscovery_NoClause()
+    {
+        var row = GenerationUiText.CostRow(true, 4m, 1m, 0m, 0m, 3m, 0m, 0m, 0m, discovery: 0m);
+        Assert.Equal("$4.00 spent · input $1.00 · output $3.00", row.Line3);
+        Assert.DoesNotContain("discovery", row.Line3Tooltip, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CostRow_OnlyNotItemized()
     {
         var row = GenerationUiText.CostRow(true, 2m, 0m, 0m, 0m, 0m, 0m, 0m, 2m);

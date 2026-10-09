@@ -172,10 +172,73 @@ public class CaseSummaryQaTests
 
         // Hand-edited case data can throw any type (NullReferenceException, KeyNotFoundException, JsonException...)
         var qa = StepCaseSummary.LoadQa(fixture.Folder, fixture.Plan, fixture.Draft.Guide!, new ReviewProtocolProse(),
-            _ => throw new NullReferenceException("case.json field missing"));
+            _ => throw new NullReferenceException("case.json field missing"), 0m);
 
         Assert.NotNull(qa.Replay);
         Assert.Null(qa.Scans);
+    }
+
+    [Fact]
+    public void LoadQa_NoPlan_ShowsDiscoverySpend()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+
+        var qa = StepCaseSummary.LoadQa(fixture.Folder, null, fixture.Draft.Guide!, new ReviewProtocolProse(), _ => null, 1.25m);
+
+        Assert.Null(qa.Plan);
+        Assert.Equal("$1.25 spent · discovery documents $1.25", qa.Cost.Line3);
+        Assert.Equal("Spent so far: $1.25\nDiscovery documents: $1.25", qa.Cost.Line3Tooltip);
+        Assert.Equal(SummaryTone.Success, qa.Cost.DotTone);
+    }
+
+    [Fact]
+    public void LoadQa_NoPlan_NoDiscoverySpend_NothingSpent()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+
+        var qa = StepCaseSummary.LoadQa(fixture.Folder, null, fixture.Draft.Guide!, new ReviewProtocolProse(), _ => null, 0m);
+
+        Assert.Equal("Nothing spent yet", qa.Cost.Line3);
+        Assert.Equal(SummaryTone.Muted, qa.Cost.DotTone);
+    }
+
+    [Fact]
+    public void LoadQa_PlanAndDiscovery_TotalIncludesBoth()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+        SeedGenerated(fixture);
+        var threads = fixture.Plan.Threads.Count;
+
+        var qa = StepCaseSummary.LoadQa(fixture.Folder, fixture.Plan, fixture.Draft.Guide!, new ReviewProtocolProse(), _ => null,
+            1.25m);
+
+        var expected = GenerationUiText.CostRow(true, 0.10m * threads + 1.25m, 0.04m * threads, 0.01m * threads,
+            0.01m * threads, 0.05m * threads, 0.01m * threads, 0m, 0m, 1.25m);
+        Assert.Equal(expected.Line3, qa.Cost.Line3);
+        Assert.StartsWith("$" + (0.10m * threads + 1.25m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " spent",
+            qa.Cost.Line3);
+        Assert.Contains(" · input $", qa.Cost.Line3);
+        Assert.EndsWith(" · discovery documents $1.25", qa.Cost.Line3);
+    }
+
+    [Fact]
+    public void Step_NoCorpusPlan_CostRowIncludesSidecarSpend()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+        fixture.Draft.Corpus = null;
+        WriteDiscoverySet(fixture.Folder, fixture.Draft.CaseId, 1.25m);
+
+        GenerateCorpusStepTests.RunSta(() =>
+        {
+            using var step = CreateStep(fixture);
+            Assert.Equal("$1.25 spent · discovery documents $1.25", step.GenerationCostLine3.Text);
+        });
+    }
+
+    internal static void WriteDiscoverySet(string folder, Guid caseId, decimal cost)
+    {
+        var set = new ReelDiscovery.Models.Discovery.DiscoveryDocumentSet { CaseId = caseId, UnattributedCostUsd = cost };
+        ReelDiscovery.Services.Discovery.DiscoveryStore.SaveAsync(folder, set).GetAwaiter().GetResult();
     }
 
     [Fact]

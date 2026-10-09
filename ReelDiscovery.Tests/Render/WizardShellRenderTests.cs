@@ -9,8 +9,8 @@ using ReelDiscovery.UserControls;
 namespace ReelDiscovery.Tests.Render;
 
 /// <summary>
-/// Renders the whole wizard window on the 8-step case flow at the active scaling (W5): header text,
-/// navigation button text, default window size and clipping for steps 3 to 8.
+/// Renders the whole wizard window on the 9-step case flow at the active scaling (W5): header text,
+/// navigation button text, default window size and clipping for steps 3 to 9.
 /// </summary>
 [Trait("Category", "Render")]
 [Collection(RenderCollection.Name)]
@@ -20,14 +20,14 @@ public class WizardShellRenderTests
     [Fact]
     public void Shell_ApiConfigurationStep()
     {
-        RenderStep(0, "wizard-shell-api-configuration", "Step 1 of 8: API Configuration", "Next >", UseDummyKeys);
+        RenderStep(0, "wizard-shell-api-configuration", "Step 1 of 9: API Configuration", "Next >", UseDummyKeys);
     }
 
     // D-21: Next from API Configuration leads to Case Scenario (recent cases)
     [Fact]
     public void Shell_CaseScenarioStep()
     {
-        RenderStep(1, "wizard-shell-case-scenario", "Step 2 of 8: Describe the Case", "Next >", UseDummyKeys);
+        RenderStep(1, "wizard-shell-case-scenario", "Step 2 of 9: Describe the Case", "Next >", UseDummyKeys);
     }
 
     // S7 / DPI contract 32: with the Workflow rows gone the disclaimer is the last row and no blank gap follows it
@@ -74,21 +74,21 @@ public class WizardShellRenderTests
     [Fact]
     public void Shell_CaseGuideStep()
     {
-        RenderStep(3, "wizard-shell-case-guide", "Step 4 of 8: Case Guide", "Next >");
+        RenderStep(3, "wizard-shell-case-guide", "Step 4 of 9: Case Guide", "Next >");
     }
 
     [Fact]
     public void Shell_CorpusSettingsStep()
     {
-        // D-12: Corpus Settings is step 5 of the 8-step case flow
-        RenderStep(4, "wizard-shell-corpus-settings", "Step 5 of 8: Corpus Settings", "Next >");
+        // D-12: Corpus Settings is step 5 of the 9-step case flow
+        RenderStep(4, "wizard-shell-corpus-settings", "Step 5 of 9: Corpus Settings", "Next >");
     }
 
     [Fact]
     public void Shell_ReviewPlanStep()
     {
         // The reopen flag keeps entering Review Plan from starting a planning run (no API calls in tests)
-        RenderStep(5, "wizard-shell-review-plan", "Step 6 of 8: Review Plan", "Next >",
+        RenderStep(5, "wizard-shell-review-plan", "Step 6 of 9: Review Plan", "Next >",
             state => state.SuppressAutoPlanOnce = true);
     }
 
@@ -96,19 +96,26 @@ public class WizardShellRenderTests
     public void Shell_GenerateCorpusStep()
     {
         // UI-SPEC S4: Generate Corpus sits between Review Plan and Case Summary; entering it never starts a run
-        RenderStep(6, "wizard-shell-generate-corpus", "Step 7 of 8: Generate Corpus", "Next >");
+        RenderStep(6, "wizard-shell-generate-corpus", "Step 7 of 9: Generate Corpus", "Next >");
     }
 
     [Fact]
     public void Shell_CaseSummaryStep()
     {
-        RenderStep(7, "wizard-shell-case-summary", "Step 8 of 8: Case Summary", "Finish");
+        RenderStep(8, "wizard-shell-case-summary", "Step 9 of 9: Case Summary", "Finish");
+    }
+
+    [Fact]
+    public void Shell_DiscoveryDocumentsStep()
+    {
+        // D-07: Discovery Documents is the optional step between Generate Corpus and Case Summary; entering it never starts a run
+        RenderStep(7, "wizard-shell-discovery-documents", "Step 8 of 9: Discovery Documents", "Next >");
     }
 
     [Fact]
     public void Shell_CoreDocumentStep()
     {
-        RenderStep(2, "wizard-shell-core-document", "Step 3 of 8: Review Core Document", "Next >");
+        RenderStep(2, "wizard-shell-core-document", "Step 3 of 9: Review Core Document", "Next >");
     }
 
     // D-16 (07-UI-SPEC S6): the header ticker tooltip is the session cost breakdown of the tracker totals

@@ -417,6 +417,12 @@ public static class DiscoveryUiText
 
     public static string Saved(string fileName) => $"Saved {fileName}.";
 
+    public static string OpenFolderFailed(string message) => $"Could not open the Discovery folder: {TrimPeriod(message)}.";
+
+    // Regenerate... on a document the current guide can no longer plan (its witness or set left the guide)
+    public static string RegenerateUnplannable(string shortTitle) =>
+        $"{shortTitle} cannot be written from the current case guide. Check the case guide, then try again.";
+
     // --- Confirmations (S3) ---
 
     public static (string Title, string Text) CD1CancelGeneration() =>

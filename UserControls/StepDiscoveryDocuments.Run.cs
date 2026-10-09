@@ -1,14 +1,18 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Discovery;
 using ReelDiscovery.Services.Ai;
+using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Discovery;
 
 namespace ReelDiscovery.UserControls;
 
 /// <summary>
-/// Discovery Documents run wiring (08-UI-SPEC S1): Generate Documents / Cancel Generation, progress and outcome lines.
+/// Discovery Documents run wiring (08-UI-SPEC S1): Generate Documents / Cancel Generation, progress and outcome lines,
+/// Regenerate..., Save Again, Open in Word and Open Discovery Folder.
 /// </summary>
 public partial class StepDiscoveryDocuments
 {
@@ -54,6 +58,156 @@ public partial class StepDiscoveryDocuments
     partial void WireRunHandlers()
     {
         _btnRun.Click += async (s, e) => await RunClickAsync();
+        _btnRegenerate.Click += async (s, e) => await RegenerateSelectedAsync();
+        _btnSaveAgain.Click += async (s, e) => await SaveAgainSelectedAsync();
+        _btnOpenWord.Click += (s, e) => OpenSelectedInWord();
+        _btnOpenFolder.Click += (s, e) => OpenDiscoveryFolder();
+        // Double-click or Enter on a row = Open in Word when the file exists (UI-SPEC S1)
+        _gridDocuments.CellDoubleClick += (s, e) =>
+        {
+            if (e.RowIndex >= 0)
+                OpenSelectedInWord();
+        };
+        _gridDocuments.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode != Keys.Enter)
+                return;
+            // Enter would otherwise move the selection down a row
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            OpenSelectedInWord();
+        };
+    }
+
+    // ----- Row actions -----
+
+    // The selected row's saved record; null when nothing is selected or the row has no saved version
+    private DiscoveryDocument? SelectedDocument()
+    {
+        var row = SelectedRow();
+        return row == null ? null : _set.Find(row.Key);
+    }
+
+    /// <summary>
+    /// Regenerate...: only through RegenerateDiscoveryDialog (the confirmation names the file it replaces and the estimate);
+    /// OK runs this one document with the guidance and replaces only it (D-11, D-27).
+    /// </summary>
+    internal async Task RegenerateSelectedAsync()
+    {
+        if (_state == null || _isGenerating || !KeyReady())
+            return;
+
+        var row = SelectedRow();
+        var document = SelectedDocument();
+        if (row == null || document == null || row.State is DiscoveryRowState.NotGenerated or DiscoveryRowState.Writing)
+            return;
+
+        var item = DiscoveryWorklist.ForDocument(Draft, document, Settings, _corpus, _set);
+        if (item == null)
+        {
+            SetStatus(DiscoveryUiText.RegenerateUnplannable(row.ShortTitle), Theme.Danger);
+            return;
+        }
+
+        var isDeposition = item.Kind == DiscoveryKind.Deposition;
+        var settingsLine = isDeposition
+            ? DiscoveryUiText.SettingsLineDeposition(item.TestimonyPages,
+                item.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+            : DiscoveryUiText.SettingsLineWritten(item.RequestCount, _model.PartyChoice.Propounding?.Name ?? string.Empty,
+                _model.PartyChoice.Responding?.Name ?? string.Empty, _model.IsMemo);
+        var estimate = isDeposition
+            ? GenerationCostEstimator.PriceDiscoveryDeposition(item.ChunkCount, item.TestimonyPages, _state.StoryModelConfig)
+            : GenerationCostEstimator.PriceDiscoveryWrittenSet(item.CallCount, item.RequestCount, _state.StoryModelConfig);
+        var path = DiscoveryStore.DocxPath(Draft.FolderPath, document.FileName);
+        var fileOpen = path != null && FileLockDetector.IsOpenElsewhere(path);
+
+        string guidance;
+        using (var dialog = new RegenerateDiscoveryDialog(row.ShortTitle, document.FileName, isDeposition, settingsLine, fileOpen,
+                   estimate))
+        {
+            var answer = ShowDialogOverride != null ? ShowDialogOverride(dialog) : dialog.ShowDialog(FindForm());
+            if (answer != DialogResult.OK || IsDisposed)
+                return;
+            guidance = dialog.Guidance;
+        }
+
+        await RunDocumentsAsync(new[] { item }, new Dictionary<string, string>(StringComparer.Ordinal) { [item.Key] = guidance });
+    }
+
+    /// <summary>
+    /// Save Again: rewrites a Not saved / File missing .docx from the stored content, with no model call and no cost (U47).
+    /// </summary>
+    internal async Task SaveAgainSelectedAsync()
+    {
+        if (_state == null || _isGenerating)
+            return;
+
+        var row = SelectedRow();
+        if (row == null || _set.Find(row.Key) == null)
+            return;
+
+        var result = await DiscoveryGenerator.SaveAgainAsync(Draft, row.Key);
+        if (IsDisposed)
+            return;
+
+        _set = LoadSet();
+        RefreshModel();
+        var fileName = result.FileName.Length > 0 ? result.FileName : row.FileName;
+        if (result.Saved)
+            SetStatus(DiscoveryUiText.Saved(fileName), Theme.Success);
+        else if (result.StillOpen)
+            SetStatus(DiscoveryUiText.StillOpen(fileName), Theme.Warning);
+        else
+            SetStatus(result.Error, Theme.Danger);
+    }
+
+    /// <summary>
+    /// Open in Word: only a validated path inside Discovery\ that exists is opened (T-08-50).
+    /// </summary>
+    internal void OpenSelectedInWord()
+    {
+        if (_state == null || _isGenerating)
+            return;
+
+        var row = SelectedRow();
+        if (row == null || string.IsNullOrWhiteSpace(Draft.FolderPath))
+            return;
+
+        var path = DiscoveryStore.DocxPath(Draft.FolderPath, row.FileName);
+        if (path == null || !FileExists(path))
+            return;
+
+        try
+        {
+            OpenFile(path);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            SetStatus(DiscoveryUiText.OpenFailed(row.FileName, ex.Message), Theme.Danger);
+        }
+    }
+
+    /// <summary>
+    /// Open Discovery Folder: the case folder plus the constant folder name, never a path read from a file (T-08-51).
+    /// </summary>
+    internal void OpenDiscoveryFolder()
+    {
+        if (_state == null || _isGenerating || string.IsNullOrWhiteSpace(Draft.FolderPath))
+            return;
+        if (!DiscoveryStore.HasDocuments(Draft.FolderPath))
+        {
+            PaintHeaderButton();
+            return;
+        }
+
+        try
+        {
+            OpenFolder(Path.GetFullPath(DiscoveryStore.FolderPath(Draft.FolderPath)));
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            SetStatus(DiscoveryUiText.OpenFolderFailed(ex.Message), Theme.Danger);
+        }
     }
 
     /// <summary>

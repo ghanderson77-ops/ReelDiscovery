@@ -4,6 +4,7 @@ using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Services.Discovery;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Services.Qa;
 using ReelDiscovery.Tests.Corpus;
@@ -106,6 +107,26 @@ public class GenerationResetTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_folder, AnswerKeyXlsxWriter.FileName)));
         Assert.True(File.Exists(Path.Combine(_folder, "notes.eml")));
         Assert.True(File.Exists(Path.Combine(_root, "neighbor.eml")));
+    }
+
+    [Fact]
+    public async Task StartOver_LeavesDiscoveryFolderAndSidecar()
+    {
+        // D-29: discovery documents are independent of the corpus run and survive Start Over
+        await FullRunAsync();
+        var docx = Path.Combine(DiscoveryStore.FolderPath(_folder), "Window Dispute - Deposition of Maria Delgado (Excerpt).docx");
+        Directory.CreateDirectory(Path.GetDirectoryName(docx)!);
+        File.WriteAllText(docx, "keep");
+        File.WriteAllText(DiscoveryStore.SetPath(_folder), "{}");
+        Assert.NotEmpty(EmlFiles());
+
+        var result = await GenerationReset.StartOverAsync(_folder, _plan, Guide);
+
+        Assert.Empty(result.Errors);
+        Assert.Empty(EmlFiles());
+        Assert.True(File.Exists(docx));
+        Assert.Equal("keep", File.ReadAllText(docx));
+        Assert.True(File.Exists(DiscoveryStore.SetPath(_folder)));
     }
 
     [Fact]

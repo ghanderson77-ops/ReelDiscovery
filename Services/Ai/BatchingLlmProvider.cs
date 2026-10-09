@@ -110,6 +110,11 @@ public class BatchingLlmProvider : ILlmProvider
     private readonly Dictionary<string, TrackedBatch> _batches = new(StringComparer.Ordinal);
     private readonly HashSet<string> _orphansBilled = new(StringComparer.Ordinal);
 
+    // CX-06: estimated input tokens of this provider's submitted-but-unfinished batches per model. The provider's queue
+    // limit (OpenAI enqueued tokens) applies across every queued batch of a model, not per input file
+    private readonly Dictionary<string, long> _queuedTokens = new(StringComparer.Ordinal);
+    private TaskCompletionSource _capacityFreed = NewSignal();
+
     /// <summary>Prices orphans by model id only (tests and single-provider catalogs).</summary>
     public BatchingLlmProvider(ILlmProvider live, IBatchTransport transport, BatchLedger ledger, Guid planId,
         Func<string, AIModelConfig?> priceLookup, BatchTimings? timings = null)
@@ -204,6 +209,12 @@ public class BatchingLlmProvider : ILlmProvider
         {
             var batch = TrackedBatch.From(record, resumed: true);
             _batches[batch.BatchId] = batch;
+
+            // CX-06: still queued at the provider, so it counts against the queue limit until it is collected
+            batch.QueuedModel = record.Items.FirstOrDefault(i => i != null)?.ModelId ?? string.Empty;
+            batch.QueuedTokens = Math.Max(0, record.EstimatedInputTokens);
+            ReserveLocked(batch.QueuedModel, batch.QueuedTokens);
+
             // CR-A02: consumption is per batch; the same id consumed from an older batch does not make this item done
             foreach (var id in batch.ItemIds.Where(id => !state.IsConsumed(batch.BatchId, id) && !_inflight.ContainsKey(id)))
                 _inflight[id] = new PendingItem(id, new LlmProviderRequest()) { BatchId = batch.BatchId };
@@ -867,6 +878,73 @@ public class BatchingLlmProvider : ILlmProvider
             yield return chunk;
     }
 
+    // Bytes / 4 is the usual estimate of input tokens; the same estimate Split uses for its per-chunk cap
+    private static long EstimateTokens(IEnumerable<PendingItem> chunk) => chunk.Sum(i => EstimateBytes(i.Request)) / 4;
+
+    /// <summary>
+    /// CX-06: waits until this model's queued tokens plus <paramref name="tokens"/> fit the provider's queue limit, then
+    /// reserves them. A chunk always goes when nothing of its model is queued (Split already keeps it within the cap). The
+    /// wait ends when a batch of any model finishes or is released, or throws when the provider is detached.
+    /// </summary>
+    private async Task WaitForCapacityAsync(string model, long tokens)
+    {
+        var cap = _transport.MaxEstimatedInputTokens;
+        while (true)
+        {
+            Task freed;
+            lock (_lock)
+            {
+                var queued = _queuedTokens.GetValueOrDefault(model);
+                if (cap == null || queued == 0 || queued + tokens <= cap.Value)
+                {
+                    ReserveLocked(model, tokens);
+                    return;
+                }
+
+                freed = _capacityFreed.Task;
+            }
+
+            await freed.WaitAsync(_cts.Token);
+        }
+    }
+
+    // Callers hold _lock (or run in the constructor)
+    private void ReserveLocked(string model, long tokens)
+    {
+        if (tokens > 0)
+            _queuedTokens[model] = _queuedTokens.GetValueOrDefault(model) + tokens;
+    }
+
+    // Callers hold _lock; wakes every chunk waiting for queue capacity
+    private void FreeLocked(string model, long tokens)
+    {
+        if (tokens <= 0)
+            return;
+
+        var left = _queuedTokens.GetValueOrDefault(model) - tokens;
+        if (left > 0)
+            _queuedTokens[model] = left;
+        else
+            _queuedTokens.Remove(model);
+
+        var freed = _capacityFreed;
+        _capacityFreed = NewSignal();
+        freed.TrySetResult();
+    }
+
+    // Callers hold _lock. Stops tracking a batch and returns its queued tokens; false when it was not tracked
+    private bool UntrackLocked(TrackedBatch batch)
+    {
+        if (!_batches.TryGetValue(batch.BatchId, out var tracked) || !ReferenceEquals(tracked, batch))
+            return false;
+
+        _batches.Remove(batch.BatchId);
+        FreeLocked(tracked.QueuedModel, tracked.QueuedTokens);
+        return true;
+    }
+
+    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private static long EstimateBytes(LlmProviderRequest request) =>
         Encoding.UTF8.GetByteCount(request.SchemaJson ?? string.Empty)
         + Encoding.UTF8.GetByteCount(request.SystemPrompt ?? string.Empty)
@@ -876,6 +954,32 @@ public class BatchingLlmProvider : ILlmProvider
     // ----- submit -----
 
     private async Task SubmitAsync(string label, List<PendingItem> chunk)
+    {
+        // CX-06: every chunk of a model waits for room in the provider's queue; one rejected over the limit would run live
+        // at full price. Chunks are single-model (CX-01)
+        var model = chunk[0].Request.ModelId ?? string.Empty;
+        var tokens = EstimateTokens(chunk);
+        _cts.Token.ThrowIfCancellationRequested();
+        await WaitForCapacityAsync(model, tokens);
+
+        var tracked = false;
+        try
+        {
+            tracked = await SubmitReservedAsync(label, chunk, model, tokens);
+        }
+        finally
+        {
+            // Not submitted, or submitted but not tracked: the reservation is not queued at the provider
+            if (!tracked)
+            {
+                lock (_lock)
+                    FreeLocked(model, tokens);
+            }
+        }
+    }
+
+    // Returns true once the batch is tracked (its reservation then lives on the TrackedBatch)
+    private async Task<bool> SubmitReservedAsync(string label, List<PendingItem> chunk, string model, long tokens)
     {
         var requests = chunk.Select(i => new BatchItemRequest { CustomId = i.CustomId, Request = i.Request }).ToList();
 
@@ -895,7 +999,7 @@ public class BatchingLlmProvider : ILlmProvider
 
             // WR-A03: an upload whose batch was never created must not leave the prompts at the provider
             await DeleteFilesBestEffortAsync(submit.InputFileId, null);
-            return;
+            return false;
         }
 
         var submittedUtc = Now();
@@ -915,7 +1019,8 @@ public class BatchingLlmProvider : ILlmProvider
                 Operation = i.Request.SchemaName,
                 ModelId = i.Request.ModelId
             }).ToList(),
-            Total = chunk.Count
+            Total = chunk.Count,
+            EstimatedInputTokens = tokens
         };
 
         try
@@ -936,12 +1041,14 @@ public class BatchingLlmProvider : ILlmProvider
 
             ReleaseItems(chunk, Delivery.Errored());
             await DeleteFilesBestEffortAsync(submit.InputFileId, null);
-            return;
+            return false;
         }
 
         var batch = new TrackedBatch(submit.BatchId, label, submittedUtc, resumed: false)
         {
-            InputFileId = submit.InputFileId ?? string.Empty
+            InputFileId = submit.InputFileId ?? string.Empty,
+            QueuedModel = model,
+            QueuedTokens = tokens
         };
         foreach (var item in record.Items)
             batch.Add(item.CustomId, item.ModelId);
@@ -965,10 +1072,11 @@ public class BatchingLlmProvider : ILlmProvider
         {
             lock (_lock)
                 batch.Polling = false;
-            return;
+            return true;
         }
 
         _ = Task.Run(() => PollLoopAsync(batch));
+        return true;
     }
 
     // ----- poll and collect -----
@@ -1118,7 +1226,7 @@ public class BatchingLlmProvider : ILlmProvider
             await DeliverAsync(batch, result);
 
         lock (_lock)
-            _batches.Remove(batch.BatchId);
+            UntrackLocked(batch);
 
         var succeeded = ordered.Count(IsUsable);
         var failed = ordered.Count - succeeded;
@@ -1314,8 +1422,7 @@ public class BatchingLlmProvider : ILlmProvider
         bool wasTracked;
         lock (_lock)
         {
-            wasTracked = _batches.ContainsKey(batch.BatchId);
-            _batches.Remove(batch.BatchId);
+            wasTracked = UntrackLocked(batch);
             foreach (var id in batch.ItemIds)
             {
                 if (!_inflight.TryGetValue(id, out var item) || item.BatchId != batch.BatchId)
@@ -1564,6 +1671,11 @@ public class BatchingLlmProvider : ILlmProvider
 
         /// <summary>Closed at run end (CancelPendingStagesAsync): never collected or delivered by this session.</summary>
         public bool Closed { get; set; }
+
+        /// <summary>CX-06: model and estimated input tokens this batch holds in the provider's queue until it is untracked.</summary>
+        public string QueuedModel { get; set; } = string.Empty;
+
+        public long QueuedTokens { get; set; }
 
         public List<string> ItemIds { get; } = new();
 

@@ -271,6 +271,73 @@ public class BatchingLlmProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task CX06_TokenCap_AppliesAcrossOutstandingBatches_NextChunkWaitsForCapacity()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        // Each item is ~130 estimated tokens ((prompts + 512 overhead) / 4): two fit under 300, so four requests are two chunks
+        transport.MaxEstimatedInputTokens = 300;
+        var provider = Create(Live(), transport);
+        var events = new EventLog();
+        events.Attach(provider);
+
+        var tasks = SendAll(provider, "non-relevant mail", 4);
+        await events.WaitFor(BatchStatusKind.Submitted);
+
+        // The second chunk would push the queued tokens of this model over the limit: it waits while the first is polled
+        await Until(() => transport.StatusCalls >= 5);
+        Assert.Single(transport.Submissions);
+        Assert.Equal(2, transport.Submissions[0].Count);
+
+        // The first batch finishes and is collected: the second chunk goes
+        transport.PollsUntilEnded = 0;
+        var responses = await Task.WhenAll(tasks).WaitAsync(Wait);
+
+        Assert.Equal(2, transport.Submissions.Count);
+        Assert.All(responses, r => Assert.True(r.IsBatch));
+        Assert.All(new BatchLedger(_folder).Replay().SubmittedById.Values,
+            r => Assert.InRange(r.EstimatedInputTokens, 1, 300));
+    }
+
+    [Fact]
+    public async Task CX06_ResumedPendingBatch_CountsAgainstCap_DetachRunsTheWaitingChunkLive()
+    {
+        // An earlier session left 250 estimated tokens of this model queued at the provider
+        await new BatchLedger(_folder).AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = LlmProviderKind.OpenAI,
+            BatchId = "batch_queued",
+            PlanId = _plan,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "non-relevant mail",
+            Items = new List<BatchLedgerItem> { new() { CustomId = "q-other", Operation = "Thread", ModelId = "gpt-test" } },
+            EstimatedInputTokens = 250
+        });
+
+        var live = Live();
+        var transport = Transport();
+        transport.MaxEstimatedInputTokens = 300;
+        var provider = Create(live, transport);
+
+        Task<LlmProviderResponse> waiting;
+        using (BatchStage.Enter("non-relevant mail"))
+            waiting = provider.SendAsync(Req("a"));
+
+        // Several quiet periods: 250 + ~130 is over the limit, so nothing is submitted
+        await Task.Delay(400);
+        Assert.Empty(transport.Submissions);
+        Assert.False(waiting.IsCompleted);
+
+        // Stop: the chunk waiting for capacity runs live instead of hanging
+        provider.Detach();
+        Assert.Equal("live:a", (await waiting.WaitAsync(Wait)).Text);
+        Assert.Empty(transport.Submissions);
+        Assert.Single(live.Requests);
+    }
+
+    [Fact]
     public async Task RequestCap_SplitsIntoSeveralBatches()
     {
         var transport = Transport();

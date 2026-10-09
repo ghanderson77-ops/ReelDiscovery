@@ -44,6 +44,12 @@ public class BatchLedgerRecord
 
     public int Done { get; set; }
     public int Total { get; set; }
+
+    /// <summary>
+    /// Submitted: estimated input tokens of the batch (bytes / 4), counted against the provider's queue limit until the
+    /// batch is collected (CX-06). 0 in lines written before it existed.
+    /// </summary>
+    public long EstimatedInputTokens { get; set; }
 }
 
 /// <summary>

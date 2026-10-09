@@ -169,7 +169,23 @@ public class BatchingLlmProvider : ILlmProvider
                 continue;
 
             var batch = TrackedBatch.From(record, resumed: false);
-            foreach (var result in _ledger.ReadResults(record.BatchId))
+            if (!_ledger.TryReadResults(record.BatchId, out var cached))
+            {
+                // CX-05: collected by a build that recorded Collected before its results cache was durable (or the cache
+                // was lost since). Already paid for: download it again rather than resubmitting its items
+                if (record.Provider == _transport.Kind
+                    && batch.ItemIds.Any(id => !state.IsConsumed(record.BatchId, id) && !_inflight.ContainsKey(id)))
+                {
+                    var again = TrackedBatch.From(record, resumed: true);
+                    _batches[again.BatchId] = again;
+                    foreach (var id in again.ItemIds.Where(id => !state.IsConsumed(again.BatchId, id) && !_inflight.ContainsKey(id)))
+                        _inflight[id] = new PendingItem(id, new LlmProviderRequest()) { BatchId = again.BatchId };
+                }
+
+                continue;
+            }
+
+            foreach (var result in cached)
             {
                 // T-07-23: only ids this batch was submitted with; consumed results are never served twice (D-09). CR-A02:
                 // keyed by batch, so a result of a newer batch for a regenerated thread's id is still served
@@ -1068,28 +1084,34 @@ public class BatchingLlmProvider : ILlmProvider
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Results stay in memory for this session; only a restart before consumption loses the cached copy
+            // Results stay in memory for this session; the batch is not recorded Collected (below), so a restart
+            // downloads it again instead of resubmitting its already-paid items
         }
 
-        try
+        // CX-05: Collected is the commit point of a durable results cache. Without the cache the batch stays pending in
+        // the ledger and a later session downloads its results again (the provider files are kept, below)
+        if (saved)
         {
-            await _ledger.AppendAsync(new BatchLedgerRecord
+            try
             {
-                Type = BatchLedgerRecordType.Collected,
-                Utc = Now(),
-                Provider = _transport.Kind,
-                BatchId = batch.BatchId,
-                PlanId = _planId,
-                SubmittedUtc = batch.SubmittedUtc,
-                StageLabel = batch.StageLabel,
-                OutputFileId = status.OutputFileId ?? string.Empty,
-                Done = status.Done,
-                Total = ordered.Count
-            }, CancellationToken.None);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // A restart collects this batch again; Consumed lines keep it from being delivered twice
+                await _ledger.AppendAsync(new BatchLedgerRecord
+                {
+                    Type = BatchLedgerRecordType.Collected,
+                    Utc = Now(),
+                    Provider = _transport.Kind,
+                    BatchId = batch.BatchId,
+                    PlanId = _planId,
+                    SubmittedUtc = batch.SubmittedUtc,
+                    StageLabel = batch.StageLabel,
+                    OutputFileId = status.OutputFileId ?? string.Empty,
+                    Done = status.Done,
+                    Total = ordered.Count
+                }, CancellationToken.None);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A restart collects this batch again; Consumed lines keep it from being delivered twice
+            }
         }
 
         foreach (var result in ordered)
@@ -1135,6 +1157,19 @@ public class BatchingLlmProvider : ILlmProvider
 
     private async Task FailAtProviderAsync(TrackedBatch batch, BatchStatusResult status)
     {
+        // CX-05: a failed batch has no results to lose; an all-errored cache keeps a restart from downloading it again
+        // (its items then run live, never in a new batch, D-10)
+        try
+        {
+            _ledger.SaveResults(batch.BatchId, batch.ItemIds
+                .Select(id => new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Errored, Message = "The batch failed" })
+                .ToList());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best effort: a restart polls this batch once more, sees it failed and sends its items live: no extra spend
+        }
+
         try
         {
             await _ledger.AppendAsync(new BatchLedgerRecord

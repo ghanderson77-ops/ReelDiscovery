@@ -660,6 +660,114 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Contains(IdOf(Req("a")), new BatchLedger(_folder).Replay().ConsumedCustomIds);
     }
 
+    // Session A submits "a", its caller stops waiting, then the provider finishes and A collects with nobody waiting
+    private async Task CollectUnwantedInFirstSessionAsync(FakeBatchTransport transport)
+    {
+        transport.PollsUntilEnded = int.MaxValue;
+        var a = Create(Live(), transport);
+        var aEvents = new EventLog();
+        aEvents.Attach(a);
+
+        using (var cts = new CancellationTokenSource())
+        {
+            Task<LlmProviderResponse> task;
+            using (BatchStage.Enter("non-relevant mail"))
+                task = a.SendAsync(Req("a"), cts.Token);
+
+            await aEvents.WaitFor(BatchStatusKind.Submitted);
+            cts.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task.WaitAsync(Wait));
+        }
+
+        transport.PollsUntilEnded = 0;
+        await aEvents.WaitFor(BatchStatusKind.Finished);
+        a.Detach();
+    }
+
+    // Session B: the request attaches to the batch being downloaded again; nothing is resubmitted or run live
+    private async Task AssertDownloadedAgainAsync(FakeBatchTransport transport, string batchId)
+    {
+        var live = Live();
+        var b = Create(live, transport);
+        Assert.Equal(1, b.PendingBatchCount);
+
+        Task<LlmProviderResponse> again;
+        using (BatchStage.Enter("non-relevant mail"))
+            again = b.SendAsync(Req("a"));
+
+        Assert.Equal(1, b.ResumePending());
+        var response = await again.WaitAsync(Wait);
+
+        Assert.Equal("batch:a", response.Text);
+        Assert.True(response.IsBatch);
+        Assert.Single(transport.Submissions);
+        Assert.Empty(live.Requests);
+
+        var ledger = new BatchLedger(_folder);
+        await Until(() => ledger.Replay().CollectedIds.Contains(batchId));
+        Assert.True(ledger.TryReadResults(batchId, out var cached));
+        Assert.Single(cached);
+    }
+
+    [Fact]
+    public async Task CX05_ResultsCacheNotWritten_NotRecordedCollected_RestartDownloadsAgain()
+    {
+        var transport = Transport();
+        var ledger = new BatchLedger(_folder);
+
+        // A directory where the cache file goes: SaveResults fails
+        var blocker = ledger.ResultsPathFor("fb_1");
+        Directory.CreateDirectory(blocker);
+        await CollectUnwantedInFirstSessionAsync(transport);
+
+        var state = ledger.Replay();
+        Assert.DoesNotContain("fb_1", state.CollectedIds);
+        Assert.Equal(1, BatchLedger.PendingBatchCount(_folder, _plan));
+        // The provider files stay, so the results can be downloaded again
+        Assert.Empty(transport.DeletedFiles);
+
+        Directory.Delete(blocker);
+        await AssertDownloadedAgainAsync(transport, "fb_1");
+    }
+
+    [Fact]
+    public async Task CX05_CollectedButCacheMissing_DownloadedAgainNotResubmitted()
+    {
+        var transport = Transport();
+        await CollectUnwantedInFirstSessionAsync(transport);
+
+        // An earlier build recorded Collected although the cache never reached the disk
+        var ledger = new BatchLedger(_folder);
+        Assert.Contains("fb_1", ledger.Replay().CollectedIds);
+        File.Delete(ledger.ResultsPathFor("fb_1"));
+
+        await AssertDownloadedAgainAsync(transport, "fb_1");
+    }
+
+    [Fact]
+    public async Task CX05_FailedBatch_CachedAsErrored_RestartRunsLiveWithoutPolling()
+    {
+        var transport = Transport();
+        transport.FailWholeBatch = true;
+        var a = Create(Live(), transport);
+        using (BatchStage.Enter("non-relevant mail"))
+            Assert.StartsWith("live:", (await a.SendAsync(Req("a")).WaitAsync(Wait)).Text);
+        a.Detach();
+
+        var ledger = new BatchLedger(_folder);
+        Assert.True(ledger.TryReadResults("fb_1", out var cached));
+        Assert.Equal(BatchItemOutcome.Errored, Assert.Single(cached).Outcome);
+
+        var statusCalls = transport.StatusCalls;
+        var live = Live();
+        var b = Create(live, transport);
+        Assert.Equal(0, b.PendingBatchCount);
+        using (BatchStage.Enter("non-relevant mail"))
+            Assert.StartsWith("live:", (await b.SendAsync(Req("a")).WaitAsync(Wait)).Text);
+        Assert.Equal(statusCalls, transport.StatusCalls);
+        Assert.Single(transport.Submissions);
+    }
+
     [Fact]
     public async Task ConsumedResult_NeverServedTwice_InSessionOrAfterRestart()
     {

@@ -344,14 +344,25 @@ public partial class BatchLedger
     /// </summary>
     public IReadOnlyList<BatchItemResult> ReadResults(string batchId)
     {
+        TryReadResults(batchId, out var results);
+        return results;
+    }
+
+    /// <summary>
+    /// Reads cached results of one batch. Returns false when the cache file is missing or cannot be read (CX-05: a
+    /// collected batch without a durable cache is downloaded again, never resubmitted). Never throws; bad lines are skipped.
+    /// </summary>
+    public bool TryReadResults(string batchId, out IReadOnlyList<BatchItemResult> found)
+    {
         var results = new List<BatchItemResult>();
+        found = results;
 
         string[] lines;
         try
         {
             var path = ResultsPathFor(batchId);
             if (!File.Exists(path))
-                return results;
+                return false;
 
             lines = File.ReadAllLines(path, Encoding.UTF8);
         }
@@ -359,7 +370,7 @@ public partial class BatchLedger
                                        or ArgumentException)
         {
             // Unreadable cache: the caller downloads the results again
-            return results;
+            return false;
         }
 
         foreach (var line in lines)
@@ -388,7 +399,7 @@ public partial class BatchLedger
             results.Add(item);
         }
 
-        return results;
+        return true;
     }
 
     /// <summary>

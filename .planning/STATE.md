@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-12-PLAN.md
-last_updated: "2026-10-09T00:21:05.698Z"
+stopped_at: Completed 08-13-PLAN.md
+last_updated: "2026-10-09T00:26:01.368Z"
 last_activity: 2026-10-09
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 149
-  completed_plans: 142
-  percent: 95
+  completed_plans: 143
+  percent: 96
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 8 (Ancillary Discovery Documents) — EXECUTING
-Plan: 13 of 19
+Plan: 14 of 19
 Status: Executing Phase 8
 Last activity: 2026-10-09
 
-Progress: [██████████] 95%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -194,6 +194,7 @@ Progress: [██████████] 95%
 | Phase 08 P10 | 6min | 3 tasks | 6 files |
 | Phase 08 P11 | 15min | 2 tasks | 3 files |
 | Phase 08 P12 | 15min | 1 tasks | 2 files |
+| Phase 08 P13 | 10min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -584,6 +585,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-11: Previous turns (last 6) and covered topics are emitted whenever supplied
 - [Phase 08]: 08-11: Replacement names section lists only applied substitutes; originals never appear in any prompt
 - [Phase 08]: 08-12: Deposition chunk refusals/timeouts are retried up to 3 attempts while no usable attempt exists; overflow trims from the last topic back (min 2 turns per topic); assigned exhibits mentioned only in text get their marker on first mention
+- [Phase 08]: 08-13: A refusal or timeout on a written-set batch is retried (up to 3 attempts) while no usable attempt exists; a batch with no usable attempt fails the whole set
+- [Phase 08]: 08-13: Request texts empty after label/prefix cleanup are dropped before validation so the slot reads as missing (D4) and is omitted
+- [Phase 08]: 08-13: Duplicated RFA prefixes are stripped with or without the trailing comma; stored Text is prefix + space + model text
 
 ### Pending Todos
 
@@ -605,6 +609,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-09T00:21:05.693Z
-Stopped at: Completed 08-12-PLAN.md
+Last session: 2026-10-09T00:26:01.362Z
+Stopped at: Completed 08-13-PLAN.md
 Resume file: None

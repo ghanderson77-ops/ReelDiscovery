@@ -10,7 +10,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Platform & Foundation
 
 - [x] **PLAT-01**: App targets .NET 10 (net10.0-windows) with the SDK pinned via global.json and still publishes as a single-file self-contained exe
-- [x] **PLAT-02**: API keys are stored encrypted with Windows DPAPI (existing Base64 key file migrated)
+- [x] **PLAT-02**: API keys are stored encrypted with Windows DPAPI (the legacy Base64 key file is no longer migrated — removed in Phase 7, D-22)
 - [x] **PLAT-03**: A test project exists and runs unit tests for planner, validators, answer-key writer and EML output
 - [x] **PLAT-04**: Known concurrency bugs are fixed (shared `System.Random`, non-thread-safe mutation in parallel sections)
 - [x] **PLAT-05**: Dead code in the old generation path is removed as it is replaced
@@ -83,18 +83,18 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Non-Relevant Material
 
-- [ ] **NOISE-01**: Non-relevant corpus includes the same custodians' daily business (other projects, scheduling, admin)
-- [ ] **NOISE-02**: Non-relevant corpus includes traffic from ancillary characters
-- [ ] **NOISE-03**: Non-relevant corpus includes newsletters, spam and personal email
-- [ ] **NOISE-04**: Non-relevant corpus includes near-miss decoys that share project names/keywords but are not about the alleged conduct
-- [ ] **NOISE-05**: Relevant and non-relevant emails are generated through the same pipeline with matched style/length/metadata distributions (no label leakage)
+- [x] **NOISE-01**: Non-relevant corpus includes the same custodians' daily business (other projects, scheduling, admin)
+- [x] **NOISE-02**: Non-relevant corpus includes traffic from ancillary characters
+- [x] **NOISE-03**: Non-relevant corpus includes newsletters, spam and personal email
+- [x] **NOISE-04**: Non-relevant corpus includes near-miss decoys that share project names/keywords but are not about the alleged conduct
+- [x] **NOISE-05**: Relevant and non-relevant emails are generated through the same pipeline with matched style/length/metadata distributions (no label leakage)
 
 ### Attachments
 
-- [ ] **ATT-01**: Word, Excel and PowerPoint attachments are generated from the plan and case guide (reusing existing builders)
-- [ ] **ATT-02**: Calendar invites (.ics) are generated for planned meetings
-- [ ] **ATT-03**: Inline images and voicemail audio are generated where planned (subject to PROV-06)
-- [ ] **ATT-04**: Attachment content is consistent with the case guide and canonical values
+- [x] **ATT-01**: Word, Excel and PowerPoint attachments are generated from the plan and case guide (reusing existing builders)
+- [x] **ATT-02**: Calendar invites (.ics) are generated for planned meetings
+- [x] **ATT-03**: Inline images and voicemail audio are generated where planned (subject to PROV-06)
+- [x] **ATT-04**: Attachment content is consistent with the case guide and canonical values
 
 ### Answer Key
 
@@ -113,7 +113,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 ### Run Reliability & Cost
 
 - [x] **RUN-01**: Each completed thread (EML files plus its answer-key rows) is saved immediately; an interruption never loses finished work
-- [ ] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
+- [x] **RUN-02**: A failed item (email, attachment, image, invite, voicemail) is logged and retried or skipped without aborting the run
 - [x] **RUN-03**: Bulk generation can use the provider's Batch API (OpenAI and Anthropic) for lower cost
 - [x] **RUN-04**: Submitted batch jobs are tracked on disk so results can be collected if the app is restarted
 - [x] **RUN-05**: Shared case-guide context uses prompt caching where the provider supports it
@@ -122,7 +122,7 @@ Requirements for the case-driven generation milestone. Each maps to roadmap phas
 
 ### Output
 
-- [ ] **OUT-01**: EML files are organized per custodian mailbox; an email appears in each participating custodian's folder (sent and received), as in a real collection
+- [x] **OUT-01**: EML files are organized per custodian mailbox; an email appears in each participating custodian's folder (sent and received), as in a real collection
 - [x] **OUT-02**: Each EML carries its DocID in a custom header (X-ReelDiscovery-DocID) traceable to the answer key
 - [x] **OUT-03**: The case-driven flow replaces the old topic/storyline wizard flow
 
@@ -225,15 +225,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORP-09 | Phase 5 | Complete |
 | CORP-10 | Phase 5 | Complete |
 | CORP-11 | Phase 5 | Complete |
-| NOISE-01 | Phase 6 | Pending |
-| NOISE-02 | Phase 6 | Pending |
-| NOISE-03 | Phase 6 | Pending |
-| NOISE-04 | Phase 6 | Pending |
-| NOISE-05 | Phase 6 | Pending |
-| ATT-01 | Phase 6 | Pending |
-| ATT-02 | Phase 6 | Pending |
-| ATT-03 | Phase 6 | Pending |
-| ATT-04 | Phase 6 | Pending |
+| NOISE-01 | Phase 6 | Complete |
+| NOISE-02 | Phase 6 | Complete |
+| NOISE-03 | Phase 6 | Complete |
+| NOISE-04 | Phase 6 | Complete |
+| NOISE-05 | Phase 6 | Complete |
+| ATT-01 | Phase 6 | Complete |
+| ATT-02 | Phase 6 | Complete |
+| ATT-03 | Phase 6 | Complete |
+| ATT-04 | Phase 6 | Complete |
 | KEY-01 | Phase 4 | Complete |
 | KEY-02 | Phase 4 | Complete |
 | KEY-03 | Phase 4 | Complete |
@@ -243,13 +243,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QA-02 | Phase 7 | Complete |
 | QA-03 | Phase 7 | Complete |
 | RUN-01 | Phase 5 | Complete |
-| RUN-02 | Phase 5, 6 | Partial (emails done in Phase 5; attachments, images, invites, voicemails in Phase 6) |
+| RUN-02 | Phase 5, 6 | Complete |
 | RUN-03 | Phase 7 | Complete |
 | RUN-04 | Phase 7 | Complete |
 | RUN-05 | Phase 7 | Complete |
 | RUN-06 | Phase 5 | Complete |
 | RUN-07 | Phase 5 | Complete |
-| OUT-01 | Phase 5, 6 | Partial (relevant mail in Phase 5; non-relevant mail in Phase 6) |
+| OUT-01 | Phase 5, 6 | Complete |
 | OUT-02 | Phase 5 | Complete |
 | OUT-03 | Phase 7 | Complete |
 

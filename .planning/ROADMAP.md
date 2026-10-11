@@ -12,7 +12,7 @@ ReelDiscovery moves from a loose topic/storyline wizard to a case-guide-driven p
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation & Provider Gateway** - .NET 10 retarget, tests, concurrency fixes, DPAPI keys, and one OpenAI + Claude gateway with strict structured outputs
+- [x] **Phase 1: Foundation & Provider Gateway** - .NET 10 retarget, tests, concurrency fixes, DPAPI keys, and one OpenAI + Claude gateway with strict structured outputs
 - [x] **Phase 2: Case Scenario & Core Document** - Scenario + preset input produces a realistic, citation-safe Complaint / Petition / Investigation Memo the user can edit (completed 2026-10-01)
 - [x] **Phase 3: Case Guide** - ID-stable issues, cast, dated facts timeline and canonical-value registry, validated, editable, saved as case.json and exported to .docx
  (completed 2026-10-02)
@@ -22,6 +22,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Scale, Cost, QA & Cutover** - Batch APIs, prompt caching, cost accounting, blind-review and leakage QA, 5K-scale runs, and removal of the old wizard flow
  (completed 2026-10-08)
 - [x] **Phase 8: Ancillary Discovery Documents** - Optional depositions, RFPs, RFAs and interrogatories grounded in the case guide and exported as .docx (completed 2026-10-09)
+- [ ] **Phase 9: Edit Safety & Navigation** - Gap closure (v1.0 audit W1, W2, W3, W6): guide edits invalidate approval everywhere, discovery reachable without a plan, discovery staleness on Start Over/Regenerate, Case Summary path back to Generate Corpus
+- [ ] **Phase 10: Answer-Key & Batch Safety** - Gap closure (v1.0 audit W4, W5, W8 + review WR-A06, WR-A08): preserved manual relabels, cross-provider pending batches, batch spend edge cases, legacy type removal
 
 ## Phase Details
 
@@ -290,6 +292,31 @@ Plans:
 - [x] 08-19-PLAN.md — Phase gate: full suite + renders, Word/150% DPI/live-provider human verification, mark ANC complete (Wave 7, checkpoint)
 **UI hint**: yes
 
+### Phase 9: Edit Safety & Navigation
+**Goal**: Editing earlier steps can never silently corrupt later output, and every optional step is reachable without paid side effects.
+**Depends on**: Phase 8
+**Requirements**: GUIDE-09, PLAN-06, PLAN-07, KEY-03, ANC-01, ANC-03, ANC-05, QA-01, QA-03, RUN-06 (already satisfied; hardening)
+**Gap Closure**: Closes integration warnings W1, W2, W3, W6 from .planning/v1.0-MILESTONE-AUDIT.md
+**Success Criteria** (what must be TRUE):
+  1. Editing the case guide after plan approval withdraws approval wherever the edit happens; Generate Corpus refuses to start (with a clear message) when the guide changed since approval, including via the Case Summary button and on case reopen; the Case Guide step warns when an approved plan or generated corpus depends on it.
+  2. Discovery Documents is reachable without an approved corpus plan, and passing through Review Plan never starts a paid planning run unless the user asks.
+  3. Start Over and Regenerate Thread mark discovery documents whose cited exhibits changed or were deleted as Out of date.
+  4. Case Summary always offers a direct way back to Generate Corpus once anything has been generated.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 10: Answer-Key & Batch Safety
+**Goal**: Manual answer-key relabels and batch spend are never silently lost or double-paid.
+**Depends on**: Phase 9
+**Requirements**: QA-01, KEY-03, RUN-03, RUN-04, PROV-01, PROV-07, PLAT-05 (already satisfied; hardening)
+**Gap Closure**: Closes integration warnings W4, W5, W8 from .planning/v1.0-MILESTONE-AUDIT.md and Phase 7 review findings WR-A06, WR-A08 (07-REVIEW-FIX.md)
+**Success Criteria** (what must be TRUE):
+  1. A manual relabel in the answer key is preserved (stored separately and re-applied) across Continue, Regenerate Thread, crash recovery and Start Over, and the user is warned before anything would discard it.
+  2. Switching text provider never resubmits items still pending in the other provider's batch; those batches are collected or cancelled when that provider's key is available, and the pending-batch banner reflects only resolvable batches.
+  3. Collected-but-unused batch spend from a cancelled run is not lost on Start Over (WR-A06), and live relevant waves do not pay again for requests already pending in an earlier session's batch (WR-A08).
+  4. The leftover legacy `Attachment` / `AttachmentComplexity` types are removed and guarded by the deleted-types test.
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
@@ -297,7 +324,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Provider Gateway | 12/13 | In Progress|  |
+| 1. Foundation & Provider Gateway | 13/13 | Complete    | 2026-09-30 |
 | 2. Case Scenario & Core Document | 9/9 | Complete    | 2026-10-01 |
 | 3. Case Guide | 20/20 | Complete    | 2026-10-02 |
 | 4. Corpus Plan & Answer Key | 22/22 | Complete    | 2026-10-03 |
@@ -305,3 +332,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
 | 8. Ancillary Discovery Documents | 19/19 | Complete    | 2026-10-09 |
+| 9. Edit Safety & Navigation | 0/0 | Not started |  |
+| 10. Answer-Key & Batch Safety | 0/0 | Not started |  |

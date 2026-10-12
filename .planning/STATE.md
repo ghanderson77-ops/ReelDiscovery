@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 9 UI-SPEC approved
-last_updated: "2026-10-12T01:39:53.605Z"
-last_activity: 2026-10-12 -- Phase 9 planning complete
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-10-12T01:44:09.565Z"
+last_activity: 2026-10-12
 progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 159
-  completed_plans: 149
+  completed_plans: 150
   percent: 94
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-29)
 
 **Core value:** Every relevant email in a multi-thousand-document corpus must stay faithful to one consistent case story (core pleading + key-facts timeline).
-**Current focus:** Phase 8 — Ancillary Discovery Documents
+**Current focus:** Phase 9 — Edit Safety & Navigation
 
 ## Current Position
 
-Phase: 8
-Plan: Not started
+Phase: 9 (Edit Safety & Navigation) — EXECUTING
+Plan: 2 of 10
 Status: Ready to execute
-Last activity: 2026-10-12 -- Phase 9 planning complete
+Last activity: 2026-10-12
 
 Progress: [██████████] 100%
 
@@ -202,6 +202,7 @@ Progress: [██████████] 100%
 | Phase 08 P17 | 25min | 2 tasks | 6 files |
 | Phase 08 P18 | 20min | 2 tasks | 7 files |
 | Phase 08 P19 | 15min | 3 tasks | 3 files |
+| Phase 09 P01 | 4min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -610,6 +611,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-18: QaInputs carries the draft; LoadQaWithDiscovery reads discovery-documents.json once for the cost row spend and the Discovery row, inside the existing Task.Run
 - [Phase 08]: 08-18: Discovery row line 2 has a full-text tooltip because it ellipsizes at 144 DPI before the D-30 sentence (UI-SPEC S4 amended)
 - [Phase 08]: 08-19: Human-verify checkpoint auto-approved by the user (yolo); Word pagination, 150% DPI review and live Claude/OpenAI runs deferred to 08-HUMAN-UAT.md
+- [Phase 09]: 09-01: CorpusApproval.WithdrawIfGuideChanged is the single guide-edit approval withdrawal; bumps Revision only when it withdrew; kept hashes never withdraw (D-25)
+- [Phase 09]: 09-01: Generate Corpus EntryDecision returns GuideChangedCard for HasPlan && GuideStale before the approval check
 
 ### Pending Todos
 
@@ -631,6 +634,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T01:15:21.621Z
-Stopped at: Phase 9 UI-SPEC approved
-Resume file: .planning/phases/09-edit-safety-navigation/09-UI-SPEC.md
+Last session: 2026-10-12T01:44:09.561Z
+Stopped at: Completed 09-01-PLAN.md
+Resume file: None

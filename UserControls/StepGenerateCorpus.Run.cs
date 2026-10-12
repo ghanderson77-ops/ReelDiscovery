@@ -74,6 +74,10 @@ public partial class StepGenerateCorpus : IWizardStep
     /// </summary>
     internal int PendingProviderBatches => _pendingProviderBatches;
 
+    internal int OtherProviderBatches => 0;
+
+    internal bool OtherProviderBlocked => false;
+
     // D-08: the case's saved batch choice; Continue Generating, Retry Failed Items and Create Skipped Media reuse it
     private bool CaseUseBatch => _state?.Case?.Corpus?.Generation?.UseBatch == true;
 

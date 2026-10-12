@@ -475,14 +475,73 @@ public class GenerateCorpusRenderTests
             {
                 Type = BatchLedgerRecordType.Submitted,
                 Utc = DateTime.UtcNow,
-                Provider = LlmProviderKind.Anthropic,
-                BatchId = "msgbatch_render",
+                // D-15: the clause counts only the current text provider's batches
+                Provider = LlmProviderKind.OpenAI,
+                BatchId = "batch_render",
                 PlanId = f.Plan.PlanId,
                 SubmittedUtc = DateTime.UtcNow.AddHours(-2),
                 StageLabel = "wave 6",
                 Total = 9
             }).GetAwaiter().GetResult();
         });
+    }
+
+    // D-15: another provider's pending batches, its key set up: they are resolved before generating
+    [Fact]
+    public void PartialOtherProviderBatches()
+    {
+        var view = FinishedView(done: 21, total: 60, warnings: 1, failed: 2, cancelled: true);
+        RenderBoth("generate-corpus-partial-other-provider-batches", GenerateCorpusRenderState.Partial, view, (step, labels) =>
+        {
+            Assert.Equal(0, step.PendingProviderBatches);
+            Assert.Equal(2, step.OtherProviderBatches);
+            Assert.False(step.OtherProviderBlocked);
+            Assert.EndsWith(" 2 Anthropic batches from an earlier session are collected or cancelled before generating.", step.BannerBodyText);
+            Assert.True(step.ContinueButton.Visible);
+        }, primary: 1, setup: f =>
+        {
+            f.Draft.Corpus!.Generation = new GenerationState { UseBatch = true };
+            f.State.AnthropicApiKey = "sk-ant-render-test";
+            SeedOtherProviderBatches(f);
+        });
+    }
+
+    // D-14: another provider's pending batches without its key: the banner names the blocking key
+    [Fact]
+    public void PartialOtherProviderKeyMissing()
+    {
+        var view = FinishedView(done: 21, total: 60, warnings: 1, failed: 2, cancelled: true);
+        RenderBoth("generate-corpus-partial-other-provider-key-missing", GenerateCorpusRenderState.Partial, view, (step, labels) =>
+        {
+            Assert.Equal(2, step.OtherProviderBatches);
+            Assert.True(step.OtherProviderBlocked);
+            Assert.EndsWith(" " + GenerationUiText.OtherProviderKeyMissingText("Anthropic"), step.BannerBodyText);
+            Assert.True(step.ContinueButton.Visible);
+        }, primary: 1, setup: f =>
+        {
+            f.Draft.Corpus!.Generation = new GenerationState { UseBatch = true };
+            SeedOtherProviderBatches(f);
+        });
+    }
+
+    // Two Anthropic batches of this plan; the fixture's text provider is OpenAI
+    private static void SeedOtherProviderBatches(StepFixture f)
+    {
+        var ledger = new BatchLedger(f.Folder);
+        foreach (var id in new[] { "msgbatch_render_1", "msgbatch_render_2" })
+        {
+            ledger.AppendAsync(new BatchLedgerRecord
+            {
+                Type = BatchLedgerRecordType.Submitted,
+                Utc = DateTime.UtcNow,
+                Provider = LlmProviderKind.Anthropic,
+                BatchId = id,
+                PlanId = f.Plan.PlanId,
+                SubmittedUtc = DateTime.UtcNow.AddHours(-2),
+                StageLabel = "wave 6",
+                Total = 9
+            }).GetAwaiter().GetResult();
+        }
     }
 
     // DPI rule 26: the checkbox text never ellipsizes or clips

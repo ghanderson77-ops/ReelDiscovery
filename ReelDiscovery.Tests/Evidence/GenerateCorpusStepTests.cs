@@ -990,6 +990,99 @@ public class GenerateCorpusStepTests
         });
     }
 
+    // ----- D-15: the banner counts only the current provider's batches -----
+
+    private static void SeedPendingBatch(Harness h, LlmProviderKind provider, string batchId) =>
+        new BatchLedger(h.Folder).AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = provider,
+            BatchId = batchId,
+            PlanId = h.Plan.PlanId,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "wave 1",
+            Total = 1
+        }).GetAwaiter().GetResult();
+
+    // Every thread written, attachments not yet: entering shows the partial-run banner
+    private static void WritePartialRun(Harness h)
+    {
+        var ids = GenerationIds(h.Plan);
+        WriteJournal(h, ids.Select(id => GenerationRunStateTests.Done(h.Plan, ThreadOf(h, id), ThreadWriteStatus.Written, 0.01m))
+            .Append(RunEnded(h, GenerationOutcome.Finished)));
+    }
+
+    [Fact]
+    public void Banner_CountsCurrentProviderOnly()
+    {
+        using var h = new Harness(mixed: true);
+        WritePartialRun(h);
+        // The fixture's text provider is OpenAI; only an Anthropic batch is pending
+        SeedPendingBatch(h, LlmProviderKind.Anthropic, "msgbatch_1");
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            step.BatchTransportFactory = _ => new FakeBatchTransport();
+            Pump(step.OnEnterStepAsync());
+
+            Assert.Equal(GenerateCorpusBanner.PartialRun, step.BannerKind);
+            Assert.Equal(0, step.PendingProviderBatches);
+            Assert.Equal(1, step.OtherProviderBatches);
+            Assert.DoesNotContain("without paying again", step.BannerBodyText);
+        });
+    }
+
+    [Fact]
+    public void Banner_OtherProviderWithKey_ShowsResolveClause()
+    {
+        using var h = new Harness(mixed: true);
+        WritePartialRun(h);
+        SeedPendingBatch(h, LlmProviderKind.OpenAI, "batch_1");
+        SeedPendingBatch(h, LlmProviderKind.Anthropic, "msgbatch_1");
+        SeedPendingBatch(h, LlmProviderKind.Anthropic, "msgbatch_2");
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var openAi = new FakeBatchTransport();
+            var anthropic = new FakeBatchTransport();
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? anthropic : openAi;
+            Pump(step.OnEnterStepAsync());
+
+            Assert.Equal(1, step.PendingProviderBatches);
+            Assert.Equal(2, step.OtherProviderBatches);
+            Assert.False(step.OtherProviderBlocked);
+            Assert.Contains(" 1 provider batch submitted earlier will be collected first, without paying again.", step.BannerBodyText);
+            Assert.EndsWith(" 2 Anthropic batches from an earlier session are collected or cancelled before generating.", step.BannerBodyText);
+        });
+    }
+
+    [Fact]
+    public void Banner_OtherProviderWithoutKey_ShowsKeyMissingNotice()
+    {
+        using var h = new Harness(mixed: true);
+        WritePartialRun(h);
+        SeedPendingBatch(h, LlmProviderKind.OpenAI, "batch_1");
+        SeedPendingBatch(h, LlmProviderKind.Anthropic, "msgbatch_1");
+        SeedPendingBatch(h, LlmProviderKind.Anthropic, "msgbatch_2");
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var openAi = new FakeBatchTransport();
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? null : openAi;
+            Pump(step.OnEnterStepAsync());
+
+            Assert.Equal(1, step.PendingProviderBatches);
+            Assert.Equal(2, step.OtherProviderBatches);
+            Assert.True(step.OtherProviderBlocked);
+            Assert.EndsWith(" " + GenerationUiText.OtherProviderKeyMissingText("Anthropic"), step.BannerBodyText);
+            Assert.DoesNotContain("collected or cancelled before generating", step.BannerBodyText);
+        });
+    }
+
     [Fact]
     public void ProgressUnits_ThreadsAndAttachmentsAreEqualUnits()
     {

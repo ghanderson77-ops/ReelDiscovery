@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-07-PLAN.md
-last_updated: "2026-10-12T20:34:06.352Z"
+stopped_at: Completed 10-08-PLAN.md
+last_updated: "2026-10-12T20:40:31.921Z"
 last_activity: 2026-10-12
 progress:
   total_phases: 10
   completed_phases: 9
   total_plans: 170
-  completed_plans: 166
+  completed_plans: 167
   percent: 98
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 10 (Answer-Key & Batch Safety) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-10-12
 
@@ -220,6 +220,7 @@ Progress: [██████████] 100%
 | Phase 10 P06 | 10 min | 3 tasks | 7 files |
 | Phase 10 P05 | 35min | 2 tasks | 6 files |
 | Phase 10 P07 | 35min | 2 tasks | 9 files |
+| Phase 10 P08 | 25 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -656,6 +657,8 @@ Recent decisions affecting current work:
 - [Phase 10]: 10-05: Damaged-key backups are data on GenerationFileResult.Backups, ThreadInvalidationResult.KeyBackups and ApprovalResult.Backups, never KeyError (Pitfall 9); PlatformTests guard forbids direct writer Build calls outside AnswerKeyFiles (D-02)
 - [Phase 10]: [10-07]: The run-start other-provider resolver runs only when provider-batches.jsonl exists (runs without a ledger start synchronously as before); closing during it lets it finish, then no run starts
 - [Phase 10]: [10-07]: A resolver exception refuses the run as Failed (D-22) with fixed copy; the exception message is never shown
+- [Phase 10]: [10-08]: The damaged-key backup notice shows only after a successful key write; at a checkpoint it runs before the story-file error, so a later write failure still wins the status line (D-10)
+- [Phase 10]: [10-08]: Review Plan approval builds the run-state overlay off the UI thread, and only from a readable journal of the same PlanId; otherwise the plain plan key is written (D-12)
 
 ### Pending Todos
 
@@ -677,6 +680,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T20:34:06.347Z
-Stopped at: Completed 10-07-PLAN.md
+Last session: 2026-10-12T20:40:27.889Z
+Stopped at: Completed 10-08-PLAN.md
 Resume file: None

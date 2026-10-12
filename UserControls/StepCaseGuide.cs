@@ -1,8 +1,10 @@
 using System.Text.RegularExpressions;
+using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Services.Corpus;
 
 namespace ReelDiscovery.UserControls;
 
@@ -31,6 +33,8 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     private TableLayoutPanel _root = null!;
     private Label _lblTitle = null!;
     private Label _lblSubtitle = null!;
+    private Label _lblDependency = null!;
+    private FlowLayoutPanel _headerButtons = null!;
     private Button _btnResume = null!;
     private CardPanel _banner = null!;
     private RowStyle _bannerRow = null!;
@@ -41,6 +45,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
     private Button _btnNotNow = null!;
     private Button _btnReviewFacts = null!;
     private Button _btnMarkAllReviewed = null!;
+    private Button _btnBannerReviewPlan = null!;
     private FlowLayoutPanel _tabStrip = null!;
     private FlowLayoutPanel _tabActions = null!;
     private Panel _bodyHost = null!;
@@ -136,7 +141,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         {
             Dock = DockStyle.Fill,
             ColumnCount = 2,
-            RowCount = 2,
+            RowCount = 3,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Margin = new Padding(0, 0, 0, gap)
@@ -145,6 +150,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 0: Title
         headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 1: Subtitle
+        headerLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 2: Dependency line (09 S2; collapses when hidden)
 
         _lblTitle = new Label
         {
@@ -170,6 +176,17 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
             ForeColor = Theme.TextMuted
         };
         _lblSubtitle.Height = _lblSubtitle.PreferredHeight;
+        // Who depends on this guide (09 S2); wraps to the header column width set in SizeDependencyLine, never ellipsizes
+        _lblDependency = new Label
+        {
+            AutoSize = true,
+            AutoEllipsis = false,
+            UseMnemonic = false,
+            Margin = new Padding(0, LogicalToDeviceUnits(4), 0, 0),
+            Font = Theme.SmallFont(),
+            ForeColor = Theme.TextMuted,
+            Visible = false
+        };
 
         var headerButtons = new FlowLayoutPanel
         {
@@ -185,11 +202,13 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnResume.Margin = new Padding(0);
         _btnResume.Visible = false;
         headerButtons.Controls.Add(_btnResume);
+        _headerButtons = headerButtons;
 
         headerLayout.Controls.Add(_lblTitle, 0, 0);
         headerLayout.Controls.Add(_lblSubtitle, 0, 1);
+        headerLayout.Controls.Add(_lblDependency, 0, 2);
         headerLayout.Controls.Add(headerButtons, 1, 0);
-        headerLayout.SetRowSpan(headerButtons, 2);
+        headerLayout.SetRowSpan(headerButtons, 3);
         _root.Controls.Add(headerLayout, 0, 0);
 
         // ----- Row 1, banner: stale guide or facts to review (Warning border on a white card) -----
@@ -251,10 +270,15 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnReviewFacts.Margin = new Padding(0, 0, smallGap, 0);
         _btnMarkAllReviewed = ButtonHelper.CreateButton(CaseGuideUiText.MarkAllReviewedButtonText, 0, buttonHeight, ButtonStyle.Default);
         _btnMarkAllReviewed.Margin = new Padding(0);
+        // PlanDependency banner (09 S2): Default, never takes focus by itself
+        _btnBannerReviewPlan = ButtonHelper.CreateButton("Review Plan", 0, buttonHeight, ButtonStyle.Default);
+        _btnBannerReviewPlan.Margin = new Padding(0);
+        _btnBannerReviewPlan.Visible = false;
         _bannerButtons.Controls.Add(_btnUpdateGuide);
         _bannerButtons.Controls.Add(_btnNotNow);
         _bannerButtons.Controls.Add(_btnReviewFacts);
         _bannerButtons.Controls.Add(_btnMarkAllReviewed);
+        _bannerButtons.Controls.Add(_btnBannerReviewPlan);
         bannerLayout.Controls.Add(_lblBannerHeading, 0, 0);
         bannerLayout.Controls.Add(_lblBannerBody, 0, 1);
         bannerLayout.Controls.Add(_bannerButtons, 1, 0);
@@ -531,6 +555,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnNotNow.Click += (s, e) => DismissStaleBanner();
         _btnReviewFacts.Click += (s, e) => ReviewFacts();
         _btnMarkAllReviewed.Click += (s, e) => MarkAllReviewed();
+        _btnBannerReviewPlan.Click += (s, e) => (FindForm() as WizardForm)?.NavigateToStage(CaseStage.ReviewPlan);
         _btnCancel.Click += BtnCancel_Click;
         _gridChecks.CellDoubleClick += (s, e) => NavigateToFinding(e.RowIndex);
         _gridChecks.KeyDown += GridChecks_KeyDown;
@@ -784,6 +809,25 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
             content = CaseGuideUiText.StaleBannerText(stale, GuideStaleness.NeedsReviewCount(draft));
         }
 
+        // 09 S2: who depends on this guide (lowest priority; never displaces stale/needs-review banners).
+        // Only cached counts are read here; the journal is never replayed on the UI thread (T-09-18)
+        var dependency = draft.Guide == null
+            ? new DependencyNoticeContent()
+            : CaseGuideUiText.DependencyNotice(draft.Corpus?.HasPlan == true, draft.Corpus?.Approved == true,
+                CorpusApproval.IsGuideStale(draft), draft.Corpus?.Generation?.EmailsWritten ?? 0);
+        var planBanner = content.Variant == BannerVariant.None && dependency.Kind == DependencyNoticeKind.Changed;
+        if (planBanner)
+            content = new BannerContent { Variant = BannerVariant.PlanDependency, Heading = dependency.Heading, Body = dependency.Body };
+
+        // The Changed line shows only while a higher variant holds the banner row
+        var line = planBanner ? string.Empty : dependency.Line;
+        if (_lblDependency.Text != line)
+            _lblDependency.Text = line;
+        _lblDependency.ForeColor = dependency.Kind == DependencyNoticeKind.Changed ? Theme.Warning : Theme.TextMuted;
+        var showLine = line.Length > 0;
+        if (_lblDependency.Visible != showLine)
+            _lblDependency.Visible = showLine;
+
         var show = content.Variant != BannerVariant.None;
         if (show)
         {
@@ -792,8 +836,11 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
             var stale = content.Variant is BannerVariant.StaleCore or BannerVariant.StaleDownstream;
             _btnUpdateGuide.Visible = stale;
             _btnNotNow.Visible = stale;
-            _btnReviewFacts.Visible = !stale;
-            _btnMarkAllReviewed.Visible = !stale;
+            var needsReview = content.Variant == BannerVariant.NeedsReview;
+            _btnReviewFacts.Visible = needsReview;
+            _btnMarkAllReviewed.Visible = needsReview;
+            _btnBannerReviewPlan.Visible = content.Variant == BannerVariant.PlanDependency;
+            _btnBannerReviewPlan.Enabled = !_isGenerating;
             _btnUpdateGuide.Enabled = !_isGenerating;
             _btnNotNow.Enabled = !_isGenerating;
             _btnReviewFacts.Enabled = !_isGenerating;
@@ -809,6 +856,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
 
     private void SizeBanner()
     {
+        SizeDependencyLine();
         if (!_showBanner)
         {
             if (_bannerRow.Height != 0)
@@ -831,6 +879,18 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         var height = Math.Max(textHeight, buttons.Height) + _banner.Padding.Vertical + _banner.Margin.Vertical;
         if (_bannerRow.Height != height)
             _bannerRow.Height = height;
+    }
+
+    // The dependency line wraps within header column 0 (page width less the Resume Guide flow), so it never runs under the button
+    private void SizeDependencyLine()
+    {
+        var header = _lblDependency.Parent;
+        // The header spans the single root column; measured from the page width so it is right before the first layout
+        var headerWidth = _root.ClientSize.Width - (header?.Margin.Horizontal ?? 0);
+        var buttons = _headerButtons.GetPreferredSize(Size.Empty);
+        var width = Math.Max(1, headerWidth - buttons.Width - _headerButtons.Margin.Horizontal - _lblDependency.Margin.Horizontal);
+        if (_lblDependency.MaximumSize.Width != width)
+            _lblDependency.MaximumSize = new Size(width, 0);
     }
 
     private void RefreshChecks()
@@ -1105,6 +1165,7 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnNotNow.Enabled = !busy;
         _btnReviewFacts.Enabled = !busy;
         _btnMarkAllReviewed.Enabled = !busy;
+        _btnBannerReviewPlan.Enabled = !busy;
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 

@@ -142,6 +142,29 @@ public class QaFindingsDialogTests
     }
 
     [Fact]
+    public void Regenerate_CitedByDiscovery_ConfirmAddsTheOutOfDateClause()
+    {
+        RunSta(() =>
+        {
+            var rows = ThreeRows();
+            foreach (var row in rows)
+                row.CitedByDiscovery = true;
+            using var dialog = Scans(rows, regenerate: _ => Task.FromResult(new ThreadInvalidationResult { Appended = true }));
+            string? text = null;
+            dialog.Confirm = (_, x) =>
+            {
+                text = x;
+                return false;
+            };
+            Select(dialog, 0);
+            dialog.RegenerateSelectedAsync().GetAwaiter().GetResult();
+
+            Assert.Equal(QaUiText.CQ1RegenerateThread("Subject RD-000001", 3, 1, true, true).Text, text);
+            Assert.EndsWith(" Discovery documents that cite its emails will show Out of date.", text);
+        });
+    }
+
+    [Fact]
     public void Regenerate_Confirmed_QueuesRowAndShowsFooter()
     {
         RunSta(() =>

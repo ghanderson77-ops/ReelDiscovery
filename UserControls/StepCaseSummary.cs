@@ -1648,6 +1648,9 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         public decimal NotRunEstimate;
         public Dictionary<string, AnswerKeyRow> EmailRows = new(StringComparer.Ordinal);
 
+        // Cited email DocIds of every saved discovery document (09 S5 C-Q1 clause)
+        public HashSet<string> DiscoveryCitedDocIds = new(StringComparer.Ordinal);
+
         public bool HasEmails => Generated.Count > 0;
     }
 
@@ -1794,6 +1797,11 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         var load = string.IsNullOrEmpty(folder) ? null : DiscoveryStore.Load(folder, inputs.Draft.CaseId);
         var set = load == null ? null : load.Set ?? new DiscoveryDocumentSet { CaseId = inputs.Draft.CaseId };
         var qa = LoadQa(folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor, set?.TotalCostUsd ?? 0m);
+        if (set != null)
+        {
+            foreach (var doc in (set.Documents ?? new()).Where(d => d != null))
+                qa.DiscoveryCitedDocIds.UnionWith(DiscoveryStaleness.CitedDocIds(doc));
+        }
         if (load != null && !load.Succeeded && !load.Missing)
         {
             // An unreadable sidecar says so instead of reading as "Not generated" with no spend (WR-06)
@@ -2322,9 +2330,10 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
             : thread.Subject;
         row.EmlCount = thread.Messages.Where(m => m != null).Sum(m => MailboxWriter.CopyPathsFor(m, folders).Count);
         row.AttachmentCount = thread.Messages.Where(m => m != null).Sum(m => m.Attachments?.Count ?? 0);
+        row.CitedByDiscovery = thread.Messages.Any(m => m != null && !string.IsNullOrEmpty(m.DocId) && qa.DiscoveryCitedDocIds.Contains(m.DocId));
     }
 
-    private static List<QaFindingRow> ScanRows(QaSnapshot qa, CorpusPlan plan, CaseGuide guide)
+    internal static List<QaFindingRow> ScanRows(QaSnapshot qa, CorpusPlan plan, CaseGuide guide)
     {
         var threads = ThreadsById(plan);
         var folders = PlanNumbering.CustodianFolders(guide);

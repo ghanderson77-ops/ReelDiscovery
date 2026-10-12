@@ -33,6 +33,9 @@ public class QaFindingRow
 
     public int EmlCount { get; set; }
     public int AttachmentCount { get; set; }
+
+    /// <summary>A saved discovery document cites one of this thread's emails (09 S5 C-Q1 clause).</summary>
+    public bool CitedByDiscovery { get; set; }
 }
 
 /// <summary>
@@ -402,7 +405,7 @@ public class QaFindingsDialog : Form
             return;
 
         var (title, text) = QaUiText.CQ1RegenerateThread(selected.RegenerateSubject, selected.EmlCount,
-            selected.AttachmentCount, selected.Relevant);
+            selected.AttachmentCount, selected.Relevant, selected.CitedByDiscovery);
         var confirm = Confirm ?? ((t, x) =>
             MessageBox.Show(this, x, t, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes);
         if (!confirm(title, text))

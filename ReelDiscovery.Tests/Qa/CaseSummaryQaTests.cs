@@ -241,6 +241,89 @@ public class CaseSummaryQaTests
         ReelDiscovery.Services.Discovery.DiscoveryStore.SaveAsync(folder, set).GetAwaiter().GetResult();
     }
 
+    // ----- 09 S5: confirmation clauses for discovery documents citing emails -----
+
+    private static ReelDiscovery.Models.Discovery.DiscoveryDocument DepositionCiting(string docId) => new()
+    {
+        Key = "DEP-CH-003",
+        Kind = ReelDiscovery.Models.Discovery.DiscoveryKind.Deposition,
+        Deposition = new ReelDiscovery.Models.Discovery.DepositionContent
+        {
+            Exhibits = { new ReelDiscovery.Models.Discovery.DepositionExhibit { Number = 1, DocId = docId } }
+        }
+    };
+
+    private static void SaveDiscoveryDocuments(string folder, Guid caseId, params ReelDiscovery.Models.Discovery.DiscoveryDocument[] documents)
+    {
+        var set = new ReelDiscovery.Models.Discovery.DiscoveryDocumentSet { CaseId = caseId };
+        set.Documents.AddRange(documents);
+        ReelDiscovery.Services.Discovery.DiscoveryStore.SaveAsync(folder, set).GetAwaiter().GetResult();
+    }
+
+    [Fact]
+    public void StartOverCitesDiscovery_TrueOnlyWhenADocumentCitesAnEmail()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+        var caseId = fixture.Draft.CaseId;
+
+        // No sidecar
+        Assert.False(StepGenerateCorpus.StartOverCitesDiscovery(fixture.Folder, caseId));
+
+        // Documents citing nothing
+        SaveDiscoveryDocuments(fixture.Folder, caseId, new ReelDiscovery.Models.Discovery.DiscoveryDocument
+        {
+            Key = "RFP",
+            Kind = ReelDiscovery.Models.Discovery.DiscoveryKind.RequestsForProduction,
+            Written = new ReelDiscovery.Models.Discovery.WrittenDiscoveryContent()
+        });
+        Assert.False(StepGenerateCorpus.StartOverCitesDiscovery(fixture.Folder, caseId));
+
+        // A deposition citing RD-000001
+        SaveDiscoveryDocuments(fixture.Folder, caseId, DepositionCiting("RD-000001"));
+        Assert.True(StepGenerateCorpus.StartOverCitesDiscovery(fixture.Folder, caseId));
+        Assert.EndsWith("Discovery documents that cite these emails will show Out of date.",
+            GenerationUiText.CG2StartOver(3, false, StepGenerateCorpus.StartOverCitesDiscovery(fixture.Folder, caseId)).Text);
+    }
+
+    [Fact]
+    public void ScanRows_CitedByDiscovery_FollowsTheThreadsDocIds()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+        SeedGenerated(fixture);
+        Assert.True(fixture.Plan.Threads.Count >= 2);
+        var cited = fixture.Plan.Threads[0];
+        var other = fixture.Plan.Threads[1];
+        var citedDocId = cited.Messages[^1].DocId;
+        new QaReportStore(fixture.Folder).SaveScans(new ScanReport
+        {
+            PlanId = fixture.Plan.PlanId,
+            CreatedUtc = DateTime.UtcNow,
+            JournalUtc = File.GetLastWriteTimeUtc(GenerationJournal.PathFor(fixture.Folder)),
+            ScannedEmails = 20,
+            Findings = new List<ScanFinding>
+            {
+                new() { ThreadId = cited.Id, DocId = cited.Messages[0].DocId, Subject = cited.Subject, Check = ScanCheck.Timeline, Text = "a", Relevant = true },
+                new() { ThreadId = other.Id, DocId = other.Messages[0].DocId, Subject = other.Subject, Check = ScanCheck.Value, Text = "b", Relevant = true }
+            }
+        });
+        SaveDiscoveryDocuments(fixture.Folder, fixture.Draft.CaseId, DepositionCiting(citedDocId));
+
+        var qa = StepCaseSummary.LoadQaWithDiscovery(
+            (fixture.Folder, fixture.Plan, fixture.Draft.Guide!, new ReviewProtocolProse(), _ => null, fixture.Draft));
+        Assert.Contains(citedDocId, qa.DiscoveryCitedDocIds);
+
+        var rows = StepCaseSummary.ScanRows(qa, fixture.Plan, fixture.Draft.Guide!);
+        Assert.True(rows.Single(r => r.ThreadId == cited.Id).CitedByDiscovery);
+        Assert.False(rows.Single(r => r.ThreadId == other.Id).CitedByDiscovery);
+
+        // No sidecar: nothing cited
+        File.Delete(Directory.GetFiles(fixture.Folder, "discovery-documents.json", SearchOption.AllDirectories).Single());
+        var bare = StepCaseSummary.LoadQaWithDiscovery(
+            (fixture.Folder, fixture.Plan, fixture.Draft.Guide!, new ReviewProtocolProse(), _ => null, fixture.Draft));
+        Assert.Empty(bare.DiscoveryCitedDocIds);
+        Assert.All(StepCaseSummary.ScanRows(bare, fixture.Plan, fixture.Draft.Guide!), r => Assert.False(r.CitedByDiscovery));
+    }
+
     [Fact]
     public void Generated_CostRowShowsBreakdown_AndRunButtonsAppear()
     {

@@ -9,6 +9,7 @@ using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Services.Discovery;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.Services.Qa;
 
@@ -871,6 +872,10 @@ public partial class StepGenerateCorpus : IWizardStep
         SetStatus(text, color);
     }
 
+    // 09 S5: whether saved discovery documents cite emails (never throws: DiscoveryStore.Load is size-capped and tolerant)
+    internal static bool StartOverCitesDiscovery(string folder, Guid caseId) =>
+        DiscoveryStaleness.AnyCitesEmails(DiscoveryStore.Load(folder, caseId).Set);
+
     // ----- Cancel (C-G1) -----
 
     internal void RequestCancel()
@@ -931,13 +936,15 @@ public partial class StepGenerateCorpus : IWizardStep
         }
 
         // The journal can be large; counting its files (and the batch ledger) stays off the UI thread. WR-A05: pending
-        // batches of every plan, since Start Over deletes the whole ledger
-        var (files, pending) = await Task.Run(() =>
-            (GenerationJournal.ListAllFiles(folder).Count, BatchLedger.PendingBatchCountAllPlans(folder)));
+        // batches of every plan, since Start Over deletes the whole ledger. 09 S5: the discovery sidecar read too
+        var caseId = Draft.CaseId;
+        var (files, pending, cited) = await Task.Run(() =>
+            (GenerationJournal.ListAllFiles(folder).Count, BatchLedger.PendingBatchCountAllPlans(folder),
+                StartOverCitesDiscovery(folder, caseId)));
         if (IsDisposed || _isGenerating || _isResetting)
             return;
 
-        var (title, text) = GenerationUiText.CG2StartOver(files, pending > 0);
+        var (title, text) = GenerationUiText.CG2StartOver(files, pending > 0, cited);
         if (!Confirm(title, text, MessageBoxIcon.Warning))
             return;
 

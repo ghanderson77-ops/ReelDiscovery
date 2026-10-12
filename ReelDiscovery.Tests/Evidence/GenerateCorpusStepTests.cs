@@ -1094,6 +1094,295 @@ public class GenerateCorpusStepTests
         });
     }
 
+    // ----- 10-07 D-13/D-14/D-22: another provider's pending batches are resolved before the run's gateway -----
+
+    // A batch of this plan submitted to Anthropic in an earlier session (the fixture's text provider is OpenAI). Its
+    // custom ids never match the current provider's, so its items can only run once under OpenAI
+    private static string SeedForeignBatch(Harness h, FakeBatchTransport anthropic, bool running)
+    {
+        var model = h.Fixture.State.AvailableModelConfigs.First(m => m.Provider == LlmProviderKind.Anthropic);
+        var items = new[] { "ant_u1", "ant_u2" }
+            .Select(id => new BatchItemRequest { CustomId = id, Request = new LlmProviderRequest() })
+            .ToList();
+        anthropic.Respond = _ => FakeLlmProvider.Ok("{}", 1000, 500);
+        if (running)
+            anthropic.NeverEndIds.Add("ant_u1");
+        var submitted = anthropic.SubmitAsync(items).GetAwaiter().GetResult();
+        new BatchLedger(h.Folder).AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = LlmProviderKind.Anthropic,
+            BatchId = submitted.BatchId,
+            InputFileId = submitted.InputFileId,
+            PlanId = h.Plan.PlanId,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "non-relevant mail",
+            Total = items.Count,
+            Items = items.Select(i => new BatchLedgerItem { CustomId = i.CustomId, Operation = "Thread", ModelId = model.ModelId }).ToList()
+        }).GetAwaiter().GetResult();
+        return submitted.BatchId;
+    }
+
+    private static readonly BatchTimings FastBatch = new()
+    {
+        QuietPeriod = TimeSpan.FromMilliseconds(50),
+        PollInterval = TimeSpan.FromMilliseconds(20),
+        SlowPollInterval = TimeSpan.FromMilliseconds(40),
+        SlowAfter = TimeSpan.FromMilliseconds(200)
+    };
+
+    // The run's batch-mode gateway over the harness fake, with an OpenAI fake transport that answers like the live fake
+    private static (ILlmGateway, BatchingLlmProvider?) BatchGateway(Harness h, FakeBatchTransport openAi)
+    {
+        var fake = h.Fake;
+        openAi.Respond = item => fake.Respond!(item.Request);
+        var tracker = h.Fixture.State.UsageTracker;
+        var batch = new BatchingLlmProvider(fake, openAi, new BatchLedger(h.Folder), h.Plan.PlanId, h.Fixture.State.PriceBatchModel, FastBatch)
+        {
+            UsageTracker = tracker
+        };
+        return (new LlmGateway(batch, ReelDiscovery.Tests.Case.CaseTestData.StoryModel(), ReelDiscovery.Tests.Case.CaseTestData.VolumeModel(), tracker), batch);
+    }
+
+    private static List<string> ActivityTexts(StepGenerateCorpus step) =>
+        step.ActivityGrid.Rows.Cast<DataGridViewRow>().Select(r => (string)r.Cells["Event"].Value!).ToList();
+
+    [Fact]
+    public void Run_OtherProviderEnded_CollectedBeforeGateway_BilledAtFinished()
+    {
+        using var h = new Harness();
+        h.Draft.Corpus!.Generation = new GenerationState { UseBatch = true };
+        var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic, PollsUntilEnded = 0 };
+        var batchId = SeedForeignBatch(h, anthropic, running: false);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var openAi = new FakeBatchTransport { PollsUntilEnded = 0 };
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? anthropic : openAi;
+            bool? collectedBeforeGateway = null;
+            step.RunGatewayFactory = useBatch =>
+            {
+                collectedBeforeGateway = new BatchLedger(h.Folder).Replay().CollectedIds.Contains(batchId);
+                return BatchGateway(h, openAi);
+            };
+            GenerationRunInput? input = null;
+            var media = step.RunInputCreated;
+            step.RunInputCreated = i =>
+            {
+                media?.Invoke(i);
+                input = i;
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            Assert.True(collectedBeforeGateway);
+            Assert.Equal(1, input!.OtherProviderResolution!.Collected);
+            Assert.Equal(GenerationOutcome.Finished, h.Draft.Corpus.Generation!.LastOutcome);
+            // CR-A04: the collected Anthropic results nobody used are billed at Finished
+            var unused = UnusedEntries(h);
+            Assert.NotEmpty(unused);
+            Assert.True(unused.Sum(e => e.Cost) > 0m);
+            Assert.Contains("Collected 1 Anthropic batch from an earlier session. Its results are kept as batch results not used.", ActivityTexts(step));
+            Assert.Single(anthropic.Submissions);
+        });
+    }
+
+    [Fact]
+    public void Run_OtherProviderRunning_CancelledThenRunsOnce()
+    {
+        using var h = new Harness();
+        h.Draft.Corpus!.Generation = new GenerationState { UseBatch = true };
+        var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+        var batchId = SeedForeignBatch(h, anthropic, running: true);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var openAi = new FakeBatchTransport { PollsUntilEnded = 0 };
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? anthropic : openAi;
+            bool? cancelledBeforeGateway = null;
+            step.RunGatewayFactory = useBatch =>
+            {
+                cancelledBeforeGateway = new BatchLedger(h.Folder).Replay().CancelledIds.Contains(batchId);
+                return BatchGateway(h, openAi);
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            Assert.True(cancelledBeforeGateway);
+            Assert.Equal(new[] { batchId }, anthropic.CancelledIds);
+            Assert.Equal(GenerationOutcome.Finished, h.Draft.Corpus.Generation!.LastOutcome);
+            // Never resubmitted to Anthropic; every request went once to OpenAI
+            Assert.Single(anthropic.Submissions);
+            var ids = openAi.Submissions.SelectMany(s => s).Select(i => i.CustomId).ToList();
+            Assert.NotEmpty(ids);
+            Assert.Equal(ids.Count, ids.Distinct(StringComparer.Ordinal).Count());
+            Assert.Contains("Cancelled 1 Anthropic batch from an earlier session. Its requests run once in this run.", ActivityTexts(step));
+        });
+    }
+
+    [Fact]
+    public void Run_LiveMode_StillResolves()
+    {
+        using var h = new Harness();
+        var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+        var batchId = SeedForeignBatch(h, anthropic, running: true);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? anthropic : new FakeBatchTransport();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            Assert.Equal(new[] { batchId }, anthropic.CancelledIds);
+            Assert.Contains(batchId, new BatchLedger(h.Folder).Replay().CancelledIds);
+            Assert.Equal(GenerationOutcome.Finished, h.Draft.Corpus!.Generation!.LastOutcome);
+        });
+    }
+
+    [Fact]
+    public void Run_OtherProviderKeyMissing_Refused()
+    {
+        using var h = new Harness();
+        var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+        SeedForeignBatch(h, anthropic, running: true);
+        var ledgerBefore = File.ReadAllBytes(BatchLedger.PathFor(h.Folder));
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? null : new FakeBatchTransport();
+            var gatewayCalls = 0;
+            step.RunGatewayFactory = useBatch =>
+            {
+                gatewayCalls++;
+                return (h.Gateway, null);
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            Assert.Equal(0, gatewayCalls);
+            Assert.Equal(GenerationUiText.RunRefusedOtherProviderKeyText("Anthropic"), step.StatusLabel.Text);
+            Assert.Equal(Theme.Warning, step.StatusLabel.ForeColor);
+            Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+            Assert.Equal(ledgerBefore, File.ReadAllBytes(BatchLedger.PathFor(h.Folder)));
+            Assert.Empty(anthropic.CancelledIds);
+            Assert.True(step.CanMoveNext);
+            Assert.False(step.IsGenerating);
+        });
+    }
+
+    [Fact]
+    public void Run_OtherProviderUnreachable_Refused()
+    {
+        using var h = new Harness();
+        // Unknown to the fake: its status call fails
+        SeedPendingBatch(h, LlmProviderKind.Anthropic, "msgbatch_unknown");
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? anthropic : new FakeBatchTransport();
+            var gatewayCalls = 0;
+            step.RunGatewayFactory = useBatch =>
+            {
+                gatewayCalls++;
+                return (h.Gateway, null);
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            Assert.Equal(0, gatewayCalls);
+            Assert.Equal(GenerationUiText.RunRefusedOtherProviderFailedText("Anthropic"), step.StatusLabel.Text);
+            Assert.Equal(Theme.Warning, step.StatusLabel.ForeColor);
+            Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+            Assert.Contains(new BatchLedger(h.Folder).Replay().Pending(h.Plan.PlanId), r => r.BatchId == "msgbatch_unknown");
+        });
+    }
+
+    [Fact]
+    public void Run_OtherProviderResolverThrows_Refused()
+    {
+        using var h = new Harness();
+        var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+        SeedForeignBatch(h, anthropic, running: true);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            // The UI-thread key checks see a transport; the resolver (on the pool) gets an exception
+            var ui = Environment.CurrentManagedThreadId;
+            step.BatchTransportFactory = _ => Environment.CurrentManagedThreadId == ui
+                ? anthropic
+                : throw new InvalidOperationException("provider down");
+            var gatewayCalls = 0;
+            step.RunGatewayFactory = useBatch =>
+            {
+                gatewayCalls++;
+                return (h.Gateway, null);
+            };
+            Pump(step.ClickStateActionAsync());
+
+            Assert.Equal(0, gatewayCalls);
+            Assert.Equal(GenerationUiText.RunRefusedOtherProviderFailedText("Anthropic"), step.StatusLabel.Text);
+            Assert.DoesNotContain("provider down", step.StatusLabel.Text);
+        });
+    }
+
+    [Fact]
+    public void Resolving_BlocksNavigationAndStartOver()
+    {
+        using var h = new Harness();
+        var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+        var batchId = SeedForeignBatch(h, anthropic, running: true);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            // Open on entry, so the UI-thread key checks of the banner never block; closed while the run resolves
+            using var gate = new ManualResetEventSlim(true);
+            step.BatchTransportFactory = k =>
+            {
+                if (k == LlmProviderKind.Anthropic)
+                    gate.Wait(Timeout);
+                return k == LlmProviderKind.Anthropic ? anthropic : new FakeBatchTransport();
+            };
+            Pump(step.OnEnterStepAsync());
+            gate.Reset();
+
+            var run = step.ClickStateActionAsync();
+            Assert.True(step.IsResolvingBatches);
+            Assert.False(step.IsGenerating);
+            Assert.False(step.CanMoveNext);
+            Assert.False(step.CanMoveBack);
+
+            var confirmed = false;
+            step.Confirm = (title, text, icon) =>
+            {
+                confirmed = true;
+                return true;
+            };
+            Pump(step.ClickStartOverAsync());
+            Assert.False(confirmed);
+            // A second run is refused while resolving
+            Pump(step.ClickStateActionAsync());
+            Assert.True(File.Exists(BatchLedger.PathFor(h.Folder)));
+
+            gate.Set();
+            Pump(run);
+
+            Assert.False(step.IsResolvingBatches);
+            Assert.Equal(new[] { batchId }, anthropic.CancelledIds);
+            Assert.Equal(GenerationOutcome.Finished, h.Draft.Corpus!.Generation!.LastOutcome);
+            Assert.True(step.CanMoveNext);
+        });
+    }
+
     // ----- D-15: the banner counts only the current provider's batches -----
 
     private static void SeedPendingBatch(Harness h, LlmProviderKind provider, string batchId) =>

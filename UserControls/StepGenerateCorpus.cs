@@ -140,6 +140,11 @@ public partial class StepGenerateCorpus : UserControl
     /// </summary>
     public bool IsGenerating => _isGenerating;
 
+    /// <summary>
+    /// True while another provider's pending batches are collected or cancelled before a run (10 D-13); closing asks C-G3.
+    /// </summary>
+    public bool IsResolvingBatches => false;
+
     public event EventHandler? StateChanged;
 
     public StepGenerateCorpus()

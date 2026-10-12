@@ -4,6 +4,7 @@ using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Services.Corpus;
 
 namespace ReelDiscovery.UserControls;
 
@@ -35,11 +36,17 @@ public partial class StepCaseGuide
         if (_state == null || !CaseStore.CanSave(Draft))
             return;
 
+        // 09 W1: an edit that makes the plan's guide stale withdraws approval (D-25). Synchronous, before the first await,
+        // so the close path (OnLeaveStepAsync not awaited, then SaveNow) still persists it (Pitfall 2)
+        var withdrew = CorpusApproval.WithdrawIfGuideChanged(Draft);
+
         var ok = await _state.CaseStore.SaveAsync(Draft);
         if (IsDisposed)
             return;
 
         RefreshHeader();
+        if (withdrew)
+            RefreshBanner();
         if (!ok)
             SetStatus(CaseGuideUiText.SaveFailedText(_state.CaseStore.LastSaveError), Theme.Danger);
     }

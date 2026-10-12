@@ -1085,6 +1085,8 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         }
 
         Draft.AdvanceStage(CaseStage.Summary);
+        // 09 W1: a guide edited after approval withdraws it here too; the save below persists it and the plan row reads out of date
+        CorpusApproval.WithdrawIfGuideChanged(Draft);
         RefreshAll();
 
         if (CaseStore.CanSave(Draft))

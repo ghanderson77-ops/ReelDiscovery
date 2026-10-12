@@ -9,6 +9,7 @@ using ReelDiscovery.Services.Discovery;
 using ReelDiscovery.Tests.Corpus;
 using ReelDiscovery.Tests.Discovery;
 using ReelDiscovery.Tests.Evidence;
+using ReelDiscovery.Tests.Render;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Case;
@@ -477,6 +478,41 @@ public class CaseSummaryLogicTests
             Assert.DoesNotContain("DiscoveryStore", text);
             Assert.DoesNotContain("DiscoveryDocument", text);
         }
+    }
+
+    [Fact]
+    public void Source_EntryWithdrawsStaleApprovalBeforeFirstRefresh()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "UserControls", "StepCaseSummary.cs"));
+        var enter = source.IndexOf("public async Task OnEnterStepAsync()", StringComparison.Ordinal);
+        Assert.True(enter > 0);
+        var advance = source.IndexOf("Draft.AdvanceStage(CaseStage.Summary);", enter, StringComparison.Ordinal);
+        var withdraw = source.IndexOf("CorpusApproval.WithdrawIfGuideChanged(Draft);", enter, StringComparison.Ordinal);
+        var refresh = source.IndexOf("RefreshAll();", enter, StringComparison.Ordinal);
+        Assert.True(advance > enter && withdraw > advance && refresh > withdraw,
+            "Case Summary entry must withdraw a stale approval after AdvanceStage and before the first RefreshAll");
+    }
+
+    [Fact]
+    public void Entry_GuideEditedAfterApproval_WithdrawsAndSaves()
+    {
+        // 09 W1: visiting Case Summary withdraws a stale approval and persists it
+        using var fixture = new GenerateCorpusRenderTests.StepFixture(approved: true);
+        fixture.Draft.Guide!.Facts[0].Title += " (revised)";
+
+        GenerateCorpusStepTests.RunSta(() =>
+        {
+            using var step = new StepCaseSummary();
+            step.OpenFile = _ => { };
+            step.OpenFolder = _ => { };
+            step.BindState(fixture.State);
+            GenerateCorpusStepTests.Pump(step.OnEnterStepAsync());
+        });
+
+        Assert.False(fixture.Draft.Corpus!.Approved);
+        var reloaded = fixture.State.CaseStore.Load(Path.Combine(fixture.Folder, CaseStore.CaseFileName));
+        Assert.NotNull(reloaded.Draft);
+        Assert.False(reloaded.Draft!.Corpus!.Approved);
     }
 
     private static string FindRepoRoot()

@@ -1,6 +1,7 @@
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Tests.Render;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Case;
@@ -117,6 +118,43 @@ public class CaseScenarioUiLogicTests
         var state = new WizardState { PlanOnEntryOnce = true };
         StepCaseScenario.MarkOpenedFromDisk(state);
         Assert.False(state.PlanOnEntryOnce);
+    }
+
+    [Fact]
+    public void MarkOpenedFromDisk_GuideEditedAfterApproval_WithdrawsApproval()
+    {
+        // 09 W1 backstop: a case whose guide changed after approval reopens unapproved
+        using var fixture = new GenerateCorpusRenderTests.StepFixture(approved: true);
+        fixture.Draft.Guide!.Facts[0].Title += " (revised)";
+        var revision = fixture.Draft.Revision;
+        fixture.State.PlanOnEntryOnce = true;
+
+        StepCaseScenario.MarkOpenedFromDisk(fixture.State);
+
+        Assert.False(fixture.Draft.Corpus!.Approved);
+        Assert.True(fixture.Draft.Revision > revision);
+        Assert.False(fixture.State.PlanOnEntryOnce);
+    }
+
+    [Fact]
+    public void MarkOpenedFromDisk_UneditedGuide_KeepsApproval()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture(approved: true);
+        var revision = fixture.Draft.Revision;
+
+        StepCaseScenario.MarkOpenedFromDisk(fixture.State);
+
+        Assert.True(fixture.Draft.Corpus!.Approved);
+        Assert.Equal(revision, fixture.Draft.Revision);
+    }
+
+    [Fact]
+    public void MarkOpenedFromDisk_CaseWithoutCorpus_DoesNotThrow()
+    {
+        var state = new WizardState { Case = new CaseDraft { Corpus = null }, PlanOnEntryOnce = true };
+        StepCaseScenario.MarkOpenedFromDisk(state);
+        Assert.False(state.PlanOnEntryOnce);
+        Assert.Null(state.Case.Corpus);
     }
 
     [Fact]

@@ -241,4 +241,22 @@ public class CaseGuideStepLogicTests
         guide.ValuesState.Status = GuidePartStatus.Pending;
         return draft;
     }
+
+    [Fact]
+    public void SaveAsync_WithdrawsStaleApprovalBeforeFirstAwait()
+    {
+        // 09 W1 / Pitfall 2: the close path runs only the synchronous prefix of OnLeaveStepAsync before SaveNow
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "ReelDiscovery.csproj")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "UserControls", "StepCaseGuide.Run.cs"));
+        var method = source.IndexOf("private async Task SaveAsync()", StringComparison.Ordinal);
+        Assert.True(method >= 0);
+        var canSave = source.IndexOf("CaseStore.CanSave(Draft)", method, StringComparison.Ordinal);
+        var withdraw = source.IndexOf("CorpusApproval.WithdrawIfGuideChanged(Draft)", method, StringComparison.Ordinal);
+        var firstAwait = source.IndexOf("await ", method, StringComparison.Ordinal);
+        Assert.True(canSave > method && withdraw > canSave && firstAwait > withdraw,
+            "SaveAsync must withdraw a stale approval after the CanSave guard and before its first await");
+    }
 }

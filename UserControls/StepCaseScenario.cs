@@ -5,6 +5,7 @@ using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Services.Corpus;
 
 namespace ReelDiscovery.UserControls;
 
@@ -887,9 +888,16 @@ public class StepCaseScenario : UserControl, IWizardStep
 
     /// <summary>
     /// A case opened from disk never starts a planning run by itself: Review Plan shows No corpus plan yet unless Corpus
-    /// Settings Next asks (T-04-62, 09 W2).
+    /// Settings Next asks (T-04-62, 09 W2). A case whose guide changed after its plan was approved reopens unapproved
+    /// (09 W1 backstop); the next step's entry save persists the withdrawal.
     /// </summary>
-    internal static void MarkOpenedFromDisk(WizardState state) => state.PlanOnEntryOnce = false;
+    internal static void MarkOpenedFromDisk(WizardState state)
+    {
+        state.PlanOnEntryOnce = false;
+        // 09 W1 backstop: a case whose guide changed after approval reopens unapproved (Generate Corpus also checks)
+        if (state.Case != null)
+            CorpusApproval.WithdrawIfGuideChanged(state.Case);
+    }
 
     /// <summary>
     /// Starts a fresh draft with no prompt (the current case is on disk); the previous case stays under Recent cases.

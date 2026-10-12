@@ -886,9 +886,10 @@ public class StepCaseScenario : UserControl, IWizardStep
     }
 
     /// <summary>
-    /// A case opened from disk never starts a planning run by itself: Review Plan shows "No corpus plan yet" once (T-04-62).
+    /// A case opened from disk never starts a planning run by itself: Review Plan shows No corpus plan yet unless Corpus
+    /// Settings Next asks (T-04-62, 09 W2).
     /// </summary>
-    internal static void MarkOpenedFromDisk(WizardState state) => state.SuppressAutoPlanOnce = true;
+    internal static void MarkOpenedFromDisk(WizardState state) => state.PlanOnEntryOnce = false;
 
     /// <summary>
     /// Starts a fresh draft with no prompt (the current case is on disk); the previous case stays under Recent cases.

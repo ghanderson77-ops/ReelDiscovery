@@ -60,6 +60,10 @@ public partial class StepReviewPlan
         if (_state == null)
             return;
 
+        // One-shot: consumed on every entry, before the decision, so a cancelled or failed run never re-plans on Back/Forward (09 Pitfall 5)
+        var planRequested = _state.PlanOnEntryOnce;
+        _state.PlanOnEntryOnce = false;
+
         // Rule 1: an active run keeps showing
         if (_isPlanning)
             return;
@@ -92,8 +96,7 @@ public partial class StepReviewPlan
             SettingsDismissed = false,
             GuideStale = CorpusApproval.IsGuideStale(Draft),
             GuideDismissed = false,
-            // Bridge until Task 2 introduces the one-shot PlanOnEntryOnce flag: same behavior as before
-            PlanRequested = !_state.SuppressAutoPlanOnce
+            PlanRequested = planRequested
         };
         // A referenced plan that did not load always shows the unreadable card, never a silent re-plan
         if (input.UnreadableReason.Length == 0 && corpus.HasPlan && corpus.Plan == null)
@@ -401,13 +404,12 @@ public partial class StepReviewPlan
             : $"The new plan was not built: {why}. The previous plan is still in place.", Theme.Danger);
     }
 
-    // Plan Corpus / Retry Planning: the user asked explicitly, so a reopened case may plan now (D-12)
+    // Plan Corpus / Retry Planning: the user asked explicitly (D-12)
     private async Task PlanFromStateCardAsync()
     {
         if (_state == null || _isPlanning || _isApproving)
             return;
 
-        _state.SuppressAutoPlanOnce = false;
         await StartPlanningAsync(string.Empty);
     }
 

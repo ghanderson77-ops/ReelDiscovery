@@ -87,9 +87,8 @@ public class WizardShellRenderTests
     [Fact]
     public void Shell_ReviewPlanStep()
     {
-        // The reopen flag keeps entering Review Plan from starting a planning run (no API calls in tests)
-        RenderStep(5, "wizard-shell-review-plan", "Step 6 of 9: Review Plan", "Next >",
-            state => state.SuppressAutoPlanOnce = true);
+        // Entering Review Plan without a planning request never starts a run (09 W2)
+        RenderStep(5, "wizard-shell-review-plan", "Step 6 of 9: Review Plan", "Next >");
     }
 
     [Fact]

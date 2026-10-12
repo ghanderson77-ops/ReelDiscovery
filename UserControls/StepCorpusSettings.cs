@@ -159,9 +159,9 @@ public class StepCorpusSettings : UserControl, IWizardStep
     public static string SanitizePrefix(string? text) => CorpusSettings.SanitizePrefix(text);
 
     /// <summary>
-    /// A successful Next (mix totals 100 and both dates valid) lets Review Plan plan a reopened case (D-12).
+    /// A successful Next (mix totals 100 and both dates valid) asks Review Plan to plan (D-12, 09 W2).
     /// </summary>
-    public static bool ClearsAutoPlanSuppression(bool mixOk, bool datesOk) => mixOk && datesOk;
+    public static bool RequestsPlanning(bool mixOk, bool datesOk) => mixOk && datesOk;
 
     // ----- Layout -----
 
@@ -1046,7 +1046,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
     /// <summary>
     /// Next gate: flush pending commits; a mix total other than 100 (M-S1) or an invalid date (M-S2) blocks; otherwise
-    /// the user explicitly asked to continue, so Review Plan may plan a reopened case (D-12).
+    /// the user explicitly asked to continue, so a successful Next asks Review Plan to plan (D-12).
     /// </summary>
     public Task<bool> ValidateStepAsync()
     {
@@ -1071,8 +1071,8 @@ public class StepCorpusSettings : UserControl, IWizardStep
             return Task.FromResult(false);
         }
 
-        if (ClearsAutoPlanSuppression(mixOk, datesOk: true))
-            _state.SuppressAutoPlanOnce = false;
+        if (RequestsPlanning(mixOk, datesOk: true))
+            _state.PlanOnEntryOnce = true;
         return Task.FromResult(true);
     }
 

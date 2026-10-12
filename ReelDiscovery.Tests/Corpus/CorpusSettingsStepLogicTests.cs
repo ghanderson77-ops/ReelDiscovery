@@ -93,9 +93,9 @@ public class CorpusSettingsStepLogicTests
     [InlineData(false, true, false)]
     [InlineData(true, false, false)]
     [InlineData(false, false, false)]
-    public void ClearsAutoPlanSuppression_OnlyWhenNextSucceeds(bool mixOk, bool datesOk, bool expected)
+    public void RequestsPlanning_OnlyWhenNextSucceeds(bool mixOk, bool datesOk, bool expected)
     {
-        Assert.Equal(expected, StepCorpusSettings.ClearsAutoPlanSuppression(mixOk, datesOk));
+        Assert.Equal(expected, StepCorpusSettings.RequestsPlanning(mixOk, datesOk));
     }
 
     [Fact]

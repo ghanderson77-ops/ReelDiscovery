@@ -110,13 +110,29 @@ public class CaseScenarioUiLogicTests
     }
 
     [Fact]
-    public void MarkOpenedFromDisk_SuppressesAutoPlanOnce()
+    public void MarkOpenedFromDisk_ClearsPlanOnEntryOnce()
     {
-        // Opening a case never starts a billed planning run by itself (T-04-62)
-        var state = new WizardState();
-        Assert.False(state.SuppressAutoPlanOnce);
+        // Opening a case never starts a billed planning run by itself (T-04-62, 09 W2)
+        Assert.False(new WizardState().PlanOnEntryOnce);
+        var state = new WizardState { PlanOnEntryOnce = true };
         StepCaseScenario.MarkOpenedFromDisk(state);
-        Assert.True(state.SuppressAutoPlanOnce);
+        Assert.False(state.PlanOnEntryOnce);
+    }
+
+    [Fact]
+    public void ReviewPlanEntry_ClearsPlanOnEntryOnceBeforeDeciding()
+    {
+        // Read-and-clear before the decision so a cancelled or failed run never re-plans on Back/Forward (09 Pitfall 5)
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "ReelDiscovery.csproj")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var source = File.ReadAllText(Path.Combine(dir!.FullName, "UserControls", "StepReviewPlan.Run.cs"));
+        var enter = source.IndexOf("OnEnterStepAsync", StringComparison.Ordinal);
+        var clear = source.IndexOf("_state.PlanOnEntryOnce = false;", StringComparison.Ordinal);
+        var decide = source.IndexOf("ReviewPlanEntryDecision(", StringComparison.Ordinal);
+        Assert.True(enter >= 0 && clear > enter && decide > clear,
+            "Review Plan entry must read and clear PlanOnEntryOnce before ReviewPlanEntryDecision");
     }
 
     [Fact]

@@ -188,6 +188,6 @@ public class WizardState
     /// </summary>
     public string PendingNotice { get; set; } = string.Empty;
 
-    /// <summary>Set when a case is opened from disk (04-19) so Review Plan shows No corpus plan yet instead of auto-planning; cleared by Next on Corpus Settings or by Plan Corpus on Review Plan.</summary>
-    public bool SuppressAutoPlanOnce { get; set; }
+    /// <summary>One-shot planning intent (09 W2, D-12): set only by a successful Next on Corpus Settings; read and cleared on every Review Plan entry; false after a case is reopened. Review Plan auto-plans only when it is set.</summary>
+    public bool PlanOnEntryOnce { get; set; }
 }

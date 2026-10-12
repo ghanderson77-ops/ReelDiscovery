@@ -32,7 +32,12 @@ public static class CorpusDetector
 
             var replay = GenerationJournal.Replay(draft.FolderPath, plan);
             if (!replay.Exists)
-                return DiscoveryCorpus.None("No emails have been generated yet.");
+            {
+                // Known-empty: Start Over deleted the journal (or no run yet), so every cited exhibit is gone (09 W3)
+                var none = DiscoveryCorpus.None("No emails have been generated yet.");
+                none.WrittenStamps = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+                return none;
+            }
             if (!replay.Readable)
                 return DiscoveryCorpus.None(replay.Reason);
             if (replay.PlanChanged)
@@ -67,7 +72,11 @@ public static class CorpusDetector
             }
 
             if (candidates.Count == 0)
-                return DiscoveryCorpus.None("No relevant emails have been written yet.");
+            {
+                var none = DiscoveryCorpus.None("No relevant emails have been written yet.");
+                none.WrittenStamps = DiscoveryStaleness.EmailStamps(replay);
+                return none;
+            }
 
             // Same chain Case Summary uses to re-project the ledger (D-22)
             var runState = GenerationRunState.From(plan, replay);
@@ -78,7 +87,8 @@ public static class CorpusDetector
                 Usable = true,
                 PlanId = plan.PlanId,
                 Candidates = candidates,
-                Ledger = merged.Entries
+                Ledger = merged.Entries,
+                WrittenStamps = DiscoveryStaleness.EmailStamps(replay)
             };
         }
         catch (OperationCanceledException)

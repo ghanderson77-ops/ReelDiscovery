@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-04-PLAN.md
-last_updated: "2026-10-12T01:57:22.567Z"
+stopped_at: Completed 09-05-PLAN.md
+last_updated: "2026-10-12T02:06:09.427Z"
 last_activity: 2026-10-12
 progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 159
-  completed_plans: 153
-  percent: 96
+  completed_plans: 154
+  percent: 97
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 9 (Edit Safety & Navigation) — EXECUTING
-Plan: 5 of 10
+Plan: 6 of 10
 Status: Ready to execute
 Last activity: 2026-10-12
 
@@ -206,6 +206,7 @@ Progress: [██████████] 100%
 | Phase 09 P02 | 8min | 2 tasks | 7 files |
 | Phase 09 P03 | 10 min | 2 tasks | 9 files |
 | Phase 09 P04 | 10 min | 2 tasks | 4 files |
+| Phase 09 P05 | 8 min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -621,6 +622,8 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-03: Next on Review Plan with no plan asks Continue Without a Plan (Yes/No, default Yes) instead of blocking
 - [Phase 09]: 09-04: Generate Corpus state-card default is a no-op; Start Over only from PlanChanged/Unreadable cards
 - [Phase 09]: 09-04: RunCoreAsync re-checks guide staleness and approval on every run start before EnsureFolder/gateway
+- [Phase 09]: Guide-staleness withdrawal lives in step save funnels (Case Guide SaveAsync, Case Summary entry, reopen), never in CaseStore.SaveAsync
+- [Phase 09]: Case Summary Mailboxes secondary button always visible: Generate Emails before generation, Generate Corpus after (W6)
 
 ### Pending Todos
 
@@ -642,6 +645,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T01:57:22.562Z
-Stopped at: Completed 09-04-PLAN.md
+Last session: 2026-10-12T02:06:09.422Z
+Stopped at: Completed 09-05-PLAN.md
 Resume file: None

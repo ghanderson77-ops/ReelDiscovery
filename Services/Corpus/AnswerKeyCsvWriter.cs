@@ -30,6 +30,12 @@ public static class AnswerKeyCsvWriter
     }
 
     /// <summary>
+    /// True when <paramref name="value"/> is a field this writer guarded: a ' followed by a formula lead (T-05-32).
+    /// </summary>
+    public static bool IsGuarded(string? value) =>
+        value != null && value.Length >= 2 && value[0] == '\'' && Array.IndexOf(FormulaLeads, value[1]) >= 0;
+
+    /// <summary>
     /// Header line plus one line per row, every line terminated by "\r\n"; bytes are the UTF-8 BOM followed by the body.
     /// </summary>
     public static byte[] Build(IReadOnlyList<AnswerKeyRow> rows)

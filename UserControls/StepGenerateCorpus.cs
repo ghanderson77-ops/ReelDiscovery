@@ -116,6 +116,10 @@ public partial class StepGenerateCorpus : UserControl
     private bool _isGenerating = false;
     // Start Over is deleting files; navigation waits for it
     private bool _isResetting = false;
+    // 10 D-13: other-provider batches are being collected or cancelled before a run; the step is busy until it ends
+    private bool _isResolvingBatches;
+    // Set when closing asks the run to stop while the resolution is in flight; the run then does not start
+    private bool _stopAfterResolve;
     // Which state card is shown, so its single action button knows what to do
     private GenerationStateCard _cardKind = GenerationStateCard.Ready;
     private bool _stateCardShown = true;
@@ -132,8 +136,8 @@ public partial class StepGenerateCorpus : UserControl
 
     public string StepTitle => "Generate Corpus";
     public string NextButtonText => "Next >";
-    public bool CanMoveNext => !_isGenerating && !_isResetting;
-    public bool CanMoveBack => !_isGenerating && !_isResetting;
+    public bool CanMoveNext => !_isGenerating && !_isResetting && !_isResolvingBatches;
+    public bool CanMoveBack => !_isGenerating && !_isResetting && !_isResolvingBatches;
 
     /// <summary>
     /// True while a generation run is active (closing asks C-G3).
@@ -143,7 +147,7 @@ public partial class StepGenerateCorpus : UserControl
     /// <summary>
     /// True while another provider's pending batches are collected or cancelled before a run (10 D-13); closing asks C-G3.
     /// </summary>
-    public bool IsResolvingBatches => false;
+    public bool IsResolvingBatches => _isResolvingBatches;
 
     public event EventHandler? StateChanged;
 

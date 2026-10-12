@@ -410,6 +410,10 @@ public partial class StepGenerateCorpus : IWizardStep
         if (run == null || run.IsCompleted)
             return true;
 
+        // 10 D-13: a run-start batch resolution finishes (it is never interrupted mid-ledger), then no run starts
+        if (_isResolvingBatches)
+            _stopAfterResolve = true;
+
         try
         {
             _cts?.Cancel();
@@ -433,7 +437,7 @@ public partial class StepGenerateCorpus : IWizardStep
 
     private async Task RunCoreAsync()
     {
-        if (_isGenerating || _isResetting || _state == null)
+        if (_isGenerating || _isResetting || _isResolvingBatches || _state == null)
             return;
 
         var plan = Draft.Corpus?.Plan;
@@ -467,12 +471,64 @@ public partial class StepGenerateCorpus : IWizardStep
         try
         {
             folder = _state.CaseStore.EnsureFolder(Draft);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            // No folder: nothing was started or billed
+            SetStatus(ErrorText(ex), Theme.Danger);
+            return;
+        }
+
+        // 10 D-13/D-14/D-22: another provider's pending batches of this plan are collected or cancelled before the run's
+        // gateway exists (its Recover reads the ledger once, Pitfall 11), in batch and live mode alike (Pitfall 12).
+        // Without a ledger file there is nothing to resolve, and the run starts synchronously as before
+        OtherProviderResolution? resolution = null;
+        if (File.Exists(BatchLedger.PathFor(folder)))
+        {
+            _isResolvingBatches = true;
+            _stopAfterResolve = false;
+            RaiseStateChanged();
+            try
+            {
+                var transportFor = TransportFor();
+                var current = _state.TextProvider;
+                var planId = plan.PlanId;
+                resolution = await Task.Run(() => BatchingLlmProvider.ResolveOtherProviderPendingAsync(new BatchLedger(folder),
+                    transportFor, planId, current, CancellationToken.None));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // D-22: never run anyway when another provider's batches could not be checked
+                resolution = new OtherProviderResolution { Provider = OtherThan(_state.TextProvider), Failed = true, FailureMessage = ex.Message };
+            }
+            finally
+            {
+                _isResolvingBatches = false;
+                RaiseStateChanged();
+            }
+            // Closing (C-G3) or disposing during the resolution: what was resolved stays in the ledger; no run starts
+            if (IsDisposed || _stopAfterResolve)
+                return;
+            if (resolution.Blocked)
+            {
+                SetOtherProviderBatches(resolution.Found);
+                RaiseStateChanged();
+                SetStatus(resolution.KeyMissing
+                    ? GenerationUiText.RunRefusedOtherProviderKeyText(resolution.Provider.ToString())
+                    : GenerationUiText.RunRefusedOtherProviderFailedText(resolution.Provider.ToString()), Theme.Warning);
+                return;
+            }
+            SetOtherProviderBatches(0);
+        }
+
+        try
+        {
             (gateway, batch) = RunGatewayFactory?.Invoke(useBatch)
                 ?? (GatewayFactory != null ? (GatewayFactory(), null) : _state.CreateRunGateway(useBatch, folder, plan.PlanId));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            // No folder or no model: nothing was started or billed
+            // No model: nothing was started or billed
             SetStatus(ErrorText(ex), Theme.Danger);
             return;
         }
@@ -512,7 +568,8 @@ public partial class StepGenerateCorpus : IWizardStep
                 CaseFolder = folder,
                 Media = _state.CreateMediaGenerator(),
                 MediaPrices = _state.MediaPrices.Clone(),
-                Batch = batch
+                Batch = batch,
+                OtherProviderResolution = resolution is { Found: > 0 } ? resolution : null
             };
             RunInputCreated?.Invoke(input);
             _runMediaAvailable = input.Media != null;
@@ -947,7 +1004,7 @@ public partial class StepGenerateCorpus : IWizardStep
     /// </summary>
     private async Task StartOverAsync()
     {
-        if (_state == null || _isGenerating || _isResetting)
+        if (_state == null || _isGenerating || _isResetting || _isResolvingBatches)
             return;
 
         var plan = Draft.Corpus?.Plan;
@@ -968,7 +1025,7 @@ public partial class StepGenerateCorpus : IWizardStep
         var (files, pending, cited) = await Task.Run(() =>
             (GenerationJournal.ListAllFiles(folder).Count, BatchLedger.PendingBatchCountAllPlans(folder),
                 StartOverCitesDiscovery(folder, caseId)));
-        if (IsDisposed || _isGenerating || _isResetting)
+        if (IsDisposed || _isGenerating || _isResetting || _isResolvingBatches)
             return;
 
         var (title, text) = GenerationUiText.CG2StartOver(files, pending > 0, cited);
@@ -1118,7 +1175,7 @@ public partial class StepGenerateCorpus : IWizardStep
     /// </summary>
     public async Task OnLeaveStepAsync()
     {
-        if (_state == null || _isGenerating || _isResetting)
+        if (_state == null || _isGenerating || _isResetting || _isResolvingBatches)
             return;
 
         var corpus = Draft.Corpus;

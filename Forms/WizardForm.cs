@@ -539,8 +539,9 @@ public partial class WizardForm : Form
         if (_currentStepIndex < 0 || _currentStepIndex >= _steps.Count)
             return false;
 
+        // 10 D-13: a run-start batch resolution is in flight (StepGenerateCorpus IsResolvingBatches)
         return _steps[_currentStepIndex] is StepCoreDocument { IsGenerating: true } or StepCaseGuide { IsGenerating: true }
-            or StepReviewPlan { IsPlanning: true } or StepGenerateCorpus { IsGenerating: true }
+            or StepReviewPlan { IsPlanning: true } or StepGenerateCorpus { IsGenerating: true } or StepGenerateCorpus { IsResolvingBatches: true }
             or StepDiscoveryDocuments { IsGenerating: true } or StepCaseSummary { IsReviewRunning: true };
     }
 

@@ -478,4 +478,104 @@ public class CaseGuideUiLogicTests
         Assert.Equal("Appears in 1 fact.", CaseGuideUiText.LinkedFactsText(1));
         Assert.Equal("Not in any fact yet.", CaseGuideUiText.LinkedFactsText(0));
     }
+
+    // --- Plan dependency notice (09 UI-SPEC S2) ---
+
+    private const string ChangedHeading = "The corpus plan was built from an earlier version of this guide.";
+    private const string ChangedLine =
+        "The corpus plan was built from an earlier version of this guide. Review it on Review Plan before generating emails.";
+
+    [Fact]
+    public void DependencyNotice_Changed_NoEmails()
+    {
+        var notice = CaseGuideUiText.DependencyNotice(hasPlan: true, approved: false, guideStale: true, emailsWritten: 0);
+
+        Assert.Equal(DependencyNoticeKind.Changed, notice.Kind);
+        Assert.Equal(ChangedHeading, notice.Heading);
+        Assert.Equal(
+            "Generate Corpus will not write emails from this plan until you review it. Open Review Plan to keep the plan and approve it, or re-plan from the current guide.",
+            notice.Body);
+        Assert.Equal("Review Plan", notice.ButtonText);
+        Assert.Equal(ChangedLine, notice.Line);
+    }
+
+    [Fact]
+    public void DependencyNotice_Changed_WithEmails()
+    {
+        var many = CaseGuideUiText.DependencyNotice(true, false, true, 1240);
+        Assert.Equal(DependencyNoticeKind.Changed, many.Kind);
+        Assert.Equal(
+            "Generate Corpus will not write emails from this plan until you review it. The 1,240 emails already written stay in place. Open Review Plan to keep the plan and approve it, or re-plan from the current guide.",
+            many.Body);
+
+        var one = CaseGuideUiText.DependencyNotice(true, true, true, 1);
+        Assert.Equal(DependencyNoticeKind.Changed, one.Kind);
+        Assert.Equal(
+            "Generate Corpus will not write emails from this plan until you review it. The 1 email already written stays in place. Open Review Plan to keep the plan and approve it, or re-plan from the current guide.",
+            one.Body);
+    }
+
+    [Fact]
+    public void DependencyNotice_ApprovedCurrent_Info()
+    {
+        var none = CaseGuideUiText.DependencyNotice(true, true, false, 0);
+        Assert.Equal(DependencyNoticeKind.Info, none.Kind);
+        Assert.Equal(
+            "The approved corpus plan was built from this guide. Editing the guide withdraws plan approval until you review the plan again.",
+            none.Line);
+        Assert.Equal("", none.Heading);
+        Assert.Equal("", none.Body);
+        Assert.Equal("", none.ButtonText);
+
+        Assert.Equal(
+            "The approved corpus plan and 3 generated emails were built from this guide. Editing the guide withdraws plan approval until you review the plan again.",
+            CaseGuideUiText.DependencyNotice(true, true, false, 3).Line);
+        Assert.Equal(
+            "The approved corpus plan and 1 generated email were built from this guide. Editing the guide withdraws plan approval until you review the plan again.",
+            CaseGuideUiText.DependencyNotice(true, true, false, 1).Line);
+    }
+
+    [Fact]
+    public void DependencyNotice_UnapprovedWithEmails_Info()
+    {
+        var five = CaseGuideUiText.DependencyNotice(true, false, false, 5);
+        Assert.Equal(DependencyNoticeKind.Info, five.Kind);
+        Assert.Equal("5 generated emails were written from this guide. Emails already written do not change when you edit it.", five.Line);
+        Assert.Equal("", five.Heading);
+
+        Assert.Equal(
+            "1 generated email was written from this guide. Emails already written do not change when you edit it.",
+            CaseGuideUiText.DependencyNotice(true, false, false, 1).Line);
+    }
+
+    [Theory]
+    [InlineData(false, false, false, 0)]
+    [InlineData(true, false, false, 0)]
+    [InlineData(false, false, true, 0)]
+    [InlineData(true, false, false, -2)]
+    public void DependencyNotice_None(bool hasPlan, bool approved, bool guideStale, int emailsWritten)
+    {
+        var notice = CaseGuideUiText.DependencyNotice(hasPlan, approved, guideStale, emailsWritten);
+
+        Assert.Equal(DependencyNoticeKind.None, notice.Kind);
+        Assert.Equal("", notice.Line);
+        Assert.Equal("", notice.Heading);
+        Assert.Equal("", notice.Body);
+        Assert.Equal("", notice.ButtonText);
+    }
+
+    [Fact]
+    public void PlanDependency_IsLastBannerVariant_AndNeverFromStaleBanner()
+    {
+        Assert.Equal(BannerVariant.PlanDependency, Enum.GetValues<BannerVariant>().Last());
+        Assert.NotEqual(BannerVariant.PlanDependency, CaseGuideUiText.StaleBannerText(Array.Empty<GuidePart>(), 0).Variant);
+        Assert.NotEqual(BannerVariant.PlanDependency, CaseGuideUiText.StaleBannerText(new[] { GuidePart.Cast }, 2).Variant);
+        Assert.NotEqual(BannerVariant.PlanDependency, CaseGuideUiText.StaleBannerText(new[] { GuidePart.Facts }, 0).Variant);
+    }
+
+    [Fact]
+    public void StateCardContent_SecondaryText_DefaultsEmpty()
+    {
+        Assert.Equal("", new StateCardContent().SecondaryText);
+    }
 }

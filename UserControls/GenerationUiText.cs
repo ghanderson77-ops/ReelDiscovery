@@ -720,6 +720,12 @@ public static class GenerationUiText
     public static string AnswerKeyLockedText(string fileName) =>
         $"The answer key was not updated because {fileName} is open. Close it; the key is updated again when you leave this step.";
 
+    /// <summary>
+    /// 10 D-10: a key file that could not be parsed was copied aside before the new one was written (a notice, not KeyError).
+    /// </summary>
+    public static string AnswerKeyBackupText(string fileName, string backupFileName) =>
+        $"{fileName} could not be read, so it was kept as \"{backupFileName}\" and a new answer key was written. Copy any relabels from the backup into the Relevance column.";
+
     public static string FileWriteFailedText(string fileName, string reason) =>
         $"Could not update {fileName}{Colon(reason)}. Your emails are saved; the file is written again when you leave this step.";
 

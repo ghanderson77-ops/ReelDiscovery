@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
+using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Evidence;
 using ReelDiscovery.UserControls;
 
@@ -250,6 +251,28 @@ public class QaFindingsDialogTests
             dialog.RegenerateSelectedAsync().GetAwaiter().GetResult();
 
             Assert.Equal(QaUiText.FooterQueued(1) + "\n" + QaUiText.FooterKeyNotUpdated("locked"), dialog.FooterLabel.Text);
+            Assert.Equal(Theme.Warning, dialog.FooterLabel.ForeColor);
+        });
+    }
+
+    // 10 D-10: a damaged key file was backed up while the key was rewritten
+    [Fact]
+    public void Regenerate_KeyBackedUp_FooterShowsBackup()
+    {
+        RunSta(() =>
+        {
+            using var dialog = Scans(ThreeRows(), regenerate: _ => Task.FromResult(new ThreadInvalidationResult
+            {
+                Appended = true,
+                KeyBackups = { new AnswerKeyBackup { FileName = "answer-key.csv", BackupFileName = "answer-key (unreadable 20261012-153000).csv" } }
+            }));
+            dialog.Confirm = (_, _) => true;
+            Select(dialog, 0);
+            dialog.RegenerateSelectedAsync().GetAwaiter().GetResult();
+
+            Assert.Equal(QaUiText.FooterQueued(1) + "\n"
+                + GenerationUiText.AnswerKeyBackupText("answer-key.csv", "answer-key (unreadable 20261012-153000).csv"),
+                dialog.FooterLabel.Text);
             Assert.Equal(Theme.Warning, dialog.FooterLabel.ForeColor);
         });
     }

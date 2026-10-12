@@ -1147,6 +1147,16 @@ public class GenerationUiTextTests
         Assert.Equal("RD-000123.eml is no longer in the case folder.", GenerationUiText.MissingEmlText("RD-000123"));
     }
 
+    // 10 D-10: the backup notice names the original and the backup file
+    [Fact]
+    public void AnswerKeyBackupText_NamesBothFiles()
+    {
+        Assert.Equal(
+            "answer-key.csv could not be read, so it was kept as \"answer-key (unreadable 20261012-153000).csv\" and a new answer key was written. Copy any relabels from the backup into the Relevance column.",
+            GenerationUiText.AnswerKeyBackupText("answer-key.csv", "answer-key (unreadable 20261012-153000).csv"));
+        AssertNoBannedWords(GenerationUiText.AnswerKeyBackupText("answer-key.csv", "answer-key (unreadable 20261012-153000).csv"));
+    }
+
     [Theory]
     [InlineData(0, "deleted 0 EML files")]
     [InlineData(1, "deleted 1 EML file,")]

@@ -214,6 +214,7 @@ public partial class StepGenerateCorpus : IWizardStep
                     {
                         Draft.Corpus!.Generation!.KeyError = FileErrorOf(data.KeyResult);
                         ShowFileError(data.KeyResult);
+                        ShowKeyBackups(data.KeyResult);
                     }
 
                     await SaveAsync();
@@ -931,6 +932,7 @@ public partial class StepGenerateCorpus : IWizardStep
         if (checkpoint.StoryResult != null)
             generation.StoryError = FileErrorOf(checkpoint.StoryResult);
         ShowFileError(checkpoint.KeyResult);
+        ShowKeyBackups(checkpoint.KeyResult);
         ShowFileError(checkpoint.StoryResult);
         CheckpointApplied?.Invoke();
 
@@ -954,6 +956,17 @@ public partial class StepGenerateCorpus : IWizardStep
         var color = result.FileOpenElsewhere ? Theme.Warning : Theme.Danger;
         _fileErrorStatus = (text, color);
         SetStatus(text, color);
+    }
+
+    // 10 D-10: a damaged key file was backed up; a warning, never the leave-retry error field (Pitfall 9).
+    // A write failure shown by ShowFileError wins (callers show the backup only before any later file error)
+    private void ShowKeyBackups(GenerationFileResult? result)
+    {
+        if (IsDisposed || result == null || !result.Succeeded || result.Backups.Count == 0)
+            return;
+
+        var backup = result.Backups[0];
+        SetStatus(GenerationUiText.AnswerKeyBackupText(backup.FileName, backup.BackupFileName), Theme.Warning);
     }
 
     // 09 S5: whether saved discovery documents cite emails (never throws: DiscoveryStore.Load is size-capped and tolerant)
@@ -1097,6 +1110,8 @@ public partial class StepGenerateCorpus : IWizardStep
                 ShowFileError(key);
             else if (cancelFailed)
                 SetStatus(GenerationUiText.StartedOverText(reset.FilesDeleted) + " " + GenerationUiText.BatchCancelFailedText, Theme.Warning);
+            else if (key is { Backups.Count: > 0 })
+                SetStatus(GenerationUiText.StartedOverText(reset.FilesDeleted) + " " + GenerationUiText.AnswerKeyBackupText(key.Backups[0].FileName, key.Backups[0].BackupFileName), Theme.Warning);
             else
                 SetStatus(GenerationUiText.StartedOverText(reset.FilesDeleted), Theme.Success);
         }
@@ -1227,6 +1242,7 @@ public partial class StepGenerateCorpus : IWizardStep
         if (key != null)
         {
             generation.KeyError = FileErrorOf(key);
+            ShowKeyBackups(key);
             written.AddRange(key.Files);
         }
         if (story != null)

@@ -439,6 +439,9 @@ public class QaFindingsDialog : Form
             // Revision 2: the answer key rewrite failed after the invalidation; own line after the not-deleted line
             if (!string.IsNullOrWhiteSpace(result.KeyError))
                 lines.Add(QaUiText.FooterKeyNotUpdated(result.KeyError));
+            // 10 D-10: a damaged key file was backed up while the key was rewritten
+            if (result.KeyBackups.Count > 0)
+                lines.Add(GenerationUiText.AnswerKeyBackupText(result.KeyBackups[0].FileName, result.KeyBackups[0].BackupFileName));
             ShowFooter(string.Join("\n", lines), lines.Count > 1 ? Theme.Warning : Theme.Success);
         }
         catch (OperationCanceledException)

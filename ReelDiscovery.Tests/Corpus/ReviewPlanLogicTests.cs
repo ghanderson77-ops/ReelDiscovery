@@ -1,5 +1,10 @@
 using ReelDiscovery.Models;
+using ReelDiscovery.Models.Case;
+using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Tests.Evidence;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Corpus;
@@ -482,5 +487,146 @@ public class ReviewPlanLogicTests
     public void ApprovalBadgeText_Format()
     {
         Assert.Equal("Approved Mar 5, 2:07 PM", CorpusUiText.ApprovalBadgeText(new DateTime(2024, 3, 5, 14, 7, 0)));
+    }
+
+    // --- 10 D-12: the run-state overlay on re-approval ---
+
+    private static (CaseDraft Draft, CorpusPlan Plan) ApprovalCase()
+    {
+        var draft = CorpusTestData.RichDraft();
+        var plan = PlanFixtures.ValidPlan(draft);
+        plan.PlanId = Guid.NewGuid();
+        plan.CreatedUtc = new DateTime(2024, 9, 1, 12, 0, 0, DateTimeKind.Utc);
+        draft.Corpus ??= new CorpusState();
+        draft.Corpus.Settings = PlanFixtures.Clone(plan).Settings;
+        draft.AdvanceStage(CaseStage.CorpusSettings);
+        draft.Corpus.Plan = plan;
+        draft.Corpus.PlanId = plan.PlanId;
+        draft.Corpus.PlanGuideHash = plan.GuideHash;
+        draft.Corpus.PlanSettingsHash = plan.SettingsHash;
+        draft.Corpus.PlanCreatedUtc = plan.CreatedUtc;
+        return (draft, plan);
+    }
+
+    private static PlannedThread FirstRelevantThread(CorpusPlan plan) =>
+        plan.Threads.Where(t => t.Relevance == ThreadRelevance.Relevant && t.Messages.Count > 0)
+            .OrderBy(t => t.Id, StringComparer.Ordinal).First();
+
+    private static string FirstEmail(PlannedThread thread) => thread.Messages.OrderBy(m => m.Seq).First().DocId;
+
+    // RunStarted + one finished thread, written for journalPlanId
+    private static void WriteJournal(string folder, CorpusPlan plan, PlannedThread thread, Guid journalPlanId)
+    {
+        var journal = new GenerationJournal(folder);
+        journal.AppendAsync(new JournalRecord { Type = JournalRecordType.RunStarted, PlanId = journalPlanId, Utc = DateTime.UtcNow })
+            .GetAwaiter().GetResult();
+        var done = GenerationRunStateTests.Done(plan, thread, ThreadWriteStatus.Written, 0.10m);
+        done.PlanId = journalPlanId;
+        journal.AppendAsync(done).GetAwaiter().GetResult();
+    }
+
+    [Fact]
+    public void ApprovalOverlay_NoJournal_Null()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var (draft, plan) = ApprovalCase();
+            Assert.Null(StepReviewPlan.ApprovalOverlay(folder, plan, draft.Guide!));
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public void ApprovalOverlay_SamePlanJournal_HasStatuses()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var (draft, plan) = ApprovalCase();
+            var thread = FirstRelevantThread(plan);
+            WriteJournal(folder, plan, thread, plan.PlanId);
+
+            var overlay = StepReviewPlan.ApprovalOverlay(folder, plan, draft.Guide!);
+
+            Assert.NotNull(overlay);
+            Assert.Equal(AnswerKeyBuilder.StatusGenerated, overlay!.ByDocId[FirstEmail(thread)].Status);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public void ApprovalOverlay_OtherPlanJournal_Null()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var (draft, plan) = ApprovalCase();
+            WriteJournal(folder, plan, FirstRelevantThread(plan), Guid.NewGuid());
+
+            Assert.Null(StepReviewPlan.ApprovalOverlay(folder, plan, draft.Guide!));
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public void ApprovalOverlay_UnreadableJournal_Null()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var (draft, plan) = ApprovalCase();
+            WriteJournal(folder, plan, FirstRelevantThread(plan), plan.PlanId);
+            // Larger than the replay cap: Replay reports it unreadable
+            GenerationJournal.SizeCapOverride = 16;
+            try
+            {
+                Assert.Null(StepReviewPlan.ApprovalOverlay(folder, plan, draft.Guide!));
+            }
+            finally
+            {
+                GenerationJournal.SizeCapOverride = 0;
+            }
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task Reapprove_KeepsRelabelAndStatus()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var (draft, plan) = ApprovalCase();
+            Assert.True((await CorpusApproval.ApproveAsync(folder, draft, plan)).Succeeded);
+            var thread = FirstRelevantThread(plan);
+            var docId = FirstEmail(thread);
+            var csv = Path.Combine(folder, AnswerKeyCsvWriter.FileName);
+            AnswerKeyRelabelLifecycleTests.RelabelCsvFile(csv, docId, AnswerKeyBuilder.NotRelevantLabel);
+            WriteJournal(folder, plan, thread, plan.PlanId);
+
+            var overlay = StepReviewPlan.ApprovalOverlay(folder, plan, draft.Guide!);
+            var result = await CorpusApproval.ApproveAsync(folder, draft, plan, overlay: overlay);
+
+            Assert.True(result.Succeeded);
+            Assert.Equal(AnswerKeyBuilder.NotRelevantLabel, AnswerKeyRelabelLifecycleTests.CsvCellOf(csv, docId, "Relevance"));
+            Assert.Equal(AnswerKeyBuilder.StatusGenerated, AnswerKeyRelabelLifecycleTests.CsvCellOf(csv, docId, "Status"));
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
     }
 }

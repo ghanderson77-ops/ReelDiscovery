@@ -2,10 +2,12 @@ using System.Diagnostics;
 using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
+using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Services.Ai;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Services.Evidence;
 
 namespace ReelDiscovery.UserControls;
 
@@ -506,6 +508,21 @@ public partial class StepReviewPlan
     // ----- Approve (D-26) -----
 
     /// <summary>
+    /// 10 D-12: re-approving the same plan keeps the run statuses in the answer key (ThreadInvalidation's overlay); no
+    /// journal, an unreadable one or one of another plan writes the plain plan key. Runs off the UI thread; never throws
+    /// for a missing journal (GenerationJournal.Replay is tolerant).
+    /// </summary>
+    internal static AnswerKeyOverlay? ApprovalOverlay(string folder, CorpusPlan plan, CaseGuide guide)
+    {
+        var replay = GenerationJournal.Replay(folder, plan);
+        if (!replay.Readable || replay.PlanChanged)
+            return null;
+
+        var state = GenerationRunState.From(plan, replay);
+        return state.HasRun ? state.BuildFullOverlay(plan, guide) : null;
+    }
+
+    /// <summary>
     /// Writes answer-key.csv, answer-key.xlsx and the review protocol, then records approval and saves; a failed write
     /// approves nothing. Returns true when the plan is approved.
     /// </summary>
@@ -526,7 +543,12 @@ public partial class StepReviewPlan
         try
         {
             var folder = _state.CaseStore.EnsureFolder(Draft!);
-            var result = await CorpusApproval.ApproveAsync(folder, Draft!, plan);
+            var guide = Draft!.Guide ?? new CaseGuide();
+            var overlay = await Task.Run(() => ApprovalOverlay(folder, plan, guide));
+            if (IsDisposed)
+                return false;
+            // D-12: relabels of this PlanId are kept by the funnel; the overlay keeps the run statuses
+            var result = await CorpusApproval.ApproveAsync(folder, Draft!, plan, overlay: overlay);
             if (IsDisposed)
                 return false;
 
@@ -536,7 +558,12 @@ public partial class StepReviewPlan
                 Draft!.Revision++;
                 _isApproving = false;
                 ShowCurrentPlan();
-                SetStatus(CorpusUiText.ApprovedText(Path.GetFileName(Path.TrimEndingDirectorySeparator(folder))), Theme.Success);
+                var approvedText = CorpusUiText.ApprovedText(Path.GetFileName(Path.TrimEndingDirectorySeparator(folder)));
+                // 10 D-10: a damaged key file was backed up; a warning on the approved status, never a failure
+                if (result.Backups.Count > 0)
+                    SetStatus(approvedText + " " + GenerationUiText.AnswerKeyBackupText(result.Backups[0].FileName, result.Backups[0].BackupFileName), Theme.Warning);
+                else
+                    SetStatus(approvedText, Theme.Success);
                 await SaveAsync();
             }
             else

@@ -82,7 +82,7 @@ public class PlatformTests
         Assert.Contains("Application.Run(new WizardForm())", program);
     }
 
-    // D-20/PLAT-05: the legacy generation path is deleted, not just unreachable
+    // D-20/PLAT-05 (10 D-18): the legacy generation path is deleted, not just unreachable
     [Theory]
     [InlineData("ReelDiscovery.Services.EmailGenerator")]
     [InlineData("ReelDiscovery.Services.StorylineGenerator")]
@@ -105,6 +105,8 @@ public class PlatformTests
     [InlineData("ReelDiscovery.Models.PresentationTheme")]
     [InlineData("ReelDiscovery.Models.WizardFlow")]
     [InlineData("ReelDiscovery.Helpers.DateHelper")]
+    [InlineData("ReelDiscovery.Models.Attachment")]
+    [InlineData("ReelDiscovery.Models.AttachmentComplexity")]
     public void LegacyType_IsDeleted(string typeName)
     {
         Assert.Null(typeof(WizardState).Assembly.GetType(typeName));

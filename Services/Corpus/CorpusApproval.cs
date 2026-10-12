@@ -220,6 +220,19 @@ public static class CorpusApproval
     }
 
     /// <summary>
+    /// The one place a guide edit withdraws plan approval (W1): when the approved plan's guide is stale and not kept,
+    /// approval is withdrawn and the draft revision is bumped so the next save persists it. Reverting the edit does not
+    /// restore approval (D-25). Returns true when it withdrew.
+    /// </summary>
+    public static bool WithdrawIfGuideChanged(CaseDraft draft)
+    {
+        if (!WithdrawApprovalIfStale(draft))
+            return false;
+        draft.Revision++;
+        return true;
+    }
+
+    /// <summary>
     /// Keep This Plan: dismisses the stale banner for the current guide hash only. Approval withdrawn for staleness stays
     /// withdrawn: approving again rewrites the protocol from the current guide (banner text says so, WR-11).
     /// </summary>

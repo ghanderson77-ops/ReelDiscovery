@@ -40,6 +40,7 @@ public class OutcomeLine
 public enum GenerationEntry
 {
     KeepRun,
+    GuideChangedCard,
     NotApprovedCard,
     PlanChangedCard,
     UnreadableCard,
@@ -54,6 +55,9 @@ public class GenerationEntryInput
     public bool HasPlan;
     public bool Approved;
     public bool HasSavedRun;
+
+    // The guide changed since the plan was built and was not kept (CorpusApproval.IsGuideStale, before withdrawal)
+    public bool GuideStale;
 
     // The saved run's plan identity differs from the current plan
     public bool PlanChanged;
@@ -82,7 +86,8 @@ public enum GenerationStateCard
     Ready,
     NotApproved,
     PlanChanged,
-    Unreadable
+    Unreadable,
+    GuideChanged
 }
 
 public class GenerationCardContent
@@ -717,15 +722,29 @@ public static class GenerationUiText
     public static string StartedOverText(int files) =>
         $"Cleared the earlier run: deleted {Plural(files, "EML file", "EML files")}, the narrative ledger and the side projects.";
 
+    // A run start refused by the gate re-check (09 UI-SPEC S1, U4)
+    public const string RunRefusedGuideChangedText =
+        "Generation did not start: the case guide changed after this plan was built. Open Review Plan to approve the plan.";
+
+    public const string RunRefusedNotApprovedText =
+        "Generation did not start: the corpus plan is not approved. Open Review Plan to approve it.";
+
     public static string MissingEmlText(string docId) => $"{docId}.eml is no longer in the case folder.";
 
     // --- Entering the step ---
 
+    /// <summary>
+    /// First match wins: a running run is kept; a plan built from a changed (not kept) guide shows the GuideChanged card
+    /// before the approval check, so a stale plan never reaches the Ready card (09 UI-SPEC S1); then not approved, plan
+    /// changed, unreadable, ready, partial and finished.
+    /// </summary>
     public static GenerationEntry EntryDecision(GenerationEntryInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (input.Running)
             return GenerationEntry.KeepRun;
+        if (input.HasPlan && input.GuideStale)
+            return GenerationEntry.GuideChangedCard;
         if (!input.HasPlan || !input.Approved)
             return GenerationEntry.NotApprovedCard;
         if (input.HasSavedRun && input.PlanChanged)
@@ -744,18 +763,33 @@ public static class GenerationUiText
     }
 
     /// <summary>
-    /// Not-approved, Plan-changed and Unreadable cards; the Ready branch delegates to <see cref="ReadyCard"/> with one
-    /// model and no media.
+    /// Not-approved, Guide-changed, Plan-changed and Unreadable cards; the Ready branch delegates to <see cref="ReadyCard"/>
+    /// with one model and no media. <paramref name="emailsWritten"/> feeds the Guide-changed body; <paramref name="hasPlan"/>
+    /// splits the Not-approved card into "No corpus plan yet" and "Approve the plan first" (09 UI-SPEC S1, U10).
     /// </summary>
     public static GenerationCardContent StateCard(
-        GenerationStateCard card, int threads, int emails, int waves, decimal cost, string modelName, int earlierThreads, string reason)
+        GenerationStateCard card, int threads, int emails, int waves, decimal cost, string modelName, int earlierThreads, string reason,
+        int emailsWritten = 0, bool hasPlan = true)
     {
         return card switch
         {
+            GenerationStateCard.NotApproved when !hasPlan => new GenerationCardContent
+            {
+                Heading = "No corpus plan yet",
+                Body = "Emails are written from an approved corpus plan. Plan and approve it on Review Plan, or click Next to write discovery documents without emails.",
+                ButtonText = "Review Plan"
+            },
             GenerationStateCard.NotApproved => new GenerationCardContent
             {
                 Heading = "Approve the plan first",
-                Body = "Emails are written from an approved corpus plan. Approve the plan on Review Plan, then come back to this step.",
+                Body = "Emails are written from an approved corpus plan. Approve the plan on Review Plan, then come back to this step. Or click Next to write discovery documents without emails.",
+                ButtonText = "Review Plan"
+            },
+            GenerationStateCard.GuideChanged => new GenerationCardContent
+            {
+                Heading = "The case guide changed after this plan was built",
+                Body = "Emails are written from the corpus plan and the guide it was built from, so generation is paused. Open Review Plan to keep this plan and approve it, or re-plan from the current guide."
+                    + EmailsKeptSentence(emailsWritten),
                 ButtonText = "Review Plan"
             },
             GenerationStateCard.PlanChanged => new GenerationCardContent
@@ -1131,6 +1165,16 @@ public static class GenerationUiText
     // --- Shared formatting ---
 
     private static string Plural(int n, string singular, string plural) => CaseGuideUiText.Plural(n, singular, plural);
+
+    // Leading-space sentence appended to the Guide-changed body; empty when no emails were written
+    private static string EmailsKeptSentence(int n)
+    {
+        if (n <= 0)
+            return "";
+        if (n == 1)
+            return " The 1 email already written stays in place.";
+        return $" The {n.ToString("N0", CultureInfo.InvariantCulture)} emails already written stay in place.";
+    }
 
     // ", with {a} attachments", or "" at 0
     private static string WithAttachments(int attachments) =>

@@ -33,5 +33,8 @@ public class DiscoveryCorpus
     public List<ExhibitCandidate> Candidates { get; set; } = new();
     public List<LedgerEntry> Ledger { get; set; } = new();
 
+    // Written email DocId -> ThreadDone Utc from the journal. null = unknown (probe not run, unreadable, other plan); empty = no emails written (journal deleted or never run)
+    public Dictionary<string, DateTime>? WrittenStamps { get; set; }
+
     public static DiscoveryCorpus None(string reason = "") => new() { Reason = reason ?? string.Empty };
 }

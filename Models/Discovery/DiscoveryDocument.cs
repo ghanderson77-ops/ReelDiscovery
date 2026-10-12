@@ -48,7 +48,10 @@ public enum StaleSource
     Guide,
     Core,
     Caption,
-    CorpusPlan
+    CorpusPlan,
+
+    // An email it cites was regenerated or deleted after it was written (09 W3)
+    Exhibits
 }
 
 public static class DiscoveryVariants
@@ -99,6 +102,9 @@ public class DiscoveryDocument
     public string CaptionHash { get; set; } = string.Empty;
     public Guid? CorpusPlanId { get; set; }
 
+    // Cited email DocId -> journal ThreadDone Utc when the document was written (09 W3); empty for legacy documents
+    public Dictionary<string, DateTime> ExhibitStamps { get; set; } = new();
+
     public decimal CostUsd { get; set; }
     public CostBreakdown CostDetail { get; set; } = new();
     public DateTime GeneratedUtc { get; set; }
@@ -125,6 +131,10 @@ public class DiscoveryDocument
         CoreHash ??= string.Empty;
         CaptionHash ??= string.Empty;
         CostDetail ??= new();
+        ExhibitStamps = (ExhibitStamps ?? new())
+            .Where(p => !string.IsNullOrWhiteSpace(p.Key))
+            .GroupBy(p => p.Key, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal);
         CostUsd = Math.Max(0m, CostUsd);
         TestimonyPages = Math.Max(0, TestimonyPages);
         RequestCount = Math.Max(0, RequestCount);

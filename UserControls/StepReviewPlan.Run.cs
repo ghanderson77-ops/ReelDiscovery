@@ -154,7 +154,8 @@ public partial class StepReviewPlan
             return false;
 
         var corpus = Draft.Corpus;
-        var gate = CorpusUiText.PlanNextGate(_isPlanning || _isApproving, corpus?.Plan != null, corpus?.Approved == true);
+        var gate = CorpusUiText.PlanNextGate(_isPlanning || _isApproving, corpus?.Plan != null, corpus?.Approved == true,
+            CorpusApproval.IsGuideStale(Draft));
         switch (gate.Kind)
         {
             case PlanNextGateKind.Disabled:
@@ -512,6 +513,9 @@ public partial class StepReviewPlan
     {
         var plan = Draft?.Corpus?.Plan;
         if (_state == null || _isPlanning || _isApproving || plan == null)
+            return false;
+        // 09 CR-01: approving would silently keep a stale guide (RecordApproval dismisses its hash)
+        if (CorpusApproval.IsGuideStale(Draft!))
             return false;
 
         _isApproving = true;

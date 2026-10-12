@@ -455,6 +455,16 @@ public class ReviewPlanLogicTests
     }
 
     [Fact]
+    public void NextGate_NotApproved_StaleGuide_AsksToSkipWithoutApproving()
+    {
+        // 09 CR-01: Next must never approve (and silently keep) a plan built from an earlier guide
+        var gate = CorpusUiText.PlanNextGate(false, true, false, guideStale: true);
+        Assert.Equal(PlanNextGateKind.AskSkip, gate.Kind);
+        Assert.Equal("Continue Without Approving", gate.Title);
+        Assert.Contains("can't be approved from here", gate.Message);
+    }
+
+    [Fact]
     public void NextGate_Approved_Proceeds()
     {
         Assert.Equal(PlanNextGateKind.Proceed, CorpusUiText.PlanNextGate(false, true, true).Kind);

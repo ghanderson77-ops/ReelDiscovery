@@ -618,7 +618,7 @@ public static class CorpusUiText
 
     // --- Review Plan: Next gate, confirmations, badge ---
 
-    public static PlanNextGateResult PlanNextGate(bool running, bool hasPlan, bool approved)
+    public static PlanNextGateResult PlanNextGate(bool running, bool hasPlan, bool approved, bool guideStale = false)
     {
         if (running)
             return new PlanNextGateResult { Kind = PlanNextGateKind.Disabled };
@@ -629,6 +629,17 @@ public static class CorpusUiText
                 Kind = PlanNextGateKind.AskSkip,
                 Title = "Continue Without a Plan",
                 Message = "Continue without a corpus plan? Generate Corpus needs an approved plan before it writes emails; click Next there to write discovery documents. You can plan the corpus later from Review Plan."
+            };
+        }
+
+        // 09 CR-01: a plan built from an earlier guide is never approved from Next; Keep This Plan or Re-plan decides
+        if (!approved && guideStale)
+        {
+            return new PlanNextGateResult
+            {
+                Kind = PlanNextGateKind.AskSkip,
+                Title = "Continue Without Approving",
+                Message = "The case guide changed after this plan was built, so the plan can't be approved from here. Continue without approving? Generate Corpus won't write emails until you keep this plan or re-plan; you can still write discovery documents."
             };
         }
 

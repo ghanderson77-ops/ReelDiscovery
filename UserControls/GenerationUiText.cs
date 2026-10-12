@@ -929,10 +929,17 @@ public static class GenerationUiText
     public const string RetryFailedTooltip =
         "Writes the failed threads and attachments again. Emails that are already saved are rewritten only when one of their attachments is added.";
 
-    public static string OtherProviderKeyMissingText(string provider) => "";
+    /// <summary>
+    /// D-14: another provider's batches of this plan are pending and its key is missing; generating could pay twice, so
+    /// the run refuses until the key is added or the provider is switched back.
+    /// </summary>
+    public static string OtherProviderKeyMissingText(string provider) =>
+        $"{ProviderName(provider)} batches from an earlier session are still pending, and no {ProviderName(provider)} key is set up. Add the {ProviderName(provider)} key on the API Configuration step, or switch the text provider back to {ProviderName(provider)}, before generating.";
 
     /// <summary>
-    /// Partial-run banner body; <paramref name="failedItems"/> counts threads + attachments.
+    /// Partial-run banner body; <paramref name="failedItems"/> counts threads + attachments. The batch clause counts only
+    /// this plan's batches of the current text provider; the D-15 clause names another provider's batches, which are
+    /// resolved at run start, or shows the D-14 notice when that provider's key is missing.
     /// </summary>
     public static string BannerBody(int threadsDone, int threadsTotal, int attachmentsDone, int attachmentsTotal, int failedItems,
         bool batchOn = false, int pendingBatches = 0, int otherProviderBatches = 0, string otherProvider = "", bool otherProviderBlocked = false)
@@ -942,7 +949,13 @@ public static class GenerationUiText
         var batchClause = pendingBatches > 0
             ? $" {Plural(pendingBatches, "provider batch", "provider batches")} submitted earlier will be collected first, without paying again."
             : batchOn ? " Batch pricing stays on for this case." : "";
-        return $"{N(threadsDone)} of {Plural(threadsTotal, "thread", "threads")}{AttachmentProgress(attachmentsDone, attachmentsTotal)} are written and saved. Continue Generating writes the rest and keeps everything already saved{failedClause}.{batchClause}";
+        // D-15: another provider's batches are resolved at run start (D-13), or block it when that key is missing (D-14)
+        var otherClause = otherProviderBatches <= 0
+            ? ""
+            : otherProviderBlocked
+                ? " " + OtherProviderKeyMissingText(otherProvider)
+                : $" {Plural(otherProviderBatches, $"{ProviderName(otherProvider)} batch", $"{ProviderName(otherProvider)} batches")} from an earlier session {(otherProviderBatches == 1 ? "is" : "are")} collected or cancelled before generating.";
+        return $"{N(threadsDone)} of {Plural(threadsTotal, "thread", "threads")}{AttachmentProgress(attachmentsDone, attachmentsTotal)} are written and saved. Continue Generating writes the rest and keeps everything already saved{failedClause}.{batchClause}{otherClause}";
     }
 
     /// <summary>

@@ -336,7 +336,7 @@ Plans:
 - [x] 10-03-PLAN.md — AnswerKeyFiles funnel: harvest, per-file baseline votes, apply, snapshot, backup (Wave 2)
 - [x] 10-04-PLAN.md — Stale wave batch drain before wave 0 (WR-A08); delete end-of-run close path (Wave 2)
 - [x] 10-06-PLAN.md — Pending-batch banner counts current provider only (D-15); Start Over records unused batch spend (WR-A06) (Wave 2)
-- [ ] 10-05-PLAN.md — Route every answer-key writer through the funnel; approval overlay seam; funnel guard test (Wave 3)
+- [x] 10-05-PLAN.md — Route every answer-key writer through the funnel; approval overlay seam; funnel guard test (Wave 3)
 - [ ] 10-07-PLAN.md — Run start resolves or refuses other-provider batches (W5); Activity lines (Wave 3)
 - [ ] 10-08-PLAN.md — Review Plan re-approval overlay (D-12); damaged-key backup notice (D-10) (Wave 4)
 - [ ] 10-09-PLAN.md — Relabel warning and guidance copy (D-05..D-08) (Wave 5)
@@ -359,4 +359,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
 | 8. Ancillary Discovery Documents | 19/19 | Complete    | 2026-10-09 |
 | 9. Edit Safety & Navigation | 10/10 | Complete    | 2026-10-12 |
-| 10. Answer-Key & Batch Safety | 5/11 | In Progress|  |
+| 10. Answer-Key & Batch Safety | 6/11 | In Progress|  |

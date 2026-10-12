@@ -110,7 +110,8 @@ public class DiscoveryStepModel
             }
 
             model.Selected = DiscoveryWorklist.Build(draft, settings, corpus, set);
-            model.Rows = BuildRows(draft, set, model.Selected, model.Variant, caseFolder, fileExists);
+            // null until the probe finishes: exhibit staleness is skipped, never flickers (09 Pitfall 3)
+            model.Rows = BuildRows(draft, set, model.Selected, model.Variant, caseFolder, fileExists, corpus?.WrittenStamps);
 
             var states = model.Rows.ToDictionary(r => r.Key, r => r.State, StringComparer.Ordinal);
             model.ToWrite = model.Selected
@@ -141,17 +142,18 @@ public class DiscoveryStepModel
 
     /// <summary>
     /// Rows for the documents saved in the sidecar only (no planning, no corpus probe), with the same state resolution;
-    /// used by the Case Summary row (Plan 08-18).
+    /// used by the Case Summary row (Plan 08-18). <paramref name="currentStamps"/> are the written-email stamps now
+    /// (null = unknown, the exhibit check is skipped).
     /// </summary>
     public static List<DiscoveryRowInfo> SavedRows(CaseDraft draft, DiscoveryDocumentSet set, string caseFolder,
-        Func<string, bool>? fileExists = null)
+        Func<string, bool>? fileExists = null, IReadOnlyDictionary<string, DateTime>? currentStamps = null)
     {
         if (draft == null || set == null)
             return new List<DiscoveryRowInfo>();
         try
         {
             return BuildRows(draft, set, new List<DiscoveryWorkItem>(), DiscoveryVariants.Of(draft.CoreDocument), caseFolder,
-                fileExists);
+                fileExists, currentStamps);
         }
         catch (Exception)
         {
@@ -236,7 +238,8 @@ public class DiscoveryStepModel
 
     // Union of saved documents and selected-but-unwritten ones (UI-SPEC S1 Card 3): depositions by date, then RFP, ROG, RFA
     private static List<DiscoveryRowInfo> BuildRows(CaseDraft draft, DiscoveryDocumentSet set, List<DiscoveryWorkItem> selected,
-        DiscoveryVariant variant, string caseFolder, Func<string, bool>? fileExists)
+        DiscoveryVariant variant, string caseFolder, Func<string, bool>? fileExists,
+        IReadOnlyDictionary<string, DateTime>? currentStamps)
     {
         var byKey = selected.ToDictionary(i => i.Key, StringComparer.Ordinal);
         var saved = (set.Documents ?? new List<DiscoveryDocument>())
@@ -258,14 +261,15 @@ public class DiscoveryStepModel
 
         var probe = fileExists ?? File.Exists;
         return depositionKeys.Concat(writtenKeys)
-            .Select(key => Row(draft, saved.GetValueOrDefault(key), byKey.GetValueOrDefault(key), key, variant, caseFolder, probe))
+            .Select(key => Row(draft, saved.GetValueOrDefault(key), byKey.GetValueOrDefault(key), key, variant, caseFolder, probe,
+                currentStamps))
             .ToList();
     }
 
     private static DiscoveryRowInfo Row(CaseDraft draft, DiscoveryDocument? doc, DiscoveryWorkItem? item, string key,
-        DiscoveryVariant variant, string caseFolder, Func<string, bool> probe)
+        DiscoveryVariant variant, string caseFolder, Func<string, bool> probe, IReadOnlyDictionary<string, DateTime>? currentStamps)
     {
-        var stale = doc == null ? StaleSource.None : DiscoveryStaleness.Check(doc, draft);
+        var stale = doc == null ? StaleSource.None : DiscoveryStaleness.Check(doc, draft, currentStamps);
 
         // Paths only through DocxPath: a validated name inside Discovery\ (T-08-28)
         var exists = doc != null && !string.IsNullOrWhiteSpace(caseFolder)

@@ -310,7 +310,9 @@ public static class DiscoveryUiText
                     : ". Click Generate Documents or Regenerate... to try again.");
 
             case DiscoveryRowState.OutOfDate:
-                return $"Out of date with the case guide: {StaleWhat(row.Stale)} changed after this document was written. Click Regenerate... to write it again.";
+                return row.Stale == StaleSource.Exhibits
+                    ? "Out of date: an email it cites was regenerated or deleted after this document was written. Click Regenerate... to write it again."
+                    : $"Out of date with the case guide: {StaleWhat(row.Stale)} changed after this document was written. Click Regenerate... to write it again.";
 
             case DiscoveryRowState.NotSaved:
                 return DiscoveryGenerator.IsWriteFailure(row.FailureReason)
@@ -371,6 +373,7 @@ public static class DiscoveryUiText
         StaleSource.Core => "the core document",
         StaleSource.Caption => "the caption or counsel",
         StaleSource.CorpusPlan => "the corpus plan",
+        StaleSource.Exhibits => "a cited email",
         _ => "it"
     };
 

@@ -1787,7 +1787,7 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
     /// LoadQa plus the Discovery documents row; discovery-documents.json is read once for both the row and its spend (D-06).
     /// Runs off the UI thread; DiscoveryStore never throws and caps the file size (T-08-55).
     /// </summary>
-    private static QaSnapshot LoadQaWithDiscovery(
+    internal static QaSnapshot LoadQaWithDiscovery(
         (string Folder, CorpusPlan? Plan, CaseGuide Guide, ReviewProtocolProse Prose, Func<string, AIModelConfig?> ModelFor, CaseDraft Draft) inputs)
     {
         var folder = inputs.Folder;
@@ -1801,8 +1801,22 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         }
         else if (set != null)
         {
+            // 09 W3: current written-email stamps from the replay LoadQa already did (never a second replay; T-05-45).
+            // No plan or an unreadable / other-plan journal = unknown (null); a deleted journal (Start Over) = known-empty.
+            // LoadQa assigns Replay whenever the folder and plan are set (Replay reports Exists = false for no journal),
+            // so a null Replay here means no plan, no folder or a replay that threw: unknown
+            IReadOnlyDictionary<string, DateTime>? stamps = null;
+            if (inputs.Plan != null && qa.Replay != null)
+            {
+                if (!qa.Replay.Exists)
+                    stamps = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+                else if (qa.Replay.Readable && !qa.Replay.PlanChanged)
+                    stamps = DiscoveryStaleness.EmailStamps(qa.Replay);
+            }
+
             // A report view over the untrusted sidecar: SavedRows never throws (a malformed set yields no rows)
-            qa.Discovery = DiscoveryRow(DiscoveryStepModel.SavedRows(inputs.Draft, set, folder), DiscoveryStore.HasDocuments(folder));
+            qa.Discovery = DiscoveryRow(DiscoveryStepModel.SavedRows(inputs.Draft, set, folder, currentStamps: stamps),
+                DiscoveryStore.HasDocuments(folder));
         }
         return qa;
     }

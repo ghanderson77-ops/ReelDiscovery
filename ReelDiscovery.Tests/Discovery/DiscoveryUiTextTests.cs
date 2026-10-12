@@ -421,6 +421,16 @@ public class DiscoveryUiTextTests
     }
 
     [Fact]
+    public void RowStatusFull_OutOfDate_Exhibits()
+    {
+        Assert.Equal("a cited email", DiscoveryUiText.StaleWhat(StaleSource.Exhibits));
+        var row = Row(DiscoveryRowState.OutOfDate);
+        row.Stale = StaleSource.Exhibits;
+        Assert.Equal("Out of date: an email it cites was regenerated or deleted after this document was written. Click Regenerate... to write it again.",
+            DiscoveryUiText.RowStatusFull(row));
+    }
+
+    [Fact]
     public void RowStatusFull_NotSavedAndFileMissing()
     {
         Assert.Equal("Not saved: Case - Requests for Production.docx is open in Word. Close it, then click Save Again.",

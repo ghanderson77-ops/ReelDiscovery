@@ -1,8 +1,11 @@
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Discovery;
 using ReelDiscovery.Services.Corpus;
 using ReelDiscovery.Services.Discovery;
+using ReelDiscovery.Services.Evidence;
+using ReelDiscovery.Tests.Evidence;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Discovery;
@@ -341,5 +344,160 @@ public class DiscoveryStepModelTests
         var same = Build(draft);
         Assert.True(same.PartyChoice.Same);
         Assert.False(same.CanGenerate(true, true));
+    }
+
+    // ----- 09 W3: exhibit staleness -----
+
+    // A deposition citing RD-000001 (thread T-0001) and an RFA set citing RD-000002 (thread T-0002), stamped against the
+    // corpus as it is now, saved to the sidecar with their .docx files present
+    private static async Task<DiscoveryDocumentSet> SaveCitingDocsAsync(string folder, CaseDraft draft, DiscoveryCorpus corpus)
+    {
+        var deposition = new DiscoveryDocument
+        {
+            Key = "DEP-CH-003",
+            Kind = DiscoveryKind.Deposition,
+            WitnessId = "CH-003",
+            FileName = "Deposition CH-003.docx",
+            Status = DiscoveryStatus.Generated,
+            FileSaved = true,
+            TestimonyPages = 25,
+            Deposition = new DepositionContent
+            {
+                WitnessId = "CH-003",
+                WitnessName = "Saved Witness",
+                Date = "2025-06-01",
+                Exhibits = { new DepositionExhibit { Number = 1, Description = "Email", DocId = "RD-000001", Date = "2024-03-04" } }
+            }
+        };
+        var rfa = new DiscoveryDocument
+        {
+            Key = "RFA",
+            Kind = DiscoveryKind.RequestsForAdmission,
+            FileName = "RFA.docx",
+            Status = DiscoveryStatus.Generated,
+            FileSaved = true,
+            RequestCount = 1,
+            Written = new WrittenDiscoveryContent
+            {
+                Requests = { new DiscoveryRequest { Number = 1, Text = "Admit the email is genuine.", DocId = "RD-000002", IsGenuineness = true } }
+            }
+        };
+        DiscoveryStaleness.Stamp(deposition, draft, corpus);
+        DiscoveryStaleness.Stamp(rfa, draft, corpus);
+
+        var set = new DiscoveryDocumentSet { CaseId = draft.CaseId };
+        set.Upsert(deposition);
+        set.Upsert(rfa);
+        await DiscoveryStore.SaveAsync(folder, set);
+        Directory.CreateDirectory(DiscoveryStore.FolderPath(folder));
+        foreach (var doc in set.Documents)
+            await File.WriteAllBytesAsync(DiscoveryStore.DocxPath(folder, doc.FileName)!, new byte[] { 1 });
+        return set;
+    }
+
+    private static DiscoveryRowInfo RowFor(List<DiscoveryRowInfo> rows, string key) => rows.Single(r => r.Key == key);
+
+    [Fact]
+    public async Task ExhibitStaleness_StartOver_MarksCitingDocumentsOutOfDate()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var draft = await DiscoveryCorpusFixture.WithWrittenCorpusAsync(folder, relevant: 4, written: 3);
+            var corpus = CorpusDetector.Detect(draft);
+            Assert.NotNull(corpus.WrittenStamps);
+            var set = await SaveCitingDocsAsync(folder, draft, corpus);
+
+            var before = DiscoveryStepModel.SavedRows(draft, set, folder, _ => true, corpus.WrittenStamps);
+            Assert.Equal(2, before.Count);
+            Assert.All(before, r => Assert.Equal(DiscoveryRowState.Generated, r.State));
+
+            var reset = await GenerationReset.StartOverAsync(folder, DiscoveryCorpusFixture.PlanOf(draft), draft.Guide);
+            Assert.Empty(reset.Errors);
+
+            var after = DiscoveryStepModel.SavedRows(draft, set, folder, _ => true, CorpusDetector.Detect(draft).WrittenStamps);
+            Assert.Equal(2, after.Count);
+            Assert.All(after, r =>
+            {
+                Assert.Equal(DiscoveryRowState.OutOfDate, r.State);
+                Assert.Equal(StaleSource.Exhibits, r.Stale);
+            });
+
+            // Unknown stamps never stale: before the probe finishes nothing flickers to Out of date
+            var unknown = DiscoveryStepModel.SavedRows(draft, set, folder, _ => true, currentStamps: null);
+            Assert.All(unknown, r => Assert.Equal(DiscoveryRowState.Generated, r.State));
+            var model = DiscoveryStepModel.Build(draft, set, DiscoveryCorpus.None(), Story, folder, _ => true);
+            Assert.NotEmpty(model.Rows);
+            Assert.DoesNotContain(model.Rows, r => r.State == DiscoveryRowState.OutOfDate);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task ExhibitStaleness_RegenerateThread_MarksOnlyItsCitersAndStaysAfterRewrite()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var draft = await DiscoveryCorpusFixture.WithWrittenCorpusAsync(folder, relevant: 4, written: 3);
+            var plan = DiscoveryCorpusFixture.PlanOf(draft);
+            var set = await SaveCitingDocsAsync(folder, draft, CorpusDetector.Detect(draft));
+
+            var result = await ThreadInvalidation.InvalidateAsync(folder, plan, draft.Guide!, "T-0001");
+            Assert.True(result.Appended);
+
+            var rows = DiscoveryStepModel.SavedRows(draft, set, folder, _ => true, CorpusDetector.Detect(draft).WrittenStamps);
+            Assert.Equal(DiscoveryRowState.OutOfDate, RowFor(rows, "DEP-CH-003").State);
+            Assert.Equal(StaleSource.Exhibits, RowFor(rows, "DEP-CH-003").Stale);
+            Assert.Equal(DiscoveryRowState.Generated, RowFor(rows, "RFA").State);
+
+            // Continue Generating writes the thread again with a later ThreadDone: the cited email changed, still Out of date
+            var rewrite = DiscoveryCorpusFixture.Done(plan.PlanId, plan.Threads.Single(t => t.Id == "T-0001"));
+            rewrite.Utc = rewrite.Utc.AddHours(2);
+            await new GenerationJournal(folder).AppendAsync(rewrite);
+
+            var corpus = CorpusDetector.Detect(draft);
+            Assert.True(corpus.WrittenStamps!.ContainsKey("RD-000001"));
+            rows = DiscoveryStepModel.SavedRows(draft, set, folder, _ => true, corpus.WrittenStamps);
+            Assert.Equal(DiscoveryRowState.OutOfDate, RowFor(rows, "DEP-CH-003").State);
+            Assert.Equal(StaleSource.Exhibits, RowFor(rows, "DEP-CH-003").Stale);
+            Assert.Equal(DiscoveryRowState.Generated, RowFor(rows, "RFA").State);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task ExhibitStaleness_CaseSummaryRow_AfterStartOver_ShowsOutOfDate()
+    {
+        var folder = EvidenceTestData.TempCaseFolder();
+        try
+        {
+            var draft = await DiscoveryCorpusFixture.WithWrittenCorpusAsync(folder, relevant: 4, written: 3);
+            var plan = DiscoveryCorpusFixture.PlanOf(draft);
+            await SaveCitingDocsAsync(folder, draft, CorpusDetector.Detect(draft));
+            StepCaseSummary.QaSnapshot Load() => StepCaseSummary.LoadQaWithDiscovery(
+                (folder, plan, draft.Guide!, new ReviewProtocolProse(), _ => null, draft));
+
+            var before = Load();
+            Assert.StartsWith("2 documents", before.Discovery.Line3);
+            Assert.DoesNotContain("out of date", before.Discovery.Line3);
+
+            var reset = await GenerationReset.StartOverAsync(folder, plan, draft.Guide);
+            Assert.Empty(reset.Errors);
+
+            var after = Load();
+            Assert.Contains(" · 2 out of date", after.Discovery.Line3);
+            Assert.Equal(SummaryTone.Warning, after.Discovery.Line3Tone);
+        }
+        finally
+        {
+            EvidenceTestData.DeleteFolder(folder);
+        }
     }
 }

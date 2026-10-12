@@ -980,10 +980,15 @@ public static class GenerationUiText
             + (batchesPending ? " Provider batches already submitted keep running; Continue Generating collects their results without paying again." : ""));
     }
 
-    public static (string Title, string Text) CG2StartOver(int files, bool batchesPending = false) =>
+    /// <summary>
+    /// C-G2 Start Over. The discovery clause (09 UI-SPEC S5) follows the batches clause when a saved discovery
+    /// document cites at least one email.
+    /// </summary>
+    public static (string Title, string Text) CG2StartOver(int files, bool batchesPending = false, bool citedByDiscovery = false) =>
         ("Start Over",
             $"Delete the {Plural(files, "generated EML file", "generated EML files")} (relevant and non-relevant, with their attachments), the narrative ledger and the side projects, and reset the answer key to Planned? This cannot be undone. The corpus plan and case guide are kept."
-            + (batchesPending ? " Pending provider batches are cancelled." : ""));
+            + (batchesPending ? " Pending provider batches are cancelled." : "")
+            + (citedByDiscovery ? " Discovery documents that cite these emails will show Out of date." : ""));
 
     public static (string Title, string Text) CG3CloseDuringRun(bool batchesPending = false) =>
         ("Stop Generating?",

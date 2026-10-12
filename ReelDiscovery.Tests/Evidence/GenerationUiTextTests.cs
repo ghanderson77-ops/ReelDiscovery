@@ -2280,6 +2280,14 @@ public class GenerationUiTextTests
         Assert.Equal(GenerationUiText.CG2StartOver(5).Text, GenerationUiText.CG2StartOver(5, false).Text);
         Assert.Equal(GenerationUiText.CG2StartOver(5).Text + " Pending provider batches are cancelled.", GenerationUiText.CG2StartOver(5, true).Text);
 
+        // 09 S5: the discovery clause follows the batches clause; default text unchanged
+        Assert.Equal(GenerationUiText.CG2StartOver(3).Text, GenerationUiText.CG2StartOver(3, false, false).Text);
+        Assert.EndsWith("are kept. Discovery documents that cite these emails will show Out of date.",
+            GenerationUiText.CG2StartOver(3, false, citedByDiscovery: true).Text);
+        Assert.EndsWith(" Pending provider batches are cancelled. Discovery documents that cite these emails will show Out of date.",
+            GenerationUiText.CG2StartOver(3, true, true).Text);
+        Assert.Equal("Start Over", GenerationUiText.CG2StartOver(3, true, true).Title);
+
         Assert.Equal(GenerationUiText.CG3CloseDuringRun().Text, GenerationUiText.CG3CloseDuringRun(false).Text);
         Assert.Equal(GenerationUiText.CG3CloseDuringRun().Text + " Provider batches already submitted keep running and are collected the next time you click Continue Generating.",
             GenerationUiText.CG3CloseDuringRun(true).Text);

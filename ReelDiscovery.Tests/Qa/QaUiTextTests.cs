@@ -376,6 +376,17 @@ public class QaUiTextTests
         Assert.Contains("Its 1,000 EML files", QaUiText.CQ1RegenerateThread("s", 1000, 1, false).Text);
     }
 
+    [Fact]
+    public void CQ1_DiscoveryClause_OnlyWhenCited()
+    {
+        var plain = QaUiText.CQ1RegenerateThread("s", 2, 1, true);
+        var cited = QaUiText.CQ1RegenerateThread("s", 2, 1, true, citedByDiscovery: true);
+        Assert.Equal(plain.Text, QaUiText.CQ1RegenerateThread("s", 2, 1, true, false).Text);
+        Assert.Equal(plain.Text + " Discovery documents that cite its emails will show Out of date.", cited.Text);
+        Assert.EndsWith(" Discovery documents that cite its emails will show Out of date.", cited.Text);
+        Assert.Equal("Regenerate Thread", cited.Title);
+    }
+
     [Theory]
     [InlineData(0, "0 emails", "are")]
     [InlineData(1, "1 email", "is")]

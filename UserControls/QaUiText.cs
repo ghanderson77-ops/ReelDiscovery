@@ -332,14 +332,16 @@ public static class QaUiText
 
     // --- Confirmations (MessageBox, default button = the safe choice) ---
 
-    public static (string Title, string Text) CQ1RegenerateThread(string subject, int emlFiles, int attachments, bool relevant)
+    public static (string Title, string Text) CQ1RegenerateThread(string subject, int emlFiles, int attachments, bool relevant,
+        bool citedByDiscovery = false)
     {
         var files = Plural(emlFiles, "EML file", "EML files");
         var att = attachments > 0 ? " and " + Plural(attachments, "attachment", "attachments") : "";
         var verb = emlFiles == 1 && attachments == 0 ? "is" : "are";
         var keep = relevant ? ", keeping the story details it already established so later threads stay consistent" : "";
         return ("Regenerate Thread",
-            $"Regenerate \"{subject}\"? Its {files}{att} {verb} deleted now and the answer key marks the thread Planned. Continue Generating on the Generate Corpus step writes it again{keep}.");
+            $"Regenerate \"{subject}\"? Its {files}{att} {verb} deleted now and the answer key marks the thread Planned. Continue Generating on the Generate Corpus step writes it again{keep}."
+            + (citedByDiscovery ? " Discovery documents that cite its emails will show Out of date." : ""));
     }
 
     public static (string Title, string Text) CQ2CancelReview(int reviewed) =>

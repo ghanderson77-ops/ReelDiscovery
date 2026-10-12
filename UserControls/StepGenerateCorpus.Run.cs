@@ -139,11 +139,13 @@ public partial class StepGenerateCorpus : IWizardStep
         {
             Running = _isGenerating,
             HasPlan = plan != null,
-            Approved = corpus?.Approved == true
+            Approved = corpus?.Approved == true,
+            // Computed before withdrawal (09 W1): a guide edited after planning pauses generation
+            GuideStale = CorpusApproval.IsGuideStale(Draft)
         };
 
         EntryData? data = null;
-        if (plan != null && input.Approved)
+        if (plan != null && input.Approved && !input.GuideStale)
         {
             string folder;
             try
@@ -217,9 +219,20 @@ public partial class StepGenerateCorpus : IWizardStep
         {
             case GenerationEntry.KeepRun:
                 return;
+            case GenerationEntry.GuideChangedCard:
+                // 09 W1 / D-25: the plan was built from an earlier guide; approval is withdrawn and saved before the card shows
+                if (CorpusApproval.WithdrawIfGuideChanged(Draft))
+                {
+                    await SaveAsync();
+                    if (IsDisposed || _isGenerating)
+                        return;
+                }
+                ShowGuideChangedCard();
+                return;
             case GenerationEntry.NotApprovedCard:
                 SetNotice(string.Empty);
-                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty), GenerationStateCard.NotApproved);
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty,
+                    hasPlan: plan != null), GenerationStateCard.NotApproved);
                 return;
             case GenerationEntry.PlanChangedCard:
                 ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.PlanChanged, 0, 0, 0, 0m, string.Empty,
@@ -300,8 +313,9 @@ public partial class StepGenerateCorpus : IWizardStep
     }
 
     /// <summary>
-    /// The state card's single action: Generate Emails starts the run; Review Plan opens that step; Start Over... clears
-    /// a run for another plan or an unreadable run.
+    /// The state card's single action: Generate Emails starts the run; Review Plan opens that step (Not approved and
+    /// Guide changed cards); Start Over... clears a run for another plan or an unreadable run. Only the Plan-changed and
+    /// Unreadable cards can delete anything (09 Pitfall 1).
     /// </summary>
     internal Task ClickStateActionAsync()
     {
@@ -309,12 +323,25 @@ public partial class StepGenerateCorpus : IWizardStep
         {
             case GenerationStateCard.Ready:
                 return StartRunAsync();
+            case GenerationStateCard.GuideChanged:
             case GenerationStateCard.NotApproved:
                 (FindForm() as WizardForm)?.NavigateToStage(CaseStage.ReviewPlan);
                 return Task.CompletedTask;
-            default:
+            case GenerationStateCard.PlanChanged:
+            case GenerationStateCard.Unreadable:
                 return StartOverAsync();
+            default:
+                // An unknown card never deletes anything (09 Pitfall 1)
+                return Task.CompletedTask;
         }
+    }
+
+    // The Guide-changed card (09 UI-SPEC S1): the plan's notice is hidden; the body names the emails already written
+    private void ShowGuideChangedCard()
+    {
+        SetNotice(string.Empty);
+        ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.GuideChanged, 0, 0, 0, 0m, string.Empty, 0, string.Empty,
+            Draft.Corpus?.Generation?.EmailsWritten ?? 0), GenerationStateCard.GuideChanged);
     }
 
     /// <summary>
@@ -387,8 +414,27 @@ public partial class StepGenerateCorpus : IWizardStep
             return;
 
         var plan = Draft.Corpus?.Plan;
-        if (plan == null || Draft.Corpus?.Approved != true)
+        // 09 W1: never write emails from a plan whose guide changed or that is not approved; nothing is billed yet
+        if (plan != null && CorpusApproval.IsGuideStale(Draft))
+        {
+            if (CorpusApproval.WithdrawIfGuideChanged(Draft))
+            {
+                await SaveAsync();
+                if (IsDisposed)
+                    return;
+            }
+            ShowGuideChangedCard();
+            SetStatus(GenerationUiText.RunRefusedGuideChangedText, Theme.Warning);
             return;
+        }
+        if (plan == null || Draft.Corpus?.Approved != true)
+        {
+            SetNotice(string.Empty);
+            ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty,
+                hasPlan: plan != null), GenerationStateCard.NotApproved);
+            SetStatus(GenerationUiText.RunRefusedNotApprovedText, Theme.Warning);
+            return;
+        }
 
         string folder;
         ILlmGateway gateway;

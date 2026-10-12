@@ -1064,6 +1064,164 @@ public class GenerateCorpusStepTests
         Assert.Equal(GenerationUiText.CG1CancelGeneration(0, 0), StepGenerateCorpus.CancelConfirmation(null));
     }
 
+    // ----- 09 W1: guide changed -----
+
+    private const string GuideChangedHeading = "The case guide changed after this plan was built";
+
+    private static CaseDraft? SavedDraft(Harness h) =>
+        System.Text.Json.JsonSerializer.Deserialize<CaseDraft>(File.ReadAllText(Path.Combine(h.Folder, CaseStore.CaseFileName)), CaseDraft.JsonOptions);
+
+    [Fact]
+    public void Entry_GuideChanged_WithdrawsApprovalSavesAndShowsGuideChangedCard_WithoutProviderCalls()
+    {
+        using var h = new Harness();
+        h.Draft.Guide!.Facts[0].Title += " (revised)";
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            step.GatewayFactory = () => throw new InvalidOperationException("entering the step must not build a provider");
+            Pump(step.OnEnterStepAsync());
+
+            Assert.True(step.StateCardShown);
+            Assert.Equal(GuideChangedHeading, step.StateHeading);
+            Assert.Equal("Review Plan", step.StateActionButton.Text);
+            Assert.False(h.Draft.Corpus!.Approved);
+            Assert.False(SavedDraft(h)?.Corpus?.Approved);
+        });
+
+        Assert.Empty(h.Fake.Requests);
+        // No journal was read or started
+        Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+    }
+
+    [Fact]
+    public void Entry_GuideChanged_KeptPlan_ShowsReadyCard()
+    {
+        using var h = new Harness();
+        h.Draft.Guide!.Facts[0].Title += " (revised)";
+        CorpusApproval.KeepStalePlan(h.Draft);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
+            Assert.True(h.Draft.Corpus!.Approved);
+        });
+
+        Assert.Empty(h.Fake.Requests);
+    }
+
+    [Fact]
+    public void Entry_UnapprovedPlanAndStaleGuide_ShowsGuideChangedCard()
+    {
+        using var h = new Harness(approved: false);
+        h.Draft.Guide!.Facts[0].Title += " (revised)";
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+
+            Assert.Equal(GuideChangedHeading, step.StateHeading);
+            Assert.Equal("Review Plan", step.StateActionButton.Text);
+        });
+
+        Assert.Empty(h.Fake.Requests);
+    }
+
+    [Fact]
+    public void GuideChangedCard_Click_NavigatesOnly_JournalSurvives()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+            Assert.False(step.IsGenerating);
+            var requests = h.Fake.Requests.Count;
+
+            h.Draft.Guide!.Facts[0].Title += " (revised)";
+            Pump(step.OnEnterStepAsync());
+            Assert.Equal(GuideChangedHeading, step.StateHeading);
+            var files = GenerationJournal.ListAllFiles(h.Folder).Count;
+            Assert.True(files > 0);
+            Assert.True(File.Exists(GenerationJournal.PathFor(h.Folder)));
+
+            var confirms = 0;
+            step.Confirm = (title, text, icon) =>
+            {
+                confirms++;
+                return true;
+            };
+            Pump(step.ClickStateActionAsync());
+
+            Assert.Equal(0, confirms);
+            Assert.Equal(files, GenerationJournal.ListAllFiles(h.Folder).Count);
+            Assert.True(File.Exists(GenerationJournal.PathFor(h.Folder)));
+            Assert.NotNull(h.Draft.Corpus!.Generation);
+            Assert.False(h.Draft.Corpus.Approved);
+            Assert.False(step.IsGenerating);
+            Assert.Equal(requests, h.Fake.Requests.Count);
+        });
+    }
+
+    [Fact]
+    public void Run_GuideChangedAfterEntry_RefusedWithWarning_NoProviderCalls()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
+
+            h.Draft.Guide!.Facts[0].Title += " (revised)";
+            Pump(step.ClickStateActionAsync());
+
+            Assert.False(step.IsGenerating);
+            Assert.True(step.StateCardShown);
+            Assert.Equal(GuideChangedHeading, step.StateHeading);
+            Assert.Equal(GenerationUiText.RunRefusedGuideChangedText, step.StatusLabel.Text);
+            Assert.Equal(Theme.Warning, step.StatusLabel.ForeColor);
+            Assert.False(h.Draft.Corpus!.Approved);
+            Assert.False(SavedDraft(h)?.Corpus?.Approved);
+        });
+
+        Assert.Empty(h.Fake.Requests);
+        Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+    }
+
+    [Fact]
+    public void Run_NotApprovedAfterEntry_RefusedWithWarning_NoProviderCalls()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Assert.Equal("Ready to write the corpus", step.StateHeading);
+
+            h.Draft.Corpus!.Approved = false;
+            Pump(step.ClickContinueAsync());
+
+            Assert.False(step.IsGenerating);
+            Assert.True(step.StateCardShown);
+            Assert.Equal("Approve the plan first", step.StateHeading);
+            Assert.Equal(GenerationUiText.RunRefusedNotApprovedText, step.StatusLabel.Text);
+            Assert.Equal(Theme.Warning, step.StatusLabel.ForeColor);
+        });
+
+        Assert.Empty(h.Fake.Requests);
+        Assert.False(File.Exists(GenerationJournal.PathFor(h.Folder)));
+    }
+
     [Fact]
     public void MostFrequentSkippedReason_PicksTheCommonestReason()
     {

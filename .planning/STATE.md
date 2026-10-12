@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-10-12T19:31:54.636Z"
+stopped_at: Completed 10-03-PLAN.md
+last_updated: "2026-10-12T19:42:34.648Z"
 last_activity: 2026-10-12
 progress:
   total_phases: 10
   completed_phases: 9
   total_plans: 170
-  completed_plans: 161
+  completed_plans: 162
   percent: 95
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 10 (Answer-Key & Batch Safety) — EXECUTING
-Plan: 3 of 11
+Plan: 4 of 11
 Status: Ready to execute
 Last activity: 2026-10-12
 
@@ -215,6 +215,7 @@ Progress: [██████████] 100%
 | Phase 09 P10 | 35min | 2 tasks | 2 files |
 | Phase 10 P01 | 7 min | 3 tasks | 9 files |
 | Phase 10 P02 | 15 min | 2 tasks | 4 files |
+| Phase 10 P03 | 20 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -641,6 +642,8 @@ Recent decisions affecting current work:
 - [Phase 10]: 10-01: XLSX cells store CRLF as LF; the relabel funnel must normalize line endings before comparing Rationale (D-23)
 - [Phase 10]: 10-02: Run start resolves another provider's pending batches before the gateway exists: collect/cancel, or block on missing key or failed call (D-13/D-14/D-22)
 - [Phase 10]: 10-02: Start Over prices unused collected results of every plan via PriceUnusedResults, sharing TryPriceItems with PriceOrphans (D-16)
+- [Phase 10]: Answer-key Rationale is compared and stored with LF line endings (XLSX reads CRLF back as LF)
+- [Phase 10]: AnswerKeyFiles.WriteAsync is the single answer-key funnel: per-file SHA-256 baseline, per-case-folder gate, damaged files backed up as 'answer-key (unreadable yyyyMMdd-HHmmss)'
 
 ### Pending Todos
 
@@ -662,6 +665,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T19:31:54.630Z
-Stopped at: Completed 10-02-PLAN.md
+Last session: 2026-10-12T19:42:34.642Z
+Stopped at: Completed 10-03-PLAN.md
 Resume file: None

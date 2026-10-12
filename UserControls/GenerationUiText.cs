@@ -929,11 +929,13 @@ public static class GenerationUiText
     public const string RetryFailedTooltip =
         "Writes the failed threads and attachments again. Emails that are already saved are rewritten only when one of their attachments is added.";
 
+    public static string OtherProviderKeyMissingText(string provider) => "";
+
     /// <summary>
     /// Partial-run banner body; <paramref name="failedItems"/> counts threads + attachments.
     /// </summary>
     public static string BannerBody(int threadsDone, int threadsTotal, int attachmentsDone, int attachmentsTotal, int failedItems,
-        bool batchOn = false, int pendingBatches = 0)
+        bool batchOn = false, int pendingBatches = 0, int otherProviderBatches = 0, string otherProvider = "", bool otherProviderBlocked = false)
     {
         var failedClause = failedItems > 0 ? $", and tries the {Plural(failedItems, "failed item", "failed items")} again" : "";
         // D-09: batches pending from before the app closed win over the saved-choice clause

@@ -2270,6 +2270,48 @@ public class GenerationUiTextTests
             GenerationUiText.BannerBody(4, 10, 0, 0, 0, batchOn: false, pendingBatches: 1000));
     }
 
+    // D-15: the current-provider clause is unchanged by the other-provider parameters
+    [Fact]
+    public void BannerBody_CurrentProviderClause_Unchanged()
+    {
+        Assert.EndsWith(" and tries the 2 failed items again. 1 provider batch submitted earlier will be collected first, without paying again.",
+            GenerationUiText.BannerBody(21, 60, 0, 0, 2, batchOn: true, pendingBatches: 1));
+    }
+
+    [Fact]
+    public void BannerBody_OtherProviderClause_PluralAndSingular()
+    {
+        Assert.EndsWith(" 2 Anthropic batches from an earlier session are collected or cancelled before generating.",
+            GenerationUiText.BannerBody(21, 60, 0, 0, 0, otherProviderBatches: 2, otherProvider: "Anthropic"));
+        Assert.EndsWith(" 1 Anthropic batch from an earlier session is collected or cancelled before generating.",
+            GenerationUiText.BannerBody(21, 60, 0, 0, 0, otherProviderBatches: 1, otherProvider: "Anthropic"));
+    }
+
+    [Fact]
+    public void BannerBody_CurrentThenOtherProviderClause()
+    {
+        Assert.Equal("21 of 60 threads are written and saved. Continue Generating writes the rest and keeps everything already saved."
+            + " 1 provider batch submitted earlier will be collected first, without paying again."
+            + " 2 Anthropic batches from an earlier session are collected or cancelled before generating.",
+            GenerationUiText.BannerBody(21, 60, 0, 0, 0, pendingBatches: 1, otherProviderBatches: 2, otherProvider: "Anthropic"));
+    }
+
+    // D-14: a missing key replaces the resolve clause with the blocking notice
+    [Fact]
+    public void BannerBody_OtherProviderBlocked_ShowsKeyMissingNotice()
+    {
+        var body = GenerationUiText.BannerBody(21, 60, 0, 0, 0, otherProviderBatches: 2, otherProvider: "OpenAI", otherProviderBlocked: true);
+        Assert.EndsWith(" " + GenerationUiText.OtherProviderKeyMissingText("OpenAI"), body);
+        Assert.DoesNotContain("collected or cancelled before generating", body);
+    }
+
+    [Fact]
+    public void OtherProviderKeyMissingText_Verbatim()
+    {
+        Assert.Equal("Anthropic batches from an earlier session are still pending, and no Anthropic key is set up. Add the Anthropic key on the API Configuration step, or switch the text provider back to Anthropic, before generating.",
+            GenerationUiText.OtherProviderKeyMissingText("Anthropic"));
+    }
+
     [Fact]
     public void Confirmations_BatchClauses_OnlyWhenPending()
     {

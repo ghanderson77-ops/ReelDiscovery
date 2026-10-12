@@ -331,7 +331,7 @@ Plans:
 **Plans**: 11 plans
 
 Plans:
-- [ ] 10-01-PLAN.md — Answer-key reader (CSV/XLSX read-back, shared read), relabel sidecar store, delete legacy Attachment types (Wave 1)
+- [x] 10-01-PLAN.md — Answer-key reader (CSV/XLSX read-back, shared read), relabel sidecar store, delete legacy Attachment types (Wave 1)
 - [ ] 10-02-PLAN.md — Batch ledger provider counts, Start Over pricer, cross-provider resolver (Services/Ai) (Wave 1)
 - [ ] 10-03-PLAN.md — AnswerKeyFiles funnel: harvest, per-file baseline votes, apply, snapshot, backup (Wave 2)
 - [ ] 10-04-PLAN.md — Stale wave batch drain before wave 0 (WR-A08); delete end-of-run close path (Wave 2)
@@ -359,4 +359,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
 | 8. Ancillary Discovery Documents | 19/19 | Complete    | 2026-10-09 |
 | 9. Edit Safety & Navigation | 10/10 | Complete    | 2026-10-12 |
-| 10. Answer-Key & Batch Safety | 0/11 | Planned |  |
+| 10. Answer-Key & Batch Safety | 1/11 | In Progress|  |

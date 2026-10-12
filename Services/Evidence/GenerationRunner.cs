@@ -283,6 +283,14 @@ public class GenerationRunner
                 Provider = _llm.Provider.ToString()
             }, CancellationToken.None).ConfigureAwait(false);
 
+            // D-17/WR-A08: wave batches an earlier build submitted are cancelled but still collected before the first live wave,
+            // so their finished requests are used free instead of paid again; the wait is bounded (DrainTimeout)
+            if (batch != null)
+            {
+                await batch.DrainStaleStagesAsync(label => label.StartsWith("wave ", StringComparison.Ordinal), ct).ConfigureAwait(false);
+                snapshot.SetPendingProviderBatches(batch.PendingBatchCount);
+            }
+
             // D-28: one voice set for every voicemail of every stage, chosen before the first one is spoken
             var proceed = true;
             if (mediaAvailable && VoicemailPending(threads.Values, state))
@@ -532,8 +540,6 @@ public class GenerationRunner
             OrphanBill? orphans = null;
             if (outcome == GenerationOutcome.Finished && batch != null)
             {
-                // Amended D-07: wave batches an earlier build submitted are never consumed now; close them so Continue never waits on them (the provider may still bill items it completed; that spend is not itemized)
-                await CloseStaleWaveBatchesAsync(batch, snapshot).ConfigureAwait(false);
                 orphans = AddOrphanSpend(ctx, batch);
             }
 
@@ -1115,20 +1121,6 @@ public class GenerationRunner
     private const string NonRelevantStageLabel = "non-relevant mail";
 
     private static string WaveStageLabel(int waveIndex) => $"wave {waveIndex}";
-
-    private static async Task CloseStaleWaveBatchesAsync(BatchingLlmProvider batch, GenerationSnapshot snapshot)
-    {
-        try
-        {
-            await batch.CancelPendingStagesAsync(label => label.StartsWith("wave ", StringComparison.Ordinal), CancellationToken.None)
-                .ConfigureAwait(false);
-            snapshot.SetPendingProviderBatches(batch.PendingBatchCount);
-        }
-        catch (Exception)
-        {
-            // RunAsync never throws; a stale wave batch left pending is retried at the next finished run
-        }
-    }
 
     // D-10 + T-07-36: orphan spend joins the unjournaled spend RunEnded carries. CR-A03: priced without side effects; the
     // batches are marked billed only after RunEnded is appended, so a failed append leaves them for the next finished run

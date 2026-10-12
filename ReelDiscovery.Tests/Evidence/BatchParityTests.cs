@@ -151,12 +151,12 @@ public partial class BatchParityTests : IDisposable
 
     // liveOverride wraps the recording fake (e.g. a concurrency probe); Mode.Live stays the fake for request assertions
     private Mode BatchMode(string folder, Func<LlmProviderRequest, LlmProviderResponse> respond, FakeBatchTransport? transport = null,
-        Func<ILlmProvider, ILlmProvider>? liveOverride = null)
+        Func<ILlmProvider, ILlmProvider>? liveOverride = null, BatchTimings? timings = null)
     {
         var live = new FakeLlmProvider(LlmProviderKind.Anthropic) { Respond = respond };
         transport ??= new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
         transport.Respond = item => respond(item.Request);
-        var batch = new BatchingLlmProvider(liveOverride?.Invoke(live) ?? live, transport, new BatchLedger(folder), _plan.PlanId, Price, Fast());
+        var batch = new BatchingLlmProvider(liveOverride?.Invoke(live) ?? live, transport, new BatchLedger(folder), _plan.PlanId, Price, timings ?? Fast());
         _providers.Add(batch);
         return new Mode { Live = live, Transport = transport, Batch = batch, Gateway = new LlmGateway(batch, _story, _volume) };
     }
@@ -641,12 +641,12 @@ public partial class BatchParityTests : IDisposable
         Assert.Equal(transport.Submissions.Count, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
     }
 
-    // ---------- amended D-07: a wave batch from an earlier build never blocks a run ----------
+    // ---------- D-17/WR-A08: a wave batch from an earlier build is drained before the waves, never paid twice ----------
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task FinishedRun_ClosesStaleWaveBatch_PendingCountZero(bool cancelFails)
+    public async Task StaleWaveBatch_DrainedBeforeWaves_NotPaidTwice(bool cancelFails)
     {
         // The first-attempt render of a wave-1 thread, exactly as the runner sends it
         var liveFolder = NewFolder();
@@ -659,13 +659,7 @@ public partial class BatchParityTests : IDisposable
         render.AllowBatch = true;
         var staleId = RequestIdentity.CustomIdFor(LlmProviderKind.Anthropic, render);
 
-        // Reference spend of a clean batch run (no stale batch)
-        var reference = NewFolder();
-        var clean = BatchMode(reference, Responder());
-        Assert.Equal(GenerationOutcome.Finished, (await Run(new GenerationRunner(clean.Gateway), Input(reference, clean))).Outcome);
-        var referenceEnded = JournalRecords(reference).Last(r => r.Type == JournalRecordType.RunEnded);
-
-        // Session 1 (an earlier build): that render went into a "wave 1" provider batch that never ends
+        // Session 1 (an earlier build): that render went into a "wave 1" provider batch that never ends on its own
         var folder = NewFolder();
         var transport = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
         transport.NeverEndIds.Add(staleId);
@@ -687,25 +681,51 @@ public partial class BatchParityTests : IDisposable
             old.Batch.Detach();
             Assert.Equal(1, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
 
-            // Session 2: the run writes the thread live without waiting on the stale batch, then closes it
+            // Session 2: the run cancels the stale batch but keeps tracking it (no Cancelled line, D-21) and waits up to
+            // DrainTimeout; a failed cancel leaves it running, so the bound expires and the thread is written live
+            Mode mode;
             if (cancelFails)
+            {
                 transport.CancelFailure = new InvalidOperationException("provider down");
-            var mode = BatchMode(folder, Responder(), transport);
+                var timings = Fast();
+                timings.DrainTimeout = TimeSpan.FromMilliseconds(300);
+                mode = BatchMode(folder, Responder(), transport, timings: timings);
+            }
+            else
+            {
+                mode = BatchMode(folder, Responder(), transport);
+            }
+
             var result = await Run(new GenerationRunner(mode.Gateway), Input(folder, mode));
 
             Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+            var state = new BatchLedger(folder).Replay();
+            Assert.DoesNotContain(staleBatch, state.CancelledIds);
             lock (mode.Live.Requests)
-                Assert.Contains(mode.Live.Requests, r => r.SchemaName == RenderSchema && ThreadOf(r) == thread);
-            if (!cancelFails)
-                Assert.Contains(staleBatch, transport.CancelledIds);
-            Assert.Contains(staleBatch, new BatchLedger(folder).Replay().CancelledIds);
-            Assert.Equal(0, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
-            Assert.Equal(0, mode.Batch!.PendingBatchCount);
+            {
+                if (cancelFails)
+                    Assert.Contains(mode.Live.Requests, r => r.SchemaName == RenderSchema && ThreadOf(r) == thread);
+                else
+                    Assert.DoesNotContain(mode.Live.Requests, r => r.SchemaName == RenderSchema && ThreadOf(r) == thread);
+            }
 
-            var ended = JournalRecords(folder).Last(r => r.Type == JournalRecordType.RunEnded);
-            Assert.Equal(referenceEnded.CostUsd, ended.CostUsd);
-            Assert.Equal(referenceEnded.InputTokens, ended.InputTokens);
-            Assert.Equal(referenceEnded.OutputTokens, ended.OutputTokens);
+            if (cancelFails)
+            {
+                Assert.Equal(1, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
+            }
+            else
+            {
+                // Served free from the drained batch
+                Assert.Contains(staleBatch, transport.CancelledIds);
+                Assert.Contains(staleBatch, state.CollectedIds);
+                Assert.Equal(0, BatchLedger.PendingBatchCount(folder, _plan.PlanId));
+                Assert.Equal(0, mode.Batch!.PendingBatchCount);
+            }
+
+            // The run's spend is journaled (RunEnded.CostUsd only carries unjournaled spend, zero here); the drained result
+            // replaces a live call, so it differs from a clean run by design
+            Assert.Contains(JournalRecords(folder), r => r.Type == JournalRecordType.RunEnded);
+            Assert.True(JournalRecords(folder).Sum(r => r.CostUsd) > 0);
         }
     }
 

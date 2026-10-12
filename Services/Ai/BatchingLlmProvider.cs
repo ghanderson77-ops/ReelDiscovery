@@ -823,80 +823,6 @@ public class BatchingLlmProvider : ILlmProvider
         }
     }
 
-    /// <summary>
-    /// Closes this plan's pending batches of this provider whose stage label matches: best-effort provider cancel, a
-    /// Cancelled ledger line (even when the cancel call fails) and file deletion, then stops tracking them so
-    /// <see cref="PendingBatchCount"/> drops. For batches an earlier build submitted per relevant wave (pre amended D-07),
-    /// which no unit consumes any more. Anyone still waiting on a closed batch runs live (D-10). Returns the number closed.
-    /// </summary>
-    public async Task<int> CancelPendingStagesAsync(Func<string, bool> stageMatch, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(stageMatch);
-
-        // The poll loop stops at its next check instead of collecting a cancelled batch nobody waits on. Closed before the
-        // provider cancel, so a poll that sees the cancelled batch never collects (or cleans up) it in the meantime
-        List<TrackedBatch> closing;
-        lock (_lock)
-        {
-            closing = _batches.Values.Where(b => !b.Closed && stageMatch(b.StageLabel ?? string.Empty)).ToList();
-            foreach (var batch in closing)
-                batch.Closed = true;
-        }
-
-        List<string> closed;
-        try
-        {
-            closed = await CancelPendingAsync(_ledger, kind => kind == _transport.Kind ? _transport : null, _planId,
-                include: r => r.Provider == _transport.Kind && stageMatch(r.StageLabel ?? string.Empty),
-                closeOnCancelFailure: true, ct: ct);
-        }
-        catch (Exception)
-        {
-            // Nothing was recorded closed: keep polling these batches so their waiters are never stranded
-            Reopen(closing);
-            throw;
-        }
-
-        Reopen(closing.Where(b => !closed.Contains(b.BatchId, StringComparer.Ordinal)));
-        foreach (var batchId in closed)
-        {
-            TrackedBatch? batch;
-            lock (_lock)
-            {
-                if (!_batches.TryGetValue(batchId, out batch))
-                    continue;
-
-                batch.Closed = true;
-            }
-
-            ReleaseBatch(batch, Delivery.Errored(), ClosedReason);
-        }
-
-        return closed.Count;
-    }
-
-    // Undoes an early close; a poll loop that already stopped on it is started again (never while detached)
-    private void Reopen(IEnumerable<TrackedBatch> batches)
-    {
-        var restart = new List<TrackedBatch>();
-        lock (_lock)
-        {
-            foreach (var batch in batches)
-            {
-                batch.Closed = false;
-                if (!batch.Polling && (!batch.Resumed || batch.PollStarted) && _batches.ContainsKey(batch.BatchId)
-                    && !_cts.IsCancellationRequested)
-                {
-                    batch.Polling = true;
-                    restart.Add(batch);
-                }
-            }
-        }
-
-        foreach (var batch in restart)
-            _ = Task.Run(() => PollLoopAsync(batch));
-    }
-
     private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     /// <summary>Raised off the UI thread; subscribers marshal to the UI themselves.</summary>
@@ -1428,12 +1354,7 @@ public class BatchingLlmProvider : ILlmProvider
             while (true)
             {
                 await Task.Delay(IntervalFor(Now() - started), _cts.Token);
-                if (IsClosed(batch))
-                    return;
-
                 var status = await _transport.GetStatusAsync(batch.BatchId, _cts.Token);
-                if (IsClosed(batch))
-                    return;
                 var now = Now();
 
                 if (!status.Succeeded)
@@ -1482,9 +1403,6 @@ public class BatchingLlmProvider : ILlmProvider
 
                     continue;
                 }
-
-                if (IsClosed(batch))
-                    return;
 
                 await CollectAsync(batch, status, results);
                 return;
@@ -1752,7 +1670,6 @@ public class BatchingLlmProvider : ILlmProvider
 
     // WR-A07: plain words for the Activity row when the app stops waiting on a batch (T-07-52: fixed text only)
     private const string StoppedWaitingReason = "the app stopped waiting on it";
-    private const string ClosedReason = "it was closed because this run no longer uses it";
 
     /// <summary>
     /// Stops tracking a batch and releases its waiters. With a <paramref name="reason"/> it also raises a terminal
@@ -1824,12 +1741,6 @@ public class BatchingLlmProvider : ILlmProvider
 
     private TimeSpan IntervalFor(TimeSpan waited) =>
         waited >= _timings.SlowAfter ? _timings.SlowPollInterval : _timings.PollInterval;
-
-    private bool IsClosed(TrackedBatch batch)
-    {
-        lock (_lock)
-            return batch.Closed;
-    }
 
     private static bool IsFatal(LlmFailureKind kind) => kind is LlmFailureKind.Auth or LlmFailureKind.SpendLimit;
 
@@ -2014,9 +1925,6 @@ public class BatchingLlmProvider : ILlmProvider
 
         /// <summary>Uploaded input file (OpenAI); deleted once the results are cached (WR-A03).</summary>
         public string InputFileId { get; init; } = string.Empty;
-
-        /// <summary>Closed at run end (CancelPendingStagesAsync): never collected or delivered by this session.</summary>
-        public bool Closed { get; set; }
 
         /// <summary>CX-06: model and estimated input tokens this batch holds in the provider's queue until it is untracked.</summary>
         public string QueuedModel { get; set; } = string.Empty;

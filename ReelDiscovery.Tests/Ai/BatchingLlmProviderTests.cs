@@ -1527,6 +1527,146 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Equal(0, provider.PendingBatchCount);
     }
 
+    // ----- D-17/WR-A08: stale wave batches are cancelled but still collected (no Cancelled line, D-21) -----
+
+    // Session A submits each item under its label, its callers stop waiting and it detaches; returns the batch id per item
+    private async Task<List<string>> SeedAbandonedBatchesAsync(FakeBatchTransport transport, params (string Label, string Prompt)[] items)
+    {
+        var a = Create(Live(), transport);
+        var events = new EventLog();
+        events.Attach(a);
+
+        using (var cts = new CancellationTokenSource())
+        {
+            var tasks = new List<Task<LlmProviderResponse>>();
+            foreach (var (label, prompt) in items)
+            {
+                using (BatchStage.Enter(label))
+                    tasks.Add(a.SendAsync(Req(prompt), cts.Token));
+            }
+
+            await Until(() => events.All.Count(e => e.Kind == BatchStatusKind.Submitted) == items.Length);
+            cts.Cancel();
+            foreach (var task in tasks)
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task.WaitAsync(Wait));
+        }
+
+        a.Detach();
+        var submitted = events.All.Where(e => e.Kind == BatchStatusKind.Submitted).ToList();
+        return items.Select(i => submitted.Single(e => e.StageLabel == i.Label).BatchId).ToList();
+    }
+
+    private static bool IsWave(string label) => label.StartsWith("wave ", StringComparison.Ordinal);
+
+    [Fact]
+    public async Task DrainStaleStages_CancelsCollectsAndServesFree_NoCancelledLine()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var batchId = (await SeedAbandonedBatchesAsync(transport, ("wave 1", "w0")))[0];
+
+        var live = Live();
+        var b = Create(live, transport);
+        Assert.Equal(1, b.ResumePending());
+
+        var drained = await b.DrainStaleStagesAsync(IsWave).WaitAsync(Wait);
+
+        Assert.Equal(1, drained);
+        Assert.Contains(batchId, transport.CancelledIds);
+        var state = new BatchLedger(_folder).Replay();
+        Assert.DoesNotContain(batchId, state.CancelledIds);
+        Assert.Contains(batchId, state.CollectedIds);
+        Assert.Equal(0, b.PendingBatchCount);
+        Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, _plan));
+
+        // A live scope uses the drained result free
+        LlmProviderResponse response;
+        using (BatchStage.Enter("wave 1"))
+        using (BatchStage.EnterLive())
+            response = await b.SendAsync(Req("w0")).WaitAsync(Wait);
+
+        Assert.Equal("batch:w0", response.Text);
+        Assert.True(response.IsBatch);
+        Assert.Empty(live.Requests);
+    }
+
+    [Fact]
+    public async Task DrainStaleStages_IgnoresOtherLabels()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        var ids = await SeedAbandonedBatchesAsync(transport, ("wave 1", "w0"), ("non-relevant mail", "n0"));
+
+        var b = Create(Live(), transport);
+        Assert.Equal(2, b.ResumePending());
+
+        Assert.Equal(1, await b.DrainStaleStagesAsync(IsWave).WaitAsync(Wait));
+
+        Assert.Equal(new[] { ids[0] }, transport.CancelledIds);
+        var state = new BatchLedger(_folder).Replay();
+        Assert.Empty(state.CancelledIds);
+        Assert.Equal(new[] { ids[1] }, state.Pending(_plan).Select(r => r.BatchId));
+        Assert.Equal(1, b.PendingBatchCount);
+    }
+
+    [Fact]
+    public async Task DrainStaleStages_CancelFails_BoundExpires_StillPending()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        transport.NeverEndIds.Add(IdOf(Req("w0")));
+        var batchId = (await SeedAbandonedBatchesAsync(transport, ("wave 2", "w0")))[0];
+
+        transport.CancelFailure = new InvalidOperationException("provider down");
+        var timings = Fast();
+        timings.DrainTimeout = TimeSpan.FromMilliseconds(200);
+        var b = Create(Live(), transport, timings);
+        Assert.Equal(1, b.ResumePending());
+
+        var drained = await b.DrainStaleStagesAsync(IsWave).WaitAsync(Wait);
+
+        Assert.Equal(1, drained);
+        Assert.Empty(transport.CancelledIds);
+        var state = new BatchLedger(_folder).Replay();
+        Assert.DoesNotContain(batchId, state.CancelledIds);
+        Assert.Equal(1, BatchLedger.PendingBatchCount(_folder, _plan));
+        Assert.Equal(1, b.PendingBatchCount);
+    }
+
+    [Fact]
+    public async Task DrainStaleStages_UserCancel_Throws()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        transport.NeverEndIds.Add(IdOf(Req("w0")));
+        await SeedAbandonedBatchesAsync(transport, ("wave 1", "w0"));
+
+        transport.CancelFailure = new InvalidOperationException("provider down");
+        var b = Create(Live(), transport);
+        Assert.Equal(1, b.ResumePending());
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => b.DrainStaleStagesAsync(IsWave, cts.Token).WaitAsync(Wait));
+        Assert.Equal(1, b.PendingBatchCount);
+    }
+
+    [Fact]
+    public async Task DrainStaleStages_NotPolling_NotAwaited()
+    {
+        var transport = Transport();
+        transport.PollsUntilEnded = int.MaxValue;
+        await SeedAbandonedBatchesAsync(transport, ("wave 1", "w0"));
+
+        // ResumePending is never called: the batch is tracked but nobody polls it, so the drain must not wait on it
+        var b = Create(Live(), transport);
+        Assert.Equal(1, b.PendingBatchCount);
+
+        Assert.Equal(0, await b.DrainStaleStagesAsync(IsWave).WaitAsync(Wait));
+        Assert.Empty(transport.CancelledIds);
+        Assert.Equal(1, b.PendingBatchCount);
+        Assert.Equal(1, BatchLedger.PendingBatchCount(_folder, _plan));
+    }
+
     [Fact]
     public async Task CancelPending_DefaultArguments_PropagateCancelFailure()
     {

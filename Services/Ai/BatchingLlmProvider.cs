@@ -276,6 +276,9 @@ public class BatchingLlmProvider : ILlmProvider
         return resume.Count;
     }
 
+    public Task<int> DrainStaleStagesAsync(Func<string, bool> stageMatch, CancellationToken ct = default) =>
+        throw new NotImplementedException();
+
     /// <summary>
     /// Prices collected results of this plan that no unit consumed (still billed by the provider) with the catalog model at
     /// batch prices, appends OrphansBilled per batch and returns the spend. A second call returns zero (T-07-26). The run

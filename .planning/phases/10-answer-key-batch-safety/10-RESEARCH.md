@@ -554,19 +554,19 @@ var reset = await GenerationReset.StartOverAsync(folder, plan, Draft.Guide, keep
 | A6 | Excel stores a literal leading `'` from CSV data as text (round-trips it) | Pitfall 6 | Guard-strip handles either case. Low |
 | A7 | OpenXml SDK 3.x rejects DTDs / external entities when reading packages | Security | XXE on a malicious key file. Low (local user file); verify `XmlReaderSettings` if concerned |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Foreign-batch status or cancel call fails (network/5xx) at run start.**
+1. **Foreign-batch status or cancel call fails (network/5xx) at run start.** RESOLVED: D-22
    - Known: `CancelPendingAsync` with default flags rethrows `BatchCancelFailedException` (`BatchingLlmProvider.cs:470-482`; test at :1269).
    - Unclear: D-13 does not cover this case.
    - Recommendation: refuse the run with "{Provider} could not be reached to stop its earlier batches; try again" (same no-double-pay principle as D-14). The planner should confirm this in UI copy.
-2. **Live-mode case with foreign pending batches (Pitfall 12).**
+2. **Live-mode case with foreign pending batches (Pitfall 12).** RESOLVED: D-24
    - Recommendation: run the resolver anyway. Leave collected foreign results unbilled until a batch Finished run or Start Over (D-16). Do not add live-mode orphan billing.
-3. **Projected rationale on relabeled rows without a user rationale.**
+3. **Projected rationale on relabeled rows without a user rationale.** RESOLVED: D-23
    - The projected rationale explains the *plan* label, so it reads contradictory after a relabel.
    - D-05 only says to keep the user's text.
    - Recommendation: keep the projected rationale unchanged (no new copy), and note this for UI-SPEC.
-4. **Rationale-only edits on an already relabeled row.**
+4. **Rationale-only edits on an already relabeled row.** RESOLVED: D-23
    - D-05 implies they are kept.
    - Pattern 1 handles them with a rationale-only vote. Confirm this is wanted.
 

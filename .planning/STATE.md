@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-04-PLAN.md
-last_updated: "2026-10-12T19:52:12.546Z"
+stopped_at: Completed 10-06-PLAN.md
+last_updated: "2026-10-12T20:08:43.084Z"
 last_activity: 2026-10-12
 progress:
   total_phases: 10
   completed_phases: 9
   total_plans: 170
-  completed_plans: 163
+  completed_plans: 164
   percent: 96
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 10 (Answer-Key & Batch Safety) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 Status: Ready to execute
 Last activity: 2026-10-12
 
@@ -217,6 +217,7 @@ Progress: [██████████] 100%
 | Phase 10 P02 | 15 min | 2 tasks | 4 files |
 | Phase 10 P03 | 20 min | 2 tasks | 2 files |
 | Phase 10 P04 | 25min | 2 tasks | 4 files |
+| Phase 10 P06 | 10 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -647,6 +648,8 @@ Recent decisions affecting current work:
 - [Phase 10]: AnswerKeyFiles.WriteAsync is the single answer-key funnel: per-file SHA-256 baseline, per-case-folder gate, damaged files backed up as 'answer-key (unreadable yyyyMMdd-HHmmss)'
 - [Phase 10]: Stale wave batches are drained (cancel but keep tracking, no Cancelled line) right after RunStarted, bounded by DrainTimeout; live waves use their results free (D-17/WR-A08)
 - [Phase 10]: CancelPendingStagesAsync, Reopen, IsClosed, ClosedReason and TrackedBatch.Closed removed with the end-of-run CloseStaleWaveBatchesAsync (PLAT-05)
+- [Phase 10]: Pending-batch banner counts only the current text provider's batches; other-provider batches get a resolve clause or the D-14 key-missing notice (D-15)
+- [Phase 10]: Start Over records collected-but-unused batch spend under 'Batch results not used' only when the cancel succeeded, before the ledger is deleted (D-16)
 
 ### Pending Todos
 
@@ -668,6 +671,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T19:52:12.541Z
-Stopped at: Completed 10-04-PLAN.md
+Last session: 2026-10-12T20:08:43.079Z
+Stopped at: Completed 10-06-PLAN.md
 Resume file: None

@@ -387,6 +387,21 @@ public class QaUiTextTests
         Assert.Equal("Regenerate Thread", cited.Title);
     }
 
+    [Fact]
+    public void CQ1_RelabelsClause_OnlyWhenRelabelsExist()
+    {
+        var plain = QaUiText.CQ1RegenerateThread("Q3 schedule", 2, 0, true);
+        Assert.Equal(plain.Text, QaUiText.CQ1RegenerateThread("Q3 schedule", 2, 0, true, false, false).Text);
+        Assert.DoesNotContain("Relabels", plain.Text);
+
+        var kept = QaUiText.CQ1RegenerateThread("Q3 schedule", 2, 0, true, relabelsKept: true);
+        Assert.Equal(plain.Text + " Relabels you made for its emails in the answer key are kept.", kept.Text);
+
+        var both = QaUiText.CQ1RegenerateThread("Q3 schedule", 2, 0, true, citedByDiscovery: true, relabelsKept: true);
+        Assert.EndsWith(" will show Out of date. Relabels you made for its emails in the answer key are kept.", both.Text);
+        Assert.Equal("Regenerate Thread", both.Title);
+    }
+
     [Theory]
     [InlineData(0, "0 emails", "are")]
     [InlineData(1, "1 email", "is")]

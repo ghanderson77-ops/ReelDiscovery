@@ -207,12 +207,16 @@ public static class CorpusUiText
         return CorpusSettings.MaxRelevantPercent;
     }
 
-    public static string SettingsNotice(bool hasPlan, bool approved, DateTime? approvedLocal)
+    /// <summary>
+    /// relabels &gt; 0 (manual relabels of the current plan) adds the 10 D-08 clause to the "replaces the current plan" notice only.
+    /// </summary>
+    public static string SettingsNotice(bool hasPlan, bool approved, DateTime? approvedLocal, int relabels = 0)
     {
         if (!hasPlan)
             return "Click Next to plan every thread and message from these settings and the case guide. Nothing is written yet. To write discovery documents without emails, click Skip to Discovery Documents.";
         if (!approved)
-            return "Changing these settings replaces the current plan when you click Next. Skip to Discovery Documents leaves the plan as it is.";
+            return "Changing these settings replaces the current plan when you click Next. Skip to Discovery Documents leaves the plan as it is."
+                + (relabels > 0 ? " " + RelabelsDroppedText(relabels) : "");
 
         var on = approvedLocal.HasValue ? $" on {Date(approvedLocal.Value)}" : "";
         return $"The plan was approved{on}. If you change these settings, Review Plan offers to re-plan; the approved plan stays until you do.";
@@ -311,8 +315,9 @@ public static class CorpusUiText
 
     /// <summary>
     /// D-RP body. generatedThreads &gt; 0 (threads already written for the current plan) adds the start-over warning (05-UI-SPEC S2).
+    /// relabels &gt; 0 (manual relabels of the current plan) adds the 10 D-08 dropped-relabels clause last.
     /// </summary>
-    public static string ReplanBody(bool approved, int generatedThreads = 0)
+    public static string ReplanBody(bool approved, int generatedThreads = 0, int relabels = 0)
     {
         const string body = "Builds a new plan from the case guide and the current corpus settings, and replaces this one. Every DocID changes. This makes new Story-model calls.";
         var text = approved
@@ -320,8 +325,14 @@ public static class CorpusUiText
             : body;
         if (generatedThreads > 0)
             text += $" {CaseGuideUiText.Plural(generatedThreads, "thread", "threads")} already generated for this plan will no longer match it. After re-planning, Generate Corpus asks you to start over.";
+        if (relabels > 0)
+            text += " " + RelabelsDroppedText(relabels);
         return text;
     }
+
+    /// <summary>10 D-08: a re-plan gives every DocID a new PlanId, so manual relabels of the current plan are dropped.</summary>
+    public static string RelabelsDroppedText(int relabels) =>
+        $"{CaseGuideUiText.Plural(relabels, "manual relabel", "manual relabels")} in the answer key will be dropped.";
 
     // --- Case Summary corpus rows ---
 

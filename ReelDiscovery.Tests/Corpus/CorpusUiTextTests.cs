@@ -260,6 +260,41 @@ public class CorpusUiTextTests
         Assert.DoesNotContain("already generated", CorpusUiText.ReplanBody(approved, 0));
     }
 
+    [Theory]
+    [InlineData(1, "1 manual relabel in the answer key will be dropped.")]
+    [InlineData(3, "3 manual relabels in the answer key will be dropped.")]
+    [InlineData(1200, "1,200 manual relabels in the answer key will be dropped.")]
+    public void RelabelsDroppedText_Plural(int relabels, string expected)
+    {
+        Assert.Equal(expected, CorpusUiText.RelabelsDroppedText(relabels));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ReplanBody_Relabels_AppendsDroppedClauseLast(bool approved)
+    {
+        Assert.Equal(CorpusUiText.ReplanBody(approved), CorpusUiText.ReplanBody(approved, 0, 0));
+        Assert.Equal(CorpusUiText.ReplanBody(approved, 12), CorpusUiText.ReplanBody(approved, 12, relabels: 0));
+        Assert.Equal(CorpusUiText.ReplanBody(approved, 12) + " 3 manual relabels in the answer key will be dropped.",
+            CorpusUiText.ReplanBody(approved, 12, relabels: 3));
+        Assert.Equal(CorpusUiText.ReplanBody(approved) + " 1 manual relabel in the answer key will be dropped.",
+            CorpusUiText.ReplanBody(approved, relabels: 1));
+    }
+
+    [Fact]
+    public void SettingsNotice_Relabels_OnlyOnTheReplaceNotice()
+    {
+        Assert.Equal(CorpusUiText.SettingsNotice(true, false, null), CorpusUiText.SettingsNotice(true, false, null, 0));
+        Assert.Equal(
+            "Changing these settings replaces the current plan when you click Next. Skip to Discovery Documents leaves the plan as it is. 2 manual relabels in the answer key will be dropped.",
+            CorpusUiText.SettingsNotice(true, false, null, relabels: 2));
+
+        var date = new DateTime(2024, 3, 5, 14, 7, 0);
+        Assert.Equal(CorpusUiText.SettingsNotice(true, true, date), CorpusUiText.SettingsNotice(true, true, date, relabels: 2));
+        Assert.Equal(CorpusUiText.SettingsNotice(false, false, null), CorpusUiText.SettingsNotice(false, false, null, relabels: 2));
+    }
+
     [Fact]
     public void ReplanGeneratedThreads_CountsWrittenThreadsOfTheCurrentPlanOnly()
     {

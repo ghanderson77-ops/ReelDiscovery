@@ -332,8 +332,9 @@ public static class QaUiText
 
     // --- Confirmations (MessageBox, default button = the safe choice) ---
 
+    // 10 D-06: Regenerate Thread keeps manual relabels (same PlanId and DocIDs)
     public static (string Title, string Text) CQ1RegenerateThread(string subject, int emlFiles, int attachments, bool relevant,
-        bool citedByDiscovery = false)
+        bool citedByDiscovery = false, bool relabelsKept = false)
     {
         var files = Plural(emlFiles, "EML file", "EML files");
         var att = attachments > 0 ? " and " + Plural(attachments, "attachment", "attachments") : "";
@@ -341,7 +342,8 @@ public static class QaUiText
         var keep = relevant ? ", keeping the story details it already established so later threads stay consistent" : "";
         return ("Regenerate Thread",
             $"Regenerate \"{subject}\"? Its {files}{att} {verb} deleted now and the answer key marks the thread Planned. Continue Generating on the Generate Corpus step writes it again{keep}."
-            + (citedByDiscovery ? " Discovery documents that cite its emails will show Out of date." : ""));
+            + (citedByDiscovery ? " Discovery documents that cite its emails will show Out of date." : "")
+            + (relabelsKept ? " Relabels you made for its emails in the answer key are kept." : ""));
     }
 
     public static (string Title, string Text) CQ2CancelReview(int reviewed) =>

@@ -2382,6 +2382,14 @@ public class GenerationUiTextTests
             GenerationUiText.CG2StartOver(3, true, true).Text);
         Assert.Equal("Start Over", GenerationUiText.CG2StartOver(3, true, true).Title);
 
+        // 10 D-07: the relabels clause follows the discovery clause; default text unchanged
+        Assert.Equal(GenerationUiText.CG2StartOver(10).Text, GenerationUiText.CG2StartOver(10, false, false, false).Text);
+        Assert.DoesNotContain("Relabels", GenerationUiText.CG2StartOver(10, true, true).Text);
+        Assert.Equal(GenerationUiText.CG2StartOver(10).Text + " Relabels you made in the answer key are kept.",
+            GenerationUiText.CG2StartOver(10, relabelsKept: true).Text);
+        Assert.EndsWith(" will show Out of date. Relabels you made in the answer key are kept.",
+            GenerationUiText.CG2StartOver(10, true, true, relabelsKept: true).Text);
+
         Assert.Equal(GenerationUiText.CG3CloseDuringRun().Text, GenerationUiText.CG3CloseDuringRun(false).Text);
         Assert.Equal(GenerationUiText.CG3CloseDuringRun().Text + " Provider batches already submitted keep running and are collected the next time you click Continue Generating.",
             GenerationUiText.CG3CloseDuringRun(true).Text);

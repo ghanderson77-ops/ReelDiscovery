@@ -339,7 +339,7 @@ Plans:
 - [x] 10-05-PLAN.md — Route every answer-key writer through the funnel; approval overlay seam; funnel guard test (Wave 3)
 - [x] 10-07-PLAN.md — Run start resolves or refuses other-provider batches (W5); Activity lines (Wave 3)
 - [x] 10-08-PLAN.md — Review Plan re-approval overlay (D-12); damaged-key backup notice (D-10) (Wave 4)
-- [ ] 10-09-PLAN.md — Relabel warning and guidance copy (D-05..D-08) (Wave 5)
+- [x] 10-09-PLAN.md — Relabel warning and guidance copy (D-05..D-08) (Wave 5)
 - [ ] 10-10-PLAN.md — Wire relabel counts into Regenerate Thread, Start Over, Re-plan and settings notice (Wave 6)
 - [ ] 10-11-PLAN.md — Phase gate: full suite, Scale run, render suites, grep gates, validation map, Excel round trip (Wave 7)
 
@@ -359,4 +359,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
 | 8. Ancillary Discovery Documents | 19/19 | Complete    | 2026-10-09 |
 | 9. Edit Safety & Navigation | 10/10 | Complete    | 2026-10-12 |
-| 10. Answer-Key & Batch Safety | 8/11 | In Progress|  |
+| 10. Answer-Key & Batch Safety | 9/11 | In Progress|  |

@@ -413,6 +413,14 @@ public partial class StepReviewPlan
         await StartPlanningAsync(string.Empty);
     }
 
+    // Skip to Discovery Documents (09 W2, UI-SPEC S3): free and non-destructive, so no confirmation; skips Generate Corpus
+    private void SkipToDiscovery()
+    {
+        if (_state == null || _isPlanning || _isApproving)
+            return;
+        (FindForm() as WizardForm)?.NavigateToStep(typeof(StepDiscoveryDocuments));
+    }
+
     private void BtnCancel_Click(object? sender, EventArgs e)
     {
         if (!_isPlanning || _cts == null)

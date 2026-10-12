@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
@@ -154,7 +155,7 @@ public partial class CorpusReviewPlanRenderTests
             (step, labels) =>
             {
                 Assert.Contains("No corpus plan yet", labels);
-                Assert.Contains("Plan Corpus", AllControls(step).OfType<Button>().Where(b => b.Visible).Select(b => b.Text));
+                AssertStateActions(step, "Plan Corpus");
             });
     }
 
@@ -165,9 +166,44 @@ public partial class CorpusReviewPlanRenderTests
             (step, labels) =>
             {
                 Assert.Contains("The plan was not built", labels);
-                Assert.Contains("Retry Planning", AllControls(step).OfType<Button>().Where(b => b.Visible).Select(b => b.Text));
+                AssertStateActions(step, "Retry Planning");
             },
             reason: "The model returned no threads for the first chunk");
+    }
+
+    // 09 UI-SPEC S3 / rule 45: the Primary and the Default skip share one row, neither ellipsizes, the card content stays
+    // centered and the skip never adds a second Primary
+    private static void AssertStateActions(StepReviewPlan step, string primaryText)
+    {
+        var primary = (ThemedButton)step.StateActionButton;
+        var skip = (ThemedButton)step.StateSkipButton;
+        Assert.True(primary.Visible);
+        Assert.True(skip.Visible);
+        Assert.True(skip.Enabled);
+        Assert.Equal(primaryText, primary.Text);
+        Assert.Equal("Skip to Discovery Documents", skip.Text);
+        Assert.Equal(ButtonStyle.Primary, primary.Variant);
+        Assert.Equal(ButtonStyle.Default, skip.Variant);
+        Assert.Equal(1, AllControls(step).OfType<ThemedButton>().Count(b => b.Visible && b.Variant == ButtonStyle.Primary));
+
+        var card = step.StateCardPanel;
+        var cardLeft = card.PointToScreen(Point.Empty).X;
+        var primaryAt = primary.PointToScreen(Point.Empty);
+        var skipAt = skip.PointToScreen(Point.Empty);
+        Assert.Equal(primaryAt.Y, skipAt.Y);
+        Assert.True(skipAt.X >= primaryAt.X + primary.Width, $"skip left {skipAt.X}, primary right {primaryAt.X + primary.Width}");
+        foreach (var button in new[] { primary, skip })
+        {
+            var textWidth = TextRenderer.MeasureText(button.Text, button.Font).Width;
+            Assert.True(button.Width >= textWidth, $"'{button.Text}' {button.Width} px narrower than its text {textWidth} px");
+        }
+
+        // The content block (heading, body, action row) is centered in the card (2 px tolerance)
+        var content = primary.Parent!.Parent!;
+        var leftGap = content.PointToScreen(Point.Empty).X - cardLeft;
+        var rightGap = card.Width - leftGap - content.Width;
+        Assert.True(Math.Abs(leftGap - rightGap) <= 2, $"content gaps {leftGap} / {rightGap}");
+        Assert.True(skipAt.X + skip.Width <= cardLeft + card.Width, "skip button runs past the card");
     }
 
     // ----- Harness -----

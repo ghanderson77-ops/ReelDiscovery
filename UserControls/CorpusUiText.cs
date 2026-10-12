@@ -546,20 +546,23 @@ public static class CorpusUiText
             PlanStateCard.Failed => new StateCardContent
             {
                 Heading = "The plan was not built",
-                Body = Sentence(reason) + "Your corpus settings were kept. Click Retry Planning to try again.",
-                ButtonText = "Retry Planning"
+                Body = Sentence(reason) + "Your corpus settings were kept. Click Retry Planning to try again, or Skip to Discovery Documents to continue without emails.",
+                ButtonText = "Retry Planning",
+                SecondaryText = "Skip to Discovery Documents"
             },
             PlanStateCard.Unreadable => new StateCardContent
             {
                 Heading = "The saved plan could not be opened",
-                Body = Sentence(reason) + "Click Plan Corpus to build a new plan from the case guide.",
-                ButtonText = "Plan Corpus"
+                Body = Sentence(reason) + "Click Plan Corpus to build a new plan from the case guide, or Skip to Discovery Documents to continue without emails.",
+                ButtonText = "Plan Corpus",
+                SecondaryText = "Skip to Discovery Documents"
             },
             _ => new StateCardContent
             {
                 Heading = "No corpus plan yet",
-                Body = "Click Plan Corpus to plan every thread and message from the case guide and your corpus settings.",
-                ButtonText = "Plan Corpus"
+                Body = "Click Plan Corpus to plan every thread and message from the case guide and your corpus settings. To write discovery documents without emails, click Skip to Discovery Documents.",
+                ButtonText = "Plan Corpus",
+                SecondaryText = "Skip to Discovery Documents"
             }
         };
     }

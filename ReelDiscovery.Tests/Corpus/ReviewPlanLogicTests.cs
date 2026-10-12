@@ -335,6 +335,7 @@ public class ReviewPlanLogicTests
         Assert.Equal("Planning the corpus...", card.Heading);
         Assert.Equal("Code fixes every email's date, people and labels first. Then the model writes a subject and purpose for each thread. This takes 1-2 minutes for 1,000 emails and up to 10 minutes for 5,000.", card.Body);
         Assert.Equal("", card.ButtonText);
+        Assert.Equal("", card.SecondaryText);
     }
 
     [Fact]
@@ -342,8 +343,9 @@ public class ReviewPlanLogicTests
     {
         var card = CorpusUiText.StateCard(PlanStateCard.NoPlan);
         Assert.Equal("No corpus plan yet", card.Heading);
-        Assert.Equal("Click Plan Corpus to plan every thread and message from the case guide and your corpus settings.", card.Body);
+        Assert.Equal("Click Plan Corpus to plan every thread and message from the case guide and your corpus settings. To write discovery documents without emails, click Skip to Discovery Documents.", card.Body);
         Assert.Equal("Plan Corpus", card.ButtonText);
+        Assert.Equal("Skip to Discovery Documents", card.SecondaryText);
     }
 
     [Theory]
@@ -353,8 +355,9 @@ public class ReviewPlanLogicTests
     {
         var card = CorpusUiText.StateCard(PlanStateCard.Failed, reason);
         Assert.Equal("The plan was not built", card.Heading);
-        Assert.Equal("The model timed out. Your corpus settings were kept. Click Retry Planning to try again.", card.Body);
+        Assert.Equal("The model timed out. Your corpus settings were kept. Click Retry Planning to try again, or Skip to Discovery Documents to continue without emails.", card.Body);
         Assert.Equal("Retry Planning", card.ButtonText);
+        Assert.Equal("Skip to Discovery Documents", card.SecondaryText);
     }
 
     [Fact]
@@ -362,7 +365,8 @@ public class ReviewPlanLogicTests
     {
         var card = CorpusUiText.StateCard(PlanStateCard.Unreadable, "The file is damaged.");
         Assert.Equal("The saved plan could not be opened", card.Heading);
-        Assert.Equal("The file is damaged. Click Plan Corpus to build a new plan from the case guide.", card.Body);
+        Assert.Equal("The file is damaged. Click Plan Corpus to build a new plan from the case guide, or Skip to Discovery Documents to continue without emails.", card.Body);
+        Assert.Equal("Skip to Discovery Documents", card.SecondaryText);
         Assert.Equal("Plan Corpus", card.ButtonText);
     }
 

@@ -86,6 +86,8 @@ public partial class StepReviewPlan : UserControl, IWizardStep
     private Label _lblStateHeading = null!;
     private Label _lblStateBody = null!;
     private Button _btnStateAction = null!;
+    private Button _btnStateSkip = null!;
+    private FlowLayoutPanel _stateActions = null!;
     private FlowLayoutPanel _stageList = null!;
     private readonly Dictionary<PlanStage, StageRow> _stageRows = new();
 
@@ -192,6 +194,7 @@ public partial class StepReviewPlan : UserControl, IWizardStep
         _btnKeepPlan.Click += (s, e) => KeepPlan();
         _btnApprove.Click += async (s, e) => await ApproveAsync();
         _btnStateAction.Click += async (s, e) => await PlanFromStateCardAsync();
+        _btnStateSkip.Click += (s, e) => SkipToDiscovery();
         _btnCancel.Click += BtnCancel_Click;
         _root.SizeChanged += (s, e) =>
         {
@@ -434,6 +437,23 @@ public partial class StepReviewPlan : UserControl, IWizardStep
         };
         _btnStateAction = ButtonHelper.CreateButton("Plan Corpus", 0, buttonHeight, ButtonStyle.Primary);
         _btnStateAction.Margin = new Padding(0);
+        _btnStateSkip = ButtonHelper.CreateButton("Skip to Discovery Documents", 0, buttonHeight, ButtonStyle.Default);
+        _btnStateSkip.Margin = new Padding(smallGap, 0, 0, 0);
+        _btnStateSkip.Visible = false;
+
+        // Action row (09 UI-SPEC S3): the Primary, then the Default skip, on one row
+        _stateActions = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            BackColor = Theme.Surface
+        };
+        _stateActions.Controls.Add(_btnStateAction);
+        _stateActions.Controls.Add(_btnStateSkip);
 
         // Stage checklist: one 28 px row per stage, 360 wide
         _stageList = new FlowLayoutPanel
@@ -463,7 +483,7 @@ public partial class StepReviewPlan : UserControl, IWizardStep
 
         _stateContent.Controls.Add(_lblStateHeading);
         _stateContent.Controls.Add(_lblStateBody);
-        _stateContent.Controls.Add(_btnStateAction);
+        _stateContent.Controls.Add(_stateActions);
         _stateContent.Controls.Add(_stageList);
         _stateCard.Controls.Add(_stateContent);
         _bodyHost.Controls.Add(_stateCard);
@@ -1054,6 +1074,10 @@ public partial class StepReviewPlan : UserControl, IWizardStep
         _lblStateBody.Text = content.Body;
         _btnStateAction.Text = content.ButtonText.Length > 0 ? content.ButtonText : "Plan Corpus";
         _btnStateAction.Visible = content.ButtonText.Length > 0;
+        _btnStateSkip.Text = content.SecondaryText.Length > 0 ? content.SecondaryText : "Skip to Discovery Documents";
+        _btnStateSkip.Visible = content.SecondaryText.Length > 0;
+        _btnStateSkip.Enabled = !_isPlanning && !_isApproving;
+        _stateActions.Visible = _btnStateAction.Visible || _btnStateSkip.Visible;
         _stageList.Visible = card == PlanStateCard.Planning;
         if (card == PlanStateCard.Planning)
             UpdateStageChecklist(PlanStage.Allocating, 0, 0);
@@ -1331,6 +1355,8 @@ public partial class StepReviewPlan : UserControl, IWizardStep
     internal bool ChecksListShown => _checksListShown;
     internal CardPanel Banner => _banner;
     internal CardPanel StateCardPanel => _stateCard;
+    internal Button StateActionButton => _btnStateAction;
+    internal Button StateSkipButton => _btnStateSkip;
 
     // ----- Small painted controls -----
 

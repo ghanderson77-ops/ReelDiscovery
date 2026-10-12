@@ -172,9 +172,12 @@ public class SummaryRowContent
     // Full line-3 breakdown (line 3 itself ellipsizes); empty when there is none
     public string Line3Tooltip = "";
 
-    // Mailboxes: Open Mailboxes Folder / Generate Emails. Story so far: Open in Word / Export Story So Far
+    // Mailboxes: Open Mailboxes Folder / Generate Emails or Generate Corpus (SecondaryText). Story so far: Open in Word / Export Story So Far
     public bool ShowPrimary;
     public bool ShowSecondary;
+
+    // Caption of the secondary button when the row sets it; empty keeps the button's own caption
+    public string SecondaryText = "";
 }
 
 public class MailboxesRowInput
@@ -996,7 +999,9 @@ public static class GenerationUiText
         {
             Line2 = $"{Plural(input.Files, "EML file", "EML files")} in {Plural(input.Mailboxes, "custodian mailbox", "custodian mailboxes")} · Mailboxes folder",
             ShowPrimary = input.FolderExists,
-            ShowSecondary = !input.Generated
+            // 09 W6: the way back to Generate Corpus is always offered; its entry gate decides what the user sees
+            ShowSecondary = true,
+            SecondaryText = input.Generated ? "Generate Corpus" : "Generate Emails"
         };
 
         if (!input.Generated)

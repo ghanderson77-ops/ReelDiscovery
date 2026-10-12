@@ -1682,6 +1682,7 @@ public class GenerationUiTextTests
         Assert.Equal(SummaryTone.Muted, row.DotTone);
         Assert.False(row.ShowPrimary);
         Assert.True(row.ShowSecondary);
+        Assert.Equal("Generate Emails", row.SecondaryText);
 
         Assert.True(GenerationUiText.MailboxesRow(new MailboxesRowInput { Generated = false, FolderExists = true }).ShowPrimary);
     }
@@ -1697,7 +1698,9 @@ public class GenerationUiTextTests
         Assert.Equal(SummaryTone.Success, row.Line3Tone);
         Assert.Equal(SummaryTone.Success, row.DotTone);
         Assert.True(row.ShowPrimary);
-        Assert.False(row.ShowSecondary);
+        // 09 W6: the way back to Generate Corpus is always offered once anything is generated
+        Assert.True(row.ShowSecondary);
+        Assert.Equal("Generate Corpus", row.SecondaryText);
     }
 
     [Fact]
@@ -1715,6 +1718,8 @@ public class GenerationUiTextTests
         Assert.Equal("Relevant: 12 of 12 threads. Non-relevant: 30 of 40 threads. Attachments: 15 of 18 (3 skipped).", row.Line3Tooltip);
         Assert.Equal(SummaryTone.Warning, row.Line3Tone);
         Assert.Equal(SummaryTone.Warning, row.DotTone);
+        Assert.True(row.ShowSecondary);
+        Assert.Equal("Generate Corpus", row.SecondaryText);
     }
 
     [Fact]
@@ -1736,6 +1741,15 @@ public class GenerationUiTextTests
         Assert.NotEqual("", row.Line3Tooltip);
         Assert.Equal(SummaryTone.Warning, row.Line3Tone);
         Assert.Equal(SummaryTone.Warning, row.DotTone);
+        Assert.True(row.ShowSecondary);
+        Assert.Equal("Generate Corpus", row.SecondaryText);
+    }
+
+    [Fact]
+    public void SummaryRowContent_SecondaryText_DefaultsEmpty()
+    {
+        // Only the Mailboxes row renames its secondary button; every other row keeps its own caption
+        Assert.Equal("", new SummaryRowContent().SecondaryText);
     }
 
     [Theory]

@@ -168,7 +168,9 @@ public class CaseSummaryGenerationTests
             using (var step = CreateStep(fixture, opened))
             {
                 Assert.True(step.OpenMailboxesButton.Visible);
-                Assert.False(step.GenerateEmailsButton.Visible);
+                // 09 W6: the way back to Generate Corpus stays visible once anything is generated
+                Assert.True(step.GenerateEmailsButton.Visible);
+                Assert.Equal("Generate Corpus", step.GenerateEmailsButton.Text);
                 step.OpenMailboxesFolder();
                 Assert.Equal(new[] { expected }, opened);
             }

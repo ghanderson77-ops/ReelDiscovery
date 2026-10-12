@@ -218,6 +218,7 @@ public class CaseSummaryRenderTests
                 var answerKeyLine = string.Empty;
                 var openMailboxes = false;
                 var generateEmails = false;
+                var generateEmailsText = string.Empty;
                 var openStory = false;
                 var exportStory = false;
                 var horizontalScroll = true;
@@ -237,6 +238,7 @@ public class CaseSummaryRenderTests
                     answerKeyLine = step.AnswerKeyLine3.Text;
                     openMailboxes = step.OpenMailboxesButton.Visible;
                     generateEmails = step.GenerateEmailsButton.Visible;
+                    generateEmailsText = step.GenerateEmailsButton.Text;
                     openStory = step.OpenStoryButton.Visible;
                     exportStory = step.ExportStoryButton.Visible;
                     horizontalScroll = host.HorizontalScroll.Visible;
@@ -251,6 +253,7 @@ public class CaseSummaryRenderTests
                         Assert.Equal(Helpers.Theme.TextMuted, mailboxesColor);
                         Assert.Equal(Helpers.Theme.BorderStrong, mailboxesDot);
                         Assert.True(generateEmails);
+                        Assert.Equal("Generate Emails", generateEmailsText);
                         Assert.False(openMailboxes);
                         Assert.Equal("Not written yet. It is written when a generation run ends.", storyLine);
                         Assert.Equal(Helpers.Theme.TextMuted, storyColor);
@@ -264,7 +267,9 @@ public class CaseSummaryRenderTests
                         Assert.Equal(Helpers.Theme.Warning, mailboxesColor);
                         Assert.Equal(Helpers.Theme.Warning, mailboxesDot);
                         Assert.True(openMailboxes);
-                        Assert.False(generateEmails);
+                        // 09 W6: Case Summary always offers the way back to Generate Corpus
+                        Assert.True(generateEmails);
+                        Assert.Equal("Generate Corpus", generateEmailsText);
                         Assert.StartsWith("Could not write: ", storyLine);
                         Assert.Equal(Helpers.Theme.Danger, storyColor);
                         Assert.Equal(Helpers.Theme.Danger, storyDot);
@@ -277,7 +282,9 @@ public class CaseSummaryRenderTests
                         Assert.Equal(Helpers.Theme.Success, mailboxesColor);
                         Assert.Equal(Helpers.Theme.Success, mailboxesDot);
                         Assert.True(openMailboxes);
-                        Assert.False(generateEmails);
+                        // 09 W6: Case Summary always offers the way back to Generate Corpus
+                        Assert.True(generateEmails);
+                        Assert.Equal("Generate Corpus", generateEmailsText);
                         Assert.StartsWith("Written ", storyLine);
                         Assert.Equal(Helpers.Theme.Success, storyColor);
                         Assert.Equal(Helpers.Theme.Success, storyDot);
@@ -291,6 +298,8 @@ public class CaseSummaryRenderTests
                         Assert.Equal(Helpers.Theme.Warning, mailboxesColor);
                         Assert.Equal(Helpers.Theme.Warning, mailboxesDot);
                         Assert.True(openMailboxes);
+                        Assert.True(generateEmails);
+                        Assert.Equal("Generate Corpus", generateEmailsText);
                         // The ledger belongs to another plan: no export from here, and no run clause on the key
                         Assert.False(exportStory);
                         Assert.DoesNotContain("generated", answerKeyLine);
@@ -314,10 +323,12 @@ public class CaseSummaryRenderTests
                 SeedFullCorpusRun(fixture, plan, partial: false);
 
                 var (line, tooltip, color, keyLine, keyTooltip) = (string.Empty, string.Empty, default(Color), string.Empty, string.Empty);
+                MailboxesButtons buttons = null!;
                 var result = Render(fixture, "case-summary-mailboxes-complete", size, control =>
                 {
                     var step = (StepCaseSummary)control;
                     RowsHost(control).ScrollControlIntoView(step.StoryLine3.Parent!);
+                    buttons = CaptureMailboxesButtons(step);
                     line = step.MailboxesLine3.Text;
                     tooltip = step.MailboxesLine3Tooltip;
                     color = step.MailboxesLine3.ForeColor;
@@ -326,6 +337,7 @@ public class CaseSummaryRenderTests
                 });
 
                 AssertRendered(result);
+                AssertMailboxesButtonsFit(buttons);
                 Assert.Equal("All 40 threads and 12 attachments written", line);
                 Assert.Equal(Helpers.Theme.Success, color);
                 Assert.Equal("Relevant: 10 of 10 threads. Non-relevant: 30 of 30 threads. Attachments: 12 of 12.", tooltip);
@@ -348,10 +360,12 @@ public class CaseSummaryRenderTests
                 SeedFullCorpusRun(fixture, plan, partial: true);
 
                 var (line, tooltip, color, keyLine, keyTooltip) = (string.Empty, string.Empty, default(Color), string.Empty, string.Empty);
+                MailboxesButtons buttons = null!;
                 var result = Render(fixture, "case-summary-mailboxes-partial", size, control =>
                 {
                     var step = (StepCaseSummary)control;
                     RowsHost(control).ScrollControlIntoView(step.StoryLine3.Parent!);
+                    buttons = CaptureMailboxesButtons(step);
                     line = step.MailboxesLine3.Text;
                     tooltip = step.MailboxesLine3Tooltip;
                     color = step.MailboxesLine3.ForeColor;
@@ -361,6 +375,7 @@ public class CaseSummaryRenderTests
 
                 // Line 3 may ellipsize (AutoEllipsis); the detector accepts that, the full text stays in Text and the tooltip
                 AssertRendered(result);
+                AssertMailboxesButtonsFit(buttons);
                 Assert.Equal("34 of 40 threads written · 4 items with warnings · 4 failed items · 2 skipped items", line);
                 Assert.Equal(Helpers.Theme.Warning, color);
                 Assert.Equal("Relevant: 7 of 10 threads. Non-relevant: 27 of 30 threads. Attachments: 8 of 12 (2 skipped).", tooltip);
@@ -369,6 +384,51 @@ public class CaseSummaryRenderTests
                 Assert.Equal("2 skipped", keyTooltip);
             }
         });
+    }
+
+    private sealed class MailboxesButtons
+    {
+        public bool GenerateVisible;
+        public string GenerateText = "";
+        public int GenerateWidth;
+        public int GenerateTextWidth;
+        public bool OpenVisible;
+        public int OpenWidth;
+        public int OpenTextWidth;
+        public Rectangle GenerateScreen;
+        public Rectangle OpenScreen;
+        public Rectangle Line3Screen;
+    }
+
+    // 09 W6 (UI-SPEC S6, rule 47): Generate Corpus and Open Mailboxes Folder never ellipsize and never overlap the text column
+    private static MailboxesButtons CaptureMailboxesButtons(StepCaseSummary step)
+    {
+        var generate = step.GenerateEmailsButton;
+        var open = step.OpenMailboxesButton;
+        return new MailboxesButtons
+        {
+            GenerateVisible = generate.Visible,
+            GenerateText = generate.Text,
+            GenerateWidth = generate.Width,
+            GenerateTextWidth = TextRenderer.MeasureText(generate.Text, generate.Font).Width,
+            OpenVisible = open.Visible,
+            OpenWidth = open.Width,
+            OpenTextWidth = TextRenderer.MeasureText(open.Text, open.Font).Width,
+            GenerateScreen = generate.RectangleToScreen(generate.ClientRectangle),
+            OpenScreen = open.RectangleToScreen(open.ClientRectangle),
+            Line3Screen = step.MailboxesLine3.RectangleToScreen(step.MailboxesLine3.ClientRectangle)
+        };
+    }
+
+    private static void AssertMailboxesButtonsFit(MailboxesButtons buttons)
+    {
+        Assert.True(buttons.GenerateVisible);
+        Assert.Equal("Generate Corpus", buttons.GenerateText);
+        Assert.True(buttons.GenerateWidth > buttons.GenerateTextWidth, $"Generate Corpus ellipsized: {buttons.GenerateWidth} <= {buttons.GenerateTextWidth}");
+        Assert.True(buttons.OpenVisible);
+        Assert.True(buttons.OpenWidth > buttons.OpenTextWidth, $"Open Mailboxes Folder ellipsized: {buttons.OpenWidth} <= {buttons.OpenTextWidth}");
+        Assert.False(buttons.GenerateScreen.IntersectsWith(buttons.OpenScreen), "Mailboxes buttons overlap");
+        Assert.True(buttons.OpenScreen.Left >= buttons.Line3Screen.Right, $"Button column overlaps line 3: {buttons.OpenScreen.Left} < {buttons.Line3Screen.Right}");
     }
 
     // ----- Render checks 5-6 (07-UI-SPEC S2, DPI rule 28): Generation cost row and the Quality checks group -----

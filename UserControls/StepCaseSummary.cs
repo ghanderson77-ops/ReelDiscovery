@@ -939,6 +939,16 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         _toolTip.SetToolTip(_rowMailboxes.Line3!, mailboxes.Line3Tooltip);
         _btnOpenMailboxes.Visible = mailboxes.ShowPrimary;
         _btnGenerateEmails.Visible = mailboxes.ShowSecondary;
+        // 09 W6: Generate Emails before anything is generated, Generate Corpus after; refit so the wider caption is never
+        // clipped and the button column never overlaps line 3 (34 = the row button height from InitializeUI)
+        if (mailboxes.SecondaryText.Length > 0 && _btnGenerateEmails.Text != mailboxes.SecondaryText)
+        {
+            _btnGenerateEmails.Text = mailboxes.SecondaryText;
+            if (_btnGenerateEmails is ThemedButton themed)
+                themed.FitToText(0, LogicalToDeviceUnits(34));
+            _btnGenerateEmails.Parent?.PerformLayout();
+            _rowMailboxes.Layout.PerformLayout();
+        }
 
         var entries = generation?.Ledger?.Entries ?? new List<LedgerEntry>();
         var storyName = StoryFileName(folder);

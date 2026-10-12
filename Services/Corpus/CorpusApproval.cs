@@ -34,16 +34,17 @@ public static class CorpusApproval
 {
     /// <summary>
     /// The three approval files in write order: answer-key.csv, answer-key.xlsx, '{folder} - Review Protocol.docx'.
+    /// Pure: the approval write goes through AnswerKeyFiles, which also harvests relabels (D-02).
     /// </summary>
     public static List<(CorpusFileKind Kind, string FileName, byte[] Bytes)> BuildFiles(CaseDraft draft, CorpusPlan plan,
-        string folderName)
+        string folderName, AnswerKeyOverlay? overlay = null, IReadOnlyDictionary<string, AnswerKeyRelabel>? relabels = null)
     {
         var guide = draft.Guide ?? new CaseGuide();
-        var rows = AnswerKeyBuilder.Build(plan, guide);
+        var (csv, xlsx) = AnswerKeyFiles.BuildBytes(plan, guide, overlay, relabels);
         return new List<(CorpusFileKind Kind, string FileName, byte[] Bytes)>
         {
-            (CorpusFileKind.AnswerKeyCsv, AnswerKeyCsvWriter.FileName, AnswerKeyCsvWriter.Build(rows)),
-            (CorpusFileKind.AnswerKeyXlsx, AnswerKeyXlsxWriter.FileName, AnswerKeyXlsxWriter.Build(rows, guide)),
+            (CorpusFileKind.AnswerKeyCsv, AnswerKeyCsvWriter.FileName, csv),
+            (CorpusFileKind.AnswerKeyXlsx, AnswerKeyXlsxWriter.FileName, xlsx),
             (CorpusFileKind.ReviewProtocol, ReviewProtocolBuilder.FileNameFor(folderName),
                 ReviewProtocolBuilder.Build(draft, plan.Protocol ?? new ReviewProtocolProse()))
         };
@@ -57,39 +58,51 @@ public static class CorpusApproval
     {
         writer ??= CaseStore.WriteAtomicAsync;
         var folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(caseFolder));
+        var guide = draft.Guide ?? new CaseGuide();
         var result = new ApprovalResult();
 
-        foreach (var (kind, fileName, bytes) in BuildFiles(draft, plan, folderName))
+        // D-02/D-12: the key files go through the funnel (relabels of this PlanId kept; a new PlanId writes the plain key and
+        // prunes the old plan's relabels); approval still stops at the first failure (D-26)
+        var key = await AnswerKeyFiles.WriteAsync(caseFolder, plan, guide, overlay, writer, stopAtFirstFailure: true, ct);
+        result.Files.AddRange(key.Files);
+        result.Backups = key.Backups;
+        if (!key.Succeeded)
         {
-            ct.ThrowIfCancellationRequested();
-            // Paths = case folder + constant names only; WrittenFiles from case.json never build paths (T-04-68)
-            var path = Path.Combine(caseFolder, fileName);
-            try
-            {
-                await writer(path, bytes, ct);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                result.Succeeded = false;
-                result.FailedFileName = fileName;
-                result.Error = ex.Message;
-                result.FileOpenElsewhere = FileLockDetector.IsFileOpenElsewhere(ex, path);
-                return result;
-            }
-
-            result.Files.Add(new WrittenCorpusFile
-            {
-                Kind = kind,
-                FileName = fileName,
-                PlanId = plan.PlanId,
-                WrittenUtc = DateTime.UtcNow
-            });
+            result.Succeeded = false;
+            result.FailedFileName = key.FailedFileName;
+            result.Error = key.Error;
+            result.FileOpenElsewhere = key.FileOpenElsewhere;
+            return result;
         }
 
+        ct.ThrowIfCancellationRequested();
+        // Paths = case folder + constant names only; WrittenFiles from case.json never build paths (T-04-68)
+        var protocolName = ReviewProtocolBuilder.FileNameFor(folderName);
+        var path = Path.Combine(caseFolder, protocolName);
+        try
+        {
+            await writer(path, ReviewProtocolBuilder.Build(draft, plan.Protocol ?? new ReviewProtocolProse()), ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            result.Succeeded = false;
+            result.FailedFileName = protocolName;
+            result.Error = ex.Message;
+            result.FileOpenElsewhere = FileLockDetector.IsFileOpenElsewhere(ex, path);
+            return result;
+        }
+
+        result.Files.Add(new WrittenCorpusFile
+        {
+            Kind = CorpusFileKind.ReviewProtocol,
+            FileName = protocolName,
+            PlanId = plan.PlanId,
+            WrittenUtc = DateTime.UtcNow
+        });
         result.Succeeded = true;
         return result;
     }
@@ -129,6 +142,8 @@ public static class CorpusApproval
     /// Writes the answer key and review protocol, then records approval only if every write succeeded (D-26, T-04-70).
     /// A partial write re-stamps only the files it replaced (WR-02). The caller saves case.json afterwards, also after a
     /// failure that wrote some files (result.Files is not empty).
+    /// Re-approving the same PlanId keeps manual relabels and, with the run-state overlay the caller passes, the run
+    /// statuses (D-12).
     /// </summary>
     public static async Task<ApprovalResult> ApproveAsync(string caseFolder, CaseDraft draft, CorpusPlan plan,
         FileWriter? writer = null, AnswerKeyOverlay? overlay = null, CancellationToken ct = default)

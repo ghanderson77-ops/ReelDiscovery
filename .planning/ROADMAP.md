@@ -312,7 +312,7 @@ Plans:
 - [x] 09-05-PLAN.md — W1 withdrawal at Case Guide save, reopen and Case Summary entry; W6 Case Summary Generate Corpus button (Wave 2)
 - [x] 09-06-PLAN.md — W1 Case Guide dependency line + PlanDependency banner, renders at 144 DPI (Wave 2)
 - [x] 09-07-PLAN.md — W2 UI: Skip to Discovery Documents on Review Plan cards and Corpus Settings, notice copy, renders (Wave 2)
-- [ ] 09-08-PLAN.md — W3 consumers: stamps through DiscoveryStepModel and Case Summary, Exhibits status copy, Start Over/Regenerate integration tests (Wave 3)
+- [x] 09-08-PLAN.md — W3 consumers: stamps through DiscoveryStepModel and Case Summary, Exhibits status copy, Start Over/Regenerate integration tests (Wave 3)
 - [ ] 09-09-PLAN.md — W3 confirmation clauses on Start Over and Regenerate Thread (Wave 4)
 - [ ] 09-10-PLAN.md — Phase gate: full + render suites, grep gates, validation map, 150% DPI human check (Wave 5)
 **UI hint**: yes

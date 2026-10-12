@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-07-PLAN.md
-last_updated: "2026-10-12T02:17:11.157Z"
+stopped_at: Completed 09-08-PLAN.md
+last_updated: "2026-10-12T02:33:46.776Z"
 last_activity: 2026-10-12
 progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 159
-  completed_plans: 156
-  percent: 98
+  completed_plans: 157
+  percent: 99
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 9 (Edit Safety & Navigation) — EXECUTING
-Plan: 8 of 10
+Plan: 9 of 10
 Status: Ready to execute
 Last activity: 2026-10-12
 
@@ -209,6 +209,7 @@ Progress: [██████████] 100%
 | Phase 09 P05 | 8 min | 2 tasks | 10 files |
 | Phase 09 P06 | 6 min | 2 tasks | 2 files |
 | Phase 09 P07 | 10 min | 2 tasks | 9 files |
+| Phase 09 P08 | 15 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -628,6 +629,7 @@ Recent decisions affecting current work:
 - [Phase 09]: Case Summary Mailboxes secondary button always visible: Generate Emails before generation, Generate Corpus after (W6)
 - [Phase ?]: 09-06: Case Guide Changed dependency line shows only while a higher banner variant holds the row; otherwise the PlanDependency banner (Default Review Plan) carries it
 - [Phase 09]: 09-07: Skip to Discovery Documents (Review Plan cards + Corpus Settings header) shares ValidateFields with Next but never sets PlanOnEntryOnce; Review Plan pair is left-aligned inside the centered card content
+- [Phase 09]: [09-08]: Case Summary exhibit stamps reuse LoadQa's qa.Replay: missing journal = known-empty, unreadable/other-plan journal or null Replay = unknown (no second replay)
 
 ### Pending Todos
 
@@ -649,6 +651,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T02:17:11.152Z
-Stopped at: Completed 09-07-PLAN.md
+Last session: 2026-10-12T02:33:46.771Z
+Stopped at: Completed 09-08-PLAN.md
 Resume file: None

@@ -109,6 +109,52 @@ public class DiscoveryStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task ExhibitStamps_RoundTrip()
+    {
+        var caseId = Guid.NewGuid();
+        var set = SampleSet(caseId);
+        var utc = new DateTime(2026, 10, 3, 12, 0, 0, DateTimeKind.Utc);
+        set.Documents[0].ExhibitStamps["BH-000042"] = utc;
+
+        await DiscoveryStore.SaveAsync(_folder, set);
+        var result = DiscoveryStore.Load(_folder, caseId);
+
+        Assert.True(result.Succeeded, result.Reason);
+        var stamp = Assert.Single(result.Set!.Find("DEP-CH-002")!.ExhibitStamps);
+        Assert.Equal("BH-000042", stamp.Key);
+        Assert.Equal(utc, stamp.Value.ToUniversalTime());
+        Assert.Empty(result.Set.Find("RFP")!.ExhibitStamps);
+    }
+
+    [Fact]
+    public void ExhibitStamps_Normalize_RepairsNullAndBlankKeys()
+    {
+        var doc = new DiscoveryDocument { ExhibitStamps = null! };
+        doc.Normalize();
+        Assert.NotNull(doc.ExhibitStamps);
+        Assert.Empty(doc.ExhibitStamps);
+
+        var utc = new DateTime(2026, 10, 3, 12, 0, 0, DateTimeKind.Utc);
+        doc.ExhibitStamps = new Dictionary<string, DateTime> { [" "] = utc, ["RD-000001"] = utc };
+        doc.Normalize();
+        Assert.Equal("RD-000001", Assert.Single(doc.ExhibitStamps).Key);
+    }
+
+    [Fact]
+    public void ExhibitStamps_LegacyJson_LoadsEmpty()
+    {
+        var caseId = Guid.NewGuid();
+        File.WriteAllText(DiscoveryStore.SetPath(_folder),
+            $"{{ \"CaseId\": \"{caseId}\", \"Documents\": [ {{ \"Key\": \"RFA\", \"Written\": {{ \"Requests\": [ {{ \"DocId\": \"RD-000001\" }} ] }} }}, {{ \"Key\": \"RFP\", \"ExhibitStamps\": null }} ] }}",
+            Encoding.UTF8);
+
+        var result = DiscoveryStore.Load(_folder, caseId);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.All(result.Set!.Documents, d => Assert.Empty(d.ExhibitStamps));
+    }
+
+    [Fact]
     public void Load_MissingFile_ReportsMissing()
     {
         var result = DiscoveryStore.Load(_folder, Guid.NewGuid());

@@ -21,6 +21,7 @@ public class AnswerKeyRelabelLifecycleTests : IDisposable
     private const string Relevant = AnswerKeyBuilder.RelevantLabel;
     private const string NotRelevant = AnswerKeyBuilder.NotRelevantLabel;
     private const char Bom = (char)0xFEFF;
+    private const string CrLf = "\r\n";
 
     private readonly string _folder;
     private readonly CaseDraft _draft;
@@ -65,32 +66,37 @@ public class AnswerKeyRelabelLifecycleTests : IDisposable
     private AnswerKeyOverlay FullOverlay() =>
         GenerationRunState.From(_plan, GenerationJournal.Replay(_folder, _plan)).BuildFullOverlay(_plan, Guide);
 
-    private List<string[]> CsvRows() =>
-        GenerationRunnerTests.ParseCsv(File.ReadAllText(CsvPath, Encoding.UTF8).TrimStart(Bom));
+    private string CsvCell(string docId, string column) => CsvCellOf(CsvPath, docId, column);
 
-    private string CsvCell(string docId, string column)
+    private string XlsxRelevance(string docId) =>
+        AnswerKeyReader.ParseXlsx(File.ReadAllBytes(XlsxPath)).Rows.Single(r => r.DocId == docId).Relevance;
+
+    private void RelabelCsv(string docId, string relevance) => RelabelCsvFile(CsvPath, docId, relevance);
+
+    private static List<string[]> CsvRows(string path) =>
+        GenerationRunnerTests.ParseCsv(File.ReadAllText(path, Encoding.UTF8).TrimStart(Bom));
+
+    /// <summary>One cell of the answer-key CSV row for docId, by header name.</summary>
+    internal static string CsvCellOf(string path, string docId, string column)
     {
-        var rows = CsvRows();
+        var rows = CsvRows(path);
         var doc = Array.IndexOf(rows[0], "DocID");
         var col = Array.IndexOf(rows[0], column);
         return rows.Skip(1).Single(r => r.Length > Math.Max(doc, col) && r[doc] == docId)[col];
     }
 
-    private string XlsxRelevance(string docId) =>
-        AnswerKeyReader.ParseXlsx(File.ReadAllBytes(XlsxPath)).Rows.Single(r => r.DocId == docId).Relevance;
-
-    // Stand-in for a user editing the Relevance cell in a spreadsheet program and saving the CSV
-    private void RelabelCsv(string docId, string relevance)
+    /// <summary>Stand-in for a user editing the Relevance cell in a spreadsheet program and saving the CSV.</summary>
+    internal static void RelabelCsvFile(string path, string docId, string relevance)
     {
-        var rows = CsvRows();
+        var rows = CsvRows(path);
         var doc = Array.IndexOf(rows[0], "DocID");
         var col = Array.IndexOf(rows[0], "Relevance");
         rows.Single(r => r.Length > Math.Max(doc, col) && r[doc] == docId)[col] = relevance;
 
         var text = new StringBuilder().Append(Bom);
         foreach (var row in rows)
-            text.Append(string.Join(",", row.Select(f => "\"" + f.Replace("\"", "\"\"") + "\""))).Append("\r\n");
-        File.WriteAllText(CsvPath, text.ToString(), new UTF8Encoding(false));
+            text.Append(string.Join(",", row.Select(f => "\"" + f.Replace("\"", "\"\"") + "\""))).Append(CrLf);
+        File.WriteAllText(path, text.ToString(), new UTF8Encoding(false));
     }
 
     private void AssertRelabelKept(string docId)

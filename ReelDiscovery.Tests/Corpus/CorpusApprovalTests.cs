@@ -3,6 +3,7 @@ using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
+using ReelDiscovery.Tests.Evidence;
 
 namespace ReelDiscovery.Tests.Corpus;
 
@@ -172,6 +173,114 @@ public class CorpusApprovalTests : IDisposable
 
         Assert.Equal(3, draft.Corpus.WrittenFiles.Count);
         Assert.All(draft.Corpus.WrittenFiles, f => Assert.Equal(next.PlanId, f.PlanId));
+    }
+
+    // ---- Phase 10: approval through the answer-key funnel (D-02, D-08, D-10, D-12) ----
+
+    private string CsvPath => Path.Combine(_folder, AnswerKeyCsvWriter.FileName);
+
+    private string XlsxPath => Path.Combine(_folder, AnswerKeyXlsxWriter.FileName);
+
+    private static string FirstRelevantEmail(CaseDraft draft, CorpusPlan plan) => AnswerKeyBuilder.Build(plan, draft.Guide!)
+        .First(r => r.DocType == AnswerKeyBuilder.DocTypeEmail && r.Relevance == AnswerKeyBuilder.RelevantLabel)
+        .DocId;
+
+    private string XlsxRelevance(string docId) =>
+        AnswerKeyReader.ParseXlsx(File.ReadAllBytes(XlsxPath)).Rows.Single(r => r.DocId == docId).Relevance;
+
+    [Fact]
+    public async Task ReApprove_SamePlanId_KeepsRelabel()
+    {
+        var (draft, plan) = Setup();
+        Attach(draft, plan);
+        Assert.True((await CorpusApproval.ApproveAsync(_folder, draft, plan)).Succeeded);
+        var docId = FirstRelevantEmail(draft, plan);
+        AnswerKeyRelabelLifecycleTests.RelabelCsvFile(CsvPath, docId, AnswerKeyBuilder.NotRelevantLabel);
+
+        var result = await CorpusApproval.ApproveAsync(_folder, draft, plan);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(AnswerKeyBuilder.NotRelevantLabel, AnswerKeyRelabelLifecycleTests.CsvCellOf(CsvPath, docId, "Relevance"));
+        Assert.Equal(AnswerKeyBuilder.NotRelevantLabel, XlsxRelevance(docId));
+    }
+
+    [Fact]
+    public async Task ReApprove_WithOverlay_KeepsStatuses()
+    {
+        var (draft, plan) = Setup();
+        Attach(draft, plan);
+        var docId = FirstRelevantEmail(draft, plan);
+        var overlay = new AnswerKeyOverlay();
+        overlay.ByDocId[docId] = new AnswerKeyOverlayEntry { Status = AnswerKeyBuilder.StatusGenerated };
+
+        var result = await CorpusApproval.ApproveAsync(_folder, draft, plan, overlay: overlay);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(AnswerKeyBuilder.StatusGenerated, AnswerKeyRelabelLifecycleTests.CsvCellOf(CsvPath, docId, "Status"));
+    }
+
+    [Fact]
+    public async Task Approve_NewPlanId_PlainKey_PrunesOldRelabels()
+    {
+        var (draft, plan) = Setup();
+        Attach(draft, plan);
+        Assert.True((await CorpusApproval.ApproveAsync(_folder, draft, plan)).Succeeded);
+        var docId = FirstRelevantEmail(draft, plan);
+        AnswerKeyRelabelLifecycleTests.RelabelCsvFile(CsvPath, docId, AnswerKeyBuilder.NotRelevantLabel);
+        Assert.True((await CorpusApproval.ApproveAsync(_folder, draft, plan)).Succeeded);
+        Assert.Contains(new AnswerKeyRelabelStore(_folder).Load().Relabels, r => r.PlanId == plan.PlanId);
+
+        var next = PlanFixtures.Clone(plan);
+        next.PlanId = Guid.NewGuid();
+        Attach(draft, next);
+        draft.Corpus!.Approved = false;
+        var result = await CorpusApproval.ApproveAsync(_folder, draft, next);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(AnswerKeyBuilder.RelevantLabel, AnswerKeyRelabelLifecycleTests.CsvCellOf(CsvPath, docId, "Relevance"));
+        Assert.Equal(AnswerKeyBuilder.RelevantLabel, XlsxRelevance(docId));
+        Assert.DoesNotContain(new AnswerKeyRelabelStore(_folder).Load().Relabels, r => r.PlanId == plan.PlanId);
+    }
+
+    [Fact]
+    public async Task Approve_CsvWriteFails_StopsBeforeXlsx()
+    {
+        var (draft, plan) = Setup();
+        Attach(draft, plan);
+        var attempted = new List<string>();
+        var failing = FailingWriter(1, new IOException("Disk full"));
+        FileWriter recording = (path, bytes, ct) =>
+        {
+            attempted.Add(Path.GetFileName(path));
+            return failing(path, bytes, ct);
+        };
+
+        var result = await CorpusApproval.ApproveAsync(_folder, draft, plan, recording);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("answer-key.csv", result.FailedFileName);
+        Assert.Equal(new[] { "answer-key.csv" }, attempted);
+        Assert.Empty(result.Files);
+        Assert.False(draft.Corpus!.Approved);
+        Assert.Null(draft.Corpus.ApprovedUtc);
+    }
+
+    [Fact]
+    public async Task Approve_DamagedXlsx_BackupReported()
+    {
+        var (draft, plan) = Setup();
+        Attach(draft, plan);
+        Assert.True((await CorpusApproval.ApproveAsync(_folder, draft, plan)).Succeeded);
+        File.WriteAllBytes(XlsxPath, new byte[] { 1, 2, 3, 4, 5 });
+
+        var result = await CorpusApproval.ApproveAsync(_folder, draft, plan);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(string.Empty, result.FailedFileName);
+        var backup = Assert.Single(result.Backups);
+        Assert.Equal(AnswerKeyXlsxWriter.FileName, backup.FileName);
+        Assert.True(File.Exists(Path.Combine(_folder, backup.BackupFileName)));
+        Assert.Equal(3, result.Files.Count);
     }
 
     [Fact]

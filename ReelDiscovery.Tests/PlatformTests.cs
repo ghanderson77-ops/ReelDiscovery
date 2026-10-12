@@ -58,6 +58,36 @@ public class PlatformTests
         Assert.True(offenders.Count == 0, "Provider SDKs referenced outside Services/Ai: " + string.Join(", ", offenders));
     }
 
+    // 10 D-02: every answer-key write harvests and re-applies manual relabels; no writer may bypass the funnel
+    [Fact]
+    public void AnswerKeyWriters_OnlyCalledFromTheFunnel()
+    {
+        var globalJson = FindGlobalJson();
+        Assert.NotNull(globalJson);
+        var root = Path.GetDirectoryName(globalJson!)!;
+        const string funnel = "Services/Corpus/AnswerKeyFiles.cs";
+
+        var sourceFiles = Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !IsExcluded(Path.GetRelativePath(root, f)))
+            .ToList();
+
+        // Guard against a vacuous pass (wrong root)
+        Assert.Contains(sourceFiles, f => Path.GetRelativePath(root, f).Replace('\\', '/') == funnel);
+
+        var offenders = sourceFiles
+            .Where(f => Path.GetRelativePath(root, f).Replace('\\', '/') != funnel)
+            .Where(f =>
+            {
+                var text = File.ReadAllText(f);
+                return text.Contains("AnswerKeyCsvWriter.Build(", StringComparison.Ordinal) ||
+                       text.Contains("AnswerKeyXlsxWriter.Build(", StringComparison.Ordinal);
+            })
+            .Select(f => Path.GetRelativePath(root, f))
+            .ToList();
+
+        Assert.True(offenders.Count == 0, "Answer-key writers called outside AnswerKeyFiles: " + string.Join(", ", offenders));
+    }
+
     // D-22: no legacy key migration remains, so startup cannot call it
     [Fact]
     public void ApiKeyStore_HasNoLegacyMigration()

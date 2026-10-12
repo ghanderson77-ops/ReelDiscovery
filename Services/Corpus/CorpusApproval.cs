@@ -16,6 +16,9 @@ public class ApprovalResult
     public string FailedFileName { get; set; } = string.Empty;
     public string Error { get; set; } = string.Empty;
     public bool FileOpenElsewhere { get; set; }
+
+    /// <summary>Damaged key files copied aside before approval rewrote them (D-10); a notice, not a failure.</summary>
+    public List<AnswerKeyBackup> Backups { get; set; } = new();
 }
 
 public class PlanApplyResult
@@ -50,7 +53,7 @@ public static class CorpusApproval
     /// Writes the three files into the case folder, stopping at the first failure. Never touches the draft.
     /// </summary>
     public static async Task<ApprovalResult> WriteFilesAsync(string caseFolder, CaseDraft draft, CorpusPlan plan,
-        FileWriter? writer = null, CancellationToken ct = default)
+        FileWriter? writer = null, AnswerKeyOverlay? overlay = null, CancellationToken ct = default)
     {
         writer ??= CaseStore.WriteAtomicAsync;
         var folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(caseFolder));
@@ -127,9 +130,10 @@ public static class CorpusApproval
     /// A partial write re-stamps only the files it replaced (WR-02). The caller saves case.json afterwards, also after a
     /// failure that wrote some files (result.Files is not empty).
     /// </summary>
-    public static async Task<ApprovalResult> ApproveAsync(string caseFolder, CaseDraft draft, CorpusPlan plan, FileWriter? writer = null, CancellationToken ct = default)
+    public static async Task<ApprovalResult> ApproveAsync(string caseFolder, CaseDraft draft, CorpusPlan plan,
+        FileWriter? writer = null, AnswerKeyOverlay? overlay = null, CancellationToken ct = default)
     {
-        var result = await WriteFilesAsync(caseFolder, draft, plan, writer, ct);
+        var result = await WriteFilesAsync(caseFolder, draft, plan, writer, overlay, ct);
         if (result.Succeeded)
             RecordApproval(draft, plan, result.Files, DateTime.UtcNow);
         else

@@ -1956,6 +1956,7 @@ public partial class StepDiscoveryDocuments : UserControl, IWizardStep, IConfirm
     internal Label NoWitnessesLabel => _lblNoWitnesses;
     internal Label NoDocumentsLabel => _lblNoDocuments;
     internal Label DetailLabel => _lblDetail;
+    internal string DetailTooltipText => _toolTip.GetToolTip(_lblDetail) ?? string.Empty;
     internal Label NoticeLabel => _lblNotice;
     internal Label SpentLabel => _lblSpent;
     internal CardPanel StateCardPanel => _stateCard;

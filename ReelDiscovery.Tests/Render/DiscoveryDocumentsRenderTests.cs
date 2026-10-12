@@ -121,6 +121,28 @@ public class DiscoveryDocumentsRenderTests
         }, primary: 1, status: status, tone: SummaryTone.Warning, arrange: step => step.SelectDocument("RFA"));
     }
 
+    // ----- 09 render check 6: a row Out of date because a cited email changed (UI-SPEC S5) -----
+
+    [Fact]
+    public void ResultsExhibitsStale()
+    {
+        var status = DiscoveryUiText.StatusDoneWithProblems(1, 1, 1);
+        RenderBoth("discovery-results-exhibits-stale", DiscoveryRenderState.Results, DiscoveryTestData.LitigationDraft,
+            ExhibitsStaleModel, step =>
+            {
+                var row = step.Model.Rows[3];
+                Assert.Equal(StaleSource.Exhibits, row.Stale);
+                Assert.Equal("Out of date", step.DocumentsGrid.Rows[3].Cells["Status"].Value);
+                Assert.StartsWith("Out of date: an email it cites", step.DetailLabel.Text);
+                Assert.Equal(Theme.Warning, step.DetailLabel.ForeColor);
+                // Rule 36: the detail line may wrap or ellipsize; the tooltip always carries the full status
+                Assert.Equal(DiscoveryUiText.RowStatusFull(row), step.DetailTooltipText);
+                Assert.True(step.RegenerateButton.Visible);
+                Assert.True(step.RegenerateButton.Enabled);
+                Assert.False(step.SaveAgainButton.Visible);
+            }, primary: 1, status: status, tone: SummaryTone.Warning, arrange: step => step.SelectDocument(step.Model.Rows[3].Key));
+    }
+
     // ----- Render check 5: memo Criminal -----
 
     [Fact]
@@ -370,6 +392,14 @@ public class DiscoveryDocumentsRenderTests
         var failedKey = rows[2].Key;
         model.ToWrite = model.Selected.Where(i => i.Key == failedKey).ToList();
         model.EstimateUsd = model.EstimateByKey.TryGetValue(failedKey, out var cost) ? cost : 0m;
+        return model;
+    }
+
+    // ResultsModel with the Out of date row stale because a cited email was regenerated or deleted (09 W3)
+    private static DiscoveryStepModel ExhibitsStaleModel(CaseDraft draft, WizardState state)
+    {
+        var model = ResultsModel(draft, state);
+        model.Rows[3].Stale = StaleSource.Exhibits;
         return model;
     }
 

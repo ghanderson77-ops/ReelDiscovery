@@ -255,6 +255,13 @@ public class GenerationRunner
             Total = state.TotalThreads
         });
 
+        // 10 D-13: what the step collected or cancelled of another provider's batches before this run (fixed copy, T-07-52)
+        var resolved = input.OtherProviderResolution;
+        if (resolved != null && resolved.Collected > 0)
+            snapshot.AddEvent(new GenerationEvent { Kind = GenerationEventKind.OtherProviderBatchesCollected, LocalTime = DateTime.Now, Total = resolved.Collected, BatchProvider = resolved.Provider.ToString() });
+        if (resolved != null && resolved.Cancelled > 0)
+            snapshot.AddEvent(new GenerationEvent { Kind = GenerationEventKind.OtherProviderBatchesCancelled, LocalTime = DateTime.Now, Total = resolved.Cancelled, BatchProvider = resolved.Provider.ToString() });
+
         // D-09: provider batch status reaches the stage rows; batches an earlier session left pending are polled again
         var batch = input.Batch;
         if (batch != null)

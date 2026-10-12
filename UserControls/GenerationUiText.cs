@@ -556,6 +556,11 @@ public static class GenerationUiText
                 ($"Collected {Plural(e.BatchRequests, "result", "results")} from a batch submitted"
                     + (e.BatchSubmittedUtc.HasValue ? " at " + SubmittedText(e.BatchSubmittedUtc.Value, e.LocalTime) : "")
                     + " before the app closed", ActivityTone.Success),
+            // 10 D-13: other-provider batches resolved at run start
+            GenerationEventKind.OtherProviderBatchesCollected =>
+                ($"Collected {Plural(e.Total, $"{ProviderName(e.BatchProvider)} batch", $"{ProviderName(e.BatchProvider)} batches")} from an earlier session. {(e.Total == 1 ? "Its" : "Their")} results are kept as batch results not used.", ActivityTone.Success),
+            GenerationEventKind.OtherProviderBatchesCancelled =>
+                ($"Cancelled {Plural(e.Total, $"{ProviderName(e.BatchProvider)} batch", $"{ProviderName(e.BatchProvider)} batches")} from an earlier session. {(e.Total == 1 ? "Its" : "Their")} requests run once in this run.", ActivityTone.Warning),
             _ =>
                 ("Finished. Answer key and story so far updated.", ActivityTone.Success)
         };
@@ -733,10 +738,12 @@ public static class GenerationUiText
         "Generation did not start: the corpus plan is not approved. Open Review Plan to approve it.";
 
     // 10 D-14: another provider's batches are pending and its key is missing
-    public static string RunRefusedOtherProviderKeyText(string provider) => string.Empty;
+    public static string RunRefusedOtherProviderKeyText(string provider) =>
+        "Generation did not start: " + OtherProviderKeyMissingText(provider);
 
     // 10 D-22: another provider's batches could not be collected or stopped; never run anyway
-    public static string RunRefusedOtherProviderFailedText(string provider) => string.Empty;
+    public static string RunRefusedOtherProviderFailedText(string provider) =>
+        $"Generation did not start: {ProviderName(provider)} batches from an earlier session could not be collected or stopped. Nothing was started, so nothing is paid twice. Try again in a moment.";
 
     public static string MissingEmlText(string docId) => $"{docId}.eml is no longer in the case folder.";
 

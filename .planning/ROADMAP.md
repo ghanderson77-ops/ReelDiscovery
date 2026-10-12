@@ -302,7 +302,19 @@ Plans:
   2. Discovery Documents is reachable without an approved corpus plan, and passing through Review Plan never starts a paid planning run unless the user asks.
   3. Start Over and Regenerate Thread mark discovery documents whose cited exhibits changed or were deleted as Out of date.
   4. Case Summary always offers a direct way back to Generate Corpus once anything has been generated.
-**Plans**: TBD
+**Plans**: 10 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — W1 pure layer: CorpusApproval.WithdrawIfGuideChanged, GuideChanged entry/card + run-refusal copy, NotApproved split, Case Guide DependencyNotice (Wave 1)
+- [ ] 09-02-PLAN.md — W3 data layer: ExhibitStamps, WrittenStamps, DiscoveryStaleness exhibit check, CorpusDetector stamps (Wave 1)
+- [ ] 09-03-PLAN.md — W2 logic: one-shot PlanOnEntryOnce (Corpus Settings Next only), PlanRequested entry rule, Continue Without a Plan gate (Wave 1)
+- [ ] 09-04-PLAN.md — W1 Generate Corpus: GuideChanged card, explicit card action (no Start Over fall-through), RunCoreAsync refusal, renders (Wave 2)
+- [ ] 09-05-PLAN.md — W1 withdrawal at Case Guide save, reopen and Case Summary entry; W6 Case Summary Generate Corpus button (Wave 2)
+- [ ] 09-06-PLAN.md — W1 Case Guide dependency line + PlanDependency banner, renders at 144 DPI (Wave 2)
+- [ ] 09-07-PLAN.md — W2 UI: Skip to Discovery Documents on Review Plan cards and Corpus Settings, notice copy, renders (Wave 2)
+- [ ] 09-08-PLAN.md — W3 consumers: stamps through DiscoveryStepModel and Case Summary, Exhibits status copy, Start Over/Regenerate integration tests (Wave 3)
+- [ ] 09-09-PLAN.md — W3 confirmation clauses on Start Over and Regenerate Thread (Wave 4)
+- [ ] 09-10-PLAN.md — Phase gate: full + render suites, grep gates, validation map, 150% DPI human check (Wave 5)
 **UI hint**: yes
 
 ### Phase 10: Answer-Key & Batch Safety
@@ -332,5 +344,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
 | 8. Ancillary Discovery Documents | 19/19 | Complete    | 2026-10-09 |
-| 9. Edit Safety & Navigation | 0/0 | Not started |  |
+| 9. Edit Safety & Navigation | 0/10 | Planned |  |
 | 10. Answer-Key & Batch Safety | 0/0 | Not started |  |

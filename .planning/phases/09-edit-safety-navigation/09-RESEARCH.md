@@ -340,17 +340,20 @@ if (!input.HasPlan || !input.Approved) return GenerationEntry.NotApprovedCard;
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | `WidenActiveRanges` on Case Guide entry never changes the hash after planning (added knowers are active on the date) | Pitfall 6 | Approval silently withdrawn by just visiting Case Guide; the regression test catches it |
-| A2 | Keeping D-12 (Corpus Settings Next = "user asks") satisfies SC2 "unless the user asks" | W2 design | If the user meant "never auto-plan", the NoPlan card should always show on entry (one-line change in `ReviewPlanEntryDecision`) |
+| A2 | Keeping D-12 (Corpus Settings Next = "user asks") satisfies SC2 "unless the user asks" | W2 design | If the user meant "never auto-plan", the NoPlan card should always show on entry (one-line change in `ReviewPlanEntryDecision`). RESOLVED: see 09-UI-SPEC U3 |
 | A3 | Reverting a guide edit should not restore approval (D-25 "stays withdrawn") | W1 design | Minor annoyance: an extra re-approve |
 | A4 | ThreadDone-only stamps are the desired "changed" signal (attachment-only completions do not stale discovery docs) | W3 | Docs could miss an attachment-only change; attachments are not cited as exhibits |
 | A5 | "Skip to Discovery Documents" on the Corpus Settings step is acceptable UI | W2 item 3 | Can be dropped; the Review Plan skip alone still meets SC2 after one cancel |
 | A6 | Default button Yes for the skip confirm | W2 | Cosmetic |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should Corpus Settings also get the skip link?** We know the Review Plan skip meets "reachable without an approved plan". What is unclear is whether a forward path with zero spend is required. Recommendation: include it. It is small and is the only zero-spend forward path.
+   RESOLVED: see 09-UI-SPEC U1 (included; visible whenever the plan is not approved).
 2. **Where does the Case Guide dependency notice go: a banner variant or a separate line?** Recommendation: a banner variant with the lowest priority. UI-SPEC should confirm the 150% layout.
+   RESOLVED: see 09-UI-SPEC U2 (Changed = lowest-priority PlanDependency banner; Info and banner-occupied Changed = header dependency line).
 3. **Should Generate Corpus offer "Keep plan and approve" directly on the GuideChanged card?** Recommendation: no. Send the user to Review Plan, where the stale banner, validator rule 19 and approval live (single source of truth).
+   RESOLVED: see 09-UI-SPEC U4 (no keep-and-approve on Generate Corpus; the card links to Review Plan).
 
 ## Environment Availability
 

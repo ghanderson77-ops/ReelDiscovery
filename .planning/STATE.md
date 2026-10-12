@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-05-PLAN.md
-last_updated: "2026-10-12T02:06:09.427Z"
+stopped_at: Completed 09-06-PLAN.md
+last_updated: "2026-10-12T02:11:39.351Z"
 last_activity: 2026-10-12
 progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 159
-  completed_plans: 154
+  completed_plans: 155
   percent: 97
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 9 (Edit Safety & Navigation) — EXECUTING
-Plan: 6 of 10
+Plan: 7 of 10
 Status: Ready to execute
 Last activity: 2026-10-12
 
@@ -207,6 +207,7 @@ Progress: [██████████] 100%
 | Phase 09 P03 | 10 min | 2 tasks | 9 files |
 | Phase 09 P04 | 10 min | 2 tasks | 4 files |
 | Phase 09 P05 | 8 min | 2 tasks | 10 files |
+| Phase 09 P06 | 6 min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -624,6 +625,7 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-04: RunCoreAsync re-checks guide staleness and approval on every run start before EnsureFolder/gateway
 - [Phase 09]: Guide-staleness withdrawal lives in step save funnels (Case Guide SaveAsync, Case Summary entry, reopen), never in CaseStore.SaveAsync
 - [Phase 09]: Case Summary Mailboxes secondary button always visible: Generate Emails before generation, Generate Corpus after (W6)
+- [Phase ?]: 09-06: Case Guide Changed dependency line shows only while a higher banner variant holds the row; otherwise the PlanDependency banner (Default Review Plan) carries it
 
 ### Pending Todos
 
@@ -645,6 +647,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T02:06:09.422Z
-Stopped at: Completed 09-05-PLAN.md
+Last session: 2026-10-12T02:11:39.346Z
+Stopped at: Completed 09-06-PLAN.md
 Resume file: None

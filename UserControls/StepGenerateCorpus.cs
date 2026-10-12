@@ -23,7 +23,9 @@ internal enum GenerateCorpusRenderState
     PartialUpgrade,
     FinishedSkippedMedia,
     FinishedSkippedMediaWithFailures,
-    FinishedSkippedMediaUnavailable
+    FinishedSkippedMediaUnavailable,
+    GuideChanged,
+    NoPlan
 }
 
 // What the row-2 banner slot holds (06-UI-SPEC S1 Row 2: at most one banner, partial-run first)
@@ -1297,7 +1299,10 @@ public partial class StepGenerateCorpus : UserControl
         BindState(state);
         RefreshHeader();
         var plan = state.Case.Corpus?.Plan;
-        SetNotice(plan == null || render == GenerateCorpusRenderState.NotApproved ? string.Empty : NoticeFor(plan));
+        // The Not-approved, No-plan and Guide-changed cards hide the plan's notice (09 UI-SPEC S1)
+        var noNotice = render is GenerateCorpusRenderState.NotApproved or GenerateCorpusRenderState.NoPlan
+            or GenerateCorpusRenderState.GuideChanged;
+        SetNotice(plan == null || noNotice ? string.Empty : NoticeFor(plan));
         var counts = view?.Counts ?? new GenerationCounts();
         var failedItems = counts.FailedThreads + counts.AttachmentsFailed;
         // The banner's pending-batches clause reads the case's batch ledger, as entering the step does
@@ -1346,6 +1351,14 @@ public partial class StepGenerateCorpus : UserControl
                 break;
             case GenerateCorpusRenderState.NotApproved:
                 ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty), GenerationStateCard.NotApproved);
+                break;
+            case GenerateCorpusRenderState.NoPlan:
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, string.Empty, 0, string.Empty,
+                    hasPlan: false), GenerationStateCard.NotApproved);
+                break;
+            case GenerateCorpusRenderState.GuideChanged:
+                ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.GuideChanged, 0, 0, 0, 0m, string.Empty, 0, string.Empty,
+                    state.Case.Corpus?.Generation?.EmailsWritten ?? 0), GenerationStateCard.GuideChanged);
                 break;
             case GenerateCorpusRenderState.PlanChanged:
                 ShowStateCard(GenerationUiText.StateCard(GenerationStateCard.PlanChanged, 0, 0, 0, 0m, string.Empty, earlierThreads, string.Empty), GenerationStateCard.PlanChanged);

@@ -122,6 +122,39 @@ public class GenerateCorpusRenderTests
         RenderBoth("generate-corpus-not-approved", GenerateCorpusRenderState.NotApproved, null, (step, labels) =>
         {
             Assert.Equal("Approve the plan first", step.StateHeading);
+            Assert.EndsWith("Or click Next to write discovery documents without emails.", step.StateBody);
+            Assert.Equal("Review Plan", step.StateActionButton.Text);
+            Assert.Equal(ButtonStyle.Primary, ((ThemedButton)step.StateActionButton).Variant);
+            Assert.False(step.NoticeLabel.Visible);
+        }, primary: 1);
+    }
+
+    // ----- 09 W1 cards (09-UI-SPEC S1) -----
+
+    [Fact]
+    public void GuideChangedCard()
+    {
+        RenderBoth("generate-corpus-guide-changed", GenerateCorpusRenderState.GuideChanged, null, (step, labels) =>
+        {
+            Assert.Equal("The case guide changed after this plan was built", step.StateHeading);
+            Assert.EndsWith("The 1,240 emails already written stay in place.", step.StateBody);
+            Assert.Equal("Review Plan", step.StateActionButton.Text);
+            Assert.Equal(ButtonStyle.Primary, ((ThemedButton)step.StateActionButton).Variant);
+            Assert.False(step.NoticeLabel.Visible);
+        }, primary: 1, setup: f =>
+        {
+            f.Draft.Corpus!.Generation ??= new GenerationState();
+            f.Draft.Corpus.Generation.EmailsWritten = 1240;
+        });
+    }
+
+    [Fact]
+    public void NoPlanCard()
+    {
+        RenderBoth("generate-corpus-no-plan", GenerateCorpusRenderState.NoPlan, null, (step, labels) =>
+        {
+            Assert.Equal("No corpus plan yet", step.StateHeading);
+            Assert.Contains("click Next to write discovery documents without emails", step.StateBody);
             Assert.Equal("Review Plan", step.StateActionButton.Text);
             Assert.Equal(ButtonStyle.Primary, ((ThemedButton)step.StateActionButton).Variant);
             Assert.False(step.NoticeLabel.Visible);

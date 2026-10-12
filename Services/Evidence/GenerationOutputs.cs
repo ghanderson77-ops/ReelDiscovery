@@ -16,6 +16,10 @@ public class GenerationFileResult
     public string FailedFileName { get; set; } = string.Empty;
     public string Error { get; set; } = string.Empty;
     public bool FileOpenElsewhere { get; set; }
+
+    /// <summary>Damaged key files copied aside before they were rewritten (D-10); reported as a notice, never as KeyError.</summary>
+    public List<AnswerKeyBackup> Backups { get; set; } = new();
+
     public bool Succeeded => FailedFileName.Length == 0;
 }
 

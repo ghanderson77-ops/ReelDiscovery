@@ -15,6 +15,9 @@ public class ThreadInvalidationResult
     public int FilesDeleted { get; set; }
     public List<string> Errors { get; set; } = new();
     public string KeyError { get; set; } = string.Empty;
+
+    /// <summary>Damaged key files backed up during the rewrite (D-10); not a failure.</summary>
+    public List<AnswerKeyBackup> KeyBackups { get; set; } = new();
 }
 
 /// <summary>

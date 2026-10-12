@@ -328,6 +328,17 @@ public class BatchingLlmProvider : ILlmProvider
     }
 
     /// <summary>
+    /// Start Over (D-16, WR-A06): prices collected results of every plan that no unit consumed and that were not billed
+    /// yet, with the batch's own provider and model at batch prices, exactly like <see cref="PriceOrphans"/>. No side
+    /// effects. Call only when the ledger is about to be deleted (cancel succeeded and the ledger is readable, Pitfall 13);
+    /// an unreadable ledger returns an empty bill. Collected batches without a results cache add nothing (CX-05).
+    /// </summary>
+    public static OrphanBill PriceUnusedResults(BatchLedger ledger, Func<LlmProviderKind, string, AIModelConfig?> priceLookup)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
     /// Appends OrphansBilled for every batch of <paramref name="bill"/> and stops serving its results, so neither this nor
     /// a later session bills them again. Call after the spend is journaled (CR-A03). A batch already marked is skipped.
     /// </summary>

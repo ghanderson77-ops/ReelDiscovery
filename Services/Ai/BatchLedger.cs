@@ -280,6 +280,24 @@ public partial class BatchLedger
     }
 
     /// <summary>
+    /// This plan's pending batches of one provider (D-15: the banner counts only batches the current text provider can
+    /// collect without paying again). Never throws; an unreadable ledger counts as 0.
+    /// </summary>
+    public static int PendingBatchCount(string caseFolder, Guid planId, LlmProviderKind provider)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// This plan's pending batches of every provider other than <paramref name="current"/> (D-13/D-15): resolved at
+    /// run start, never resubmitted. Never throws; an unreadable ledger counts as 0.
+    /// </summary>
+    public static int PendingBatchCountOtherProviders(string caseFolder, Guid planId, LlmProviderKind current)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
     /// Number of batches of any plan that were submitted but neither collected nor cancelled (Start Over, WR-A05). Never
     /// throws; an unreadable ledger counts as 0 (Start Over keeps it, CR-A05).
     /// </summary>

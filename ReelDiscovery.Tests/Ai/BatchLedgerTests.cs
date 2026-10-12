@@ -77,6 +77,70 @@ public class BatchLedgerTests : IDisposable
         Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, Guid.NewGuid()));
     }
 
+    private async Task SeedMixedProvidersAsync()
+    {
+        var ledger = new BatchLedger(_folder);
+        BatchLedgerRecord Of(string batchId, LlmProviderKind kind, Guid planId)
+        {
+            var record = Submitted(batchId, planId, "q" + batchId);
+            record.Provider = kind;
+            return record;
+        }
+
+        await ledger.AppendAsync(Of("o1", LlmProviderKind.OpenAI, _plan));
+        await ledger.AppendAsync(Of("o2", LlmProviderKind.OpenAI, _plan));
+        await ledger.AppendAsync(Of("a1", LlmProviderKind.Anthropic, _plan));
+        await ledger.AppendAsync(Of("a-other-plan", LlmProviderKind.Anthropic, Guid.NewGuid()));
+
+        // Collected and cancelled batches are not pending for any provider
+        await ledger.AppendAsync(Of("o-collected", LlmProviderKind.OpenAI, _plan));
+        await ledger.AppendAsync(Simple(BatchLedgerRecordType.Collected, "o-collected"));
+        await ledger.AppendAsync(Of("a-cancelled", LlmProviderKind.Anthropic, _plan));
+        await ledger.AppendAsync(Simple(BatchLedgerRecordType.Cancelled, "a-cancelled"));
+    }
+
+    [Fact]
+    public async Task PendingBatchCount_ByProvider_CountsOnlyThatProvider()
+    {
+        await SeedMixedProvidersAsync();
+
+        Assert.Equal(2, BatchLedger.PendingBatchCount(_folder, _plan, LlmProviderKind.OpenAI));
+        Assert.Equal(1, BatchLedger.PendingBatchCount(_folder, _plan, LlmProviderKind.Anthropic));
+        Assert.Equal(3, BatchLedger.PendingBatchCount(_folder, _plan));
+        Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, Guid.NewGuid(), LlmProviderKind.OpenAI));
+    }
+
+    [Fact]
+    public async Task PendingBatchCountOtherProviders_ExcludesCurrentAndOtherPlans()
+    {
+        await SeedMixedProvidersAsync();
+
+        Assert.Equal(1, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
+        Assert.Equal(2, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.Anthropic));
+        Assert.Equal(4, BatchLedger.PendingBatchCountAllPlans(_folder));
+    }
+
+    [Fact]
+    public void PendingBatchCount_ByProvider_BlankOrMissingFolder_Zero()
+    {
+        Assert.Equal(0, BatchLedger.PendingBatchCount("", _plan, LlmProviderKind.OpenAI));
+        Assert.Equal(0, BatchLedger.PendingBatchCount("  ", _plan, LlmProviderKind.Anthropic));
+        Assert.Equal(0, BatchLedger.PendingBatchCountOtherProviders("", _plan, LlmProviderKind.OpenAI));
+        Assert.Equal(0, BatchLedger.PendingBatchCountOtherProviders(Path.Combine(_folder, "nope"), _plan, LlmProviderKind.OpenAI));
+    }
+
+    [Fact]
+    public async Task PendingBatchCount_ByProvider_UnreadableLedger_Zero()
+    {
+        await SeedMixedProvidersAsync();
+
+        using (new FileStream(new BatchLedger(_folder).FilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, _plan, LlmProviderKind.OpenAI));
+            Assert.Equal(0, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
+        }
+    }
+
     [Fact]
     public async Task Cancelled_NotPending()
     {

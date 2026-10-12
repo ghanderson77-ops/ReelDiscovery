@@ -1575,6 +1575,160 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Equal(new[] { "batch_unknown" }, provider.PriceOrphans().UnpricedBatchIds);
     }
 
+    // ----- PriceUnusedResults (D-16, WR-A06) -----
+
+    private static AIModelConfig PricedModel(LlmProviderKind kind, string modelId, decimal input, decimal output) => new()
+    {
+        Provider = kind,
+        ModelId = modelId,
+        InputTokenPricePerMillion = input,
+        OutputTokenPricePerMillion = output,
+        BatchDiscountPercent = 50m
+    };
+
+    private static CostBreakdown BatchCost(AIModelConfig model) =>
+        model.CalculateCost(new TokenUsage { InputTokens = 1000, OutputTokens = 500, IsBatch = true });
+
+    private async Task SeedCollectedAsync(string batchId, LlmProviderKind kind, Guid plan, string modelId,
+        IEnumerable<(string Id, BatchItemOutcome Outcome)> items, bool cache = true)
+    {
+        var list = items.ToList();
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = kind,
+            BatchId = batchId,
+            PlanId = plan,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "non-relevant mail",
+            Items = list.Select(i => new BatchLedgerItem { CustomId = i.Id, Operation = "Thread", ModelId = modelId }).ToList()
+        });
+        if (cache)
+        {
+            ledger.SaveResults(batchId, list.Select(i => i.Outcome == BatchItemOutcome.Succeeded
+                ? new BatchItemResult { CustomId = i.Id, Outcome = BatchItemOutcome.Succeeded, Response = FakeLlmProvider.Ok("{}", 1000, 500) }
+                : new BatchItemResult { CustomId = i.Id, Outcome = i.Outcome, Message = "Scripted" }).ToList());
+        }
+
+        await ledger.AppendAsync(new BatchLedgerRecord { Type = BatchLedgerRecordType.Collected, Utc = DateTime.UtcNow, Provider = kind, BatchId = batchId, PlanId = plan });
+    }
+
+    [Fact]
+    public async Task PriceUnusedResults_AllPlans_SkipsConsumedErroredAndBilled()
+    {
+        var otherPlan = Guid.NewGuid();
+        await SeedCollectedAsync("batch_a", LlmProviderKind.OpenAI, _plan, "gpt-test", new[]
+        {
+            ("q1", BatchItemOutcome.Succeeded), ("q2", BatchItemOutcome.Succeeded), ("q3", BatchItemOutcome.Errored)
+        });
+        await SeedCollectedAsync("msgbatch_b", LlmProviderKind.Anthropic, otherPlan, "claude-test", new[] { ("q4", BatchItemOutcome.Succeeded) });
+        await SeedCollectedAsync("batch_billed", LlmProviderKind.OpenAI, _plan, "gpt-test", new[] { ("q5", BatchItemOutcome.Succeeded) });
+
+        var ledger = new BatchLedger(_folder);
+        await ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Consumed, Utc = DateTime.UtcNow, Provider = LlmProviderKind.OpenAI, BatchId = "batch_a", PlanId = _plan,
+            Items = new List<BatchLedgerItem> { new() { CustomId = "q2" } }
+        });
+        await ledger.AppendAsync(new BatchLedgerRecord { Type = BatchLedgerRecordType.OrphansBilled, Utc = DateTime.UtcNow, Provider = LlmProviderKind.OpenAI, BatchId = "batch_billed", PlanId = _plan });
+
+        var gpt = PricedModel(LlmProviderKind.OpenAI, "gpt-test", 2m, 8m);
+        var claude = PricedModel(LlmProviderKind.Anthropic, "claude-test", 3m, 15m);
+        var lookups = new List<(LlmProviderKind, string)>();
+        var bill = BatchingLlmProvider.PriceUnusedResults(ledger, (kind, id) =>
+        {
+            lookups.Add((kind, id));
+            return kind == LlmProviderKind.OpenAI && id == "gpt-test" ? gpt
+                : kind == LlmProviderKind.Anthropic && id == "claude-test" ? claude : null;
+        });
+
+        Assert.Equal(new[] { "batch_a", "msgbatch_b" }, bill.ItemsByBatch.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        Assert.Equal(new[] { "q1" }, bill.ItemsByBatch["batch_a"]);
+        Assert.Equal(new[] { "q4" }, bill.ItemsByBatch["msgbatch_b"]);
+        Assert.Equal(2, bill.Lines.Count);
+        Assert.Equal(BatchCost(gpt).TotalUsd + BatchCost(claude).TotalUsd, bill.Cost.TotalUsd);
+        Assert.Equal(2000, bill.InputTokens);
+        Assert.Equal(1000, bill.OutputTokens);
+        Assert.Empty(bill.UnpricedBatchIds);
+        Assert.Contains((LlmProviderKind.Anthropic, "claude-test"), lookups);
+
+        // No side effects: nothing was marked billed
+        Assert.DoesNotContain("batch_a", new BatchLedger(_folder).Replay().OrphansBilledIds);
+    }
+
+    [Fact]
+    public async Task PriceUnusedResults_UnpricedModel_ListedNotBilled()
+    {
+        await SeedCollectedAsync("batch_priced", LlmProviderKind.OpenAI, _plan, "gpt-test", new[] { ("q1", BatchItemOutcome.Succeeded) });
+        await SeedCollectedAsync("batch_unknown", LlmProviderKind.OpenAI, _plan, "edited-away", new[] { ("q2", BatchItemOutcome.Succeeded) });
+        var gpt = PricedModel(LlmProviderKind.OpenAI, "gpt-test", 2m, 8m);
+
+        var bill = BatchingLlmProvider.PriceUnusedResults(new BatchLedger(_folder), (_, id) => id == "gpt-test" ? gpt : null);
+
+        Assert.Equal(new[] { "batch_priced" }, bill.ItemsByBatch.Keys);
+        Assert.Equal(new[] { "batch_unknown" }, bill.UnpricedBatchIds);
+        Assert.Equal(BatchCost(gpt).TotalUsd, bill.Cost.TotalUsd);
+        Assert.Single(bill.Lines);
+    }
+
+    [Fact]
+    public async Task PriceUnusedResults_NoCache_AddsNothing()
+    {
+        await SeedCollectedAsync("batch_nocache", LlmProviderKind.OpenAI, _plan, "gpt-test", new[] { ("q1", BatchItemOutcome.Succeeded) }, cache: false);
+        var gpt = PricedModel(LlmProviderKind.OpenAI, "gpt-test", 2m, 8m);
+
+        var bill = BatchingLlmProvider.PriceUnusedResults(new BatchLedger(_folder), (_, _) => gpt);
+
+        Assert.True(bill.IsEmpty);
+        Assert.Empty(bill.UnpricedBatchIds);
+        Assert.Equal(0m, bill.Cost.TotalUsd);
+    }
+
+    [Fact]
+    public async Task PriceUnusedResults_UnreadableLedger_Empty()
+    {
+        await SeedCollectedAsync("batch_a", LlmProviderKind.OpenAI, _plan, "gpt-test", new[] { ("q1", BatchItemOutcome.Succeeded) });
+        var gpt = PricedModel(LlmProviderKind.OpenAI, "gpt-test", 2m, 8m);
+        var ledger = new BatchLedger(_folder);
+
+        OrphanBill bill;
+        using (new FileStream(ledger.FilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            bill = BatchingLlmProvider.PriceUnusedResults(ledger, (_, _) => gpt);
+
+        Assert.True(bill.IsEmpty);
+        Assert.Empty(bill.Lines);
+        Assert.Empty(bill.UnpricedBatchIds);
+        Assert.Equal(0m, bill.Cost.TotalUsd);
+    }
+
+    [Fact]
+    public async Task PriceUnusedResults_MatchesPriceOrphans()
+    {
+        await SeedCollectedAsync("batch_a", LlmProviderKind.OpenAI, _plan, "gpt-test", new[]
+        {
+            ("q1", BatchItemOutcome.Succeeded), ("q2", BatchItemOutcome.Succeeded)
+        });
+        await SeedCollectedAsync("msgbatch_b", LlmProviderKind.Anthropic, _plan, "claude-test", new[] { ("q3", BatchItemOutcome.Succeeded) });
+        var gpt = PricedModel(LlmProviderKind.OpenAI, "gpt-test", 2m, 8m);
+        var claude = PricedModel(LlmProviderKind.Anthropic, "claude-test", 3m, 15m);
+        Func<LlmProviderKind, string, AIModelConfig?> lookup = (kind, _) => kind == LlmProviderKind.OpenAI ? gpt : claude;
+
+        var provider = new BatchingLlmProvider(Live(), Transport(), new BatchLedger(_folder), _plan, lookup, Fast());
+        _providers.Add(provider);
+        var orphans = provider.PriceOrphans();
+        var unused = BatchingLlmProvider.PriceUnusedResults(new BatchLedger(_folder), lookup);
+
+        Assert.True(orphans.Cost.TotalUsd > 0);
+        Assert.Equal(orphans.Cost.TotalUsd, unused.Cost.TotalUsd);
+        Assert.Equal(orphans.Cost.BatchSavingsUsd, unused.Cost.BatchSavingsUsd);
+        Assert.Equal(orphans.InputTokens, unused.InputTokens);
+        Assert.Equal(orphans.OutputTokens, unused.OutputTokens);
+        Assert.Equal(orphans.Lines.Count, unused.Lines.Count);
+        Assert.Equal(orphans.ItemsByBatch.Keys.OrderBy(k => k, StringComparer.Ordinal), unused.ItemsByBatch.Keys.OrderBy(k => k, StringComparer.Ordinal));
+    }
+
     [Fact]
     public async Task WRA03_CollectedBatch_DeletesItsProviderFiles()
     {

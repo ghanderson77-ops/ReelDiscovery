@@ -1,6 +1,7 @@
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Services.Case;
 using ReelDiscovery.Services.Corpus;
 
 namespace ReelDiscovery.Tests.Corpus;
@@ -320,6 +321,69 @@ public class CorpusApprovalTests : IDisposable
         draft.Guide!.Facts[0].Title += " (revised)";
         Assert.True(CorpusApproval.WithdrawApprovalIfStale(draft));
         Assert.False(draft.Corpus.Approved);
+    }
+
+    [Fact]
+    public async Task WithdrawIfGuideChanged_ApprovedAndEdited_WithdrawsAndBumpsRevisionOnce()
+    {
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+        draft.Corpus!.Approved = true;
+        var revision = draft.Revision;
+
+        // Unchanged guide: nothing to withdraw
+        Assert.False(CorpusApproval.WithdrawIfGuideChanged(draft));
+        Assert.True(draft.Corpus.Approved);
+        Assert.Equal(revision, draft.Revision);
+
+        draft.Guide!.Facts[0].Title += " (revised)";
+        Assert.True(CorpusApproval.WithdrawIfGuideChanged(draft));
+        Assert.False(draft.Corpus.Approved);
+        Assert.Equal(revision + 1, draft.Revision);
+
+        // Second call: already withdrawn, revision unchanged
+        Assert.False(CorpusApproval.WithdrawIfGuideChanged(draft));
+        Assert.Equal(revision + 1, draft.Revision);
+    }
+
+    [Fact]
+    public async Task WithdrawIfGuideChanged_KeptHash_DoesNothing()
+    {
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+        draft.Corpus!.Approved = true;
+        draft.Guide!.Facts[0].Title += " (revised)";
+        CorpusApproval.KeepStalePlan(draft);
+        var revision = draft.Revision;
+
+        Assert.False(CorpusApproval.WithdrawIfGuideChanged(draft));
+        Assert.True(draft.Corpus.Approved);
+        Assert.Equal(revision, draft.Revision);
+    }
+
+    [Fact]
+    public async Task WithdrawIfGuideChanged_Unapproved_DoesNothing()
+    {
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+        draft.Corpus!.Approved = false;
+        draft.Guide!.Facts[0].Title += " (revised)";
+        var revision = draft.Revision;
+
+        Assert.False(CorpusApproval.WithdrawIfGuideChanged(draft));
+        Assert.False(draft.Corpus.Approved);
+        Assert.Equal(revision, draft.Revision);
+    }
+
+    [Fact]
+    public async Task WidenActiveRanges_AfterPlanning_DoesNotStaleGuide()
+    {
+        // A1 / Pitfall 6: visiting Case Guide right after planning must not change the guide hash
+        var (draft, plan) = Setup();
+        await CorpusApproval.ApplyNewPlanAsync(_folder, draft, plan, (f, p, ct) => Task.CompletedTask);
+
+        Assert.False(CaseGuideEditing.WidenActiveRanges(draft));
+        Assert.False(CorpusApproval.IsGuideStale(draft));
     }
 
     [Fact]

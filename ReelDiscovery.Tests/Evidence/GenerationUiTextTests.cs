@@ -1162,7 +1162,7 @@ public class GenerationUiTextTests
     private static GenerationEntryInput Entry(
         bool running = false, bool hasPlan = true, bool approved = true, bool hasSavedRun = true,
         bool planChanged = false, string unreadable = "", int total = 10, int written = 10, int failed = 0,
-        int attachmentsTotal = 0, int attachmentsFinal = 0, bool latestAttemptEnded = false) =>
+        int attachmentsTotal = 0, int attachmentsFinal = 0, bool latestAttemptEnded = false, bool guideStale = false) =>
         new()
         {
             Running = running,
@@ -1176,7 +1176,8 @@ public class GenerationUiTextTests
             Failed = failed,
             AttachmentsTotal = attachmentsTotal,
             AttachmentsFinal = attachmentsFinal,
-            LatestAttemptEnded = latestAttemptEnded
+            LatestAttemptEnded = latestAttemptEnded,
+            GuideStale = guideStale
         };
 
     [Fact]
@@ -1190,6 +1191,34 @@ public class GenerationUiTextTests
     {
         Assert.Equal(GenerationEntry.NotApprovedCard, GenerationUiText.EntryDecision(Entry(hasPlan: false)));
         Assert.Equal(GenerationEntry.NotApprovedCard, GenerationUiText.EntryDecision(Entry(approved: false, planChanged: true, unreadable: "x")));
+    }
+
+    [Fact]
+    public void EntryDecision_RunningKeepsRun_EvenWhenGuideStale()
+    {
+        Assert.Equal(GenerationEntry.KeepRun, GenerationUiText.EntryDecision(Entry(running: true, guideStale: true)));
+    }
+
+    [Fact]
+    public void EntryDecision_GuideStale_GuideChangedCard_BeforeNotApproved()
+    {
+        Assert.Equal(GenerationEntry.GuideChangedCard, GenerationUiText.EntryDecision(Entry(approved: true, guideStale: true)));
+        Assert.Equal(GenerationEntry.GuideChangedCard, GenerationUiText.EntryDecision(Entry(approved: false, guideStale: true)));
+        Assert.Equal(GenerationEntry.GuideChangedCard,
+            GenerationUiText.EntryDecision(Entry(approved: true, guideStale: true, planChanged: true, unreadable: "x")));
+    }
+
+    [Fact]
+    public void EntryDecision_GuideStaleWithoutPlan_NotApprovedCard()
+    {
+        Assert.Equal(GenerationEntry.NotApprovedCard, GenerationUiText.EntryDecision(Entry(hasPlan: false, guideStale: true)));
+    }
+
+    [Fact]
+    public void EntryDecision_GuideNotStale_Unchanged()
+    {
+        Assert.Equal(GenerationEntry.FinishedDashboard, GenerationUiText.EntryDecision(Entry(approved: true, guideStale: false)));
+        Assert.Equal(GenerationEntry.ReadyCard, GenerationUiText.EntryDecision(Entry(hasSavedRun: false, guideStale: false)));
     }
 
     [Fact]
@@ -1364,9 +1393,53 @@ public class GenerationUiTextTests
         var card = GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, "", 0, "");
 
         Assert.Equal("Approve the plan first", card.Heading);
-        Assert.Equal("Emails are written from an approved corpus plan. Approve the plan on Review Plan, then come back to this step.", card.Body);
+        Assert.Equal(
+            "Emails are written from an approved corpus plan. Approve the plan on Review Plan, then come back to this step. Or click Next to write discovery documents without emails.",
+            card.Body);
         Assert.Equal("Review Plan", card.ButtonText);
         Assert.False(card.Danger);
+    }
+
+    [Fact]
+    public void StateCard_NotApproved_NoPlan()
+    {
+        var card = GenerationUiText.StateCard(GenerationStateCard.NotApproved, 0, 0, 0, 0m, "", 0, "", hasPlan: false);
+
+        Assert.Equal("No corpus plan yet", card.Heading);
+        Assert.Equal(
+            "Emails are written from an approved corpus plan. Plan and approve it on Review Plan, or click Next to write discovery documents without emails.",
+            card.Body);
+        Assert.Equal("Review Plan", card.ButtonText);
+        Assert.False(card.Danger);
+    }
+
+    private const string GuideChangedBody =
+        "Emails are written from the corpus plan and the guide it was built from, so generation is paused. Open Review Plan to keep this plan and approve it, or re-plan from the current guide.";
+
+    [Theory]
+    [InlineData(0, "")]
+    [InlineData(-3, "")]
+    [InlineData(1, " The 1 email already written stays in place.")]
+    [InlineData(1240, " The 1,240 emails already written stay in place.")]
+    public void StateCard_GuideChanged_EmailsSentence(int emailsWritten, string suffix)
+    {
+        var card = GenerationUiText.StateCard(GenerationStateCard.GuideChanged, 0, 0, 0, 0m, "", 0, "", emailsWritten: emailsWritten);
+
+        Assert.Equal("The case guide changed after this plan was built", card.Heading);
+        Assert.Equal(GuideChangedBody + suffix, card.Body);
+        Assert.Equal("Review Plan", card.ButtonText);
+        Assert.False(card.Danger);
+    }
+
+    [Fact]
+    public void RunRefusedTexts_Verbatim()
+    {
+        Assert.Equal(
+            "Generation did not start: the case guide changed after this plan was built. Open Review Plan to approve the plan.",
+            GenerationUiText.RunRefusedGuideChangedText);
+        Assert.Equal(
+            "Generation did not start: the corpus plan is not approved. Open Review Plan to approve it.",
+            GenerationUiText.RunRefusedNotApprovedText);
     }
 
     [Fact]

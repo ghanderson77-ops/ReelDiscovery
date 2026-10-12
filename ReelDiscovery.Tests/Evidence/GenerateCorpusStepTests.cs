@@ -990,6 +990,110 @@ public class GenerateCorpusStepTests
         });
     }
 
+    // ----- D-16 / WR-A06: Start Over records collected but unused batch results -----
+
+    // A collected batch whose cache holds two usable results no unit consumed, priced with the fixture's catalog model
+    private static AIModelConfig SeedCollectedUnused(Harness h, string batchId)
+    {
+        var model = h.Fixture.State.AvailableModelConfigs.First(m => m.Provider == LlmProviderKind.OpenAI);
+        var ledger = new BatchLedger(h.Folder);
+        ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = LlmProviderKind.OpenAI,
+            BatchId = batchId,
+            PlanId = h.Plan.PlanId,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "wave 1",
+            Items = new[] { "u1", "u2" }.Select(id => new BatchLedgerItem { CustomId = id, Operation = "Thread", ModelId = model.ModelId }).ToList()
+        }).GetAwaiter().GetResult();
+        ledger.SaveResults(batchId, new[] { "u1", "u2" }
+            .Select(id => new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Succeeded, Response = FakeLlmProvider.Ok("{}", 1000, 500) })
+            .ToList());
+        ledger.AppendAsync(new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Collected, Utc = DateTime.UtcNow, Provider = LlmProviderKind.OpenAI, BatchId = batchId, PlanId = h.Plan.PlanId
+        }).GetAwaiter().GetResult();
+        return model;
+    }
+
+    private static List<TokenUsageEntry> UnusedEntries(Harness h) =>
+        h.Fixture.State.UsageTracker.Entries.Where(e => e.Operation == BatchingLlmProvider.OrphanOperation).ToList();
+
+    [Fact]
+    public void StartOver_RecordsUnusedBatchResults()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            var model = SeedCollectedUnused(h, "batch_collected");
+            var expected = BatchingLlmProvider.PriceUnusedResults(new BatchLedger(h.Folder),
+                (kind, id) => h.Fixture.State.AvailableModelConfigs.FirstOrDefault(m => m.ModelId == id && m.Provider == kind));
+            Assert.Equal(2, expected.Lines.Count);
+            Assert.True(expected.Cost.TotalUsd > 0m);
+            step.BatchTransportFactory = _ => new FakeBatchTransport();
+            Pump(step.ClickStartOverAsync());
+
+            var entries = UnusedEntries(h);
+            Assert.Equal(2, entries.Count);
+            Assert.All(entries, e => Assert.Equal(model.ModelId, e.ModelId));
+            Assert.Equal(expected.Cost.TotalUsd, entries.Sum(e => e.Cost));
+            // The ledger and the results cache are gone after pricing
+            Assert.False(File.Exists(BatchLedger.PathFor(h.Folder)));
+            Assert.Equal(Theme.Success, step.StatusLabel.ForeColor);
+        });
+    }
+
+    [Fact]
+    public void StartOver_CancelFailed_RecordsNothing()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            SeedCollectedUnused(h, "batch_collected");
+            SeedPendingBatch(h, LlmProviderKind.OpenAI, "batch_pending");
+            step.BatchTransportFactory = _ => throw new InvalidOperationException("provider down");
+            Pump(step.ClickStartOverAsync());
+
+            // Pitfall 13: the ledger is kept, so its results stay unbilled for a later run
+            Assert.Empty(UnusedEntries(h));
+            Assert.True(File.Exists(BatchLedger.PathFor(h.Folder)));
+            Assert.EndsWith(GenerationUiText.BatchCancelFailedText, step.StatusLabel.Text);
+        });
+    }
+
+    [Fact]
+    public void StartOver_UnreadableLedger_RecordsNothing()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            SeedCollectedUnused(h, "batch_collected");
+            step.BatchTransportFactory = _ => new FakeBatchTransport();
+            // Held open without sharing: the ledger cannot be read while Start Over runs
+            using (new FileStream(BatchLedger.PathFor(h.Folder), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Pump(step.ClickStartOverAsync());
+
+            Assert.Empty(UnusedEntries(h));
+        });
+    }
+
     // ----- D-15: the banner counts only the current provider's batches -----
 
     private static void SeedPendingBatch(Harness h, LlmProviderKind provider, string batchId) =>

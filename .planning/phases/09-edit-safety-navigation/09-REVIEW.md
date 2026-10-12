@@ -58,6 +58,8 @@ I reviewed the phase-9 diff against the six priority areas. Here is what I found
 
 ### CR-01: Review Plan Next approves a stale-guide plan, bypassing the disabled Approve button and Keep This Plan
 
+**Status: FIXED in 906263a** (2026-10-12): `PlanNextGate` takes `guideStale`; a stale, unapproved plan returns AskSkip "Continue Without Approving", and `ApproveAsync` refuses a stale guide. Regression test `NextGate_NotApproved_StaleGuide_AsksToSkipWithoutApproving`.
+
 **File:** `UserControls/StepReviewPlan.Run.cs:150-171` (with `UserControls/CorpusUiText.cs:621-646`, `Services/Corpus/CorpusApproval.cs:97-109`, `UserControls/StepReviewPlan.cs:1198`)
 
 **Issue:** When the guide is stale, Review Plan disables the Approve button on purpose (`_btnApprove.Enabled = _bannerVariant != PlanBannerVariant.StaleGuide`). The user has to choose Re-plan or Keep This Plan first. The Next gate does not check for this:

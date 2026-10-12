@@ -92,8 +92,8 @@ public partial class StepReviewPlan
             SettingsDismissed = false,
             GuideStale = CorpusApproval.IsGuideStale(Draft),
             GuideDismissed = false,
-            // Not reset here: Next on Corpus Settings or Plan Corpus / Retry Planning clear it (D-12 revision decision)
-            SuppressAutoPlan = _state.SuppressAutoPlanOnce
+            // Bridge until Task 2 introduces the one-shot PlanOnEntryOnce flag: same behavior as before
+            PlanRequested = !_state.SuppressAutoPlanOnce
         };
         // A referenced plan that did not load always shows the unreadable card, never a silent re-plan
         if (input.UnreadableReason.Length == 0 && corpus.HasPlan && corpus.Plan == null)
@@ -141,8 +141,9 @@ public partial class StepReviewPlan
     }
 
     /// <summary>
-    /// Next gate (UI-SPEC S2): disabled during a run; no plan blocks (M-P1); an unapproved plan asks to approve (M-P2,
-    /// default Yes) and continues only if every file was written; an approved plan advances.
+    /// Next gate (UI-SPEC S2): disabled during a run; no plan asks to continue without one (09 UI-SPEC S3, default Yes);
+    /// an unapproved plan asks to approve (M-P2, default Yes) and continues only if every file was written; an approved
+    /// plan advances.
     /// </summary>
     public async Task<bool> ValidateStepAsync()
     {
@@ -155,9 +156,10 @@ public partial class StepReviewPlan
         {
             case PlanNextGateKind.Disabled:
                 return false;
-            case PlanNextGateKind.NoPlan:
-                MessageBox.Show(FindForm(), gate.Message, gate.Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
+            case PlanNextGateKind.AskSkip:
+                // 09 W2: continuing without a plan is free and non-destructive; Generate Corpus shows its no-plan card
+                return MessageBox.Show(FindForm(), gate.Message, gate.Title, MessageBoxButtons.YesNo, MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1) == DialogResult.Yes;
             case PlanNextGateKind.AskApprove:
                 var answer = MessageBox.Show(FindForm(), gate.Message, gate.Title, MessageBoxButtons.YesNo, MessageBoxIcon.Question,
                     MessageBoxDefaultButton.Button1);

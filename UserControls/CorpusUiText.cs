@@ -104,8 +104,8 @@ public class ReviewPlanEntryInput
     public bool GuideStale;
     public bool GuideDismissed;
 
-    // Reopened case: show the No corpus plan yet card instead of planning (Phase 3 U13 cost control)
-    public bool SuppressAutoPlan;
+    // One-shot: Next on Corpus Settings asked for planning (D-12); every other entry shows the No corpus plan yet card (09 W2)
+    public bool PlanRequested;
 }
 
 public enum PlanStateCard
@@ -119,7 +119,7 @@ public enum PlanStateCard
 public enum PlanNextGateKind
 {
     Disabled,
-    NoPlan,
+    AskSkip,
     AskApprove,
     Proceed
 }
@@ -374,10 +374,10 @@ public static class CorpusUiText
     // --- Review Plan: entry rules (D-12, D-25, D-26) ---
 
     /// <summary>
-    /// First match wins: active run, unreadable plan, no plan (auto-plan, or the card on reopen), unapproved plan with
-    /// changed settings (auto re-plan, except on a reopened case), stale guide (banner; wins over changed settings),
-    /// changed settings (banner), otherwise show the plan. Nothing re-plans an approved plan silently (T-04-34), and a
-    /// case opened from disk never starts a run by itself (T-04-62, D-25).
+    /// First match wins: active run, unreadable plan, no plan (auto-plan only when Corpus Settings Next asked for it,
+    /// otherwise the card), unapproved plan with changed settings (auto re-plan only when asked), stale guide (banner;
+    /// wins over changed settings), changed settings (banner), otherwise show the plan. Nothing re-plans an approved
+    /// plan silently (T-04-34), and only an explicit request starts a planning run (T-04-62, 09 W2).
     /// </summary>
     public static ReviewPlanEntry ReviewPlanEntryDecision(ReviewPlanEntryInput input)
     {
@@ -386,9 +386,9 @@ public static class CorpusUiText
         if (!string.IsNullOrWhiteSpace(input.UnreadableReason))
             return ReviewPlanEntry.UnreadableCard;
         if (!input.HasPlan)
-            return input.SuppressAutoPlan ? ReviewPlanEntry.NoPlanCard : ReviewPlanEntry.AutoPlan;
-        // A reopened case shows the saved plan with the settings banner instead of re-planning (CR-02)
-        if (!input.Approved && input.SettingsChanged && !input.SuppressAutoPlan)
+            return input.PlanRequested ? ReviewPlanEntry.AutoPlan : ReviewPlanEntry.NoPlanCard;
+        // Without a planning request the saved plan shows with the settings banner instead of re-planning (CR-02, 09 W2)
+        if (!input.Approved && input.SettingsChanged && input.PlanRequested)
             return ReviewPlanEntry.AutoReplan;
         if (input.GuideStale && !input.GuideDismissed)
             return ReviewPlanEntry.StaleBanner;
@@ -623,9 +623,9 @@ public static class CorpusUiText
         {
             return new PlanNextGateResult
             {
-                Kind = PlanNextGateKind.NoPlan,
-                Title = "No Plan Yet",
-                Message = "There is no corpus plan yet. Click Plan Corpus, then approve the plan."
+                Kind = PlanNextGateKind.AskSkip,
+                Title = "Continue Without a Plan",
+                Message = "Continue without a corpus plan? Generate Corpus needs an approved plan before it writes emails; click Next there to write discovery documents. You can plan the corpus later from Review Plan."
             };
         }
 

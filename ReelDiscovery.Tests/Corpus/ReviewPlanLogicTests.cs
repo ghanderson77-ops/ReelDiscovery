@@ -8,7 +8,7 @@ public class ReviewPlanLogicTests
 {
     private static ReviewPlanEntryInput Input(bool running = false, bool hasPlan = true, string unreadable = "",
         bool approved = false, bool settingsChanged = false, bool settingsDismissed = false,
-        bool guideStale = false, bool guideDismissed = false, bool suppress = false) => new()
+        bool guideStale = false, bool guideDismissed = false, bool requested = false) => new()
     {
         Running = running,
         HasPlan = hasPlan,
@@ -18,7 +18,7 @@ public class ReviewPlanLogicTests
         SettingsDismissed = settingsDismissed,
         GuideStale = guideStale,
         GuideDismissed = guideDismissed,
-        SuppressAutoPlan = suppress
+        PlanRequested = requested
     };
 
     private static PlanSummary Summary() => new()
@@ -66,35 +66,39 @@ public class ReviewPlanLogicTests
     }
 
     [Fact]
-    public void Entry_NoPlanAutoPlans()
+    public void Entry_NoPlanRequested_AutoPlans()
     {
-        Assert.Equal(ReviewPlanEntry.AutoPlan, CorpusUiText.ReviewPlanEntryDecision(Input(hasPlan: false)));
+        // Next on Corpus Settings asked for planning (D-12, 09 W2)
+        Assert.Equal(ReviewPlanEntry.AutoPlan, CorpusUiText.ReviewPlanEntryDecision(Input(hasPlan: false, requested: true)));
     }
 
     [Fact]
-    public void Entry_NoPlanOnReopenShowsCard()
+    public void Entry_NoPlanNotRequested_ShowsCard()
     {
-        Assert.Equal(ReviewPlanEntry.NoPlanCard, CorpusUiText.ReviewPlanEntryDecision(Input(hasPlan: false, suppress: true)));
+        // Back from Generate Corpus, Case Summary's Review Plan button and a reopened case start no paid run (09 W2)
+        Assert.Equal(ReviewPlanEntry.NoPlanCard, CorpusUiText.ReviewPlanEntryDecision(Input(hasPlan: false)));
     }
 
     [Fact]
     public void Entry_UnreadablePlanShowsCard()
     {
         Assert.Equal(ReviewPlanEntry.UnreadableCard, CorpusUiText.ReviewPlanEntryDecision(Input(hasPlan: false, unreadable: "The file is damaged")));
-        Assert.Equal(ReviewPlanEntry.UnreadableCard, CorpusUiText.ReviewPlanEntryDecision(Input(hasPlan: false, unreadable: "bad", suppress: true)));
+        Assert.Equal(ReviewPlanEntry.UnreadableCard, CorpusUiText.ReviewPlanEntryDecision(Input(hasPlan: false, unreadable: "bad", requested: true)));
     }
 
     [Fact]
     public void Entry_UnapprovedSettingsChangedAutoReplans()
     {
-        Assert.Equal(ReviewPlanEntry.AutoReplan, CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true)));
+        Assert.Equal(ReviewPlanEntry.AutoReplan, CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true, requested: true)));
+        // Without a planning request the settings banner shows instead (09 W2)
+        Assert.Equal(ReviewPlanEntry.SettingsBanner, CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true)));
     }
 
     [Fact]
     public void Entry_ReopenedUnapprovedSettingsChanged_ShowsBannerNotReplan()
     {
         // CR-02: a case opened from disk never starts a (billed) re-plan by itself (T-04-62, D-25)
-        var input = Input(settingsChanged: true, suppress: true);
+        var input = Input(settingsChanged: true);
         Assert.Equal(ReviewPlanEntry.SettingsBanner, CorpusUiText.ReviewPlanEntryDecision(input));
         Assert.False(CorpusUiText.WithdrawsApproval(input));
     }
@@ -103,20 +107,20 @@ public class ReviewPlanLogicTests
     public void Entry_ReopenedUnapprovedSettingsChangedDismissed_ShowsPlan()
     {
         Assert.Equal(ReviewPlanEntry.ShowPlan,
-            CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true, settingsDismissed: true, suppress: true)));
+            CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true, settingsDismissed: true)));
     }
 
     [Fact]
     public void Entry_ReopenedUnapprovedStaleAndSettingsChanged_StaleWins()
     {
         Assert.Equal(ReviewPlanEntry.StaleBanner,
-            CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true, guideStale: true, suppress: true)));
+            CorpusUiText.ReviewPlanEntryDecision(Input(settingsChanged: true, guideStale: true)));
     }
 
     [Fact]
     public void Entry_ApprovedSettingsChangedShowsBanner()
     {
-        Assert.Equal(ReviewPlanEntry.SettingsBanner, CorpusUiText.ReviewPlanEntryDecision(Input(approved: true, settingsChanged: true)));
+        Assert.Equal(ReviewPlanEntry.SettingsBanner, CorpusUiText.ReviewPlanEntryDecision(Input(approved: true, settingsChanged: true, requested: true)));
     }
 
     [Fact]
@@ -429,12 +433,12 @@ public class ReviewPlanLogicTests
     }
 
     [Fact]
-    public void NextGate_NoPlan()
+    public void NextGate_NoPlan_AsksToSkip()
     {
         var gate = CorpusUiText.PlanNextGate(false, false, false);
-        Assert.Equal(PlanNextGateKind.NoPlan, gate.Kind);
-        Assert.Equal("No Plan Yet", gate.Title);
-        Assert.Equal("There is no corpus plan yet. Click Plan Corpus, then approve the plan.", gate.Message);
+        Assert.Equal(PlanNextGateKind.AskSkip, gate.Kind);
+        Assert.Equal("Continue Without a Plan", gate.Title);
+        Assert.Equal("Continue without a corpus plan? Generate Corpus needs an approved plan before it writes emails; click Next there to write discovery documents. You can plan the corpus later from Review Plan.", gate.Message);
     }
 
     [Fact]

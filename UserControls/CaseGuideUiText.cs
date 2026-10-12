@@ -18,7 +18,10 @@ public enum BannerVariant
     None,
     StaleCore,
     StaleDownstream,
-    NeedsReview
+    NeedsReview,
+
+    // Lowest priority: the corpus plan was built from an earlier guide (09 UI-SPEC S2); shown only when no other variant holds the banner
+    PlanDependency
 }
 
 public enum NextGateKind
@@ -36,6 +39,9 @@ public class StateCardContent
     public string Body = "";
     public string ButtonText = "";
     public bool ShowBar;
+
+    // Secondary Default button (Review Plan: Skip to Discovery Documents); empty = hidden
+    public string SecondaryText = "";
 }
 
 public class BannerContent
@@ -45,6 +51,26 @@ public class BannerContent
     public string Body = "";
     public string PrimaryText = "";
     public string SecondaryText = "";
+}
+
+public enum DependencyNoticeKind
+{
+    None,
+    Info,
+    Changed
+}
+
+public class DependencyNoticeContent
+{
+    public DependencyNoticeKind Kind;
+
+    // Header dependency line (Info: muted; Changed: warning, used while a higher banner variant holds the row)
+    public string Line = "";
+
+    // PlanDependency banner (Changed only)
+    public string Heading = "";
+    public string Body = "";
+    public string ButtonText = "";
 }
 
 public class NextGateResult
@@ -126,6 +152,60 @@ public static class CaseGuideUiText
     public static string Plural(int n, string singular, string plural)
     {
         return n.ToString("N0", Invariant) + " " + (n == 1 ? singular : plural);
+    }
+
+    // --- Corpus plan dependency (09 UI-SPEC S2) ---
+
+    /// <summary>
+    /// What Case Guide says about the corpus plan built from it (09 UI-SPEC S2), first match wins: (1) a plan built from an
+    /// earlier, not kept guide -> Changed (PlanDependency banner plus a warning line); (2) an approved plan built from this
+    /// guide -> Info line that editing withdraws approval; (3) an unapproved plan with emails written -> Info line that
+    /// written emails do not change; (4) otherwise None. Negative email counts read as 0.
+    /// </summary>
+    public static DependencyNoticeContent DependencyNotice(bool hasPlan, bool approved, bool guideStale, int emailsWritten)
+    {
+        var n = Math.Max(0, emailsWritten);
+
+        if (hasPlan && guideStale)
+        {
+            var kept = n switch
+            {
+                0 => "",
+                1 => "The 1 email already written stays in place. ",
+                _ => $"The {n.ToString("N0", Invariant)} emails already written stay in place. "
+            };
+            return new DependencyNoticeContent
+            {
+                Kind = DependencyNoticeKind.Changed,
+                Heading = "The corpus plan was built from an earlier version of this guide.",
+                Body = "Generate Corpus will not write emails from this plan until you review it. " + kept
+                    + "Open Review Plan to keep the plan and approve it, or re-plan from the current guide.",
+                ButtonText = "Review Plan",
+                Line = "The corpus plan was built from an earlier version of this guide. Review it on Review Plan before generating emails."
+            };
+        }
+
+        if (approved && !guideStale)
+        {
+            return new DependencyNoticeContent
+            {
+                Kind = DependencyNoticeKind.Info,
+                Line = n == 0
+                    ? "The approved corpus plan was built from this guide. Editing the guide withdraws plan approval until you review the plan again."
+                    : $"The approved corpus plan and {Plural(n, "generated email", "generated emails")} were built from this guide. Editing the guide withdraws plan approval until you review the plan again."
+            };
+        }
+
+        if (!approved && !guideStale && n > 0)
+        {
+            return new DependencyNoticeContent
+            {
+                Kind = DependencyNoticeKind.Info,
+                Line = $"{Plural(n, "generated email was", "generated emails were")} written from this guide. Emails already written do not change when you edit it."
+            };
+        }
+
+        return new DependencyNoticeContent { Kind = DependencyNoticeKind.None };
     }
 
     public static string PartNoun(GuidePart part, bool capitalized)

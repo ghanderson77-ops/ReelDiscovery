@@ -532,8 +532,169 @@ public class BatchingLlmProvider : ILlmProvider
         Func<LlmProviderKind, IBatchTransport?> transportFor, Guid planId, LlmProviderKind current,
         CancellationToken ct = default)
     {
-        await Task.CompletedTask;
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(ledger);
+        ArgumentNullException.ThrowIfNull(transportFor);
+
+        var state = ledger.Replay();
+        if (!state.Readable)
+            return new OtherProviderResolution { LedgerUnreadable = true };
+
+        var result = new OtherProviderResolution();
+        var foreign = state.Pending(planId)
+            .Where(r => r.Provider != current)
+            .OrderBy(r => r.SubmittedUtc)
+            .ThenBy(r => r.BatchId, StringComparer.Ordinal)
+            .ToList();
+        result.Found = foreign.Count;
+        if (foreign.Count == 0)
+            return result;
+
+        // D-14: every provider is checked before any network call, so a missing key leaves everything untouched
+        result.Provider = foreign[0].Provider;
+        foreach (var kind in foreign.Select(r => r.Provider).Distinct())
+        {
+            if (transportFor(kind) == null)
+            {
+                result.Provider = kind;
+                result.KeyMissing = true;
+                return result;
+            }
+        }
+
+        var running = new List<BatchLedgerRecord>();
+        foreach (var record in foreign)
+        {
+            ct.ThrowIfCancellationRequested();
+            var transport = transportFor(record.Provider)!;
+            var status = await transport.GetStatusAsync(record.BatchId, ct);
+            if (!status.Succeeded)
+                return Fail(result, record.Provider, status.Message);
+
+            switch (status.State)
+            {
+                case BatchState.Ended:
+                case BatchState.Expired:
+                case BatchState.Cancelled:
+                {
+                    var results = await transport.GetResultsAsync(record.BatchId, ct);
+                    if (!results.Succeeded)
+                        return Fail(result, record.Provider, results.Message);
+
+                    var batch = TrackedBatch.From(record, resumed: true);
+                    var ordered = ClassifyResults(batch, results.Items);
+                    try
+                    {
+                        ledger.SaveResults(record.BatchId, ordered);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        // Not recorded Collected without a durable cache (CX-05): refuse rather than lose paid results
+                        return Fail(result, record.Provider, ex.Message);
+                    }
+
+                    if (!await TryAppendCollectedAsync(ledger, record, status.OutputFileId, status.Done, ordered.Count, result, ct))
+                        return result;
+
+                    result.Collected++;
+
+                    // WR-A03: the cache is durable, so the provider files are no longer needed
+                    try
+                    {
+                        await transport.DeleteFilesAsync(NullIfEmpty(record.InputFileId), NullIfEmpty(status.OutputFileId), ct);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // Best effort: a file left at the provider is cleaned up by Start Over; it never affects the run
+                    }
+
+                    break;
+                }
+                case BatchState.Failed:
+                {
+                    // As FailAtProviderAsync: no results to lose; an all-errored cache keeps a restart from downloading it
+                    try
+                    {
+                        ledger.SaveResults(record.BatchId, TrackedBatch.From(record, resumed: true).ItemIds
+                            .Select(id => new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Errored, Message = "The batch failed" })
+                            .ToList());
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        // Best effort: without the cache its items simply run live under the current provider; no extra spend
+                    }
+
+                    if (!await TryAppendCollectedAsync(ledger, record, null, 0, record.Items.Count(i => i != null), result, ct))
+                        return result;
+
+                    result.Collected++;
+                    break;
+                }
+                default:
+                    running.Add(record);
+                    break;
+            }
+        }
+
+        if (running.Count > 0)
+        {
+            var ids = running.Select(r => r.BatchId).ToHashSet(StringComparer.Ordinal);
+            try
+            {
+                var cancelled = await CancelPendingAsync(ledger, transportFor, planId,
+                    include: r => r.Provider != current && ids.Contains(r.BatchId), ct: ct);
+                result.Cancelled = cancelled.Count;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // D-22: a batch that could not be stopped may still run and bill; refuse the run rather than pay twice
+                result.Failed = true;
+                result.Provider = running[0].Provider;
+                result.FailureMessage = ex.Message;
+            }
+        }
+
+        return result;
+    }
+
+    private static OtherProviderResolution Fail(OtherProviderResolution result, LlmProviderKind provider, string? message)
+    {
+        result.Failed = true;
+        result.Provider = provider;
+        result.FailureMessage = message ?? string.Empty;
+        return result;
+    }
+
+    // Collected line under the batch's own provider and plan; false (and the resolution failed) when it cannot be written
+    private static async Task<bool> TryAppendCollectedAsync(BatchLedger ledger, BatchLedgerRecord record, string? outputFileId,
+        int done, int total, OtherProviderResolution result, CancellationToken ct)
+    {
+        try
+        {
+            await ledger.AppendAsync(new BatchLedgerRecord
+            {
+                Type = BatchLedgerRecordType.Collected,
+                Utc = DateTime.UtcNow,
+                Provider = record.Provider,
+                BatchId = record.BatchId,
+                PlanId = record.PlanId,
+                SubmittedUtc = record.SubmittedUtc,
+                StageLabel = record.StageLabel,
+                OutputFileId = outputFileId ?? string.Empty,
+                Done = done,
+                Total = total
+            }, ct);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // D-22: the batch would stay pending and Recover would ignore it; refuse the run rather than resubmit its items
+            Fail(result, record.Provider, ex.Message);
+            return false;
+        }
     }
 
     // CR-A05: never act on (or let Start Over delete) a ledger that could not be read

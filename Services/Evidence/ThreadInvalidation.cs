@@ -100,6 +100,8 @@ public static class ThreadInvalidation
             var state = GenerationRunState.From(plan, GenerationJournal.Replay(caseFolder, plan));
             var written = await GenerationOutputs.WriteAnswerKeyAsync(caseFolder, guide, plan, state.BuildFullOverlay(plan, guide))
                 .ConfigureAwait(false);
+            // D-10: a backed-up damaged key is a notice, never a KeyError (Pitfall 9)
+            result.KeyBackups = written.Backups;
             if (!written.Succeeded)
                 result.KeyError = $"{written.FailedFileName}: {written.Error}";
         }

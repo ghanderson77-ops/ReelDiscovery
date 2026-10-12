@@ -30,44 +30,23 @@ public class GenerationFileResult
 public static class GenerationOutputs
 {
     /// <summary>
-    /// Writes answer-key.csv and answer-key.xlsx from the plan with the run-state overlay.
+    /// Writes answer-key.csv and answer-key.xlsx from the plan with the run-state overlay and the user's manual relabels
+    /// (D-01, D-02).
     /// </summary>
     public static async Task<GenerationFileResult> WriteAnswerKeyAsync(string caseFolder, CaseGuide guide, CorpusPlan plan,
         AnswerKeyOverlay overlay, FileWriter? writer = null, CancellationToken ct = default)
     {
-        writer ??= CaseStore.WriteAtomicAsync;
-        var result = new GenerationFileResult();
-
-        // CSV fields go through AnswerKeyCsvWriter.Field, which neutralizes formula prefixes (T-05-32)
-        var rows = AnswerKeyBuilder.Build(plan, guide, overlay);
-        var files = new List<(CorpusFileKind Kind, string FileName, Func<byte[]> Bytes)>
+        // D-02: the one funnel harvests manual relabels, re-applies them and writes both files (each on its own, Pitfall 8)
+        var written = await AnswerKeyFiles.WriteAsync(caseFolder, plan, guide, overlay, writer, stopAtFirstFailure: false, ct)
+            .ConfigureAwait(false);
+        return new GenerationFileResult
         {
-            (CorpusFileKind.AnswerKeyCsv, AnswerKeyCsvWriter.FileName, () => AnswerKeyCsvWriter.Build(rows)),
-            (CorpusFileKind.AnswerKeyXlsx, AnswerKeyXlsxWriter.FileName, () => AnswerKeyXlsxWriter.Build(rows, guide))
+            Files = written.Files,
+            FailedFileName = written.FailedFileName,
+            Error = written.Error,
+            FileOpenElsewhere = written.FileOpenElsewhere,
+            Backups = written.Backups
         };
-
-        foreach (var (kind, fileName, bytes) in files)
-        {
-            ct.ThrowIfCancellationRequested();
-            // Paths = case folder + constant names only; WrittenFiles from case.json never build paths (T-04-68)
-            var path = Path.Combine(caseFolder, fileName);
-            try
-            {
-                await writer(path, bytes(), ct).ConfigureAwait(false);
-                result.Files.Add(Stamp(kind, fileName, plan.PlanId));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // Carry on with the next file: a locked CSV must not block the XLSX (Pitfall 8)
-                RecordFailure(result, fileName, path, ex);
-            }
-        }
-
-        return result;
     }
 
     /// <summary>

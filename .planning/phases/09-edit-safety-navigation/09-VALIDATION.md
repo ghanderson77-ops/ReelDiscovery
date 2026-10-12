@@ -75,7 +75,7 @@ Existing infrastructure covers all phase requirements (FakeLlmProvider, Discover
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| New banners/buttons readable at 150% DPI in the running app | QA-01, GUIDE-09 | Render tests cover clipping, not visual judgment | Run app at 150% scaling; edit guide after approval; visit Generate Corpus, Case Summary, Review Plan (no plan), Case Guide |
+| New banners/buttons readable at 150% DPI in the running app | QA-01, GUIDE-09 | Render tests cover clipping, not visual judgment | Run app at 150% scaling; edit guide after approval; visit Generate Corpus, Case Summary, Review Plan (no plan), Case Guide. **Status: ⬜ pending — not performed; deferred by user 2026-10-12 (steps 1-10 in 09-10-SUMMARY.md)** |
 
 ---
 
@@ -88,4 +88,4 @@ Existing infrastructure covers all phase requirements (FakeLlmProvider, Discover
 - [x] Feedback latency < 90s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** approved 2026-10-11 (automated gate; 150% DPI human walkthrough recorded in 09-10-SUMMARY.md)
+**Approval:** approved 2026-10-11 (automated gate); 150% DPI walkthrough deferred by user 2026-10-12 — outstanding (see 09-10-SUMMARY.md)

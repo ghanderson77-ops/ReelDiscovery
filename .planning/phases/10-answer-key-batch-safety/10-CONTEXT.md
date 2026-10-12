@@ -99,6 +99,20 @@ Out of scope: an in-app relabel UI (D-13 keeps relabeling manual), persisting `T
   - Relabel round-trips cover both CSV and XLSX (inline and shared-string cells) via `SpreadsheetDocument.Open`.
   - Run `Category=Scale` once, because batching changes (07-REVIEW-FIX precedent).
 
+### Amendments after research (auto-locked 2026-10-12; see 10-RESEARCH.md)
+- **D-20 (refines D-03):** The relabel sidecar stores a per-file baseline for each key file: the PlanId, a SHA-256 hash and the relabel set from our last successful write.
+  - A file counts as user-edited only when its hash differs from our last write.
+  - A row counts as a user edit only when it differs from that file's own baseline.
+  - "Later LastWriteTimeUtc wins" applies only when both files carry conflicting edits.
+  - This keeps a stale XLSX (one Excel had open during a failed write) from silently removing a relabel captured from the CSV.
+- **D-21 (refines D-17):** The stale-wave-batch resolution cancels through `_transport.CancelAsync` directly and **never** appends a `Cancelled` ledger line. The batch stays in `Pending()` and the existing poll loop collects its partial results.
+  - The 5-minute `DrainTimeout` can be shorter than OpenAI's cancelling window (up to 10 min). D-17 step 4 already covers this case.
+- **D-22 (extends D-13/D-14):** Cross-provider resolution runs in `StepGenerateCorpus.RunCoreAsync` before `CreateRunGateway`. A key counts as available when `transportFor(kind) != null`.
+  - If the other provider's status call or cancel call fails, the run is refused with the same notice pattern as D-14. It never runs anyway.
+- **D-23:** On a relabeled row whose Rationale cell the user left empty or unchanged, the projected rationale is kept.
+  - On a row that is already relabeled, an edit to the Rationale alone is captured. Rationale edits on rows that are not relabeled are ignored (D-05).
+- **D-24:** A live-mode case with collected results from the other provider leaves them unbilled until Start Over (D-16) or a later Finished batch run. This is accepted as is, with no new billing path.
+
 ### Claude's Discretion
 - How the harvest is implemented: the parser structure, and whether CSV and XLSX readers share a row model.
 - The exact Activity log wording for cross-provider resolution, consistent with existing Activity phrasing.

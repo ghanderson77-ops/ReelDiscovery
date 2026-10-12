@@ -1,4 +1,5 @@
 using System.Globalization;
+using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
@@ -23,6 +24,8 @@ public class StepCorpusSettings : UserControl, IWizardStep
     private Label _lblTitle = null!;
     private Label _lblSubtitle = null!;
     private Button _btnResetDefaults = null!;
+    private Button _btnSkipToDiscovery = null!;
+    private ToolTip _toolTip = null!;
     private Label _lblNotice = null!;
     private RowStyle _noticeRow = null!;
     private Panel _scrollHost = null!;
@@ -163,6 +166,9 @@ public class StepCorpusSettings : UserControl, IWizardStep
     /// </summary>
     public static bool RequestsPlanning(bool mixOk, bool datesOk) => mixOk && datesOk;
 
+    /// <summary>09 W2 / U1: the zero-spend route to Discovery Documents shows whenever there is no approved plan.</summary>
+    public static bool ShowsSkipToDiscovery(bool hasPlan, bool approved) => !(hasPlan && approved);
+
     // ----- Layout -----
 
     private void InitializeUI()
@@ -176,6 +182,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
         var inset = LogicalToDeviceUnits(15);
         var buttonHeight = LogicalToDeviceUnits(34);
         var xs = LogicalToDeviceUnits(4);
+        _toolTip = new ToolTip();
 
         _root = new TableLayoutPanel
         {
@@ -232,14 +239,29 @@ public class StepCorpusSettings : UserControl, IWizardStep
             ForeColor = Theme.TextMuted
         };
         _lblSubtitle.Height = _lblSubtitle.PreferredHeight;
+        // Header buttons (09 UI-SPEC S4): Skip to Discovery Documents, then Reset to Defaults, on one row
+        var headerButtons = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(gap, 0, 0, 0),
+            Padding = new Padding(0)
+        };
+        _btnSkipToDiscovery = ButtonHelper.CreateButton("Skip to Discovery Documents", 0, buttonHeight, ButtonStyle.Default);
+        _btnSkipToDiscovery.Margin = new Padding(0, 0, smallGap, 0);
+        _toolTip.SetToolTip(_btnSkipToDiscovery, "Go straight to Discovery Documents without planning the corpus. No model calls are made.");
         _btnResetDefaults = ButtonHelper.CreateButton("Reset to Defaults", 0, buttonHeight, ButtonStyle.Default);
-        _btnResetDefaults.Anchor = AnchorStyles.Right;
-        _btnResetDefaults.Margin = new Padding(gap, 0, 0, 0);
+        _btnResetDefaults.Margin = new Padding(0);
+        headerButtons.Controls.Add(_btnSkipToDiscovery);
+        headerButtons.Controls.Add(_btnResetDefaults);
 
         headerLayout.Controls.Add(_lblTitle, 0, 0);
         headerLayout.Controls.Add(_lblSubtitle, 0, 1);
-        headerLayout.Controls.Add(_btnResetDefaults, 1, 0);
-        headerLayout.SetRowSpan(_btnResetDefaults, 2);
+        headerLayout.Controls.Add(headerButtons, 1, 0);
+        headerLayout.SetRowSpan(headerButtons, 2);
         _root.Controls.Add(headerLayout, 0, 0);
 
         // ----- Row 1, notice line (wraps; width follows the step in UpdateWidths) -----
@@ -322,6 +344,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
         _scrollHost.ClientSizeChanged += (s, e) => UpdateWidths();
         this.SizeChanged += (s, e) => UpdateWidths();
         _btnResetDefaults.Click += (s, e) => ResetDefaults();
+        _btnSkipToDiscovery.Click += (s, e) => SkipToDiscovery();
 
         foreach (var toggle in _sizeToggles)
             toggle.Click += (s, e) => SelectPreset((int)toggle.Tag!);
@@ -1052,15 +1075,24 @@ public class StepCorpusSettings : UserControl, IWizardStep
     {
         if (_state == null || Draft.Corpus == null)
             return Task.FromResult(false);
+        if (!ValidateFields())
+            return Task.FromResult(false);
 
+        if (RequestsPlanning(true, datesOk: true))
+            _state.PlanOnEntryOnce = true;
+        return Task.FromResult(true);
+    }
+
+    // Shared by Next and Skip to Discovery Documents: flush pending text, then M-S1 (mix total) and M-S2 (dates) block
+    private bool ValidateFields()
+    {
         FlushCommits();
 
-        var mixOk = Settings.MixTotal == 100;
-        if (!mixOk)
+        if (Settings.MixTotal != 100)
         {
             var (title, text) = CorpusUiText.MS1MixTotal(Settings.MixTotal);
             MessageBox.Show(FindForm(), text, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return Task.FromResult(false);
+            return false;
         }
 
         var badDate = InvalidDateField();
@@ -1068,12 +1100,19 @@ public class StepCorpusSettings : UserControl, IWizardStep
         {
             var (title, text) = CorpusUiText.MS2InvalidDate(badDate);
             MessageBox.Show(FindForm(), text, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return Task.FromResult(false);
+            return false;
         }
 
-        if (RequestsPlanning(mixOk, datesOk: true))
-            _state.PlanOnEntryOnce = true;
-        return Task.FromResult(true);
+        return true;
+    }
+
+    // Skip to Discovery Documents (09 W2, UI-SPEC S4): same validation as Next, but no planning request, so Review Plan
+    // never plans on the way (PlanOnEntryOnce untouched). The wizard's leave path (OnLeaveStepAsync) saves the settings.
+    private void SkipToDiscovery()
+    {
+        if (_state == null || Draft.Corpus == null || !ValidateFields())
+            return;
+        (FindForm() as WizardForm)?.NavigateToStep(typeof(StepDiscoveryDocuments));
     }
 
     /// <summary>
@@ -1119,6 +1158,7 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
             _lblNotice.Text = CorpusUiText.SettingsNotice(Draft.Corpus!.HasPlan, Draft.Corpus.Approved,
                 Draft.Corpus.ApprovedUtc?.ToLocalTime());
+            _btnSkipToDiscovery.Visible = ShowsSkipToDiscovery(Draft.Corpus.HasPlan, Draft.Corpus.Approved);
             SizeNoticeRow();
 
             _txtSize.Text = FormatCount(settings.TotalEmails);
@@ -1586,6 +1626,10 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
     internal CaseDraft DraftForTest => Draft;
     internal Panel ScrollHost => _scrollHost;
+    internal Button SkipToDiscoveryButton => _btnSkipToDiscovery;
+    internal Button ResetDefaultsButton => _btnResetDefaults;
+    internal Label NoticeLabel => _lblNotice;
+    internal Label TitleLabel => _lblTitle;
     internal CardPanel SizeCard => _cardSize;
     internal CardPanel DatesCard => _cardDates;
     internal PercentSlider Slider => _slider;

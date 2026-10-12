@@ -98,6 +98,16 @@ public class CorpusSettingsStepLogicTests
         Assert.Equal(expected, StepCorpusSettings.RequestsPlanning(mixOk, datesOk));
     }
 
+    // 09 W2 / U1: the skip button shows whenever there is no approved plan
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    public void ShowsSkipToDiscovery_UnlessApprovedPlan(bool hasPlan, bool approved, bool expected)
+    {
+        Assert.Equal(expected, StepCorpusSettings.ShowsSkipToDiscovery(hasPlan, approved));
+    }
+
     [Fact]
     public void StepContract()
     {

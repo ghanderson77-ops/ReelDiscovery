@@ -210,9 +210,9 @@ public static class CorpusUiText
     public static string SettingsNotice(bool hasPlan, bool approved, DateTime? approvedLocal)
     {
         if (!hasPlan)
-            return "Click Next to plan every thread and message from these settings and the case guide. Nothing is written yet.";
+            return "Click Next to plan every thread and message from these settings and the case guide. Nothing is written yet. To write discovery documents without emails, click Skip to Discovery Documents.";
         if (!approved)
-            return "Changing these settings replaces the current plan when you click Next.";
+            return "Changing these settings replaces the current plan when you click Next. Skip to Discovery Documents leaves the plan as it is.";
 
         var on = approvedLocal.HasValue ? $" on {Date(approvedLocal.Value)}" : "";
         return $"The plan was approved{on}. If you change these settings, Review Plan offers to re-plan; the approved plan stays until you do.";

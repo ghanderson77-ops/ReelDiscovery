@@ -90,9 +90,9 @@ public class CorpusUiTextTests
     [Fact]
     public void SettingsNotice_ThreeStates()
     {
-        Assert.Equal("Click Next to plan every thread and message from these settings and the case guide. Nothing is written yet.",
+        Assert.Equal("Click Next to plan every thread and message from these settings and the case guide. Nothing is written yet. To write discovery documents without emails, click Skip to Discovery Documents.",
             CorpusUiText.SettingsNotice(false, false, null));
-        Assert.Equal("Changing these settings replaces the current plan when you click Next.",
+        Assert.Equal("Changing these settings replaces the current plan when you click Next. Skip to Discovery Documents leaves the plan as it is.",
             CorpusUiText.SettingsNotice(true, false, null));
         Assert.Equal("The plan was approved on Mar 5, 2024. If you change these settings, Review Plan offers to re-plan; the approved plan stays until you do.",
             CorpusUiText.SettingsNotice(true, true, new DateTime(2024, 3, 5, 14, 7, 0)));

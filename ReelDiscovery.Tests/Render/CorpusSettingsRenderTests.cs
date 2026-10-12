@@ -1,3 +1,4 @@
+using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
@@ -85,8 +86,63 @@ public class CorpusSettingsRenderTests
             });
     }
 
+    // 09 UI-SPEC S4 / rule 46: with no plan the header shows Skip to Discovery Documents then Reset to Defaults on one row
+    [Fact]
+    public void NoPlan_SkipToDiscovery()
+    {
+        RenderBoth("corpus-settings-skip", draft => { }, mediaAvailable: true, expandAdvanced: false, arrange: null,
+            (step, labels) =>
+            {
+                Assert.Contains(CorpusUiText.SettingsNotice(false, false, null), labels);
+            },
+            shown: step =>
+            {
+                var skip = (ThemedButton)step.SkipToDiscoveryButton;
+                var reset = (ThemedButton)step.ResetDefaultsButton;
+                Assert.True(skip.Visible);
+                Assert.True(reset.Visible);
+                Assert.Equal("Skip to Discovery Documents", skip.Text);
+                Assert.Equal(ButtonStyle.Default, skip.Variant);
+                Assert.Equal(ButtonStyle.Default, reset.Variant);
+                var skipAt = step.PointToClient(skip.PointToScreen(Point.Empty));
+                var resetAt = step.PointToClient(reset.PointToScreen(Point.Empty));
+                Assert.Equal(skipAt.Y, resetAt.Y);
+                Assert.True(resetAt.X >= skipAt.X + skip.Width, $"reset left {resetAt.X}, skip right {skipAt.X + skip.Width}");
+                Assert.True(resetAt.X + reset.Width <= step.ClientSize.Width, "Reset to Defaults runs past the step");
+                foreach (var button in new[] { skip, reset })
+                {
+                    var textWidth = TextRenderer.MeasureText(button.Text, button.Font).Width;
+                    Assert.True(button.Width >= textWidth, $"'{button.Text}' {button.Width} px narrower than its text {textWidth} px");
+                }
+                // The title gives way before the buttons: it ends left of the button row
+                var titleRight = step.PointToClient(step.TitleLabel.PointToScreen(Point.Empty)).X + step.TitleLabel.Width;
+                Assert.True(titleRight <= skipAt.X, $"title right {titleRight}, skip left {skipAt.X}");
+                Assert.True(step.NoticeLabel.Height >= step.NoticeLabel.PreferredHeight - 1,
+                    $"notice {step.NoticeLabel.Height} px, needs {step.NoticeLabel.PreferredHeight} px");
+            });
+    }
+
+    [Fact]
+    public void ApprovedPlan_SkipHidden()
+    {
+        RenderBoth("corpus-settings-approved", draft =>
+            {
+                draft.Corpus!.PlanId = Guid.NewGuid();
+                draft.Corpus.Approved = true;
+                draft.Corpus.ApprovedUtc = new DateTime(2026, 9, 30, 15, 5, 0, DateTimeKind.Utc);
+            },
+            mediaAvailable: true, expandAdvanced: false, arrange: null,
+            (step, labels) => { },
+            shown: step =>
+            {
+                Assert.False(step.SkipToDiscoveryButton.Visible);
+                Assert.True(step.ResetDefaultsButton.Visible);
+            });
+    }
+
     private static void RenderBoth(string name, Action<CaseDraft> setup, bool mediaAvailable, bool expandAdvanced,
-        Action<StepCorpusSettings>? arrange, Action<StepCorpusSettings, List<string>> verify)
+        Action<StepCorpusSettings>? arrange, Action<StepCorpusSettings, List<string>> verify,
+        Action<StepCorpusSettings>? shown = null)
     {
         RenderHarness.RunSta(() =>
         {
@@ -122,6 +178,8 @@ public class CorpusSettingsRenderTests
                     suffixCenter = CenterY(step, step.PercentSuffix);
                     // Visible only while the form is shown, so collect the texts here
                     visibleLabels = AllControls(step).OfType<Label>().Where(l => l.Visible).Select(l => l.Text).ToList();
+                    // Visible flags only hold while the form is shown
+                    shown?.Invoke(step);
                 });
 
                 Assert.True(File.Exists(result.PngPath), result.PngPath);

@@ -90,6 +90,13 @@ public class WizardState
     /// subscribe to its status, resume pending batches and bill orphans. <paramref name="transport"/> and
     /// <paramref name="timings"/> are test seams; null uses the text provider's batch transport and the default timings.
     /// </summary>
+    /// <summary>
+    /// CR-A04: catalog model of the provider that ran a batch (tiers never mix providers, D-11); null = unpriced, never $0.
+    /// Shared by the run's orphan billing and Start Over's unused-results pricing (D-16).
+    /// </summary>
+    public AIModelConfig? PriceBatchModel(LlmProviderKind kind, string modelId) =>
+        AvailableModelConfigs.FirstOrDefault(m => m.ModelId == modelId && m.Provider == kind);
+
     public (ILlmGateway Gateway, BatchingLlmProvider? Batch) CreateRunGateway(bool useBatch, string caseFolder, Guid planId,
         IBatchTransport? transport = null, BatchTimings? timings = null)
     {
@@ -106,10 +113,8 @@ public class WizardState
         // CR-A04: orphans are priced with the catalog model of the provider that ran their batch (tiers never mix
         // providers, D-11), so a batch left by another provider is never billed at $0
         var provider = TextProvider;
-        Func<LlmProviderKind, string, AIModelConfig?> price = (kind, id) =>
-            AvailableModelConfigs.FirstOrDefault(m => m.ModelId == id && m.Provider == kind);
         var batch = new BatchingLlmProvider(live, transport ?? LlmProviderFactory.CreateBatchTransport(provider, key),
-            new BatchLedger(caseFolder), planId, price, timings)
+            new BatchLedger(caseFolder), planId, PriceBatchModel, timings)
         {
             // WR-A09: orphan spend reaches the header ticker as well as RunEnded
             UsageTracker = UsageTracker

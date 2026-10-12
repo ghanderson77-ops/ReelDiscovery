@@ -993,6 +993,18 @@ public partial class StepGenerateCorpus : IWizardStep
             if (IsDisposed)
                 return;
 
+            // D-16/WR-A06: results already collected but never used were paid for; record them before the ledger is deleted.
+            // Only when the ledger goes (cancel succeeded); an unreadable ledger prices as empty (Pitfall 13)
+            if (!cancelFailed)
+            {
+                var bill = await Task.Run(() => BatchingLlmProvider.PriceUnusedResults(new BatchLedger(folder), _state.PriceBatchModel));
+                if (IsDisposed)
+                    return;
+
+                foreach (var line in bill.Lines)
+                    _state.UsageTracker.RecordUsage(BatchingLlmProvider.OrphanOperation, line.Model, line.Usage, line.Cost);
+            }
+
             // Deletes only journal-listed and planned relevant EML paths under Mailboxes plus two constant-name files (T-05-49).
             // WR-A05: a batch that could not be cancelled keeps its ledger record so it is never lost
             var reset = await GenerationReset.StartOverAsync(folder, plan, Draft.Guide, keepBatchLedger: cancelFailed);

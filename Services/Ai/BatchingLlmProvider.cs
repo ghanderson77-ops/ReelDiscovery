@@ -286,45 +286,60 @@ public class BatchingLlmProvider : ILlmProvider
         var bill = new OrphanBill();
         foreach (var group in groups)
         {
-            var cost = new CostBreakdown();
-            var input = 0;
-            var output = 0;
-            var priced = true;
-            var lines = new List<(string, AIModelConfig, TokenUsage, CostBreakdown)>();
-            foreach (var (_, orphan) in group)
-            {
-                // CR-A04: the batch's own provider and model; no catalog price means unbilled, never a recorded $0
-                var model = _priceLookup(orphan.Provider, orphan.ModelId);
-                if (model == null)
-                {
-                    priced = false;
-                    break;
-                }
-
-                var usage = orphan.Result.Response!.ToUsage();
-                usage.IsBatch = true;
-                usage.Normalize();
-                var itemCost = model.CalculateCost(usage);
-                cost.Add(itemCost);
-                lines.Add((group.Key, model, usage, itemCost));
-                input += usage.TotalInputTokens;
-                output += usage.OutputTokens;
-            }
-
-            if (!priced)
-            {
-                bill.UnpricedBatchIds.Add(group.Key);
-                continue;
-            }
-
-            bill.Cost.Add(cost);
-            bill.Lines.AddRange(lines);
-            bill.InputTokens += input;
-            bill.OutputTokens += output;
-            bill.ItemsByBatch[group.Key] = group.Select(kv => kv.Key).ToList();
+            AddToBill(bill, group.Key,
+                group.Select(kv => (kv.Value.ModelId, kv.Value.Provider, kv.Value.Result)).ToList(), _priceLookup);
         }
 
         return bill;
+    }
+
+    // One batch's unused results onto the bill (CR-A04: the batch's own provider and model; a batch holding an unpriced
+    // model goes to UnpricedBatchIds and adds nothing)
+    private static void AddToBill(OrphanBill bill, string batchId,
+        IReadOnlyList<(string ModelId, LlmProviderKind Provider, BatchItemResult Result)> items,
+        Func<LlmProviderKind, string, AIModelConfig?> priceLookup)
+    {
+        if (!TryPriceItems(items, batchId, priceLookup, out var cost, out var input, out var output, out var lines))
+        {
+            bill.UnpricedBatchIds.Add(batchId);
+            return;
+        }
+
+        bill.Cost.Add(cost);
+        bill.Lines.AddRange(lines);
+        bill.InputTokens += input;
+        bill.OutputTokens += output;
+        bill.ItemsByBatch[batchId] = items.Select(i => i.Result.CustomId).ToList();
+    }
+
+    // The only place batch results are priced (PriceOrphans and PriceUnusedResults). False when some item's model has no
+    // catalog price: the batch is then left unbilled, never recorded at $0 (CR-A04)
+    private static bool TryPriceItems(IEnumerable<(string ModelId, LlmProviderKind Provider, BatchItemResult Result)> items,
+        string batchId, Func<LlmProviderKind, string, AIModelConfig?> priceLookup, out CostBreakdown cost, out int input,
+        out int output, out List<(string, AIModelConfig, TokenUsage, CostBreakdown)> lines)
+    {
+        cost = new CostBreakdown();
+        input = 0;
+        output = 0;
+        lines = new List<(string, AIModelConfig, TokenUsage, CostBreakdown)>();
+        foreach (var (modelId, provider, result) in items)
+        {
+            // CR-A04: the batch's own provider and model; no catalog price means unbilled, never a recorded $0
+            var model = priceLookup(provider, modelId);
+            if (model == null)
+                return false;
+
+            var usage = result.Response!.ToUsage();
+            usage.IsBatch = true;
+            usage.Normalize();
+            var itemCost = model.CalculateCost(usage);
+            cost.Add(itemCost);
+            lines.Add((batchId, model, usage, itemCost));
+            input += usage.TotalInputTokens;
+            output += usage.OutputTokens;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -335,7 +350,38 @@ public class BatchingLlmProvider : ILlmProvider
     /// </summary>
     public static OrphanBill PriceUnusedResults(BatchLedger ledger, Func<LlmProviderKind, string, AIModelConfig?> priceLookup)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(ledger);
+        ArgumentNullException.ThrowIfNull(priceLookup);
+
+        var bill = new OrphanBill();
+        var state = ledger.Replay();
+        if (!state.Readable)
+            return bill;
+
+        var collected = state.SubmittedById.Values
+            .Where(r => state.CollectedIds.Contains(r.BatchId) && !state.OrphansBilledIds.Contains(r.BatchId))
+            .OrderBy(r => r.SubmittedUtc)
+            .ThenBy(r => r.BatchId, StringComparer.Ordinal)
+            .ToList();
+        foreach (var record in collected)
+        {
+            // CX-05: a batch collected without a durable cache has nothing to price here
+            if (!ledger.TryReadResults(record.BatchId, out var cached))
+                continue;
+
+            // T-07-23 and CR-A02, as in Recover: only this batch's own ids, never a result a unit already consumed
+            var batch = TrackedBatch.From(record, resumed: false);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var items = cached
+                .Where(result => result != null && batch.Contains(result.CustomId)
+                    && !state.IsConsumed(record.BatchId, result.CustomId) && IsUsable(result) && seen.Add(result.CustomId))
+                .Select(result => (batch.ModelFor(result.CustomId), record.Provider, result))
+                .ToList();
+            if (items.Count > 0)
+                AddToBill(bill, record.BatchId, items, priceLookup);
+        }
+
+        return bill;
     }
 
     /// <summary>
@@ -392,12 +438,13 @@ public class BatchingLlmProvider : ILlmProvider
         }
     }
 
-    private const string OrphanOperation = "Batch results not used";
-
     /// <summary>
     /// Session ticker (WR-A09): orphan spend is recorded here when it is marked billed, after the journal carries it.
     /// </summary>
     public TokenUsageTracker? UsageTracker { get; set; }
+
+    /// <summary>Usage-tracker operation for collected batch results no unit used (D-10, WR-A06, WR-A09).</summary>
+    public const string OrphanOperation = "Batch results not used";
 
     /// <summary>
     /// Cancels this plan's pending provider batches (one transport per record's provider; a null transport is skipped),
@@ -1217,18 +1264,7 @@ public class BatchingLlmProvider : ILlmProvider
 
     private async Task CollectAsync(TrackedBatch batch, BatchStatusResult status, BatchResultsResult results)
     {
-        // T-07-23: only ids this batch was submitted with are delivered; foreign or repeated ids are ignored
-        var byId = new Dictionary<string, BatchItemResult>(StringComparer.Ordinal);
-        foreach (var item in results.Items)
-        {
-            if (item != null && batch.Contains(item.CustomId) && !byId.ContainsKey(item.CustomId))
-                byId[item.CustomId] = item;
-        }
-
-        var ordered = batch.ItemIds.Select(id => byId.TryGetValue(id, out var found)
-            ? found
-            : new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Expired, Message = "Missing from the batch results" })
-            .ToList();
+        var ordered = ClassifyResults(batch, results.Items);
 
         var saved = false;
         try
@@ -1292,6 +1328,23 @@ public class BatchingLlmProvider : ILlmProvider
         // provider (OpenAI keeps batch files until they are deleted). Kept when the cache could not be written.
         if (saved)
             await DeleteFilesBestEffortAsync(batch.InputFileId, status.OutputFileId);
+    }
+
+    // One result per submitted id, in submission order (shared by CollectAsync and ResolveOtherProviderPendingAsync)
+    private static List<BatchItemResult> ClassifyResults(TrackedBatch batch, IEnumerable<BatchItemResult?>? items)
+    {
+        // T-07-23: only ids this batch was submitted with are delivered; foreign or repeated ids are ignored
+        var byId = new Dictionary<string, BatchItemResult>(StringComparer.Ordinal);
+        foreach (var item in items ?? Enumerable.Empty<BatchItemResult?>())
+        {
+            if (item != null && batch.Contains(item.CustomId) && !byId.ContainsKey(item.CustomId))
+                byId[item.CustomId] = item;
+        }
+
+        return batch.ItemIds.Select(id => byId.TryGetValue(id, out var found)
+            ? found
+            : new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Expired, Message = "Missing from the batch results" })
+            .ToList();
     }
 
     private async Task DeleteFilesBestEffortAsync(string? inputFileId, string? outputFileId)

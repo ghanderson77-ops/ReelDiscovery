@@ -285,7 +285,10 @@ public partial class BatchLedger
     /// </summary>
     public static int PendingBatchCount(string caseFolder, Guid planId, LlmProviderKind provider)
     {
-        throw new NotImplementedException();
+        if (string.IsNullOrWhiteSpace(caseFolder))
+            return 0;
+
+        return new BatchLedger(caseFolder).Replay().Pending(planId).Count(r => r.Provider == provider);
     }
 
     /// <summary>
@@ -294,7 +297,10 @@ public partial class BatchLedger
     /// </summary>
     public static int PendingBatchCountOtherProviders(string caseFolder, Guid planId, LlmProviderKind current)
     {
-        throw new NotImplementedException();
+        if (string.IsNullOrWhiteSpace(caseFolder))
+            return 0;
+
+        return new BatchLedger(caseFolder).Replay().Pending(planId).Count(r => r.Provider != current);
     }
 
     /// <summary>

@@ -69,7 +69,8 @@ public class AnswerKeyReaderTests : IDisposable
         Row("BR-000002", "T-0002", false, "Routine.")
     };
 
-    private static void AssertRows(List<AnswerKeyRow> expected, AnswerKeyParseResult result)
+    // XML end-of-line handling stores CRLF in a cell as LF, so XLSX read-back compares with LF line breaks
+    private static void AssertRows(List<AnswerKeyRow> expected, AnswerKeyParseResult result, bool lineFeedsOnly = false)
     {
         Assert.True(result.Parsed, result.Error);
         Assert.Equal(expected.Count, result.Rows.Count);
@@ -78,7 +79,8 @@ public class AnswerKeyReaderTests : IDisposable
             Assert.Equal(expected[i].DocId, result.Rows[i].DocId);
             Assert.Equal(expected[i].ThreadId, result.Rows[i].ThreadId);
             Assert.Equal(expected[i].Relevance, result.Rows[i].Relevance);
-            Assert.Equal(expected[i].Rationale, AnswerKeyReader.StripCsvGuard(result.Rows[i].Rationale));
+            var rationale = lineFeedsOnly ? expected[i].Rationale.Replace("\r\n", "\n") : expected[i].Rationale;
+            Assert.Equal(rationale, AnswerKeyReader.StripCsvGuard(result.Rows[i].Rationale));
         }
     }
 
@@ -169,7 +171,7 @@ public class AnswerKeyReaderTests : IDisposable
 
         var result = AnswerKeyReader.ParseXlsx(AnswerKeyXlsxWriter.Build(rows, Guide()));
 
-        AssertRows(rows, result);
+        AssertRows(rows, result, lineFeedsOnly: true);
         Assert.Equal("=SUM(A1)", result.Rows[1].Rationale);
     }
 

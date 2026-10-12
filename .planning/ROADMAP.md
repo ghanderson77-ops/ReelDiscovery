@@ -307,7 +307,7 @@ Plans:
 Plans:
 - [x] 09-01-PLAN.md — W1 pure layer: CorpusApproval.WithdrawIfGuideChanged, GuideChanged entry/card + run-refusal copy, NotApproved split, Case Guide DependencyNotice (Wave 1)
 - [x] 09-02-PLAN.md — W3 data layer: ExhibitStamps, WrittenStamps, DiscoveryStaleness exhibit check, CorpusDetector stamps (Wave 1)
-- [ ] 09-03-PLAN.md — W2 logic: one-shot PlanOnEntryOnce (Corpus Settings Next only), PlanRequested entry rule, Continue Without a Plan gate (Wave 1)
+- [x] 09-03-PLAN.md — W2 logic: one-shot PlanOnEntryOnce (Corpus Settings Next only), PlanRequested entry rule, Continue Without a Plan gate (Wave 1)
 - [ ] 09-04-PLAN.md — W1 Generate Corpus: GuideChanged card, explicit card action (no Start Over fall-through), RunCoreAsync refusal, renders (Wave 2)
 - [ ] 09-05-PLAN.md — W1 withdrawal at Case Guide save, reopen and Case Summary entry; W6 Case Summary Generate Corpus button (Wave 2)
 - [ ] 09-06-PLAN.md — W1 Case Guide dependency line + PlanDependency banner, renders at 144 DPI (Wave 2)

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-10-12T01:48:23.253Z"
+stopped_at: Completed 09-03-PLAN.md
+last_updated: "2026-10-12T01:51:21.004Z"
 last_activity: 2026-10-12
 progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 159
-  completed_plans: 151
-  percent: 95
+  completed_plans: 152
+  percent: 96
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-29)
 ## Current Position
 
 Phase: 9 (Edit Safety & Navigation) — EXECUTING
-Plan: 3 of 10
+Plan: 4 of 10
 Status: Ready to execute
 Last activity: 2026-10-12
 
@@ -204,6 +204,7 @@ Progress: [██████████] 100%
 | Phase 08 P19 | 15min | 3 tasks | 3 files |
 | Phase 09 P01 | 4min | 2 tasks | 6 files |
 | Phase 09 P02 | 8min | 2 tasks | 7 files |
+| Phase 09 P03 | 10 min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -615,6 +616,8 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-01: CorpusApproval.WithdrawIfGuideChanged is the single guide-edit approval withdrawal; bumps Revision only when it withdrew; kept hashes never withdraw (D-25)
 - [Phase 09]: 09-01: Generate Corpus EntryDecision returns GuideChangedCard for HasPlan && GuideStale before the approval check
 - [Phase 09]: 09-02: Exhibit staleness derived from journal ThreadDone stamps; null current stamps never stale, missing journal = known-empty, legacy docs get existence-only check
+- [Phase 09]: 09-03: Review Plan auto-plans only on the one-shot PlanOnEntryOnce intent set by a successful Corpus Settings Next; consumed at the top of every entry
+- [Phase 09]: 09-03: Next on Review Plan with no plan asks Continue Without a Plan (Yes/No, default Yes) instead of blocking
 
 ### Pending Todos
 
@@ -636,6 +639,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-12T01:48:19.893Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-10-12T01:51:20.999Z
+Stopped at: Completed 09-03-PLAN.md
 Resume file: None

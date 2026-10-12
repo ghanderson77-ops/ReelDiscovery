@@ -2867,3 +2867,52 @@ public partial class GenerationRunnerMixedTests
         Assert.Equal(AnswerKeyBuilder.StatusGenerated, KeyRows()[target.Messages[0].DocId].Status);
     }
 }
+
+// ---------- 10-07 other-provider batches resolved at run start (D-13) ----------
+
+public partial class GenerationRunnerTests
+{
+    [Fact]
+    public async Task OtherProviderResolution_AddsActivityAfterRunStarted()
+    {
+        _fake.Respond = Responder();
+        var snapshot = new GenerationSnapshot();
+        var input = Input;
+        input.OtherProviderResolution = new OtherProviderResolution
+        {
+            Provider = LlmProviderKind.Anthropic, Found = 3, Collected = 1, Cancelled = 2
+        };
+
+        var result = await new GenerationRunner(_gateway).RunAsync(input, snapshot, Persist);
+
+        Assert.Equal(GenerationOutcome.Finished, result.Outcome);
+        var events = snapshot.Peek().Events.ToList();
+        var started = events.FindIndex(e => e.Kind == GenerationEventKind.RunStarted);
+        Assert.True(started >= 0);
+        var collected = events[started + 1];
+        Assert.Equal(GenerationEventKind.OtherProviderBatchesCollected, collected.Kind);
+        Assert.Equal(1, collected.Total);
+        Assert.Equal("Anthropic", collected.BatchProvider);
+        var cancelled = events[started + 2];
+        Assert.Equal(GenerationEventKind.OtherProviderBatchesCancelled, cancelled.Kind);
+        Assert.Equal(2, cancelled.Total);
+        Assert.Equal("Anthropic", cancelled.BatchProvider);
+    }
+
+    [Fact]
+    public async Task OtherProviderResolution_None_NoEvents()
+    {
+        _fake.Respond = Responder();
+        var none = new GenerationSnapshot();
+        await new GenerationRunner(_gateway).RunAsync(Input, none, Persist);
+        Assert.DoesNotContain(none.Peek().Events, e => e.Kind is GenerationEventKind.OtherProviderBatchesCollected
+            or GenerationEventKind.OtherProviderBatchesCancelled);
+
+        var zero = new GenerationSnapshot();
+        var input = Input;
+        input.OtherProviderResolution = new OtherProviderResolution { Provider = LlmProviderKind.Anthropic };
+        await new GenerationRunner(_gateway).RunAsync(input, zero, Persist);
+        Assert.DoesNotContain(zero.Peek().Events, e => e.Kind is GenerationEventKind.OtherProviderBatchesCollected
+            or GenerationEventKind.OtherProviderBatchesCancelled);
+    }
+}

@@ -2256,6 +2256,48 @@ public class GenerationUiTextTests
         Assert.Equal(ActivityTone.Success, line.Tone);
     }
 
+    private static GenerationEvent OtherProviderEvent(GenerationEventKind kind, int total, string provider)
+    {
+        var e = Event(kind);
+        e.Total = total;
+        e.BatchProvider = provider;
+        return e;
+    }
+
+    [Fact]
+    public void Activity_OtherProviderBatchesCollected()
+    {
+        var line = GenerationUiText.ActivityText(OtherProviderEvent(GenerationEventKind.OtherProviderBatchesCollected, 2, "Anthropic"));
+        Assert.Equal("Collected 2 Anthropic batches from an earlier session. Their results are kept as batch results not used.", line.Text);
+        Assert.Equal(ActivityTone.Success, line.Tone);
+
+        Assert.Equal("Collected 1 Anthropic batch from an earlier session. Its results are kept as batch results not used.",
+            GenerationUiText.ActivityText(OtherProviderEvent(GenerationEventKind.OtherProviderBatchesCollected, 1, "Anthropic")).Text);
+    }
+
+    [Fact]
+    public void Activity_OtherProviderBatchesCancelled()
+    {
+        var line = GenerationUiText.ActivityText(OtherProviderEvent(GenerationEventKind.OtherProviderBatchesCancelled, 1, "OpenAI"));
+        Assert.Equal("Cancelled 1 OpenAI batch from an earlier session. Its requests run once in this run.", line.Text);
+        Assert.Equal(ActivityTone.Warning, line.Tone);
+
+        Assert.Equal("Cancelled 3 OpenAI batches from an earlier session. Their requests run once in this run.",
+            GenerationUiText.ActivityText(OtherProviderEvent(GenerationEventKind.OtherProviderBatchesCancelled, 3, "OpenAI")).Text);
+    }
+
+    [Fact]
+    public void RunRefusedOtherProvider_Texts()
+    {
+        Assert.Equal("Generation did not start: " + GenerationUiText.OtherProviderKeyMissingText("Anthropic"),
+            GenerationUiText.RunRefusedOtherProviderKeyText("Anthropic"));
+        Assert.Equal(
+            "Generation did not start: Anthropic batches from an earlier session could not be collected or stopped. Nothing was started, so nothing is paid twice. Try again in a moment.",
+            GenerationUiText.RunRefusedOtherProviderFailedText("Anthropic"));
+        AssertNoBannedWords(GenerationUiText.RunRefusedOtherProviderKeyText("OpenAI"));
+        AssertNoBannedWords(GenerationUiText.RunRefusedOtherProviderFailedText("OpenAI"));
+    }
+
     [Fact]
     public void BannerBody_BatchClauses_PendingWins()
     {

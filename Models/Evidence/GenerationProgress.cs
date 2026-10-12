@@ -34,7 +34,10 @@ public enum GenerationEventKind
     NotSaved,
 
     // D-09: provider batch activity (append-only: earlier members keep their values)
-    BatchSubmitted, BatchFinished, BatchFinishedWithFailures, BatchFailedAtProvider, BatchCollectedAfterRestart
+    BatchSubmitted, BatchFinished, BatchFinishedWithFailures, BatchFailedAtProvider, BatchCollectedAfterRestart,
+
+    // 10 D-13: another provider's batches of this plan resolved at run start (append-only)
+    OtherProviderBatchesCollected, OtherProviderBatchesCancelled
 }
 
 /// <summary>

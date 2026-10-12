@@ -24,6 +24,9 @@ public class GenerationRunInput
 
     /// <summary>Batch mode (D-07): the decorator behind the run's gateway; null = live.</summary>
     public BatchingLlmProvider? Batch { get; set; }
+
+    /// <summary>10 D-13: other-provider batches the step resolved before this run (Activity only); null = none.</summary>
+    public OtherProviderResolution? OtherProviderResolution { get; set; }
 }
 
 /// <summary>

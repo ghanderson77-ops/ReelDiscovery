@@ -732,6 +732,12 @@ public static class GenerationUiText
     public const string RunRefusedNotApprovedText =
         "Generation did not start: the corpus plan is not approved. Open Review Plan to approve it.";
 
+    // 10 D-14: another provider's batches are pending and its key is missing
+    public static string RunRefusedOtherProviderKeyText(string provider) => string.Empty;
+
+    // 10 D-22: another provider's batches could not be collected or stopped; never run anyway
+    public static string RunRefusedOtherProviderFailedText(string provider) => string.Empty;
+
     public static string MissingEmlText(string docId) => $"{docId}.eml is no longer in the case folder.";
 
     // --- Entering the step ---

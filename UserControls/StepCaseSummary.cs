@@ -1651,6 +1651,9 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         // Cited email DocIds of every saved discovery document (09 S5 C-Q1 clause)
         public HashSet<string> DiscoveryCitedDocIds = new(StringComparer.Ordinal);
 
+        // Manually relabeled DocIDs of the current plan (10 D-06 C-Q1 clause)
+        public HashSet<string> RelabeledDocIds = new(StringComparer.Ordinal);
+
         public bool HasEmails => Generated.Count > 0;
     }
 
@@ -1797,6 +1800,9 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         var load = string.IsNullOrEmpty(folder) ? null : DiscoveryStore.Load(folder, inputs.Draft.CaseId);
         var set = load == null ? null : load.Set ?? new DiscoveryDocumentSet { CaseId = inputs.Draft.CaseId };
         var qa = LoadQa(folder, inputs.Plan, inputs.Guide, inputs.Prose, inputs.ModelFor, set?.TotalCostUsd ?? 0m);
+        // 10 D-06: relabels the next key write would keep (sidecar plus unharvested edits); PeekRelabels never throws
+        if (!string.IsNullOrEmpty(folder) && inputs.Plan != null)
+            qa.RelabeledDocIds.UnionWith(AnswerKeyFiles.PeekRelabels(folder, inputs.Plan, inputs.Guide).Keys);
         if (set != null)
         {
             foreach (var doc in (set.Documents ?? new()).Where(d => d != null))
@@ -2331,6 +2337,9 @@ public class StepCaseSummary : UserControl, IWizardStep, IConfirmLeave
         row.EmlCount = thread.Messages.Where(m => m != null).Sum(m => MailboxWriter.CopyPathsFor(m, folders).Count);
         row.AttachmentCount = thread.Messages.Where(m => m != null).Sum(m => m.Attachments?.Count ?? 0);
         row.CitedByDiscovery = thread.Messages.Any(m => m != null && !string.IsNullOrEmpty(m.DocId) && qa.DiscoveryCitedDocIds.Contains(m.DocId));
+        row.RelabelsKept = thread.Messages.Where(m => m != null).Any(m =>
+            (!string.IsNullOrEmpty(m.DocId) && qa.RelabeledDocIds.Contains(m.DocId))
+            || (m.Attachments ?? new()).Any(a => a != null && !string.IsNullOrEmpty(a.DocId) && qa.RelabeledDocIds.Contains(a.DocId)));
     }
 
     internal static List<QaFindingRow> ScanRows(QaSnapshot qa, CorpusPlan plan, CaseGuide guide)

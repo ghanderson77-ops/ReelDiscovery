@@ -36,6 +36,9 @@ public class QaFindingRow
 
     /// <summary>A saved discovery document cites one of this thread's emails (09 S5 C-Q1 clause).</summary>
     public bool CitedByDiscovery { get; set; }
+
+    /// <summary>One of this thread's emails or attachments has a manual relabel (10 D-06 C-Q1 clause).</summary>
+    public bool RelabelsKept { get; set; }
 }
 
 /// <summary>
@@ -405,7 +408,8 @@ public class QaFindingsDialog : Form
             return;
 
         var (title, text) = QaUiText.CQ1RegenerateThread(selected.RegenerateSubject, selected.EmlCount,
-            selected.AttachmentCount, selected.Relevant, selected.CitedByDiscovery);
+            selected.AttachmentCount, selected.Relevant, selected.CitedByDiscovery,
+            relabelsKept: selected.RelabelsKept);
         var confirm = Confirm ?? ((t, x) =>
             MessageBox.Show(this, x, t, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes);
         if (!confirm(title, text))

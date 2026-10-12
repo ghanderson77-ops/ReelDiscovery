@@ -1033,15 +1033,18 @@ public partial class StepGenerateCorpus : IWizardStep
         }
 
         // The journal can be large; counting its files (and the batch ledger) stays off the UI thread. WR-A05: pending
-        // batches of every plan, since Start Over deletes the whole ledger. 09 S5: the discovery sidecar read too
+        // batches of every plan, since Start Over deletes the whole ledger. 09 S5: the discovery sidecar read too.
+        // 10 D-07: relabel count too (PeekRelabels never throws; a failure counts as none)
         var caseId = Draft.CaseId;
-        var (files, pending, cited) = await Task.Run(() =>
+        var guide = Draft.Guide ?? new CaseGuide();
+        var (files, pending, cited, relabels) = await Task.Run(() =>
             (GenerationJournal.ListAllFiles(folder).Count, BatchLedger.PendingBatchCountAllPlans(folder),
-                StartOverCitesDiscovery(folder, caseId)));
+                StartOverCitesDiscovery(folder, caseId),
+                plan == null ? 0 : AnswerKeyFiles.PeekRelabels(folder, plan, guide).Count));
         if (IsDisposed || _isGenerating || _isResetting || _isResolvingBatches)
             return;
 
-        var (title, text) = GenerationUiText.CG2StartOver(files, pending > 0, cited);
+        var (title, text) = GenerationUiText.CG2StartOver(files, pending > 0, cited, relabelsKept: relabels > 0);
         if (!Confirm(title, text, MessageBoxIcon.Warning))
             return;
 

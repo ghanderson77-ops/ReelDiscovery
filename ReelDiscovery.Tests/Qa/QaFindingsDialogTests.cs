@@ -166,6 +166,29 @@ public class QaFindingsDialogTests
     }
 
     [Fact]
+    public void Regenerate_Relabeled_ConfirmAddsTheKeptClause()
+    {
+        RunSta(() =>
+        {
+            var rows = ThreeRows();
+            foreach (var row in rows)
+                row.RelabelsKept = true;
+            using var dialog = Scans(rows, regenerate: _ => Task.FromResult(new ThreadInvalidationResult { Appended = true }));
+            string? text = null;
+            dialog.Confirm = (_, x) =>
+            {
+                text = x;
+                return false;
+            };
+            Select(dialog, 0);
+            dialog.RegenerateSelectedAsync().GetAwaiter().GetResult();
+
+            Assert.Equal(QaUiText.CQ1RegenerateThread("Subject RD-000001", 3, 1, true, relabelsKept: true).Text, text);
+            Assert.EndsWith(" Relabels you made for its emails in the answer key are kept.", text);
+        });
+    }
+
+    [Fact]
     public void Regenerate_Confirmed_QueuesRowAndShowsFooter()
     {
         RunSta(() =>

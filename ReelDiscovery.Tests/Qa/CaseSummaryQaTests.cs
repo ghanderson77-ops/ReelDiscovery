@@ -2,6 +2,7 @@ using System.Diagnostics;
 using ReelDiscovery.Forms;
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
+using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Models.Qa;
@@ -322,6 +323,66 @@ public class CaseSummaryQaTests
             (fixture.Folder, fixture.Plan, fixture.Draft.Guide!, new ReviewProtocolProse(), _ => null, fixture.Draft));
         Assert.Empty(bare.DiscoveryCitedDocIds);
         Assert.All(StepCaseSummary.ScanRows(bare, fixture.Plan, fixture.Draft.Guide!), r => Assert.False(r.CitedByDiscovery));
+    }
+
+    /// <summary>
+    /// Saves a sidecar relabel (10 D-01) that flips the plan label of each DocID, as a harvested user edit would.
+    /// </summary>
+    internal static void SeedRelabels(string folder, CorpusPlan plan, CaseGuide guide, params string[] docIds)
+    {
+        var labels = AnswerKeyBuilder.Build(plan, guide).ToDictionary(r => r.DocId, r => r.Relevance, StringComparer.Ordinal);
+        var set = new AnswerKeyRelabelSet();
+        foreach (var docId in docIds)
+        {
+            set.Relabels.Add(new AnswerKeyRelabel
+            {
+                PlanId = plan.PlanId,
+                DocId = docId,
+                Relevance = labels[docId] == AnswerKeyBuilder.RelevantLabel ? AnswerKeyBuilder.NotRelevantLabel : AnswerKeyBuilder.RelevantLabel,
+                CapturedUtc = DateTime.UtcNow,
+                Source = AnswerKeyCsvWriter.FileName
+            });
+        }
+        new AnswerKeyRelabelStore(folder).Save(set);
+    }
+
+    [Fact]
+    public void ScanRows_RelabelsKept_FollowsTheThreadsDocIds()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+        SeedGenerated(fixture);
+        var withAttachment = fixture.Plan.Threads.First(t => t.Messages.Any(m => m.Attachments.Count > 0));
+        var byEmail = fixture.Plan.Threads.First(t => t.Id != withAttachment.Id);
+        var other = fixture.Plan.Threads.First(t => t.Id != withAttachment.Id && t.Id != byEmail.Id);
+        var emailDocId = byEmail.Messages[^1].DocId;
+        var attachmentDocId = withAttachment.Messages.SelectMany(m => m.Attachments).First().DocId;
+        new QaReportStore(fixture.Folder).SaveScans(new ScanReport
+        {
+            PlanId = fixture.Plan.PlanId,
+            CreatedUtc = DateTime.UtcNow,
+            JournalUtc = File.GetLastWriteTimeUtc(GenerationJournal.PathFor(fixture.Folder)),
+            ScannedEmails = 20,
+            Findings = new[] { byEmail, withAttachment, other }
+                .Select(t => new ScanFinding { ThreadId = t.Id, DocId = t.Messages[0].DocId, Subject = t.Subject, Check = ScanCheck.Timeline, Text = "a", Relevant = true })
+                .ToList()
+        });
+
+        // No relabels: no clause anywhere
+        var bare = StepCaseSummary.LoadQaWithDiscovery(
+            (fixture.Folder, fixture.Plan, fixture.Draft.Guide!, new ReviewProtocolProse(), _ => null, fixture.Draft));
+        Assert.Empty(bare.RelabeledDocIds);
+        Assert.All(StepCaseSummary.ScanRows(bare, fixture.Plan, fixture.Draft.Guide!), r => Assert.False(r.RelabelsKept));
+
+        SeedRelabels(fixture.Folder, fixture.Plan, fixture.Draft.Guide!, emailDocId, attachmentDocId);
+        var qa = StepCaseSummary.LoadQaWithDiscovery(
+            (fixture.Folder, fixture.Plan, fixture.Draft.Guide!, new ReviewProtocolProse(), _ => null, fixture.Draft));
+        Assert.Contains(emailDocId, qa.RelabeledDocIds);
+        Assert.Contains(attachmentDocId, qa.RelabeledDocIds);
+
+        var rows = StepCaseSummary.ScanRows(qa, fixture.Plan, fixture.Draft.Guide!);
+        Assert.True(rows.Single(r => r.ThreadId == byEmail.Id).RelabelsKept);
+        Assert.True(rows.Single(r => r.ThreadId == withAttachment.Id).RelabelsKept);
+        Assert.False(rows.Single(r => r.ThreadId == other.Id).RelabelsKept);
     }
 
     [Fact]

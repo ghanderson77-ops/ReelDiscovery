@@ -420,6 +420,38 @@ public class GenerateCorpusStepTests
     }
 
     [Fact]
+    public void StartOver_WithRelabels_ConfirmSaysKept()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            // Without relabels: no clause
+            string? text = null;
+            step.Confirm = (_, x, _) =>
+            {
+                text = x;
+                return false;
+            };
+            Pump(step.ClickStartOverAsync());
+            Assert.NotNull(text);
+            Assert.DoesNotContain("Relabels you made in the answer key are kept.", text);
+
+            // A relabel of the current plan: the D-07 reassurance
+            Qa.CaseSummaryQaTests.SeedRelabels(h.Folder, h.Plan, h.Draft.Guide!, h.Relevant[0].Messages[0].DocId);
+            text = null;
+            Pump(step.ClickStartOverAsync());
+            Assert.NotNull(text);
+            Assert.Contains("Relabels you made in the answer key are kept.", text);
+            Assert.True(File.Exists(GenerationJournal.PathFor(h.Folder)));
+        });
+    }
+
+    [Fact]
     public void StartOver_No_ChangesNothing()
     {
         using var h = new Harness();

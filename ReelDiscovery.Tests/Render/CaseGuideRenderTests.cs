@@ -1,6 +1,8 @@
 using ReelDiscovery.Helpers;
 using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
+using ReelDiscovery.Models.Corpus;
+using ReelDiscovery.Models.Evidence;
 using ReelDiscovery.Services.Case;
 using ReelDiscovery.Tests.Case;
 using ReelDiscovery.UserControls;
@@ -409,7 +411,166 @@ public class CaseGuideRenderTests
         });
     }
 
+    [Fact]
+    public void PlanDependencyBanner()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                // 09 S2 decision table row 1: the plan was built from an earlier guide and no other banner holds the row
+                var draft = CaseTestData.SampleGuidedDraft();
+                draft.Corpus = PlanCorpus("stale", approved: false);
+                using var fixture = new GuideFixture(draft);
+                var heading = false;
+                var body = false;
+                var reviewPlan = false;
+                var primaryInBanner = true;
+                var lineShown = true;
+                var result = Render(fixture, "case-guide-plan-dependency-" + SizeName(size), size, false, null, GuidePart.Issues, step =>
+                {
+                    heading = VisibleLabel(step, "The corpus plan was built from an earlier version of this guide.");
+                    body = AllControls(step).OfType<Label>()
+                        .Any(l => l.Visible && l.Text.Contains("The 1,240 emails already written stay in place.", StringComparison.Ordinal));
+                    var banner = AllControls(step).OfType<CardPanel>().First(c => c.Visible && c.BorderColor == Theme.Warning);
+                    var buttons = AllControls(banner).OfType<ThemedButton>().Where(b => b.Visible).ToList();
+                    reviewPlan = buttons.Any(b => b.Enabled && b.Text == "Review Plan" && b.Variant == ButtonStyle.Default);
+                    primaryInBanner = buttons.Any(b => b.Variant == ButtonStyle.Primary);
+                    lineShown = DependencyLine(step) != null;
+                });
+
+                AssertRendered(result);
+                Assert.True(heading);
+                Assert.True(body);
+                Assert.True(reviewPlan);
+                Assert.False(primaryInBanner);
+                Assert.False(lineShown);
+            }
+        });
+    }
+
+    [Fact]
+    public void StaleCoreBanner_WithDependencyLine()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                // 09 S2: StaleCore holds the banner row, so the changed plan shows as a Warning header line
+                var draft = CaseTestData.SampleGuidedDraft();
+                foreach (var part in GuideStaleness.Order)
+                    GuideStaleness.Stamp(draft, part);
+                var section = draft.CoreDocument!.Sections.First(s => s.Paragraphs.Count > 0);
+                section.Paragraphs[0] += " Harmon later disputed the change order in writing.";
+                draft.Corpus = PlanCorpus("stale", approved: false);
+                using var fixture = new GuideFixture(draft);
+                var staleBanner = false;
+                var reviewPlanInBanner = true;
+                LineCheck line = default;
+                var result = Render(fixture, "case-guide-stale-core-dependency-" + SizeName(size), size, false, null, GuidePart.Issues, step =>
+                {
+                    staleBanner = VisibleLabel(step, "The guide is out of date with the core document.")
+                        && AllControls(step).OfType<Button>().Any(b => b.Visible && b.Text == "Update Guide");
+                    reviewPlanInBanner = AllControls(step).OfType<Button>().Any(b => b.Visible && b.Text == "Review Plan");
+                    line = CheckLine(step);
+                });
+
+                AssertRendered(result);
+                Assert.True(staleBanner);
+                Assert.False(reviewPlanInBanner);
+                Assert.Equal("The corpus plan was built from an earlier version of this guide. Review it on Review Plan before generating emails.", line.Text);
+                Assert.Equal(Theme.Warning, line.Color);
+                AssertLineFits(line);
+            }
+        });
+    }
+
+    [Fact]
+    public void DependencyLine_Info()
+    {
+        RenderHarness.RunSta(() =>
+        {
+            foreach (var size in new[] { RenderHarness.Large, RenderHarness.WizardMin })
+            {
+                // 09 S2: an approved plan built from this guide -> muted Info line; Values left unwritten so Resume Guide
+                // shows beside the line (the line must wrap before it, never under it)
+                var draft = CaseTestData.SampleGuidedDraft();
+                draft.Guide!.Values.Clear();
+                draft.Guide.ValuesState.Status = GuidePartStatus.Pending;
+                draft.Corpus = PlanCorpus(draft.Guide.ComputeHash(), approved: true);
+                using var fixture = new GuideFixture(draft);
+                var banner = true;
+                LineCheck line = default;
+                var result = Render(fixture, "case-guide-dependency-info-" + SizeName(size), size, false, null, GuidePart.Issues, step =>
+                {
+                    banner = AllControls(step).OfType<CardPanel>().Any(c => c.Visible && c.BorderColor == Theme.Warning);
+                    line = CheckLine(step);
+                });
+
+                AssertRendered(result);
+                Assert.False(banner);
+                Assert.Equal("The approved corpus plan and 1,240 generated emails were built from this guide. Editing the guide withdraws plan approval until you review the plan again.", line.Text);
+                Assert.Equal(Theme.TextMuted, line.Color);
+                Assert.True(line.ResumeVisible);
+                AssertLineFits(line);
+            }
+        });
+    }
+
     // ----- Helpers -----
+
+    private struct LineCheck
+    {
+        public string Text;
+        public Color Color;
+        public Rectangle Bounds;
+        public Rectangle Resume;
+        public bool ResumeVisible;
+        public int LineHeight;
+        public bool Ellipsis;
+    }
+
+    private static CorpusState PlanCorpus(string guideHash, bool approved) => new()
+    {
+        PlanId = Guid.NewGuid(),
+        PlanGuideHash = guideHash,
+        Approved = approved,
+        Generation = new GenerationState { EmailsWritten = 1240 }
+    };
+
+    private static string SizeName(Size size) => size == RenderHarness.Large ? "large" : "wizardmin";
+
+    // The header dependency line: the visible label in the header's third row (the header also hosts Resume Guide)
+    private static Label? DependencyLine(StepCaseGuide step) =>
+        AllControls(step).OfType<Label>().FirstOrDefault(l => l.Visible && l.Parent is TableLayoutPanel t
+            && t.GetRow(l) == 2 && t.GetColumn(l) == 0 && AllControls(t).Any(c => c is Button b && b.Text == "Resume Guide"));
+
+    private static LineCheck CheckLine(StepCaseGuide step)
+    {
+        var label = DependencyLine(step);
+        Assert.NotNull(label);
+        var resume = AllControls(step).OfType<Button>().First(b => b.Text == "Resume Guide");
+        return new LineCheck
+        {
+            Text = label!.Text,
+            Color = label.ForeColor,
+            Bounds = step.RectangleToClient(label.Parent!.RectangleToScreen(label.Bounds)),
+            Resume = step.RectangleToClient(resume.Parent!.RectangleToScreen(resume.Bounds)),
+            ResumeVisible = resume.Visible,
+            LineHeight = TextRenderer.MeasureText("Ag", label.Font).Height,
+            Ellipsis = label.AutoEllipsis
+        };
+    }
+
+    // Rule 44: wraps to at most 2 lines, never ellipsizes, never overlaps or runs under Resume Guide
+    private static void AssertLineFits(LineCheck line)
+    {
+        Assert.False(line.Ellipsis);
+        Assert.True(line.Bounds.Width > 0 && line.Bounds.Height > 0);
+        Assert.True(line.Bounds.Height <= 2 * line.LineHeight, $"line height {line.Bounds.Height} > 2 x {line.LineHeight}");
+        if (line.ResumeVisible)
+            Assert.True(line.Bounds.Right <= line.Resume.Left, $"line {line.Bounds} runs into Resume Guide {line.Resume}");
+    }
 
     private static RenderResult Render(GuideFixture fixture, string name, Size size, bool simulateRun, GuidePart? writingPart,
         GuidePart selectedTab, Action<StepCaseGuide>? arrange = null)

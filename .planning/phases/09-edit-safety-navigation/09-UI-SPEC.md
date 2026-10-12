@@ -1,7 +1,8 @@
 ---
 phase: 9
 slug: edit-safety-navigation
-status: draft
+status: approved
+reviewed_at: 2026-10-11
 shadcn_initialized: false
 preset: none
 created: 2026-10-11
@@ -155,6 +156,8 @@ On `GuideChangedCard`: `CorpusApproval.WithdrawApprovalIfStale(Draft)`, `Revisio
 | Guide stale | GuideChanged (after withdraw + save) | `Generation did not start: the case guide changed after this plan was built. Open Review Plan to approve the plan.` |
 | Not approved | NotApproved | `Generation did not start: the corpus plan is not approved. Open Review Plan to approve it.` |
 
+
+Initial focus on other surfaces (checker recommendation, locked): S3 NoPlan/Failed/Unreadable cards focus the Primary `Plan Corpus` / `Retry Planning`, never `Skip to Discovery Documents`; S2 PlanDependency banner takes no focus (its Default `Review Plan` button does not grab focus); S4 Corpus Settings keeps focus on the first settings field, and the skip button never takes default focus.
 Focal point: the `Review Plan` Primary button (receives focus when the card shows).
 
 ### S2. Case Guide — plan dependency notice (W1, SC1 last clause)
@@ -356,11 +359,11 @@ Human inspection of the 144-DPI PNGs before hand-off: no ellipsized button text,
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: FLAG (initial focus added below)
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
 **Approval:** pending

@@ -885,10 +885,272 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Equal(0, provider.ResumePending());
         Assert.Equal(0, transport.StatusCalls);
 
-        // Not attached to the other provider's batch: a fresh submission
+        // W5: Recover still ignores another provider's batch; the run start resolves it first (see ResolveOtherProvider_CancelsForeignBatch_BeforeCurrentProviderSubmits)
+    }
+
+    // ----- ResolveOtherProviderPendingAsync (D-13, D-14, D-22) -----
+
+    private static FakeBatchTransport Anthropic()
+    {
+        var transport = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+        transport.Respond = item => FakeLlmProvider.Ok("claude:" + item.Request.UserPrompt, 1000, 500);
+        return transport;
+    }
+
+    // Submits a real batch on the fake (it only knows batches it issued) and records it in the ledger
+    private async Task<BatchLedgerRecord> SeedForeignAsync(FakeBatchTransport transport, Guid plan, params string[] prompts)
+    {
+        var items = prompts.Select(p => new BatchItemRequest { CustomId = "c-" + p, Request = Req(p) }).ToList();
+        var submitted = await transport.SubmitAsync(items);
+        Assert.True(submitted.Succeeded);
+        return await AppendSubmittedAsync(transport.Kind, submitted.BatchId, submitted.InputFileId, plan,
+            items.Select(i => i.CustomId).ToArray());
+    }
+
+    private async Task<BatchLedgerRecord> AppendSubmittedAsync(LlmProviderKind kind, string batchId, string inputFileId,
+        Guid plan, params string[] customIds)
+    {
+        var record = new BatchLedgerRecord
+        {
+            Type = BatchLedgerRecordType.Submitted,
+            Utc = DateTime.UtcNow,
+            Provider = kind,
+            BatchId = batchId,
+            PlanId = plan,
+            SubmittedUtc = DateTime.UtcNow,
+            StageLabel = "wave 1",
+            InputFileId = inputFileId,
+            Items = customIds.Select(id => new BatchLedgerItem { CustomId = id, Operation = "Thread", ModelId = "claude-test" }).ToList()
+        };
+        await new BatchLedger(_folder).AppendAsync(record);
+        return record;
+    }
+
+    private List<BatchLedgerRecord> LedgerLines() =>
+        File.ReadAllLines(new BatchLedger(_folder).FilePath)
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .Select(l => System.Text.Json.JsonSerializer.Deserialize<BatchLedgerRecord>(l, ReelDiscovery.Models.Case.CaseDraft.JsonOptions)!)
+            .ToList();
+
+    private Task<OtherProviderResolution> ResolveAsync(Func<LlmProviderKind, IBatchTransport?> transportFor) =>
+        BatchingLlmProvider.ResolveOtherProviderPendingAsync(new BatchLedger(_folder), transportFor, _plan,
+            LlmProviderKind.OpenAI).WaitAsync(Wait);
+
+    [Fact]
+    public async Task ResolveOtherProvider_None_NoCalls()
+    {
+        var openAi = Transport();
+        var anthropic = Anthropic();
+        await SeedForeignAsync(openAi, _plan, "own");
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : openAi);
+
+        Assert.Equal(0, result.Found);
+        Assert.False(result.Blocked);
+        Assert.False(result.LedgerUnreadable);
+        Assert.Equal(0, openAi.StatusCalls);
+        Assert.Equal(0, anthropic.StatusCalls);
+        Assert.Empty(openAi.CancelledIds);
+        Assert.Equal(1, BatchLedger.PendingBatchCount(_folder, _plan, LlmProviderKind.OpenAI));
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_KeyMissing_Blocked_TouchesNothing()
+    {
+        var anthropic = Anthropic();
+        var openAi = Transport();
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a");
+        var before = LedgerLines().Count;
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.OpenAI ? openAi : null);
+
+        Assert.Equal(1, result.Found);
+        Assert.True(result.KeyMissing);
+        Assert.True(result.Blocked);
+        Assert.False(result.Failed);
+        Assert.Equal(LlmProviderKind.Anthropic, result.Provider);
+        Assert.Equal(before, LedgerLines().Count);
+        Assert.Equal(0, anthropic.StatusCalls);
+        Assert.Equal(0, openAi.StatusCalls);
+        Assert.Contains(new BatchLedger(_folder).Replay().Pending(_plan), r => r.BatchId == foreign.BatchId);
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_Ended_CollectedUnderOwnProvider_ThenBilledAsOrphan()
+    {
+        var anthropic = Anthropic();
+        anthropic.PollsUntilEnded = 0;
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a", "b");
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.False(result.Blocked);
+        Assert.Equal(1, result.Found);
+        Assert.Equal(1, result.Collected);
+        Assert.Equal(0, result.Cancelled);
+        Assert.Empty(anthropic.CancelledIds);
+
+        var collected = Assert.Single(LedgerLines(), r => r.Type == BatchLedgerRecordType.Collected);
+        Assert.Equal(LlmProviderKind.Anthropic, collected.Provider);
+        Assert.Equal(foreign.BatchId, collected.BatchId);
+        Assert.Equal(_plan, collected.PlanId);
+        Assert.Equal(2, collected.Total);
+        Assert.True(new BatchLedger(_folder).TryReadResults(foreign.BatchId, out var cached));
+        Assert.Equal(2, cached.Count);
+        Assert.Equal(0, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
+        Assert.Contains((foreign.InputFileId, "file_out_" + foreign.BatchId), anthropic.DeletedFiles.Select(f => (f.Item1!, f.Item2!)));
+
+        // CR-A04: the OpenAI run's gateway sees the results as orphans and prices them with Anthropic's model
+        var claude = PricedModel(LlmProviderKind.Anthropic, "claude-test", 3m, 15m);
+        var lookups = new List<LlmProviderKind>();
+        var provider = new BatchingLlmProvider(Live(), Transport(), new BatchLedger(_folder), _plan, (kind, id) =>
+        {
+            lookups.Add(kind);
+            return kind == LlmProviderKind.Anthropic && id == "claude-test" ? claude : null;
+        }, Fast());
+        _providers.Add(provider);
+        var bill = provider.PriceOrphans();
+        Assert.Equal(new[] { foreign.BatchId }, bill.ItemsByBatch.Keys);
+        Assert.Equal(2 * BatchCost(claude).TotalUsd, bill.Cost.TotalUsd);
+        Assert.All(lookups, k => Assert.Equal(LlmProviderKind.Anthropic, k));
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_FailedBatch_ErroredCacheAndCollected()
+    {
+        var anthropic = Anthropic();
+        anthropic.FailWholeBatch = true;
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a", "b");
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.False(result.Blocked);
+        Assert.Equal(1, result.Collected);
+        Assert.Equal(0, result.Cancelled);
+        var collected = Assert.Single(LedgerLines(), r => r.Type == BatchLedgerRecordType.Collected);
+        Assert.Equal(LlmProviderKind.Anthropic, collected.Provider);
+        Assert.True(new BatchLedger(_folder).TryReadResults(foreign.BatchId, out var cached));
+        Assert.Equal(2, cached.Count);
+        Assert.All(cached, r => Assert.Equal(BatchItemOutcome.Errored, r.Outcome));
+        Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, _plan));
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_Running_Cancelled()
+    {
+        var anthropic = Anthropic();
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a");
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.False(result.Blocked);
+        Assert.Equal(1, result.Cancelled);
+        Assert.Equal(0, result.Collected);
+        Assert.Equal(new[] { foreign.BatchId }, anthropic.CancelledIds);
+        var cancelled = Assert.Single(LedgerLines(), r => r.Type == BatchLedgerRecordType.Cancelled);
+        Assert.Equal(foreign.BatchId, cancelled.BatchId);
+        Assert.Equal(LlmProviderKind.Anthropic, cancelled.Provider);
+        Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, _plan));
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_StatusFails_Blocked()
+    {
+        var anthropic = Anthropic();
+        await AppendSubmittedAsync(LlmProviderKind.Anthropic, "msgbatch_never_issued", string.Empty, _plan, "c-x");
+        var before = LedgerLines().Count;
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.True(result.Failed);
+        Assert.True(result.Blocked);
+        Assert.False(result.KeyMissing);
+        Assert.Equal(LlmProviderKind.Anthropic, result.Provider);
+        Assert.Equal(before, LedgerLines().Count);
+        Assert.Empty(anthropic.CancelledIds);
+        Assert.Equal(1, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_CancelFails_Blocked_NoCancelledLine()
+    {
+        var anthropic = Anthropic();
+        await SeedForeignAsync(anthropic, _plan, "a");
+        anthropic.CancelFailure = new InvalidOperationException("provider down");
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.True(result.Failed);
+        Assert.True(result.Blocked);
+        Assert.Equal(LlmProviderKind.Anthropic, result.Provider);
+        Assert.Equal(0, result.Cancelled);
+        Assert.DoesNotContain(LedgerLines(), r => r.Type == BatchLedgerRecordType.Cancelled);
+        Assert.Equal(1, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_OtherPlans_Untouched()
+    {
+        var anthropic = Anthropic();
+        anthropic.PollsUntilEnded = 0;
+        var otherPlan = Guid.NewGuid();
+        await SeedForeignAsync(anthropic, otherPlan, "a");
+        var before = LedgerLines().Count;
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.Equal(0, result.Found);
+        Assert.False(result.Blocked);
+        Assert.Equal(0, anthropic.StatusCalls);
+        Assert.Empty(anthropic.CancelledIds);
+        Assert.Equal(before, LedgerLines().Count);
+        Assert.Equal(1, BatchLedger.PendingBatchCount(_folder, otherPlan));
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_UnreadableLedger_NoOp()
+    {
+        var anthropic = Anthropic();
+        await SeedForeignAsync(anthropic, _plan, "a");
+
+        OtherProviderResolution result;
+        using (new FileStream(new BatchLedger(_folder).FilePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.True(result.LedgerUnreadable);
+        Assert.False(result.Blocked);
+        Assert.Equal(0, result.Found);
+        Assert.Equal(0, anthropic.StatusCalls);
+        Assert.Empty(anthropic.CancelledIds);
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_CancelsForeignBatch_BeforeCurrentProviderSubmits()
+    {
+        var anthropic = Anthropic();
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a");
+        anthropic.NeverEndIds.Add("c-a");
+        var openAi = Transport();
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : openAi);
+
+        // Resolved before the run's gateway exists: the foreign batch is Cancelled and nothing was submitted yet
+        Assert.False(result.Blocked);
+        Assert.Equal(1, result.Cancelled);
+        Assert.Contains(foreign.BatchId, new BatchLedger(_folder).Replay().CancelledIds);
+        Assert.Empty(openAi.Submissions);
+
+        var provider = Create(Live(), openAi);
         using (BatchStage.Enter("wave 1"))
             await provider.SendAsync(Req("a")).WaitAsync(Wait);
-        Assert.Single(transport.Submissions);
+        Assert.Single(openAi.Submissions);
+
+        // The ledger order shows the foreign batch closed before the current provider's single submission
+        var lines = LedgerLines();
+        var cancelledAt = lines.FindIndex(r => r.Type == BatchLedgerRecordType.Cancelled && r.BatchId == foreign.BatchId);
+        var submittedAt = lines.FindIndex(r => r.Type == BatchLedgerRecordType.Submitted && r.Provider == LlmProviderKind.OpenAI);
+        Assert.True(cancelledAt >= 0 && submittedAt > cancelledAt);
+        Assert.Equal(0, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
     }
 
     [Fact]

@@ -84,6 +84,26 @@ public class OrphanBill
 }
 
 /// <summary>
+/// Outcome of resolving this plan's pending batches of another provider before a run (D-13, D-14, D-22). Blocked means
+/// the run must not start: the other provider has no key, or it could not be reached to collect or stop its batches.
+/// </summary>
+public class OtherProviderResolution
+{
+    public LlmProviderKind Provider { get; set; }
+    public int Found { get; set; }
+    public int Collected { get; set; }
+    public int Cancelled { get; set; }
+    public bool KeyMissing { get; set; }
+    public bool Failed { get; set; }
+    public bool LedgerUnreadable { get; set; }
+
+    /// <summary>Diagnostic only; never shown in Activity or status text (T-07-52).</summary>
+    public string FailureMessage { get; set; } = string.Empty;
+
+    public bool Blocked => KeyMissing || Failed;
+}
+
+/// <summary>
 /// Transparent provider batching (RUN-03, D-01): an <see cref="ILlmProvider"/> decorator behind LlmGateway. First attempts
 /// that allow batching queue per <see cref="BatchStage"/> label and flush as one provider batch after a quiet period;
 /// units keep awaiting <see cref="SendAsync"/> exactly as in live mode. Everything that cannot be answered from a batch
@@ -498,6 +518,22 @@ public class BatchingLlmProvider : ILlmProvider
             state.SubmittedById.Values.Where(r => !notCancelled.Contains(r.BatchId, StringComparer.Ordinal)), transportFor, ct);
 
         return notCancelled;
+    }
+
+    /// <summary>
+    /// Run start (D-13): resolves this plan's pending batches of every provider other than <paramref name="current"/>
+    /// before the run's gateway exists (its constructor's Recover then sees the collected results as orphans, Pitfall 11).
+    /// An ended, expired or cancelled batch is collected and cached under its own provider; a failed batch gets an
+    /// all-Errored cache; a running batch is cancelled. Their items then run once under the current provider. No key for
+    /// that provider, or a failed status/results/save/cancel call, blocks the run instead (D-14, D-22): never a silent
+    /// resubmission. An unreadable ledger changes nothing here (the run keeps today's CR-A05 behavior).
+    /// </summary>
+    public static async Task<OtherProviderResolution> ResolveOtherProviderPendingAsync(BatchLedger ledger,
+        Func<LlmProviderKind, IBatchTransport?> transportFor, Guid planId, LlmProviderKind current,
+        CancellationToken ct = default)
+    {
+        await Task.CompletedTask;
+        throw new NotImplementedException();
     }
 
     // CR-A05: never act on (or let Start Over delete) a ledger that could not be read

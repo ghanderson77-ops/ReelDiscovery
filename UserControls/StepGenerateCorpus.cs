@@ -1100,7 +1100,8 @@ public partial class StepGenerateCorpus : UserControl
         _btnRetryFailed.Visible = !banner && finishedWithFailures;
         if (banner)
             SetBanner(GenerateCorpusBanner.PartialRun, GenerationUiText.BannerHeading(runEnded),
-                GenerationUiText.BannerBody(done, total, attachmentsDone, attachmentsTotal, failed, CaseUseBatch, _pendingProviderBatches),
+                GenerationUiText.BannerBody(done, total, attachmentsDone, attachmentsTotal, failed, CaseUseBatch, _pendingProviderBatches,
+                    otherProviderBatches: _otherProviderBatches, otherProvider: _otherProvider.ToString(), otherProviderBlocked: _otherProviderBlocked),
                 GenerationUiText.BannerButton);
         else
             SetBanner(GenerateCorpusBanner.None, string.Empty, string.Empty, string.Empty);
@@ -1119,7 +1120,8 @@ public partial class StepGenerateCorpus : UserControl
         _btnRetryFailed.Visible = false;
         SetBanner(GenerateCorpusBanner.PartialRun, GenerationUiText.BannerHeading(runEnded),
             GenerationUiText.BannerBody(threadsDone, threadsTotal, attachmentsDone, attachmentsTotal, failedItems, CaseUseBatch,
-                _pendingProviderBatches),
+                _pendingProviderBatches, otherProviderBatches: _otherProviderBatches, otherProvider: _otherProvider.ToString(),
+                otherProviderBlocked: _otherProviderBlocked),
             GenerationUiText.BannerButton);
         RaiseStateChanged();
     }
@@ -1305,8 +1307,9 @@ public partial class StepGenerateCorpus : UserControl
         SetNotice(plan == null || noNotice ? string.Empty : NoticeFor(plan));
         var counts = view?.Counts ?? new GenerationCounts();
         var failedItems = counts.FailedThreads + counts.AttachmentsFailed;
-        // The banner's pending-batches clause reads the case's batch ledger, as entering the step does
-        _pendingProviderBatches = plan == null ? 0 : Services.Ai.BatchLedger.PendingBatchCount(state.Case.FolderPath, plan.PlanId);
+        // The banner's pending-batches clauses read the case's batch ledger by provider, as entering the step does (D-15)
+        _pendingProviderBatches = plan == null ? 0 : Services.Ai.BatchLedger.PendingBatchCount(state.Case.FolderPath, plan.PlanId, state.TextProvider);
+        SetOtherProviderBatches(plan == null ? 0 : Services.Ai.BatchLedger.PendingBatchCountOtherProviders(state.Case.FolderPath, plan.PlanId, state.TextProvider));
 
         switch (render)
         {

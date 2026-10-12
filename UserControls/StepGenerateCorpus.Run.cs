@@ -56,12 +56,19 @@ public partial class StepGenerateCorpus : IWizardStep
     internal Func<bool, (ILlmGateway Gateway, BatchingLlmProvider? Batch)>? RunGatewayFactory;
 
     /// <summary>
-    /// Batch transport per provider for Start Over's cancel; null uses LlmProviderFactory with the session's keys. Test seam.
+    /// Batch transport per provider for Start Over's cancel and the D-15 key check; null uses LlmProviderFactory with the
+    /// session's keys. Test seam.
     /// </summary>
     internal Func<LlmProviderKind, IBatchTransport?>? BatchTransportFactory;
 
-    // Provider batches of this plan not yet collected: the ledger count on entry and after a run, the live count during one
+    // Provider batches of this plan of the current text provider not yet collected (D-15): the ledger count on entry and
+    // after a run, the live count during one
     private int _pendingProviderBatches;
+
+    // D-15: this plan's pending batches of the other text provider, resolved at run start (D-13) or blocking it (D-14)
+    private int _otherProviderBatches;
+    private LlmProviderKind _otherProvider;
+    private bool _otherProviderBlocked;
 
     // What the batch discount took off this case's spend so far (journal on entry, plus this session's runs)
     private decimal _caseBatchSavings;
@@ -70,13 +77,18 @@ public partial class StepGenerateCorpus : IWizardStep
     private decimal _runSavingsBase;
 
     /// <summary>
-    /// Provider batches submitted for this plan and not yet collected (C-G1..C-G3 batch clauses, the banner clause).
+    /// Provider batches submitted for this plan of the current text provider (D-15) and not yet collected (C-G1..C-G3
+    /// batch clauses, the banner clause).
     /// </summary>
     internal int PendingProviderBatches => _pendingProviderBatches;
 
-    internal int OtherProviderBatches => 0;
+    /// <summary>
+    /// D-15: this plan's pending batches of the other text provider (the banner's resolve clause or D-14 notice).
+    /// </summary>
+    internal int OtherProviderBatches => _otherProviderBatches;
 
-    internal bool OtherProviderBlocked => false;
+    // D-14: the other provider's batches are pending and no transport can be built for it
+    internal bool OtherProviderBlocked => _otherProviderBlocked;
 
     // D-08: the case's saved batch choice; Continue Generating, Retry Failed Items and Create Skipped Media reuse it
     private bool CaseUseBatch => _state?.Case?.Corpus?.Generation?.UseBatch == true;
@@ -105,8 +117,10 @@ public partial class StepGenerateCorpus : IWizardStep
         // Set when the journal was re-projected on entry (crash recovery)
         public NarrativeLedger? Ledger;
         public GenerationFileResult? KeyResult;
-        // Provider batches of this plan still pending in the ledger (07 S1 banner clause)
+        // Provider batches of this plan still pending in the ledger for the current text provider (07 S1 banner clause)
         public int PendingBatches;
+        // D-15: this plan's pending batches of the other text provider
+        public int OtherProviderBatches;
     }
 
     // ----- IWizardStep lifecycle -----
@@ -135,6 +149,8 @@ public partial class StepGenerateCorpus : IWizardStep
 
         RefreshHeader();
         _pendingProviderBatches = 0;
+        _otherProviderBatches = 0;
+        _otherProviderBlocked = false;
         _caseBatchSavings = 0m;
         // A referenced plan that does not load reads as "no plan" here; Review Plan shows its unreadable card
         CorpusPlanStore.EnsureLoaded(Draft);
@@ -180,11 +196,13 @@ public partial class StepGenerateCorpus : IWizardStep
                 var cachedPlanId = cached?.RunPlanId;
                 var cachedProjected = cached?.ProjectedUtc;
                 // Replay and projections run off the UI thread (200 MB cap in the journal, T-05-45); never a provider call (T-05-51)
-                data = await Task.Run(() => ReadEntryAsync(folder, plan, guide, pricing, cachedPlanId, cachedProjected));
+                var textProvider = _state.TextProvider;
+                data = await Task.Run(() => ReadEntryAsync(folder, plan, guide, pricing, textProvider, cachedPlanId, cachedProjected));
                 if (IsDisposed || _isGenerating)
                     return;
 
                 _pendingProviderBatches = data.PendingBatches;
+                SetOtherProviderBatches(data.OtherProviderBatches);
                 _caseBatchSavings = data.Replay.SpentDetail?.BatchSavingsUsd ?? 0m;
 
                 if (data.Ledger != null)
@@ -532,9 +550,14 @@ public partial class StepGenerateCorpus : IWizardStep
         // This run's batch discount joins the case total; the ledger says which batches are still at the provider
         _caseBatchSavings += Math.Max(0m, _state.UsageTracker.TotalBatchSavings - _runSavingsBase);
         _runSavingsBase = _state.UsageTracker.TotalBatchSavings;
-        _pendingProviderBatches = await Task.Run(() => BatchLedger.PendingBatchCount(folder, plan.PlanId));
+        // D-15: the banner counts the current provider's batches and names the other provider's
+        var provider = _state.TextProvider;
+        (_pendingProviderBatches, var otherBatches) = await Task.Run(() =>
+            (BatchLedger.PendingBatchCount(folder, plan.PlanId, provider), BatchLedger.PendingBatchCountOtherProviders(folder, plan.PlanId, provider)));
         if (IsDisposed)
             return;
+
+        SetOtherProviderBatches(otherBatches);
 
         if (result != null)
             ShowRunResult(plan, result);
@@ -1033,11 +1056,7 @@ public partial class StepGenerateCorpus : IWizardStep
     /// </summary>
     private async Task<bool> CancelPendingBatchesAsync(string folder)
     {
-        var transportFor = BatchTransportFactory ?? (kind =>
-        {
-            var key = _state.GetApiKey(kind);
-            return string.IsNullOrWhiteSpace(key) ? null : LlmProviderFactory.CreateBatchTransport(kind, key);
-        });
+        var transportFor = TransportFor();
 
         try
         {
@@ -1054,6 +1073,29 @@ public partial class StepGenerateCorpus : IWizardStep
             // Best effort by design: a provider outage must not block deleting the case's own files
             return false;
         }
+    }
+
+    // Keys go only to the transport constructors (T-07-54); the test seam replaces them
+    private Func<LlmProviderKind, IBatchTransport?> TransportFor() => BatchTransportFactory ?? (kind =>
+    {
+        var key = _state.GetApiKey(kind);
+        return string.IsNullOrWhiteSpace(key) ? null : LlmProviderFactory.CreateBatchTransport(kind, key);
+    });
+
+    // D-22: a key counts as available when a transport can be built for that provider
+    internal bool HasBatchTransport(LlmProviderKind kind) =>
+        BatchTransportFactory != null ? BatchTransportFactory(kind) != null : !string.IsNullOrWhiteSpace(_state.GetApiKey(kind));
+
+    // The provider that is not the current text provider (LlmProviderKind has two members)
+    private static LlmProviderKind OtherThan(LlmProviderKind current) =>
+        current == LlmProviderKind.OpenAI ? LlmProviderKind.Anthropic : LlmProviderKind.OpenAI;
+
+    // D-15: the other provider's pending batch count and whether its missing key blocks the run (D-14)
+    private void SetOtherProviderBatches(int count)
+    {
+        _otherProviderBatches = count;
+        _otherProvider = OtherThan(_state.TextProvider);
+        _otherProviderBlocked = count > 0 && !HasBatchTransport(_otherProvider);
     }
 
     // ----- Leaving the step (Pitfall 8) -----
@@ -1190,11 +1232,17 @@ public partial class StepGenerateCorpus : IWizardStep
     }
 
     private static async Task<EntryData> ReadEntryAsync(string folder, CorpusPlan plan, CaseGuide guide, EntryPricing pricing,
-        Guid? cachedPlanId, DateTime? cachedProjectedUtc)
+        LlmProviderKind textProvider, Guid? cachedPlanId, DateTime? cachedProjectedUtc)
     {
         var replay = GenerationJournal.Replay(folder, plan);
         var state = GenerationRunState.From(plan, replay);
-        var data = new EntryData { Replay = replay, State = state, PendingBatches = BatchLedger.PendingBatchCount(folder, plan.PlanId) };
+        var data = new EntryData
+        {
+            Replay = replay,
+            State = state,
+            PendingBatches = BatchLedger.PendingBatchCount(folder, plan.PlanId, textProvider),
+            OtherProviderBatches = BatchLedger.PendingBatchCountOtherProviders(folder, plan.PlanId, textProvider)
+        };
         if (!state.HasRun || !replay.Readable || replay.PlanChanged)
             return data;
 

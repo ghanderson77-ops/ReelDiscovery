@@ -2,6 +2,7 @@ using ReelDiscovery.Models;
 using ReelDiscovery.Models.Case;
 using ReelDiscovery.Models.Corpus;
 using ReelDiscovery.Services.Case;
+using ReelDiscovery.Tests.Render;
 using ReelDiscovery.UserControls;
 
 namespace ReelDiscovery.Tests.Corpus;
@@ -203,6 +204,33 @@ public class CorpusSettingsStepLogicTests
             Assert.True(draft.Corpus!.Settings.IncludeImages);
             Assert.True(draft.Corpus.Settings.IncludeVoicemail);
         });
+    }
+
+    [Fact]
+    public void RelabelCount_NoFolderOrPlan_Zero()
+    {
+        Assert.Equal(0, StepCorpusSettings.RelabelCount(new CaseDraft()));
+
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+        var plan = fixture.Plan;
+        Qa.CaseSummaryQaTests.SeedRelabels(fixture.Folder, plan, fixture.Draft.Guide!, plan.Threads[0].Messages[0].DocId);
+        // A folder but no plan, and a plan with no folder
+        var noPlan = new CaseDraft { FolderPath = fixture.Folder, Guide = fixture.Draft.Guide, Corpus = new CorpusState() };
+        Assert.Equal(0, StepCorpusSettings.RelabelCount(noPlan));
+        var noFolder = new CaseDraft { Guide = fixture.Draft.Guide, Corpus = new CorpusState { Plan = plan } };
+        Assert.Equal(0, StepCorpusSettings.RelabelCount(noFolder));
+    }
+
+    [Fact]
+    public void RelabelCount_SidecarRelabel_Counted()
+    {
+        using var fixture = new GenerateCorpusRenderTests.StepFixture();
+        var plan = fixture.Plan;
+        Assert.Equal(fixture.Folder, fixture.Draft.FolderPath);
+        Assert.Equal(0, StepCorpusSettings.RelabelCount(fixture.Draft));
+
+        Qa.CaseSummaryQaTests.SeedRelabels(fixture.Folder, plan, fixture.Draft.Guide!, plan.Threads[0].Messages[0].DocId);
+        Assert.Equal(1, StepCorpusSettings.RelabelCount(fixture.Draft));
     }
 
     private static CaseStore TempStore()

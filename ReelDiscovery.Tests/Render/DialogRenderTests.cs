@@ -100,6 +100,32 @@ public class DialogRenderTests
         });
     }
 
+    // 10 D-08: D-RP with the dropped-relabels sentence (render PNGs on the dev machine are 120 DPI; check 150% by hand)
+    [Theory]
+    [InlineData(true, 12, 3, "replan-dialog-relabels")]
+    [InlineData(false, 0, 1, "replan-dialog-relabels-unapproved")]
+    public void ReplanDialog_WithRelabels_RendersWithoutClipping(bool approved, int generated, int relabels, string name)
+    {
+        RenderHarness.RunSta(() =>
+        {
+            var height = 0;
+            var workingHeight = 0;
+            var bodyShown = false;
+            var narrowButtons = new List<string>();
+            var result = RenderHarness.RenderForm(() => new ReplanDialog(approved, generated, relabels), name, form =>
+            {
+                height = form.ClientSize.Height;
+                workingHeight = Screen.FromControl(form).WorkingArea.Height;
+                bodyShown = Descendants(form).OfType<Label>().Any(l => l.Text == CorpusUiText.ReplanBody(approved, generated, relabels));
+                narrowButtons = Descendants(form).OfType<Button>().Where(b => b.Width < b.PreferredSize.Width).Select(b => b.Text).ToList();
+            });
+
+            AssertRendered(result, height, workingHeight);
+            Assert.True(bodyShown);
+            Assert.Empty(narrowButtons);
+        });
+    }
+
     private static IEnumerable<Control> Descendants(Control root)
     {
         foreach (Control child in root.Controls)

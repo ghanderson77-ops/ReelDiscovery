@@ -467,13 +467,36 @@ public partial class StepReviewPlan
         return generation.ThreadsWritten + generation.ThreadsWithWarnings;
     }
 
+    // A second Re-plan click while the relabel count is read must not open a second dialog
+    private bool _isOpeningReplan;
+
     private async Task ReplanAsync()
     {
-        if (_state == null || _isPlanning || _isApproving || Draft.Corpus?.Plan == null)
+        if (_state == null || _isPlanning || _isApproving || _isOpeningReplan || Draft.Corpus?.Plan == null)
+            return;
+
+        // 10 D-08: a re-plan changes every DocID, so the current plan's manual relabels are dropped; say how many first
+        var folder = Draft.FolderPath;
+        var plan = Draft.Corpus.Plan;
+        var guide = Draft.Guide ?? new CaseGuide();
+        int relabels;
+        _isOpeningReplan = true;
+        try
+        {
+            relabels = string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)
+                ? 0
+                : await Task.Run(() => AnswerKeyFiles.PeekRelabels(folder, plan, guide).Count);
+        }
+        finally
+        {
+            _isOpeningReplan = false;
+        }
+        // A run (or approval) may have started, or the plan changed, while the count was read
+        if (IsDisposed || _isPlanning || _isApproving || Draft.Corpus?.Plan == null || !ReferenceEquals(Draft.Corpus.Plan, plan))
             return;
 
         string guidance;
-        using (var dialog = new ReplanDialog(Draft.Corpus.Approved, ReplanGeneratedThreads(Draft.Corpus)))
+        using (var dialog = new ReplanDialog(Draft.Corpus.Approved, ReplanGeneratedThreads(Draft.Corpus), relabels))
         {
             if (dialog.ShowDialog(FindForm()) != DialogResult.OK)
                 return;

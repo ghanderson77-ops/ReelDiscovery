@@ -99,6 +99,9 @@ public class StepCorpusSettings : UserControl, IWizardStep
     private Label _lblStatus = null!;
 
     private bool _loading;
+
+    // 10 D-08: relabels of the current plan, counted off the UI thread on entry
+    private int _relabelCount;
     private bool _advancedExpanded;
     // Transient clamp notices shown in place of the hint until the next commit
     private string _sizeClampText = string.Empty;
@@ -1022,11 +1025,23 @@ public class StepCorpusSettings : UserControl, IWizardStep
         if (_state == null)
             return;
 
+        _relabelCount = 0;
         EnterCore();
         if (!string.IsNullOrWhiteSpace(_state.PendingNotice))
         {
             SetStatus(_state.PendingNotice, Theme.Success);
             _state.PendingNotice = string.Empty;
+        }
+
+        // 10 D-08: count the current plan's relabels off the UI thread, then refresh only the notice (user edits stay)
+        var draft = Draft;
+        _relabelCount = await Task.Run(() => RelabelCount(draft));
+        if (IsDisposed)
+            return;
+        if (_relabelCount > 0)
+        {
+            _lblNotice.Text = NoticeText();
+            SizeNoticeRow();
         }
 
         Draft.AdvanceStage(CaseStage.CorpusSettings);
@@ -1147,6 +1162,20 @@ public class StepCorpusSettings : UserControl, IWizardStep
 
     // ----- Fill and refresh -----
 
+    // 10 D-08: manual relabels of the current plan that a re-plan would drop (counted off the UI thread on entry)
+    internal static int RelabelCount(CaseDraft draft)
+    {
+        var plan = draft.Corpus?.Plan;
+        var folder = draft.FolderPath;
+        if (plan == null || string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            return 0;
+        return AnswerKeyFiles.PeekRelabels(folder, plan, draft.Guide ?? new CaseGuide()).Count;
+    }
+
+    private string NoticeText() =>
+        CorpusUiText.SettingsNotice(Draft.Corpus!.HasPlan, Draft.Corpus.Approved, Draft.Corpus.ApprovedUtc?.ToLocalTime(),
+            relabels: _relabelCount);
+
     private void FillControls()
     {
         _loading = true;
@@ -1156,9 +1185,8 @@ public class StepCorpusSettings : UserControl, IWizardStep
             _sizeClampText = string.Empty;
             _percentClampText = string.Empty;
 
-            _lblNotice.Text = CorpusUiText.SettingsNotice(Draft.Corpus!.HasPlan, Draft.Corpus.Approved,
-                Draft.Corpus.ApprovedUtc?.ToLocalTime());
-            _btnSkipToDiscovery.Visible = ShowsSkipToDiscovery(Draft.Corpus.HasPlan, Draft.Corpus.Approved);
+            _lblNotice.Text = NoticeText();
+            _btnSkipToDiscovery.Visible = ShowsSkipToDiscovery(Draft.Corpus!.HasPlan, Draft.Corpus.Approved);
             SizeNoticeRow();
 
             _txtSize.Text = FormatCount(settings.TotalEmails);

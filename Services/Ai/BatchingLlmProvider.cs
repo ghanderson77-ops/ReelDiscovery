@@ -276,8 +276,51 @@ public class BatchingLlmProvider : ILlmProvider
         return resume.Count;
     }
 
-    public Task<int> DrainStaleStagesAsync(Func<string, bool> stageMatch, CancellationToken ct = default) =>
-        throw new NotImplementedException();
+    /// <summary>
+    /// D-17/WR-A08: batches an earlier build submitted per relevant wave (pre amended D-07) are cancelled at the provider but
+    /// stay tracked and pending in the ledger (no Cancelled line, D-21), then awaited up to DrainTimeout. Both providers
+    /// return partial results for a cancelled batch, so the poll loop collects them and live scopes use them free; what no
+    /// unit uses is billed as an orphan at Finished. When the bound expires the run goes live and the batch keeps polling
+    /// (late results become orphans). Only batches whose polling ResumePending started are drained. Returns the number drained.
+    /// </summary>
+    public async Task<int> DrainStaleStagesAsync(Func<string, bool> stageMatch, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stageMatch);
+
+        List<TrackedBatch> stale;
+        lock (_lock)
+            stale = _batches.Values.Where(b => b.Resumed && b.PollStarted && stageMatch(b.StageLabel ?? string.Empty)).ToList();
+        if (stale.Count == 0)
+            return 0;
+
+        foreach (var batch in stale)
+        {
+            try
+            {
+                await _transport.CancelAsync(batch.BatchId, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // Keep polling: the batch may still finish on its own; the drain bound below still applies (D-17 step 4)
+            }
+        }
+
+        try
+        {
+            await Task.WhenAll(stale.Select(b => b.Ended.Task)).WaitAsync(_timings.DrainTimeout, ct).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // D-17 step 4: go live; the batch keeps polling and late results become billed orphans. OpenAI can stay
+            // "cancelling" for up to 10 minutes, longer than the default bound (D-21)
+        }
+
+        return stale.Count;
+    }
 
     /// <summary>
     /// Prices collected results of this plan that no unit consumed (still billed by the provider) with the catalog model at
@@ -1232,6 +1275,7 @@ public class BatchingLlmProvider : ILlmProvider
             return false;
 
         _batches.Remove(batch.BatchId);
+        tracked.Ended.TrySetResult();
         FreeLocked(tracked.QueuedModel, tracked.QueuedTokens);
         return true;
     }
@@ -1964,6 +2008,9 @@ public class BatchingLlmProvider : ILlmProvider
 
         /// <summary>A resumed batch whose polling ResumePending started (a submitted batch polls from the start).</summary>
         public bool PollStarted { get; set; }
+
+        /// <summary>Completed when the batch stops being tracked (collected, failed or released); D-17 drain waits on it.</summary>
+        public TaskCompletionSource Ended { get; } = NewSignal();
 
         /// <summary>Uploaded input file (OpenAI); deleted once the results are cached (WR-A03).</summary>
         public string InputFileId { get; init; } = string.Empty;

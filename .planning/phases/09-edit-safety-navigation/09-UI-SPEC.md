@@ -360,10 +360,10 @@ Human inspection of the 144-DPI PNGs before hand-off: no ellipsized button text,
 ## Checker Sign-Off
 
 - [x] Dimension 1 Copywriting: PASS
-- [x] Dimension 2 Visuals: FLAG (initial focus added below)
+- [x] Dimension 2 Visuals: FLAG (initial focus rules added next to S1 focal point)
 - [x] Dimension 3 Color: PASS
 - [x] Dimension 4 Typography: PASS
 - [x] Dimension 5 Spacing: PASS
 - [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-10-11

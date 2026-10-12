@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Scale, Cost, QA & Cutover** - Batch APIs, prompt caching, cost accounting, blind-review and leakage QA, 5K-scale runs, and removal of the old wizard flow
  (completed 2026-10-08)
 - [x] **Phase 8: Ancillary Discovery Documents** - Optional depositions, RFPs, RFAs and interrogatories grounded in the case guide and exported as .docx (completed 2026-10-09)
-- [ ] **Phase 9: Edit Safety & Navigation** - Gap closure (v1.0 audit W1, W2, W3, W6): guide edits invalidate approval everywhere, discovery reachable without a plan, discovery staleness on Start Over/Regenerate, Case Summary path back to Generate Corpus
+- [x] **Phase 9: Edit Safety & Navigation** - Gap closure (v1.0 audit W1, W2, W3, W6): guide edits invalidate approval everywhere, discovery reachable without a plan, discovery staleness on Start Over/Regenerate, Case Summary path back to Generate Corpus (completed 2026-10-12)
 - [ ] **Phase 10: Answer-Key & Batch Safety** - Gap closure (v1.0 audit W4, W5, W8 + review WR-A06, WR-A08): preserved manual relabels, cross-provider pending batches, batch spend edge cases, legacy type removal
 
 ## Phase Details
@@ -344,5 +344,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8. Ph
 | 6. Attachments & Non-Relevant Corpus | 25/25 | Complete    | 2026-10-06 |
 | 7. Scale, Cost, QA & Cutover | 24/24 | Complete    | 2026-10-08 |
 | 8. Ancillary Discovery Documents | 19/19 | Complete    | 2026-10-09 |
-| 9. Edit Safety & Navigation | 0/10 | Planned |  |
+| 9. Edit Safety & Navigation | 10/10 | Complete    | 2026-10-12 |
 | 10. Answer-Key & Batch Safety | 0/0 | Not started |  |

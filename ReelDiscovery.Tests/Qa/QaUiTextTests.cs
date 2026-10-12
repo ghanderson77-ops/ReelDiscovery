@@ -304,7 +304,7 @@ public class QaUiTextTests
         Assert.Equal("Blind Review Disagreements", c.Title);
         Assert.Equal("Blind review disagreements", c.Headline);
         Assert.Equal("m disagreed with the answer key on 1 email. Relabel or regenerate each one.", c.Summary);
-        Assert.StartsWith("Check each one: edit the answer key spreadsheet to relabel it, or click Regenerate Thread...", QaUiText.FindingsSummaryTooltip(QaFindingsMode.BlindReview));
+        Assert.Equal("Check each one: edit the Relevance column of the answer key spreadsheet to relabel it, or click Regenerate Thread... to write its thread again. Relabels are kept when the answer key is rewritten; edits to other columns are replaced.", QaUiText.FindingsSummaryTooltip(QaFindingsMode.BlindReview));
     }
 
     [Fact]

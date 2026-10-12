@@ -53,7 +53,7 @@ public static class AnswerKeyXlsxWriter
         "Thread ID: Conversation the email belongs to.",
         "Family ID: DocID of the parent email; the same on the email and its attachments.",
         "Parent DocID: DocID of the parent email for attachments; blank on emails.",
-        "Relevance: Relevant or Not Relevant to the issues in this matter.",
+        "Relevance: Relevant or Not Relevant to the issues in this matter. To relabel a document, edit this column; the relabel is kept when the answer key is rewritten. Edits to other columns are replaced.",
         "Issue Codes: Issues the document is relevant to (see Issue Codes).",
         "Fact IDs: Key facts the document evidences (see Key Facts).",
         "Hot: Y when the document is a hot document that directly evidences a key fact.",

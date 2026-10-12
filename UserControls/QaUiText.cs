@@ -293,7 +293,7 @@ public static class QaUiText
     public static string FindingsSummaryTooltip(QaFindingsMode mode) => mode switch
     {
         QaFindingsMode.Scans => "Each row names the check and what it found. Open Email shows the email; Regenerate Thread... writes its thread again.",
-        QaFindingsMode.BlindReview => "Check each one: edit the answer key spreadsheet to relabel it, or click Regenerate Thread... to write its thread again.",
+        QaFindingsMode.BlindReview => "Check each one: edit the Relevance column of the answer key spreadsheet to relabel it, or click Regenerate Thread... to write its thread again. Relabels are kept when the answer key is rewritten; edits to other columns are replaced.",
         _ => ""
     };
 

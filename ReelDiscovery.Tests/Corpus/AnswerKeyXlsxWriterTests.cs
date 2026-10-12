@@ -288,6 +288,11 @@ public class AnswerKeyXlsxWriterTests
         Assert.Equal(AnswerKeyColumns.Headers, columns.Select(r => Text(r["A"])));
         Assert.All(columns, r => Assert.False(string.IsNullOrWhiteSpace(Text(r["B"]))));
 
+        // 10 D-05: the Legend tells the user which column to edit to relabel and what survives a rewrite
+        var relevance = columns.Single(r => Text(r["A"]) == "Relevance");
+        Assert.Equal("Relevance: Relevant or Not Relevant to the issues in this matter. To relabel a document, edit this column; the relabel is kept when the answer key is rewritten. Edits to other columns are replaced.",
+            Text(relevance["B"]));
+
         var categories = Section(grid, "Category Definitions").Select(r => Text(r["A"])).ToList();
         foreach (var label in new[] { "Daily business", "Ancillary", "Newsletter/spam/personal", "Decoy" })
             Assert.Contains(label, categories);

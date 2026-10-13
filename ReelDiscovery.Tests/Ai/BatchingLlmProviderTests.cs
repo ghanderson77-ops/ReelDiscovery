@@ -976,6 +976,26 @@ public class BatchingLlmProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task ResolveOtherProvider_DeadlinePassed_Throws_LedgerUntouched()
+    {
+        // Audit N6: the run start's deadline ends the resolution; the batch stays pending for the next run start
+        var anthropic = Anthropic();
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a");
+        var before = LedgerLines().Count;
+        using var deadline = new CancellationTokenSource();
+        deadline.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            BatchingLlmProvider.ResolveOtherProviderPendingAsync(new BatchLedger(_folder),
+                k => k == LlmProviderKind.Anthropic ? anthropic : Transport(), _plan, LlmProviderKind.OpenAI, deadline.Token)
+                .WaitAsync(Wait));
+
+        Assert.Equal(before, LedgerLines().Count);
+        Assert.Empty(anthropic.CancelledIds);
+        Assert.Contains(new BatchLedger(_folder).Replay().Pending(_plan), r => r.BatchId == foreign.BatchId);
+    }
+
+    [Fact]
     public async Task ResolveOtherProvider_Ended_CollectedUnderOwnProvider_ThenBilledAsOrphan()
     {
         var anthropic = Anthropic();

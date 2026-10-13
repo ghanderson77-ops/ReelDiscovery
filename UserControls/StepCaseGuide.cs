@@ -555,7 +555,12 @@ public partial class StepCaseGuide : UserControl, IWizardStep, IGuideHost
         _btnNotNow.Click += (s, e) => DismissStaleBanner();
         _btnReviewFacts.Click += (s, e) => ReviewFacts();
         _btnMarkAllReviewed.Click += (s, e) => MarkAllReviewed();
-        _btnBannerReviewPlan.Click += (s, e) => (FindForm() as WizardForm)?.NavigateToStage(CaseStage.ReviewPlan);
+        // Audit N1: the banner is a shortcut past Next, so it asks the same Next gate first
+        _btnBannerReviewPlan.Click += async (s, e) =>
+        {
+            if (await ValidateStepAsync() && !IsDisposed)
+                (FindForm() as WizardForm)?.NavigateToStage(CaseStage.ReviewPlan);
+        };
         _btnCancel.Click += BtnCancel_Click;
         _gridChecks.CellDoubleClick += (s, e) => NavigateToFinding(e.RowIndex);
         _gridChecks.KeyDown += GridChecks_KeyDown;

@@ -95,6 +95,10 @@ public class OtherProviderResolution
     public int Cancelled { get; set; }
     public bool KeyMissing { get; set; }
     public bool Failed { get; set; }
+
+    /// <summary>Set by the caller when its run-start deadline ended the resolution (audit N6); implies Failed.</summary>
+    public bool TimedOut { get; set; }
+
     public bool LedgerUnreadable { get; set; }
 
     /// <summary>Diagnostic only; never shown in Activity or status text (T-07-52).</summary>
@@ -777,7 +781,7 @@ public class BatchingLlmProvider : ILlmProvider
                 Provider = record.Provider,
                 BatchId = record.BatchId,
                 PlanId = record.PlanId
-            }, ct);
+            }, CancellationToken.None); // Audit N6: a local write, never cut short by the run-start deadline
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -815,7 +819,7 @@ public class BatchingLlmProvider : ILlmProvider
                 OutputFileId = outputFileId ?? string.Empty,
                 Done = done,
                 Total = total
-            }, ct);
+            }, CancellationToken.None); // Audit N6: as above
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

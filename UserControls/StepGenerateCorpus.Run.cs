@@ -436,6 +436,9 @@ public partial class StepGenerateCorpus : IWizardStep
         return run.IsCompleted;
     }
 
+    // Audit N6: run-start resolution of another provider's batches; well inside CloseWaitTimeout
+    internal static readonly TimeSpan ResolveBatchesTimeout = TimeSpan.FromMinutes(3);
+
     private async Task RunCoreAsync()
     {
         if (_isGenerating || _isResetting || _isResolvingBatches || _state == null)
@@ -489,13 +492,23 @@ public partial class StepGenerateCorpus : IWizardStep
             _isResolvingBatches = true;
             _stopAfterResolve = false;
             RaiseStateChanged();
+            SetStatus(GenerationUiText.ResolvingOtherProviderText(OtherThan(_state.TextProvider).ToString()), Theme.TextMuted);
+            // Audit N6: a stalled provider call must not hold the step (and app close) for the transport's 10 minutes;
+            // ledger writes are never cut short, so a timed-out resolution leaves the ledger consistent
+            using var deadline = new CancellationTokenSource(ResolveBatchesTimeout);
             try
             {
                 var transportFor = TransportFor();
                 var current = _state.TextProvider;
                 var planId = plan.PlanId;
                 resolution = await Task.Run(() => BatchingLlmProvider.ResolveOtherProviderPendingAsync(new BatchLedger(folder),
-                    transportFor, planId, current, CancellationToken.None));
+                    transportFor, planId, current, deadline.Token));
+            }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+            {
+                // D-22: never run anyway when another provider's batches could not be checked in time
+                resolution = new OtherProviderResolution { Provider = OtherThan(_state.TextProvider), Failed = true, TimedOut = true,
+                    FailureMessage = "Timed out" };
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -517,12 +530,15 @@ public partial class StepGenerateCorpus : IWizardStep
                 // CR-01: a batch the provider no longer has never blocks; what remains is transient, or a refused key
                 SetStatus(resolution.KeyMissing
                     ? GenerationUiText.RunRefusedOtherProviderKeyText(resolution.Provider.ToString())
+                    : resolution.TimedOut
+                        ? GenerationUiText.RunRefusedOtherProviderTimedOutText(resolution.Provider.ToString())
                     : resolution.FailureKind == LlmFailureKind.Auth
                         ? GenerationUiText.RunRefusedOtherProviderKeyRefusedText(resolution.Provider.ToString())
                         : GenerationUiText.RunRefusedOtherProviderFailedText(resolution.Provider.ToString()), Theme.Warning);
                 return;
             }
             SetOtherProviderBatches(0);
+            SetStatus(string.Empty, Theme.TextMuted);
         }
 
         try

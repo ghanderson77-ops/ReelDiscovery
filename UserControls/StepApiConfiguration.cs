@@ -315,6 +315,9 @@ public class StepApiConfiguration : UserControl, IWizardStep
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    // A key test is a single free model lookup; anything slower is a stalled connection
+    internal static readonly TimeSpan KeyTestTimeout = TimeSpan.FromSeconds(30);
+
     private async Task TestKeyAsync(LlmProviderKind provider)
     {
         var key = GetKeyBox(provider).Text.Trim();
@@ -337,7 +340,11 @@ public class StepApiConfiguration : UserControl, IWizardStep
         try
         {
             var modelId = _state.GetKeyTestModelId(provider);
-            var result = await LlmProviderFactory.Create(provider, key).TestKeyAsync(modelId);
+            // 01 WR-12: a stalled connection must not lock the key box for minutes; WaitAsync also covers an SDK that
+            // ignores the token
+            using var deadline = new CancellationTokenSource(KeyTestTimeout);
+            var result = await LlmProviderFactory.Create(provider, key).TestKeyAsync(modelId, deadline.Token)
+                .WaitAsync(KeyTestTimeout);
 
             // The key was cleared or edited while the test ran: discard the stale result (never re-save a removed key)
             if (!KeyTestGuard.IsResultCurrent(key, keyBox.Text))
@@ -366,6 +373,11 @@ public class StepApiConfiguration : UserControl, IWizardStep
                 SetStatus(provider, result.Message, Color.Red);
                 SetTested(provider, false);
             }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
+        {
+            SetStatus(provider, $"Key test timed out after {KeyTestTimeout.TotalSeconds:0} seconds; check your connection and test again.", Color.Red);
+            SetTested(provider, false);
         }
         catch (Exception ex)
         {

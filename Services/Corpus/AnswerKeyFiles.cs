@@ -166,7 +166,8 @@ public static class AnswerKeyFiles
 
     /// <summary>
     /// The relabels the next write would keep, without writing anything (no key files, no backup, no sidecar). Never
-    /// throws for I/O failures: falls back to the sidecar's relabels for this plan. Call off the UI thread.
+    /// throws: a failed harvest falls back to the sidecar's relabels for this plan, and a failed fallback counts as none.
+    /// Call off the UI thread.
     /// </summary>
     public static Dictionary<string, AnswerKeyRelabel> PeekRelabels(string caseFolder, CorpusPlan plan, CaseGuide guide)
     {
@@ -175,11 +176,21 @@ public static class AnswerKeyFiles
         {
             return Harvest(caseFolder, store, plan, guide, overlay: null).Relabels;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception)
         {
-            // A dry harvest only feeds warnings: the stored relabels are the best answer we have
+            // Audit N5: a dry harvest only feeds warnings, and its callers sit on async-void UI paths; the stored
+            // relabels are the best answer we have
+        }
+
+        try
+        {
             var planLabels = PlanLabels(AnswerKeyBuilder.Build(plan, guide));
             return CurrentRelabels(store.Load(), plan.PlanId, planLabels);
+        }
+        catch (Exception)
+        {
+            // Nothing readable: the warning simply omits the relabel count; the next real write still harvests
+            return new Dictionary<string, AnswerKeyRelabel>(StringComparer.Ordinal);
         }
     }
 

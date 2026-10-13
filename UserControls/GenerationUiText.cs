@@ -751,6 +751,14 @@ public static class GenerationUiText
     public static string RunRefusedOtherProviderFailedText(string provider) =>
         $"Generation did not start: {ProviderName(provider)} batches from an earlier session could not be collected or stopped. Nothing was started, so nothing is paid twice. Try again in a moment.";
 
+    // Audit N6: shown while run start collects or stops another provider's batches
+    public static string ResolvingOtherProviderText(string provider) =>
+        $"Checking {ProviderName(provider)} batches from an earlier session...";
+
+    // Audit N6: the provider did not answer within the run-start deadline; never run anyway
+    public static string RunRefusedOtherProviderTimedOutText(string provider) =>
+        $"Generation did not start: {ProviderName(provider)} did not respond in time while checking batches from an earlier session. Nothing was started, so nothing is paid twice. Check your connection and try again.";
+
     // 10 D-22, CR-01: the other provider refused its key; retrying alone never clears this, so point at the key instead
     public static string RunRefusedOtherProviderKeyRefusedText(string provider) =>
         $"Generation did not start: {ProviderName(provider)} did not accept its key, so batches from an earlier session could not be collected or stopped. Nothing was started, so nothing is paid twice. Check the {ProviderName(provider)} key on the API Configuration step.";

@@ -1106,6 +1106,30 @@ public class GenerateCorpusStepTests
     }
 
     [Fact]
+    public void StartOver_LedgerDeleteFails_RecordsNothing()
+    {
+        using var h = new Harness();
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            SeedCollectedUnused(h, "batch_collected");
+            step.BatchTransportFactory = _ => new FakeBatchTransport();
+            // Readable but not deletable (antivirus, indexer): the ledger survives Start Over with no OrphansBilled line
+            using (new FileStream(BatchLedger.PathFor(h.Folder), FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                Pump(step.ClickStartOverAsync());
+
+            // WR-05: a later Finished run bills these results; recording them now would count them twice
+            Assert.True(File.Exists(BatchLedger.PathFor(h.Folder)));
+            Assert.Empty(UnusedEntries(h));
+            Assert.Empty(new BatchLedger(h.Folder).Replay().OrphansBilledIds);
+        });
+    }
+
+    [Fact]
     public void StartOver_UnreadableLedger_RecordsNothing()
     {
         using var h = new Harness();

@@ -1069,21 +1069,29 @@ public partial class StepGenerateCorpus : IWizardStep
             if (IsDisposed)
                 return;
 
-            // D-16/WR-A06: results already collected but never used were paid for; record them before the ledger is deleted.
+            // D-16/WR-A06: results already collected but never used were paid for; price them before the ledger is deleted.
             // Only when the ledger goes (cancel succeeded); an unreadable ledger prices as empty (Pitfall 13)
+            OrphanBill? unused = null;
             if (!cancelFailed)
             {
-                var bill = await Task.Run(() => BatchingLlmProvider.PriceUnusedResults(new BatchLedger(folder), _state.PriceBatchModel));
+                unused = await Task.Run(() => BatchingLlmProvider.PriceUnusedResults(new BatchLedger(folder), _state.PriceBatchModel));
                 if (IsDisposed)
                     return;
-
-                foreach (var line in bill.Lines)
-                    _state.UsageTracker.RecordUsage(BatchingLlmProvider.OrphanOperation, line.Model, line.Usage, line.Cost);
             }
 
             // Deletes only journal-listed and planned relevant EML paths under Mailboxes plus two constant-name files (T-05-49).
             // WR-A05: a batch that could not be cancelled keeps its ledger record so it is never lost
-            var reset = await GenerationReset.StartOverAsync(folder, plan, Draft.Guide, keepBatchLedger: cancelFailed);
+            StartOverResult reset;
+            try
+            {
+                reset = await GenerationReset.StartOverAsync(folder, plan, Draft.Guide, keepBatchLedger: cancelFailed);
+            }
+            finally
+            {
+                // WR-05: recorded only once the ledger is gone; even when the reset failed part way
+                RecordUnusedResultsIfLedgerGone(folder, unused);
+            }
+
             if (IsDisposed)
                 return;
 
@@ -1163,6 +1171,17 @@ public partial class StepGenerateCorpus : IWizardStep
             // Best effort by design: a provider outage must not block deleting the case's own files
             return false;
         }
+    }
+
+    // WR-05: a ledger that survived Start Over (locked, unreadable, or the reset failed) keeps these results unbilled, so a
+    // later Finished batch run bills them once; recording them here too would count the same spend twice
+    private void RecordUnusedResultsIfLedgerGone(string folder, OrphanBill? bill)
+    {
+        if (bill == null || bill.Lines.Count == 0 || File.Exists(BatchLedger.PathFor(folder)))
+            return;
+
+        foreach (var line in bill.Lines)
+            _state.UsageTracker.RecordUsage(BatchingLlmProvider.OrphanOperation, line.Model, line.Usage, line.Cost);
     }
 
     // Keys go only to the transport constructors (T-07-54); the test seam replaces them

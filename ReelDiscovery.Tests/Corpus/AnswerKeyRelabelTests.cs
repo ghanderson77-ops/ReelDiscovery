@@ -546,6 +546,55 @@ public class AnswerKeyRelabelTests : IDisposable
     }
 
     [Fact]
+    public async Task OtherPlanFile_NotOverwritten_KeepsItsSnapshot()
+    {
+        // WR-01: a re-plan approval writes the CSV but the XLSX is locked. The old plan's XLSX stays on disk, so its
+        // snapshot must stay too; otherwise the next harvest takes it by legacy ownership and imports its labels
+        var otherPlan = Guid.NewGuid();
+        var docId = Email(Relevant, 0);
+        var rows = Projection();
+        Edit(rows, docId, NotRelevant, null);
+        SaveCsv(_folder, rows);
+        File.WriteAllBytes(XlsxPath(_folder), AnswerKeyXlsxWriter.Build(rows, _guide));
+        var seeded = new AnswerKeyRelabelSet();
+        seeded.Files[AnswerKeyCsvWriter.FileName] = new AnswerKeyFileSnapshot { PlanId = otherPlan, Sha256 = "00" };
+        seeded.Files[AnswerKeyXlsxWriter.FileName] = new AnswerKeyFileSnapshot { PlanId = otherPlan, Sha256 = "00" };
+        new AnswerKeyRelabelStore(_folder).Save(seeded);
+
+        var first = await Write(writer: FailFor(".xlsx"));
+
+        Assert.False(first.Succeeded);
+        Assert.Equal(AnswerKeyXlsxWriter.FileName, first.FailedFileName);
+        var saved = Sidecar(_folder);
+        Assert.Equal(_plan.PlanId, saved.Files[AnswerKeyCsvWriter.FileName].PlanId);
+        Assert.Equal(otherPlan, saved.Files[AnswerKeyXlsxWriter.FileName].PlanId);
+
+        // The lock is gone: the old plan's label in the XLSX is still not a relabel of this plan
+        var second = await Write();
+
+        Assert.True(second.Succeeded);
+        Assert.Equal(0, second.Relabels);
+        Assert.Empty(Sidecar(_folder).Relabels);
+        Assert.Equal(Relevant, KeyRow(CsvPath(_folder), false, docId).Relevance);
+        Assert.Equal(Relevant, KeyRow(XlsxPath(_folder), true, docId).Relevance);
+        Assert.All(Sidecar(_folder).Files.Values, s => Assert.Equal(_plan.PlanId, s.PlanId));
+    }
+
+    [Fact]
+    public async Task OtherPlanSnapshot_FileGone_Pruned()
+    {
+        // WR-01: a snapshot whose file no longer exists says nothing; it is dropped
+        var seeded = new AnswerKeyRelabelSet();
+        seeded.Files[AnswerKeyXlsxWriter.FileName] = new AnswerKeyFileSnapshot { PlanId = Guid.NewGuid(), Sha256 = "00" };
+        new AnswerKeyRelabelStore(_folder).Save(seeded);
+
+        await Write(writer: FailFor(".xlsx"));
+
+        Assert.False(File.Exists(XlsxPath(_folder)));
+        Assert.False(Sidecar(_folder).Files.ContainsKey(AnswerKeyXlsxWriter.FileName));
+    }
+
+    [Fact]
     public async Task LegacyFile_NoSidecar()
     {
         // Written before Phase 10: plain projection, no sidecar

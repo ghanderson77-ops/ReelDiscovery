@@ -128,9 +128,14 @@ public static class AnswerKeyFiles
                 }
             }
 
-            // Only this plan's relabels and snapshots are kept (D-04, D-08)
+            // Only this plan's relabels are kept (D-04, D-08). WR-01: a file written above now carries this plan's snapshot;
+            // another plan's snapshot is dropped only once its file is gone. A file this call could not overwrite still holds
+            // that plan's labels, and without its snapshot the next harvest would fall back to legacy ownership
             set.Relabels = relabels.Values.OrderBy(r => r.DocId, StringComparer.Ordinal).ToList();
-            foreach (var name in set.Files.Where(f => f.Value == null || f.Value.PlanId != plan.PlanId).Select(f => f.Key).ToList())
+            foreach (var name in set.Files
+                         .Where(f => f.Value == null || !KeyFiles.Contains(f.Key, StringComparer.Ordinal)
+                                     || (f.Value.PlanId != plan.PlanId && !File.Exists(Path.Combine(caseFolder, f.Key))))
+                         .Select(f => f.Key).ToList())
                 set.Files.Remove(name);
 
             try

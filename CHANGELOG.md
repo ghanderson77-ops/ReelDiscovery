@@ -35,13 +35,6 @@ A full rebuild around a **case guide**. You describe a real-life dispute or inve
 - Manual relabels in the answer key are kept across Continue, Regenerate Thread, reopening and Start Over; you are warned before Re-plan drops them.
 - Switching provider no longer strands or double-pays the other provider's pending batches.
 
-### Known limitations
-- Not yet tested end to end with live runs on both providers. Anthropic prompt caching and a batch run interrupted by an app restart have not been checked against the live API.
-- Layout has been checked at up to 125% Windows scaling; 150% has not been checked.
-- Discovery documents can be marked Out of date when the run journal is missing for a reason other than Start Over.
-- Saving the CSV answer key from Excel as ANSI ("CSV (Comma delimited)") can garble the Rationale text of relabeled rows. Save as XLSX or CSV UTF-8.
-- Office attachments are not byte-identical between runs.
-
 ## [1.3.0] - 2026-01-27
 
 ### Fixed

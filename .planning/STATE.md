@@ -243,7 +243,7 @@ None.
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-10-13 (audit-open flagged 18; the 4 UAT files for phases 03-06 are approved/passed with 0 pending and are omitted):
+Items acknowledged and deferred at milestone close on 2026-10-13; phase files now live under milestones/v1.0-phases/ (audit-open flagged 18; the 4 UAT files for phases 03-06 are approved/passed with 0 pending and are omitted):
 
 | Category | Item | Status |
 |----------|------|--------|

@@ -6,15 +6,15 @@
 
 ---
 
-ReelDiscovery builds realistic, internally consistent eDiscovery data sets for training, testing and demonstrations. You describe a dispute or investigation in plain English. ReelDiscovery writes the legal document, builds a case guide from it, and generates up to ~5,000 emails with attachments. The relevant emails are the evidence behind the allegations, mixed with a share of ordinary business traffic you control, plus an exact answer key saying which documents are relevant and why.
+ReelDiscovery builds realistic, internally consistent eDiscovery data sets for training, testing and demonstrations. You describe a dispute or investigation in plain English: a realistic business matter, or one set in the world of your favorite TV show, movie or book. ReelDiscovery writes the legal document, builds a case guide from it, and generates up to ~5,000 emails with attachments. The relevant emails are the evidence behind the allegations, mixed with a share of ordinary business traffic you control, plus an exact answer key saying which documents are relevant and why.
 
 It works with **OpenAI** or **Anthropic Claude**.
 
-> **New in 2.0:** ReelDiscovery was rebuilt around a case guide. The 1.x topic → storylines → characters wizard is gone. See the [CHANGELOG](CHANGELOG.md).
+> **New in 2.0:** ReelDiscovery was rebuilt around a case guide. The 1.x topic → storylines → characters wizard is gone, but TV-show and movie scenarios still work: just describe the case. See the [CHANGELOG](CHANGELOG.md).
 
 ## How it works
 
-1. **Describe the Case.** Write a scenario, such as *"construction defect dispute between a window subcontractor, a general contractor and the developer on a midrise commercial project"*, and pick a Simple, Standard or Complex preset.
+1. **Describe the Case.** Write a scenario, such as *"construction defect dispute between a window subcontractor, a general contractor and the developer on a midrise commercial project"* or *"Dunder Mifflin sues a rival paper supplier for poaching its biggest clients"*, and pick a Simple, Standard or Complex preset.
 2. **Review Core Document.** ReelDiscovery writes a Complaint, Petition or Investigation Memo. Edit it, regenerate sections, and fix any flagged issues.
 3. **Case Guide.** The document becomes a structured guide: issues, a cast of key characters, a dated timeline of key facts, and canonical values (amounts, dates, names). Everything later is generated from this guide, so edit it here.
 4. **Corpus Settings.** Choose the corpus size, the relevant share, the non-relevant mix, the date window and the attachment types.
@@ -115,11 +115,18 @@ Every email carries an `X-ReelDiscovery-DocID` header that matches its answer-ke
 
 ## Example scenarios
 
+**Realistic matters**
 - "Construction defect dispute between a window subcontractor, a general contractor and the developer on a midrise commercial project"
 - "Trade-secret theft by a departing sales director who joins a competitor"
 - "Hospital billing fraud investigation into upcoding by a physician group"
 - "Shareholder dispute over a family-owned manufacturing company"
-- "Correspondence inspired by a TV crime drama evidencing a criminal conspiracy" (names are swapped for fictional ones)
+
+**From your favorite TV show, movie or book**
+- "Dunder Mifflin sues a rival paper supplier for poaching its biggest clients"
+- "A DEA investigation into a high-school chemistry teacher's meth operation" (Breaking Bad)
+- "Waystar Royco board fight over a hostile takeover bid" (Succession)
+
+Characters and companies from fictional works are kept as written. Only real-world people, companies and brands are flagged, so you can swap them for invented ones before anything is generated.
 
 ## Disclaimer
 

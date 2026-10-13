@@ -7,7 +7,7 @@ All notable changes to ReelDiscovery are listed here. Versions follow [Semantic 
 A full rebuild around a **case guide**. You describe a real-life dispute or investigation; ReelDiscovery writes the legal document, builds a structured case guide, plans every email in code, and then generates a consistent eDiscovery corpus of up to ~5,000 emails with an exact answer key, on **OpenAI or Anthropic Claude**.
 
 ### Breaking changes
-- The topic → storylines → characters wizard is removed. Every run now uses the case-driven flow.
+- The topic → storylines → characters wizard is removed. Every run now uses the case-driven flow. Scenarios set in a TV show, movie or book still work: describe the case, and its characters and companies are kept as written.
 - Requires a key for OpenAI or Anthropic. Images and voicemail audio still need an OpenAI key.
 - API keys saved by 1.x (Base64 file) are not migrated. Enter your key again on the API Configuration step; it is now stored encrypted with Windows DPAPI.
 - Opt-in Slack telemetry is removed.

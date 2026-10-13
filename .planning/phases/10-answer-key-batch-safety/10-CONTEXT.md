@@ -113,6 +113,8 @@ Out of scope: an in-app relabel UI (D-13 keeps relabeling manual), persisting `T
   - On a row that is already relabeled, an edit to the Rationale alone is captured. Rationale edits on rows that are not relabeled are ignored (D-05).
 - **D-24:** A live-mode case with collected results from the other provider leaves them unbilled until Start Over (D-16) or a later Finished batch run. This is accepted as is, with no new billing path.
 
+- **D-25 (refines D-13; code review WR-06/CR-01, 2026-10-13):** A running other-provider batch is cancelled through the transport **without** a Cancelled ledger line; its status is re-checked once — if ended it is collected (partial results billed as orphans at Finished), otherwise it stays pending and the next run start collects it (the run is not blocked). A batch the other provider no longer has (HTTP 404) or whose results expired is closed and no longer blocks; transient/auth failures still block (D-22).
+
 ### Claude's Discretion
 - How the harvest is implemented: the parser structure, and whether CSV and XLSX readers share a row model.
 - The exact Activity log wording for cross-provider resolution, consistent with existing Activity phrasing.

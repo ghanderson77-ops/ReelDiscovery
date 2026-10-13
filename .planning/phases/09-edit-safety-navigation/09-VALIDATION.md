@@ -88,4 +88,4 @@ Existing infrastructure covers all phase requirements (FakeLlmProvider, Discover
 - [x] Feedback latency < 90s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** approved 2026-10-11 (automated gate); 150% DPI walkthrough deferred by user 2026-10-12 — outstanding (see 09-10-SUMMARY.md)
+**Approval:** automated gate passed 2026-10-11; 150% DPI walkthrough deferred by user 2026-10-12 — outstanding (see 09-10-SUMMARY.md)

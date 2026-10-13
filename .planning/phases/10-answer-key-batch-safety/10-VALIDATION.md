@@ -94,4 +94,4 @@ Filled at the phase gate (10-11) from the tasks of plans 10-01..10-10. Gate run 
 - [x] Feedback latency < 90s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** approved 2026-10-12 (automated gate); real-Excel round trip and 150% DPI check deferred by user 2026-10-13 — outstanding
+**Approval:** automated gate passed 2026-10-12; real-Excel round trip and 150% DPI check deferred by user 2026-10-13 — outstanding

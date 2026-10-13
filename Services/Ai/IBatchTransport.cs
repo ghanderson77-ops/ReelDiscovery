@@ -100,6 +100,12 @@ public class BatchStatusResult
     public string ErrorFileId { get; set; } = string.Empty;
     public LlmFailureKind FailureKind { get; set; }
     public string Message { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Failed because the provider does not know the batch (HTTP 404: deleted, or the key belongs to another org or
+    /// project). Permanent: a batch the provider no longer has can neither finish nor bill.
+    /// </summary>
+    public bool NotFound { get; set; }
 }
 
 public enum BatchItemOutcome
@@ -127,4 +133,10 @@ public class BatchResultsResult
     public List<BatchItemResult> Items { get; set; } = new();
     public LlmFailureKind FailureKind { get; set; }
     public string Message { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Failed because the batch or its result files are gone (HTTP 404, for example results past the provider's
+    /// retention window). Permanent: retrying never brings them back.
+    /// </summary>
+    public bool NotFound { get; set; }
 }

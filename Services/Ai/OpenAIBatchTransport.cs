@@ -148,7 +148,7 @@ public class OpenAIBatchTransport : IBatchTransport
         catch (Exception ex)
         {
             var (kind, message) = MapFailure(ex);
-            return new BatchStatusResult { FailureKind = kind, Message = message };
+            return new BatchStatusResult { FailureKind = kind, Message = message, NotFound = IsNotFound(ex) };
         }
     }
 
@@ -184,7 +184,7 @@ public class OpenAIBatchTransport : IBatchTransport
         catch (Exception ex)
         {
             var (kind, message) = MapFailure(ex);
-            return new BatchResultsResult { FailureKind = kind, Message = message };
+            return new BatchResultsResult { FailureKind = kind, Message = message, NotFound = IsNotFound(ex) };
         }
     }
 
@@ -387,6 +387,9 @@ public class OpenAIBatchTransport : IBatchTransport
         obj.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var n)
             ? Math.Max(0, n)
             : 0;
+
+    // CR-01: a deleted batch, a key of another org or project, or output files past their retention window
+    private static bool IsNotFound(Exception ex) => ex is ClientResultException { Status: 404 };
 
     private static (LlmFailureKind Kind, string Message) MapFailure(Exception ex)
     {

@@ -1089,6 +1089,70 @@ public class BatchingLlmProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task ResolveOtherProvider_StatusNotFound_ClosedNotBlocked()
+    {
+        // CR-01: the provider no longer has the batch (deleted, or a key of another org): it can never bill
+        var anthropic = Anthropic();
+        anthropic.UnknownIsNotFound = true;
+        await AppendSubmittedAsync(LlmProviderKind.Anthropic, "msgbatch_gone", "file_in_gone", _plan, "c-x");
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.False(result.Blocked);
+        Assert.Equal(1, result.Found);
+        Assert.Equal(1, result.Cancelled);
+        Assert.Equal(0, result.Collected);
+        Assert.Empty(anthropic.CancelledIds);
+        var closed = Assert.Single(LedgerLines(), r => r.Type == BatchLedgerRecordType.Cancelled);
+        Assert.Equal("msgbatch_gone", closed.BatchId);
+        Assert.Equal(LlmProviderKind.Anthropic, closed.Provider);
+        Assert.Equal(0, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
+
+        // The next run start finds nothing left to resolve
+        var again = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+        Assert.Equal(0, again.Found);
+        Assert.False(again.Blocked);
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_ResultsGone_ClosedNotBlocked()
+    {
+        // CR-01: the batch ended but its results are past the provider's retention window
+        var anthropic = Anthropic();
+        anthropic.PollsUntilEnded = 0;
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a");
+        anthropic.ResultsGoneIds.Add(foreign.BatchId);
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.False(result.Blocked);
+        Assert.Equal(1, result.Cancelled);
+        Assert.Equal(0, result.Collected);
+        Assert.DoesNotContain(LedgerLines(), r => r.Type == BatchLedgerRecordType.Collected);
+        Assert.Contains(foreign.BatchId, new BatchLedger(_folder).Replay().CancelledIds);
+        Assert.False(new BatchLedger(_folder).TryReadResults(foreign.BatchId, out _));
+        Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, _plan));
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_AuthFailure_BlockedWithKind()
+    {
+        // D-22: a refused key is not "gone"; the batch may still bill, so the run stays blocked and names the key
+        var anthropic = Anthropic();
+        await SeedForeignAsync(anthropic, _plan, "a");
+        anthropic.StatusFailure = LlmFailureKind.Auth;
+        var before = LedgerLines().Count;
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.True(result.Blocked);
+        Assert.True(result.Failed);
+        Assert.Equal(LlmFailureKind.Auth, result.FailureKind);
+        Assert.Equal(before, LedgerLines().Count);
+        Assert.Equal(1, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
+    }
+
+    [Fact]
     public async Task ResolveOtherProvider_OtherPlans_Untouched()
     {
         var anthropic = Anthropic();

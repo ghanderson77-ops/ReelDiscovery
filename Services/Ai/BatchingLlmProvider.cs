@@ -100,6 +100,9 @@ public class OtherProviderResolution
     /// <summary>Diagnostic only; never shown in Activity or status text (T-07-52).</summary>
     public string FailureMessage { get; set; } = string.Empty;
 
+    /// <summary>Kind of the provider failure that blocked the run (Auth picks the key copy); None for a ledger write failure.</summary>
+    public LlmFailureKind FailureKind { get; set; }
+
     public bool Blocked => KeyMissing || Failed;
 }
 
@@ -570,9 +573,11 @@ public class BatchingLlmProvider : ILlmProvider
     /// Run start (D-13): resolves this plan's pending batches of every provider other than <paramref name="current"/>
     /// before the run's gateway exists (its constructor's Recover then sees the collected results as orphans, Pitfall 11).
     /// An ended, expired or cancelled batch is collected and cached under its own provider; a failed batch gets an
-    /// all-Errored cache; a running batch is cancelled. Their items then run once under the current provider. No key for
-    /// that provider, or a failed status/results/save/cancel call, blocks the run instead (D-14, D-22): never a silent
-    /// resubmission. An unreadable ledger changes nothing here (the run keeps today's CR-A05 behavior).
+    /// all-Errored cache; a running batch is cancelled. Their items then run once under the current provider. A batch the
+    /// provider no longer has, or whose results are gone (HTTP 404, CR-01), can never finish or bill: it is recorded
+    /// Cancelled and no longer blocks. No key for that provider, or a failed status/results/save/cancel call, blocks the run
+    /// instead (D-14, D-22): never a silent resubmission. An unreadable ledger changes nothing here (the run keeps today's
+    /// CR-A05 behavior).
     /// </summary>
     public static async Task<OtherProviderResolution> ResolveOtherProviderPendingAsync(BatchLedger ledger,
         Func<LlmProviderKind, IBatchTransport?> transportFor, Guid planId, LlmProviderKind current,
@@ -613,8 +618,17 @@ public class BatchingLlmProvider : ILlmProvider
             ct.ThrowIfCancellationRequested();
             var transport = transportFor(record.Provider)!;
             var status = await transport.GetStatusAsync(record.BatchId, ct);
+            if (!status.Succeeded && status.NotFound)
+            {
+                // CR-01: the provider no longer has this batch, so it cannot bill; close it rather than block every run
+                if (!await TryCloseGoneAsync(ledger, transport, record, null, result, ct))
+                    return result;
+
+                continue;
+            }
+
             if (!status.Succeeded)
-                return Fail(result, record.Provider, status.Message);
+                return Fail(result, record.Provider, status.Message, status.FailureKind);
 
             switch (status.State)
             {
@@ -623,8 +637,17 @@ public class BatchingLlmProvider : ILlmProvider
                 case BatchState.Cancelled:
                 {
                     var results = await transport.GetResultsAsync(record.BatchId, ct);
+                    if (!results.Succeeded && results.NotFound)
+                    {
+                        // CR-01: results past the provider's retention window never come back; nothing is left to bill
+                        if (!await TryCloseGoneAsync(ledger, transport, record, status.OutputFileId, result, ct))
+                            return result;
+
+                        break;
+                    }
+
                     if (!results.Succeeded)
-                        return Fail(result, record.Provider, results.Message);
+                        return Fail(result, record.Provider, results.Message, results.FailureKind);
 
                     var batch = TrackedBatch.From(record, resumed: true);
                     var ordered = ClassifyResults(batch, results.Items);
@@ -688,7 +711,7 @@ public class BatchingLlmProvider : ILlmProvider
             {
                 var cancelled = await CancelPendingAsync(ledger, transportFor, planId,
                     include: r => r.Provider != current && ids.Contains(r.BatchId), ct: ct);
-                result.Cancelled = cancelled.Count;
+                result.Cancelled += cancelled.Count;
             }
             catch (OperationCanceledException)
             {
@@ -700,18 +723,57 @@ public class BatchingLlmProvider : ILlmProvider
                 result.Failed = true;
                 result.Provider = running[0].Provider;
                 result.FailureMessage = ex.Message;
+                result.FailureKind = ex is BatchCancelFailedException cancelFailed ? cancelFailed.FailureKind : LlmFailureKind.Unknown;
             }
         }
 
         return result;
     }
 
-    private static OtherProviderResolution Fail(OtherProviderResolution result, LlmProviderKind provider, string? message)
+    private static OtherProviderResolution Fail(OtherProviderResolution result, LlmProviderKind provider, string? message,
+        LlmFailureKind kind = LlmFailureKind.None)
     {
         result.Failed = true;
         result.Provider = provider;
         result.FailureMessage = message ?? string.Empty;
+        result.FailureKind = kind;
         return result;
+    }
+
+    // CR-01: a batch (or its results) the provider no longer has is recorded Cancelled under its own provider, so it stops
+    // blocking run starts; its items run once under the current provider. False (and the resolution failed) when the line
+    // cannot be written
+    private static async Task<bool> TryCloseGoneAsync(BatchLedger ledger, IBatchTransport transport, BatchLedgerRecord record,
+        string? outputFileId, OtherProviderResolution result, CancellationToken ct)
+    {
+        try
+        {
+            await ledger.AppendAsync(new BatchLedgerRecord
+            {
+                Type = BatchLedgerRecordType.Cancelled,
+                Utc = DateTime.UtcNow,
+                Provider = record.Provider,
+                BatchId = record.BatchId,
+                PlanId = record.PlanId
+            }, ct);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Fail(result, record.Provider, ex.Message);
+            return false;
+        }
+
+        result.Cancelled++;
+        try
+        {
+            await transport.DeleteFilesAsync(NullIfEmpty(record.InputFileId), NullIfEmpty(outputFileId), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Best effort: a file left at the provider is cleaned up by Start Over; it never affects the run
+        }
+
+        return true;
     }
 
     // Collected line under the batch's own provider and plan; false (and the resolution failed) when it cannot be written

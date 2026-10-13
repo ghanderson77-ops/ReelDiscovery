@@ -1337,6 +1337,59 @@ public class GenerateCorpusStepTests
     }
 
     [Fact]
+    public void Run_OtherProviderKeyRefused_RefusedWithKeyCopy()
+    {
+        using var h = new Harness();
+        var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic };
+        SeedForeignBatch(h, anthropic, running: true);
+        anthropic.StatusFailure = LlmFailureKind.Auth;
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? anthropic : new FakeBatchTransport();
+            var gatewayCalls = 0;
+            step.RunGatewayFactory = useBatch =>
+            {
+                gatewayCalls++;
+                return (h.Gateway, null);
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            // CR-01: a refused key is named, never "try again in a moment"
+            Assert.Equal(0, gatewayCalls);
+            Assert.Equal(GenerationUiText.RunRefusedOtherProviderKeyRefusedText("Anthropic"), step.StatusLabel.Text);
+        });
+    }
+
+    [Fact]
+    public void Run_OtherProviderBatchGone_RunStarts()
+    {
+        using var h = new Harness();
+        // CR-01: the provider no longer has this batch; it cannot bill, so it never blocks the run
+        SeedPendingBatch(h, LlmProviderKind.Anthropic, "msgbatch_gone");
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            var anthropic = new FakeBatchTransport { Kind = LlmProviderKind.Anthropic, UnknownIsNotFound = true };
+            step.BatchTransportFactory = k => k == LlmProviderKind.Anthropic ? anthropic : new FakeBatchTransport();
+            var gatewayCalls = 0;
+            step.RunGatewayFactory = useBatch =>
+            {
+                gatewayCalls++;
+                return (h.Gateway, null);
+            };
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            Assert.Equal(1, gatewayCalls);
+            Assert.Contains("msgbatch_gone", new BatchLedger(h.Folder).Replay().CancelledIds);
+        });
+    }
+
+    [Fact]
     public void Run_OtherProviderResolverThrows_Refused()
     {
         using var h = new Harness();

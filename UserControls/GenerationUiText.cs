@@ -751,6 +751,10 @@ public static class GenerationUiText
     public static string RunRefusedOtherProviderFailedText(string provider) =>
         $"Generation did not start: {ProviderName(provider)} batches from an earlier session could not be collected or stopped. Nothing was started, so nothing is paid twice. Try again in a moment.";
 
+    // 10 D-22, CR-01: the other provider refused its key; retrying alone never clears this, so point at the key instead
+    public static string RunRefusedOtherProviderKeyRefusedText(string provider) =>
+        $"Generation did not start: {ProviderName(provider)} did not accept its key, so batches from an earlier session could not be collected or stopped. Nothing was started, so nothing is paid twice. Check the {ProviderName(provider)} key on the API Configuration step.";
+
     public static string MissingEmlText(string docId) => $"{docId}.eml is no longer in the case folder.";
 
     // --- Entering the step ---

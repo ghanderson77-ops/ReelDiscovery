@@ -2309,6 +2309,18 @@ public class GenerationUiTextTests
     }
 
     [Fact]
+    public void RunRefusedOtherProvider_KeyRefused_PointsAtKeyNotRetry()
+    {
+        // CR-01: a refused key never clears on its own, so the copy must not say "try again in a moment"
+        var text = GenerationUiText.RunRefusedOtherProviderKeyRefusedText("Anthropic");
+        Assert.Equal(
+            "Generation did not start: Anthropic did not accept its key, so batches from an earlier session could not be collected or stopped. Nothing was started, so nothing is paid twice. Check the Anthropic key on the API Configuration step.",
+            text);
+        Assert.DoesNotContain("Try again", text);
+        AssertNoBannedWords(GenerationUiText.RunRefusedOtherProviderKeyRefusedText("OpenAI"));
+    }
+
+    [Fact]
     public void BannerBody_BatchClauses_PendingWins()
     {
         const string body = "4 of 10 threads are written and saved. Continue Generating writes the rest and keeps everything already saved.";

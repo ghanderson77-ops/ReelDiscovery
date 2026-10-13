@@ -36,6 +36,15 @@ public class FakeBatchTransport : IBatchTransport
     /// <summary>Batches whose first item custom id is in this set stay InProgress regardless of PollsUntilEnded.</summary>
     public HashSet<string> NeverEndIds { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>When true, a status or results call for a batch this fake never issued reports NotFound (HTTP 404).</summary>
+    public bool UnknownIsNotFound { get; set; }
+
+    /// <summary>Batches whose results download reports NotFound (results past the provider's retention window).</summary>
+    public HashSet<string> ResultsGoneIds { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>When set, every status call fails with this kind (not NotFound).</summary>
+    public LlmFailureKind? StatusFailure { get; set; }
+
     public int PollsUntilEnded { get; set; } = 1;
     public TimeSpan SubmitDelay { get; set; }
 
@@ -82,10 +91,16 @@ public class FakeBatchTransport : IBatchTransport
         lock (_lock)
         {
             StatusCalls++;
+            if (StatusFailure != null)
+                return Task.FromResult(new BatchStatusResult
+                {
+                    Succeeded = false, FailureKind = StatusFailure.Value, Message = "Scripted status failure"
+                });
+
             if (!_batches.TryGetValue(batchId, out var items))
                 return Task.FromResult(new BatchStatusResult
                 {
-                    Succeeded = false, FailureKind = LlmFailureKind.BadRequest, Message = "Unknown batch"
+                    Succeeded = false, FailureKind = LlmFailureKind.BadRequest, Message = "Unknown batch", NotFound = UnknownIsNotFound
                 });
 
             var total = items.Count;
@@ -122,7 +137,13 @@ public class FakeBatchTransport : IBatchTransport
             if (!_batches.TryGetValue(batchId, out var found))
                 return Task.FromResult(new BatchResultsResult
                 {
-                    Succeeded = false, FailureKind = LlmFailureKind.BadRequest, Message = "Unknown batch"
+                    Succeeded = false, FailureKind = LlmFailureKind.BadRequest, Message = "Unknown batch", NotFound = UnknownIsNotFound
+                });
+
+            if (ResultsGoneIds.Contains(batchId))
+                return Task.FromResult(new BatchResultsResult
+                {
+                    Succeeded = false, FailureKind = LlmFailureKind.BadRequest, Message = "Results expired", NotFound = true
                 });
 
             items = found.ToList();

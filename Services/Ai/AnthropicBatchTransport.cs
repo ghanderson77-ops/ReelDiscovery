@@ -90,7 +90,7 @@ public class AnthropicBatchTransport : IBatchTransport
         catch (Exception ex)
         {
             var (kind, message) = MapFailure(ex);
-            return new BatchStatusResult { FailureKind = kind, Message = message };
+            return new BatchStatusResult { FailureKind = kind, Message = message, NotFound = IsNotFound(ex) };
         }
     }
 
@@ -116,7 +116,7 @@ public class AnthropicBatchTransport : IBatchTransport
         catch (Exception ex)
         {
             var (kind, message) = MapFailure(ex);
-            return new BatchResultsResult { FailureKind = kind, Message = message };
+            return new BatchResultsResult { FailureKind = kind, Message = message, NotFound = IsNotFound(ex) };
         }
     }
 
@@ -215,6 +215,9 @@ public class AnthropicBatchTransport : IBatchTransport
     }
 
     private static int ClampCount(long value) => (int)Math.Clamp(value, 0, int.MaxValue);
+
+    // CR-01: a deleted batch, a key of another workspace, or results past their retention window (about 29 days)
+    private static bool IsNotFound(Exception ex) => ex is AnthropicApiException api && (int)api.StatusCode == 404;
 
     private static (LlmFailureKind Kind, string Message) MapFailure(Exception ex)
     {

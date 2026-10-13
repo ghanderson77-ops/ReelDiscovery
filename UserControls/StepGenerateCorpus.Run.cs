@@ -514,9 +514,12 @@ public partial class StepGenerateCorpus : IWizardStep
             {
                 SetOtherProviderBatches(resolution.Found);
                 RaiseStateChanged();
+                // CR-01: a batch the provider no longer has never blocks; what remains is transient, or a refused key
                 SetStatus(resolution.KeyMissing
                     ? GenerationUiText.RunRefusedOtherProviderKeyText(resolution.Provider.ToString())
-                    : GenerationUiText.RunRefusedOtherProviderFailedText(resolution.Provider.ToString()), Theme.Warning);
+                    : resolution.FailureKind == LlmFailureKind.Auth
+                        ? GenerationUiText.RunRefusedOtherProviderKeyRefusedText(resolution.Provider.ToString())
+                        : GenerationUiText.RunRefusedOtherProviderFailedText(resolution.Provider.ToString()), Theme.Warning);
                 return;
             }
             SetOtherProviderBatches(0);

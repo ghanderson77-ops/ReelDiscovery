@@ -45,6 +45,9 @@ public class FakeBatchTransport : IBatchTransport
     /// <summary>When set, every status call fails with this kind (not NotFound).</summary>
     public LlmFailureKind? StatusFailure { get; set; }
 
+    /// <summary>When true, a cancelled batch keeps reporting its normal state (OpenAI "cancelling" can last minutes).</summary>
+    public bool CancelKeepsRunning { get; set; }
+
     public int PollsUntilEnded { get; set; } = 1;
     public TimeSpan SubmitDelay { get; set; }
 
@@ -107,7 +110,7 @@ public class FakeBatchTransport : IBatchTransport
             if (FailWholeBatch)
                 return Task.FromResult(new BatchStatusResult { Succeeded = true, State = BatchState.Failed, Total = total });
 
-            if (CancelledIds.Contains(batchId))
+            if (CancelledIds.Contains(batchId) && !CancelKeepsRunning)
                 return Task.FromResult(new BatchStatusResult { Succeeded = true, State = BatchState.Cancelled, Total = total });
 
             var polls = _polls[batchId]++;

@@ -573,7 +573,9 @@ public class BatchingLlmProvider : ILlmProvider
     /// Run start (D-13): resolves this plan's pending batches of every provider other than <paramref name="current"/>
     /// before the run's gateway exists (its constructor's Recover then sees the collected results as orphans, Pitfall 11).
     /// An ended, expired or cancelled batch is collected and cached under its own provider; a failed batch gets an
-    /// all-Errored cache; a running batch is cancelled. Their items then run once under the current provider. A batch the
+    /// all-Errored cache; a running batch is cancelled at the provider without a Cancelled line and collected like an ended
+    /// one, now or at a later run start, so what it finished before the cancel is billed as an orphan (WR-06). Their items
+    /// then run once under the current provider. A batch the
     /// provider no longer has, or whose results are gone (HTTP 404, CR-01), can never finish or bill: it is recorded
     /// Cancelled and no longer blocks. No key for that provider, or a failed status/results/save/cancel call, blocks the run
     /// instead (D-14, D-22): never a silent resubmission. An unreadable ledger changes nothing here (the run keeps today's
@@ -612,7 +614,6 @@ public class BatchingLlmProvider : ILlmProvider
             }
         }
 
-        var running = new List<BatchLedgerRecord>();
         foreach (var record in foreign)
         {
             ct.ThrowIfCancellationRequested();
@@ -624,94 +625,34 @@ public class BatchingLlmProvider : ILlmProvider
                 if (!await TryCloseGoneAsync(ledger, transport, record, null, result, ct))
                     return result;
 
+                result.Cancelled++;
                 continue;
             }
 
             if (!status.Succeeded)
                 return Fail(result, record.Provider, status.Message, status.FailureKind);
 
-            switch (status.State)
+            if (status.State != BatchState.InProgress)
             {
-                case BatchState.Ended:
-                case BatchState.Expired:
-                case BatchState.Cancelled:
-                {
-                    var results = await transport.GetResultsAsync(record.BatchId, ct);
-                    if (!results.Succeeded && results.NotFound)
-                    {
-                        // CR-01: results past the provider's retention window never come back; nothing is left to bill
-                        if (!await TryCloseGoneAsync(ledger, transport, record, status.OutputFileId, result, ct))
-                            return result;
+                var ended = await TryCollectEndedAsync(ledger, transport, record, status, result, ct);
+                if (ended == EndedOutcome.Failed)
+                    return result;
 
-                        break;
-                    }
-
-                    if (!results.Succeeded)
-                        return Fail(result, record.Provider, results.Message, results.FailureKind);
-
-                    var batch = TrackedBatch.From(record, resumed: true);
-                    var ordered = ClassifyResults(batch, results.Items);
-                    try
-                    {
-                        ledger.SaveResults(record.BatchId, ordered);
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        // Not recorded Collected without a durable cache (CX-05): refuse rather than lose paid results
-                        return Fail(result, record.Provider, ex.Message);
-                    }
-
-                    if (!await TryAppendCollectedAsync(ledger, record, status.OutputFileId, status.Done, ordered.Count, result, ct))
-                        return result;
-
+                if (ended == EndedOutcome.Collected)
                     result.Collected++;
-
-                    // WR-A03: the cache is durable, so the provider files are no longer needed
-                    try
-                    {
-                        await transport.DeleteFilesAsync(NullIfEmpty(record.InputFileId), NullIfEmpty(status.OutputFileId), ct);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        // Best effort: a file left at the provider is cleaned up by Start Over; it never affects the run
-                    }
-
-                    break;
-                }
-                case BatchState.Failed:
-                {
-                    // As FailAtProviderAsync: no results to lose; an all-errored cache keeps a restart from downloading it
-                    try
-                    {
-                        ledger.SaveResults(record.BatchId, TrackedBatch.From(record, resumed: true).ItemIds
-                            .Select(id => new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Errored, Message = "The batch failed" })
-                            .ToList());
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        // Best effort: without the cache its items simply run live under the current provider; no extra spend
-                    }
-
-                    if (!await TryAppendCollectedAsync(ledger, record, null, 0, record.Items.Count(i => i != null), result, ct))
-                        return result;
-
-                    result.Collected++;
-                    break;
-                }
-                default:
-                    running.Add(record);
-                    break;
+                else
+                    result.Cancelled++;
+                continue;
             }
-        }
 
-        if (running.Count > 0)
-        {
-            var ids = running.Select(r => r.BatchId).ToHashSet(StringComparer.Ordinal);
+            // WR-06: cancelled at the provider directly, never with a bare Cancelled line (as D-21 for stale waves). Both
+            // providers bill, and return, the requests that finished before the cancel took effect, so the batch is
+            // collected and those results are billed as orphans: now when the provider already reports it over, otherwise
+            // at a later run start (it stays pending until then). Its custom ids never match the current provider's, so its
+            // items run once under the current provider either way (D-13)
             try
             {
-                var cancelled = await CancelPendingAsync(ledger, transportFor, planId,
-                    include: r => r.Provider != current && ids.Contains(r.BatchId), ct: ct);
-                result.Cancelled += cancelled.Count;
+                await transport.CancelAsync(record.BatchId, ct);
             }
             catch (OperationCanceledException)
             {
@@ -720,14 +661,95 @@ public class BatchingLlmProvider : ILlmProvider
             catch (Exception ex)
             {
                 // D-22: a batch that could not be stopped may still run and bill; refuse the run rather than pay twice
-                result.Failed = true;
-                result.Provider = running[0].Provider;
-                result.FailureMessage = ex.Message;
-                result.FailureKind = ex is BatchCancelFailedException cancelFailed ? cancelFailed.FailureKind : LlmFailureKind.Unknown;
+                return Fail(result, record.Provider, ex.Message,
+                    ex is BatchCancelFailedException cancelFailed ? cancelFailed.FailureKind : LlmFailureKind.Unknown);
             }
+
+            result.Cancelled++;
+            var after = await transport.GetStatusAsync(record.BatchId, ct);
+            if (after.Succeeded && after.State != BatchState.InProgress
+                && await TryCollectEndedAsync(ledger, transport, record, after, result, ct) == EndedOutcome.Failed)
+                return result;
+
+            // Still cancelling (or the re-check failed): the stop took effect at the provider; the next run start collects it
         }
 
         return result;
+    }
+
+    private enum EndedOutcome
+    {
+        Failed,
+        Collected,
+        Closed
+    }
+
+    // One batch the provider reports over (ended, expired, cancelled or failed): its results are cached under its own
+    // provider and it is recorded Collected; results that are gone (CR-01) close it instead. Failed when the resolution failed
+    private static async Task<EndedOutcome> TryCollectEndedAsync(BatchLedger ledger, IBatchTransport transport,
+        BatchLedgerRecord record, BatchStatusResult status, OtherProviderResolution result, CancellationToken ct)
+    {
+        if (status.State == BatchState.Failed)
+        {
+            // As FailAtProviderAsync: no results to lose; an all-errored cache keeps a restart from downloading it
+            try
+            {
+                ledger.SaveResults(record.BatchId, TrackedBatch.From(record, resumed: true).ItemIds
+                    .Select(id => new BatchItemResult { CustomId = id, Outcome = BatchItemOutcome.Errored, Message = "The batch failed" })
+                    .ToList());
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Best effort: without the cache its items simply run live under the current provider; no extra spend
+            }
+
+            return await TryAppendCollectedAsync(ledger, record, null, 0, record.Items.Count(i => i != null), result, ct)
+                ? EndedOutcome.Collected
+                : EndedOutcome.Failed;
+        }
+
+        var results = await transport.GetResultsAsync(record.BatchId, ct);
+        if (!results.Succeeded && results.NotFound)
+        {
+            // CR-01: results past the provider's retention window never come back; nothing is left to bill
+            return await TryCloseGoneAsync(ledger, transport, record, status.OutputFileId, result, ct)
+                ? EndedOutcome.Closed
+                : EndedOutcome.Failed;
+        }
+
+        if (!results.Succeeded)
+        {
+            Fail(result, record.Provider, results.Message, results.FailureKind);
+            return EndedOutcome.Failed;
+        }
+
+        var batch = TrackedBatch.From(record, resumed: true);
+        var ordered = ClassifyResults(batch, results.Items);
+        try
+        {
+            ledger.SaveResults(record.BatchId, ordered);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Not recorded Collected without a durable cache (CX-05): refuse rather than lose paid results
+            Fail(result, record.Provider, ex.Message);
+            return EndedOutcome.Failed;
+        }
+
+        if (!await TryAppendCollectedAsync(ledger, record, status.OutputFileId, status.Done, ordered.Count, result, ct))
+            return EndedOutcome.Failed;
+
+        // WR-A03: the cache is durable, so the provider files are no longer needed
+        try
+        {
+            await transport.DeleteFilesAsync(NullIfEmpty(record.InputFileId), NullIfEmpty(status.OutputFileId), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Best effort: a file left at the provider is cleaned up by Start Over; it never affects the run
+        }
+
+        return EndedOutcome.Collected;
     }
 
     private static OtherProviderResolution Fail(OtherProviderResolution result, LlmProviderKind provider, string? message,
@@ -763,7 +785,6 @@ public class BatchingLlmProvider : ILlmProvider
             return false;
         }
 
-        result.Cancelled++;
         try
         {
             await transport.DeleteFilesAsync(NullIfEmpty(record.InputFileId), NullIfEmpty(outputFileId), ct);

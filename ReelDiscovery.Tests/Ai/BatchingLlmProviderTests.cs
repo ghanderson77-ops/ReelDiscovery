@@ -1036,10 +1036,12 @@ public class BatchingLlmProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task ResolveOtherProvider_Running_Cancelled()
+    public async Task ResolveOtherProvider_Running_CancelledThenPartialResultsCollected()
     {
+        // WR-06: the requests the batch finished before the cancel are billed by the provider; they are collected and
+        // billed as orphans, never hidden behind a bare Cancelled line
         var anthropic = Anthropic();
-        var foreign = await SeedForeignAsync(anthropic, _plan, "a");
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a", "b");
 
         var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
 
@@ -1047,10 +1049,54 @@ public class BatchingLlmProviderTests : IDisposable
         Assert.Equal(1, result.Cancelled);
         Assert.Equal(0, result.Collected);
         Assert.Equal(new[] { foreign.BatchId }, anthropic.CancelledIds);
-        var cancelled = Assert.Single(LedgerLines(), r => r.Type == BatchLedgerRecordType.Cancelled);
-        Assert.Equal(foreign.BatchId, cancelled.BatchId);
-        Assert.Equal(LlmProviderKind.Anthropic, cancelled.Provider);
+        Assert.DoesNotContain(LedgerLines(), r => r.Type == BatchLedgerRecordType.Cancelled);
+        var collected = Assert.Single(LedgerLines(), r => r.Type == BatchLedgerRecordType.Collected);
+        Assert.Equal(foreign.BatchId, collected.BatchId);
+        Assert.Equal(LlmProviderKind.Anthropic, collected.Provider);
+        Assert.True(new BatchLedger(_folder).TryReadResults(foreign.BatchId, out var cached));
+        Assert.Equal(2, cached.Count);
         Assert.Equal(0, BatchLedger.PendingBatchCount(_folder, _plan));
+
+        // The current provider's gateway bills them once as orphans, with the Anthropic model (CR-A04)
+        var claude = PricedModel(LlmProviderKind.Anthropic, "claude-test", 3m, 15m);
+        var provider = new BatchingLlmProvider(Live(), Transport(), new BatchLedger(_folder), _plan,
+            (kind, id) => kind == LlmProviderKind.Anthropic && id == "claude-test" ? claude : null, Fast());
+        _providers.Add(provider);
+        var bill = provider.PriceOrphans();
+        Assert.Equal(new[] { foreign.BatchId }, bill.ItemsByBatch.Keys);
+        Assert.Equal(2 * BatchCost(claude).TotalUsd, bill.Cost.TotalUsd);
+    }
+
+    [Fact]
+    public async Task ResolveOtherProvider_StillCancelling_StaysPending_CollectedNextRunStart()
+    {
+        // WR-06: a batch that is still cancelling is stopped at the provider but stays pending without a Cancelled line;
+        // the run is not blocked, and the next run start collects its partial results
+        var anthropic = Anthropic();
+        anthropic.CancelKeepsRunning = true;
+        var foreign = await SeedForeignAsync(anthropic, _plan, "a");
+        anthropic.NeverEndIds.Add("c-a");
+
+        var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.False(result.Blocked);
+        Assert.Equal(1, result.Cancelled);
+        Assert.Equal(new[] { foreign.BatchId }, anthropic.CancelledIds);
+        Assert.DoesNotContain(LedgerLines(), r => r.Type is BatchLedgerRecordType.Cancelled or BatchLedgerRecordType.Collected);
+        Assert.Equal(1, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
+        Assert.Empty(anthropic.DeletedFiles);
+
+        // The cancel has taken effect by the next run start
+        anthropic.CancelKeepsRunning = false;
+        var next = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : Transport());
+
+        Assert.False(next.Blocked);
+        Assert.Equal(1, next.Collected);
+        Assert.DoesNotContain(LedgerLines(), r => r.Type == BatchLedgerRecordType.Cancelled);
+        Assert.Contains(foreign.BatchId, new BatchLedger(_folder).Replay().CollectedIds);
+        Assert.True(new BatchLedger(_folder).TryReadResults(foreign.BatchId, out var cached));
+        Assert.Single(cached);
+        Assert.Equal(0, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));
     }
 
     [Fact]
@@ -1198,10 +1244,11 @@ public class BatchingLlmProviderTests : IDisposable
 
         var result = await ResolveAsync(k => k == LlmProviderKind.Anthropic ? anthropic : openAi);
 
-        // Resolved before the run's gateway exists: the foreign batch is Cancelled and nothing was submitted yet
+        // Resolved before the run's gateway exists: the foreign batch is cancelled (and its partial results collected,
+        // WR-06) and nothing was submitted yet
         Assert.False(result.Blocked);
         Assert.Equal(1, result.Cancelled);
-        Assert.Contains(foreign.BatchId, new BatchLedger(_folder).Replay().CancelledIds);
+        Assert.Contains(foreign.BatchId, new BatchLedger(_folder).Replay().CollectedIds);
         Assert.Empty(openAi.Submissions);
 
         var provider = Create(Live(), openAi);
@@ -1211,7 +1258,7 @@ public class BatchingLlmProviderTests : IDisposable
 
         // The ledger order shows the foreign batch closed before the current provider's single submission
         var lines = LedgerLines();
-        var cancelledAt = lines.FindIndex(r => r.Type == BatchLedgerRecordType.Cancelled && r.BatchId == foreign.BatchId);
+        var cancelledAt = lines.FindIndex(r => r.Type == BatchLedgerRecordType.Collected && r.BatchId == foreign.BatchId);
         var submittedAt = lines.FindIndex(r => r.Type == BatchLedgerRecordType.Submitted && r.Provider == LlmProviderKind.OpenAI);
         Assert.True(cancelledAt >= 0 && submittedAt > cancelledAt);
         Assert.Equal(0, BatchLedger.PendingBatchCountOtherProviders(_folder, _plan, LlmProviderKind.OpenAI));

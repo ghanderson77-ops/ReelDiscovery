@@ -1261,7 +1261,9 @@ public class GenerateCorpusStepTests
             bool? cancelledBeforeGateway = null;
             step.RunGatewayFactory = useBatch =>
             {
-                cancelledBeforeGateway = new BatchLedger(h.Folder).Replay().CancelledIds.Contains(batchId);
+                // WR-06: cancelled at the provider, then its partial results collected (no bare Cancelled line)
+                var ledger = new BatchLedger(h.Folder).Replay();
+                cancelledBeforeGateway = ledger.CollectedIds.Contains(batchId) && !ledger.CancelledIds.Contains(batchId);
                 return BatchGateway(h, openAi);
             };
             Pump(step.OnEnterStepAsync());
@@ -1270,6 +1272,10 @@ public class GenerateCorpusStepTests
             Assert.True(cancelledBeforeGateway);
             Assert.Equal(new[] { batchId }, anthropic.CancelledIds);
             Assert.Equal(GenerationOutcome.Finished, h.Draft.Corpus.Generation!.LastOutcome);
+            // WR-06: what it finished before the cancel was paid for, so it is billed once at Finished
+            var unused = UnusedEntries(h);
+            Assert.Equal(2, unused.Count);
+            Assert.True(unused.Sum(e => e.Cost) > 0m);
             // Never resubmitted to Anthropic; every request went once to OpenAI
             Assert.Single(anthropic.Submissions);
             var ids = openAi.Submissions.SelectMany(s => s).Select(i => i.CustomId).ToList();
@@ -1294,7 +1300,8 @@ public class GenerateCorpusStepTests
             Pump(step.ClickStateActionAsync());
 
             Assert.Equal(new[] { batchId }, anthropic.CancelledIds);
-            Assert.Contains(batchId, new BatchLedger(h.Folder).Replay().CancelledIds);
+            // WR-06: its partial results are collected (live mode leaves them unbilled until Start Over or a batch run, D-24)
+            Assert.Contains(batchId, new BatchLedger(h.Folder).Replay().CollectedIds);
             Assert.Equal(GenerationOutcome.Finished, h.Draft.Corpus!.Generation!.LastOutcome);
         });
     }

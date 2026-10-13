@@ -1,7 +1,7 @@
 ---
 phase: 02-case-scenario-core-document
 verified: 2026-10-01T17:30:00Z
-status: human_needed
+status: passed
 score: 5/5 roadmap success criteria verified in code (44/44 plan must-have truths verified); live UI/LLM behavior awaits human testing
 overrides_applied: 0
 human_verification:
@@ -26,7 +26,7 @@ human_verification:
 
 **Phase Goal:** The user describes a real-life dispute or investigation and gets a realistic, legally structured core document that they can review, edit and regenerate.
 **Verified:** 2026-10-01T17:30:00Z
-**Status:** human_needed
+**Status:** passed (human verification items reported complete by the user, 2026-10-13)
 **Re-verification:** No — initial verification
 
 ## Goal Achievement
@@ -149,3 +149,8 @@ No code gaps found. Every roadmap success criterion and every plan must-have tru
 
 _Verified: 2026-10-01T17:30:00Z_
 _Verifier: Claude (gsd-verifier)_
+
+
+---
+
+**Human verification closed 2026-10-13:** the user reported completing live testing of the items above; see the phase HUMAN-UAT file.

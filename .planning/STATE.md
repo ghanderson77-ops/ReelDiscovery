@@ -238,29 +238,18 @@ None.
 
 ### Blockers/Concerns
 
-- Deferred human/live UAT for phases 1, 2, 7, 8, 9, 10 (see Deferred Items). Anthropic prompt caching and batch round trip have never been exercised live.
+- Human/live UAT for phases 1, 2, 7, 8, 9, 10 closed 2026-10-13 (user-reported live testing).
+- Two debug sessions remain open (see Deferred Items).
 - Open audit warnings N2-N4 (milestones/v1.0-MILESTONE-AUDIT.md).
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-10-13; phase files now live under milestones/v1.0-phases/ (audit-open flagged 18; the 4 UAT files for phases 03-06 are approved/passed with 0 pending and are omitted):
+Items acknowledged and deferred at milestone close on 2026-10-13. Human UAT and verification for phases 1, 2, 7, 8, 9, 10 were closed the same day after the user reported completing live testing; phase files now live under milestones/v1.0-phases/ (audit-open flagged 18; the 4 UAT files for phases 03-06 are approved/passed with 0 pending and are omitted):
 
 | Category | Item | Status |
 |----------|------|--------|
 | debug | personal-sender-role-names | investigating |
 | debug | phase6-test-failures | awaiting_human_verify |
-| uat | Phase 01 (01-HUMAN-UAT.md, 4 open) | partial |
-| uat | Phase 02 (02-HUMAN-UAT.md, 3 open) | partial |
-| uat | Phase 07 (07-HUMAN-UAT.md, 2 open) | deferred |
-| uat | Phase 08 (08-HUMAN-UAT.md) | deferred |
-| uat | Phase 09 (09-HUMAN-UAT.md, 4 open) | partial |
-| uat | Phase 10 (10-HUMAN-UAT.md, 3 open) | partial |
-| verification | Phase 01 (01-VERIFICATION.md) | human_needed |
-| verification | Phase 02 (02-VERIFICATION.md) | human_needed |
-| verification | Phase 07 (07-VERIFICATION.md) | human_needed |
-| verification | Phase 08 (08-VERIFICATION.md) | human_needed |
-| verification | Phase 09 (09-VERIFICATION.md) | human_needed |
-| verification | Phase 10 (10-VERIFICATION.md) | human_needed |
 
 ## Session Continuity
 

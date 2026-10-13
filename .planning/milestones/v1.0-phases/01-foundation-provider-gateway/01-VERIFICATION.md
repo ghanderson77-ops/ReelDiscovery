@@ -1,7 +1,7 @@
 ---
 phase: 01-foundation-provider-gateway
 verified: 2026-09-30T18:30:00Z
-status: human_needed
+status: passed
 score: 5/5 roadmap success criteria verified (plan must-haves previously failed are now verified; live UI/API checks pending human)
 overrides_applied: 0
 re_verification:
@@ -41,7 +41,7 @@ human_verification:
 
 **Phase Goal:** The app runs on a supported runtime with tests and safe concurrency, and all text generation goes through one provider-agnostic gateway, so the user can choose OpenAI or Claude.
 **Verified:** 2026-09-30T18:30:00Z
-**Status:** human_needed
+**Status:** passed (human verification items reported complete by the user, 2026-10-13)
 **Re-verification:** Yes, after gap closure (plans 01-12, 01-13)
 
 ## Re-verification Summary
@@ -143,3 +143,8 @@ No gaps remain. CR-01 and CR-02 are fixed in code and covered by new tests, and 
 
 _Verified: 2026-09-30T18:30:00Z_
 _Verifier: Claude (gsd-verifier)_
+
+
+---
+
+**Human verification closed 2026-10-13:** the user reported completing live testing of the items above; see the phase HUMAN-UAT file.

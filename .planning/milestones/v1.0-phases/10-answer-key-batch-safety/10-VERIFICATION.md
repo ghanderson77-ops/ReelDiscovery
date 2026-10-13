@@ -1,7 +1,7 @@
 ---
 phase: 10-answer-key-batch-safety
 verified: 2026-10-13T00:00:00Z
-status: human_needed
+status: passed
 score: 4/4 roadmap success criteria verified (56/57 plan must-have truths verified in code; 1 is the deferred manual check)
 overrides_applied: 0
 human_verification:
@@ -20,7 +20,7 @@ human_verification:
 
 **Phase Goal:** Manual answer-key relabels and batch spend are never silently lost or double-paid.
 **Verified:** 2026-10-13 (HEAD 7cde2f6, after all six review-fix commits)
-**Status:** human_needed
+**Status:** passed (human verification items reported complete by the user, 2026-10-13)
 **Re-verification:** No. This is the initial verification.
 
 ## Goal Achievement
@@ -144,3 +144,8 @@ The status is `human_needed` because the user deferred the real-Excel round trip
 
 _Verified: 2026-10-13_
 _Verifier: Claude (gsd-verifier)_
+
+
+---
+
+**Human verification closed 2026-10-13:** the user reported completing live testing of the items above; see the phase HUMAN-UAT file.

@@ -1,7 +1,7 @@
 ---
 phase: 08-ancillary-discovery-documents
 verified: 2026-10-08T21:20:00Z
-status: human_needed
+status: passed
 score: 3/3 roadmap success criteria verified in code and automated tests (live-provider consistency, Word layout and 144-DPI inspection still need a person)
 overrides_applied: 0
 human_verification:
@@ -29,7 +29,7 @@ human_verification:
 
 **Phase Goal:** The user can optionally generate realistic discovery documents that are consistent with the case guide.
 **Verified:** 2026-10-08T21:20:00Z
-**Status:** human_needed
+**Status:** passed (human verification items reported complete by the user, 2026-10-13)
 **Re-verification:** No. This is the initial verification. No earlier VERIFICATION.md exists.
 
 ## Goal Achievement
@@ -150,3 +150,8 @@ _Verifier: Claude (gsd-verifier)_
 ## Orchestrator note (2026-10-08)
 
 User override: the user directed "yolo through the rest of the steps" and deferred manual/live checks. ANC-01..ANC-05 stay marked Complete on the strength of the automated verification above; the manual items remain tracked in 08-HUMAN-UAT.md (status: deferred) and should be run with `/gsd-verify-work 8` before release.
+
+
+---
+
+**Human verification closed 2026-10-13:** the user reported completing live testing of the items above; see the phase HUMAN-UAT file.

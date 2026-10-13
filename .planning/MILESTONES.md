@@ -19,7 +19,7 @@
 
 **Audit:** tech_debt; 80/80 requirements, 0 broken integration, 11/11 flows (milestones/v1.0-MILESTONE-AUDIT.md).
 
-**Known deferred items at close:** 14 (see STATE.md Deferred Items): 2 debug sessions, human UAT in phases 1, 2, 7, 8, 9, 10, and the matching 6 human_needed verifications.
+**Known deferred items at close:** 2 debug sessions (see STATE.md Deferred Items). Human UAT for phases 1, 2, 7, 8, 9, 10 was closed on 2026-10-13 after the user reported completing live testing.
 
 **Archives:** milestones/v1.0-ROADMAP.md, milestones/v1.0-REQUIREMENTS.md, milestones/v1.0-MILESTONE-AUDIT.md, milestones/v1.0-phases/
 

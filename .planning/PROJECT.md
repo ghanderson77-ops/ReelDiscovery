@@ -16,13 +16,12 @@ Every relevant email in a multi-thousand-document corpus must stay faithful to o
 
 - The case-driven flow is the only flow; the legacy topic → storylines wizard was removed in the v1.0 cutover.
 - ~85,600 lines of app C# and ~83,100 lines of tests (xUnit, 4,697 passing outside the Scale/LiveSpike suites).
-- v1.0 closed with known deferred items: human/live UAT for phases 1, 2, 7, 8, 9, 10 was never run (live provider fidelity, Anthropic caching and batch round trip, 150% DPI, real-Excel relabel round trip), plus two open debug sessions. See STATE.md Deferred Items and `milestones/v1.0-MILESTONE-AUDIT.md`.
+- Live testing on both providers was reported complete by the user on 2026-10-13; all phase verifications are closed. Two debug sessions remain open (STATE.md Deferred Items). Released publicly as ReelDiscovery 2.0.0.
 
 ## Next Milestone Goals
 
 Not yet defined — start with `/gsd-new-milestone`. Candidates:
 
-- Run the deferred live UAT and close the six human_needed verifications before adding features.
 - Open audit warnings N2-N4 (discovery staleness false positives, guide-changed crash recovery, relabel edge cases) and Phase 7 design debt (leakage sender weighting, deterministic OpenXml, CX-07 drain bound).
 - v2 requirements below.
 
@@ -41,8 +40,8 @@ Not yet defined — start with `/gsd-new-milestone`. Candidates:
 - ✓ Incremental, journaled saving; one failed item never aborts the run; continue / start over / regenerate thread — v1.0
 - ✓ Per-custodian mailboxes with X-ReelDiscovery-DocID headers matching the answer key — v1.0
 - ✓ Non-relevant traffic (daily business, ancillary characters, newsletters/spam/personal, near-miss decoys) through the same pipeline — v1.0
-- ✓ ~5,000-email runs with Batch APIs, prompt caching, cost accounting, blind-review and leakage QA — v1.0 (Anthropic caching/batch live UAT deferred)
-- ✓ Optional depositions, RFPs, RFAs and interrogatories consistent with the guide, exported as .docx — v1.0 (live fidelity UAT deferred)
+- ✓ ~5,000-email runs with Batch APIs, prompt caching, cost accounting, blind-review and leakage QA — v1.0
+- ✓ Optional depositions, RFPs, RFAs and interrogatories consistent with the guide, exported as .docx — v1.0
 - ✓ Edit and spend safety: guide edits withdraw plan approval; discovery staleness tracking; manual answer-key relabels preserved; cross-provider batch resolution — v1.0
 
 ### Active
@@ -76,7 +75,7 @@ Not yet defined — start with `/gsd-new-milestone`. Candidates:
 
 - v1.0 rebuilt the app around a case guide: the ~2,000-line `EmailGenerator` god class, `OpenAIService`, Slack telemetry and the legacy wizard are gone. Work is organized under `Services/Ai`, `Services/Case`, `Services/Corpus`, `Services/Evidence`, `Services/Discovery` with case state in a per-case folder (case.json, corpus-plan.json, run journal, batch ledger, answer key + relabel sidecar).
 - Generation is grounded in structured data: code owns dates, participants, counts and labels; the LLM writes prose within a knowledge gate and a narrative ledger; end-of-run timeline and canonical-value scans check consistency.
-- Known debt (see `milestones/v1.0-MILESTONE-AUDIT.md`): deferred human/live UAT in six phases; render tests stopped at 120 DPI so 150% scaling is unverified since Phase 3; leakage audit Warning on the default plan (sender weighting); Office attachments not byte-deterministic; SUMMARY requirements frontmatter missing in many plans.
+- Known debt (see `milestones/v1.0-MILESTONE-AUDIT.md`): render tests run at 120 DPI (150% checked by hand at release); leakage audit Warning on the default plan (sender weighting); Office attachments not byte-deterministic; SUMMARY requirements frontmatter missing in many plans.
 
 ## Constraints
 
@@ -94,8 +93,8 @@ Not yet defined — start with `/gsd-new-milestone`. Candidates:
 | Core legal document is the "guide"; key-facts timeline drives email generation | Timeline-driven generation keeps threads cohesive across thousands of emails | ✓ Good — Phase 5 live UAT confirmed consistency on one run |
 | Complexity via presets (Simple/Standard/Complex) | Simple UX; presets drive parties, issues, characters, timeline span | ✓ Good |
 | User reviews/edits core doc, cast, and key facts before corpus generation | Guide quality determines corpus quality; cheap to fix early | ✓ Good — needed Phase 9 to make later edits safe |
-| Answer key in CSV/Excel | Needed to demonstrate/score automated classification | ✓ Good — relabels round-trip via sidecar (real-Excel UAT deferred) |
-| Add Anthropic Claude alongside OpenAI | User request; enables provider choice | ✓ Good — ⚠️ Revisit: Anthropic caching/batch never verified live |
+| Answer key in CSV/Excel | Needed to demonstrate/score automated classification | ✓ Good — relabels round-trip via sidecar |
+| Add Anthropic Claude alongside OpenAI | User request; enables provider choice | ✓ Good — both providers tested live at release |
 | Incremental saving + Batch API; no pause/resume in v1 | Protects long 5K runs and cuts cost without project-file complexity | ✓ Good — journal + batch ledger; reopen resumes in practice |
 | Keep all existing attachment types | Reuse working builders; richer evidence | ✓ Good |
 | Running narrative ledger; relevant threads in chronological waves | Later emails build on earlier inventions; trade-off: less parallel | ✓ Good |

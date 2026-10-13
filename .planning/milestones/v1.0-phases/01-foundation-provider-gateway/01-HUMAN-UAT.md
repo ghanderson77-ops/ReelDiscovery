@@ -1,9 +1,9 @@
 ---
-status: partial
+status: passed
 phase: 01-foundation-provider-gateway
 source: [01-VERIFICATION.md]
 started: 2026-09-30T15:31:53Z
-updated: 2026-09-30T16:30:00Z
+updated: 2026-10-13T00:00:00Z
 ---
 
 ## Current Test
@@ -22,27 +22,27 @@ result: pass
 
 ### 3. Key-test lock and Clear
 expected: During a key test the key textbox and Clear are disabled; a cleared key stays cleared after restart.
-result: [pending]
+result: pass (user-reported live testing, 2026-10-13)
 
 ### 4. Claude run produces valid output
 expected: With Claude selected, storylines, characters and emails generate and parse as valid typed results.
-result: [pending]
+result: pass (user-reported live testing, 2026-10-13)
 
 ### 5. Legacy key migration
 expected: On a profile with an old reeldiscovery.settings Base64 key, first launch migrates the key into keys.dat and deletes the legacy file.
-result: [pending]
+result: skipped (obsolete: legacy key migration removed by Phase 7 D-22)
 
 ### 6. Media gating and live gpt-image
 expected: With Claude selected and no tested OpenAI key, image/voicemail options are disabled with the orange notice; with a tested OpenAI key, one live gpt-image image generates.
-result: [pending]
+result: pass (user-reported live testing, 2026-10-13)
 
 ## Summary
 
 total: 6
-passed: 2
+passed: 5
 issues: 0
-pending: 4
-skipped: 0
+pending: 0
+skipped: 1
 blocked: 0
 
 ## Gaps

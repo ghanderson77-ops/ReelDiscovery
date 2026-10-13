@@ -41,6 +41,12 @@ public static class AnswerKeyFiles
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Test seam (WR-07): called inside the per-case gate, just before the harvest, for the case folder with this
+    /// <see cref="GateKey"/>. Lets a test see which thread reads and parses the key files. Empty in the app.
+    /// </summary>
+    internal static readonly ConcurrentDictionary<string, Action> HarvestObservers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Harvests relabels, writes answer-key.csv then answer-key.xlsx with them applied, and saves the sidecar. Each file
     /// is written on its own unless <paramref name="stopAtFirstFailure"/>; a file that could not be read is never
     /// overwritten, and a file that could not be parsed is backed up first. Never throws for I/O failures.
@@ -56,6 +62,9 @@ public static class AnswerKeyFiles
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            if (!HarvestObservers.IsEmpty && HarvestObservers.TryGetValue(GateKey(caseFolder), out var observe))
+                observe();
+
             var store = new AnswerKeyRelabelStore(caseFolder);
             var harvest = Harvest(caseFolder, store, plan, guide, overlay);
             var relabels = harvest.Relabels;
@@ -494,7 +503,7 @@ public static class AnswerKeyFiles
         return (string.Empty, new IOException($"No free backup name for {fileName}."));
     }
 
-    private static string GateKey(string caseFolder) =>
+    internal static string GateKey(string caseFolder) =>
         Path.GetFullPath(Path.TrimEndingDirectorySeparator(caseFolder.Trim()));
 
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();

@@ -420,6 +420,38 @@ public class GenerateCorpusStepTests
     }
 
     [Fact]
+    public void StartOver_HarvestsAnswerKey_OffTheUiThread()
+    {
+        using var h = new Harness();
+        var key = AnswerKeyFiles.GateKey(h.Folder);
+
+        RunSta(() =>
+        {
+            using var step = h.CreateStep();
+            Pump(step.OnEnterStepAsync());
+            Pump(step.ClickStateActionAsync());
+
+            // WR-07: reading, parsing and hashing both key files must never freeze the wizard
+            var ui = Environment.CurrentManagedThreadId;
+            var threads = new System.Collections.Concurrent.ConcurrentQueue<int>();
+            AnswerKeyFiles.HarvestObservers[key] = () => threads.Enqueue(Environment.CurrentManagedThreadId);
+            try
+            {
+                step.Confirm = (_, _, _) => true;
+                Pump(step.ClickStartOverAsync());
+            }
+            finally
+            {
+                AnswerKeyFiles.HarvestObservers.TryRemove(key, out _);
+            }
+
+            Assert.NotEmpty(threads);
+            Assert.DoesNotContain(ui, threads);
+            Assert.Equal(Theme.Success, step.StatusLabel.ForeColor);
+        });
+    }
+
+    [Fact]
     public void StartOver_WithRelabels_ConfirmSaysKept()
     {
         using var h = new Harness();

@@ -111,6 +111,43 @@ public partial class CorpusReviewPlanRenderTests
     }
 
     [Fact]
+    public void Approve_HarvestsAnswerKey_OffTheUiThread()
+    {
+        // Built before the UI thread installs its context: the fixture blocks on async saves
+        var draft = NormalDraft();
+        using var fixture = new PlanFixture(draft, NormalPlan.Value);
+        var folder = fixture.State.CaseStore.EnsureFolder(draft);
+        var key = AnswerKeyFiles.GateKey(folder);
+        ReelDiscovery.Tests.Evidence.GenerateCorpusStepTests.RunSta(() =>
+        {
+            using var step = new StepReviewPlan();
+            step.LoadForRender(fixture.State, ReviewPlanRenderState.Ready);
+
+            // WR-07: reading, parsing and hashing both key files must never freeze the wizard
+            var ui = Environment.CurrentManagedThreadId;
+            var threads = new System.Collections.Concurrent.ConcurrentQueue<int>();
+            AnswerKeyFiles.HarvestObservers[key] = () => threads.Enqueue(Environment.CurrentManagedThreadId);
+            Task<bool> approve;
+            try
+            {
+                approve = step.ClickApproveAsync();
+                ReelDiscovery.Tests.Evidence.GenerateCorpusStepTests.Pump(approve);
+            }
+            finally
+            {
+                AnswerKeyFiles.HarvestObservers.TryRemove(key, out _);
+            }
+
+            Assert.True(approve.IsCompletedSuccessfully);
+            Assert.True(approve.Result);
+            Assert.True(draft.Corpus!.Approved);
+            Assert.True(File.Exists(Path.Combine(folder, AnswerKeyCsvWriter.FileName)));
+            Assert.NotEmpty(threads);
+            Assert.DoesNotContain(ui, threads);
+        });
+    }
+
+    [Fact]
     public void StaleGuideBanner_ApproveDisabled()
     {
         RenderBoth("review-plan-stale", NormalDraft, NormalPlan.Value, ReviewPlanRenderState.Stale, "Issue", null,

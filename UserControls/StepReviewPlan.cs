@@ -1348,6 +1348,9 @@ public partial class StepReviewPlan : UserControl, IWizardStep
     internal CardPanel CountsCard => _countsCard;
     internal MonthHistogram Histogram => _histogram;
     internal Button ApproveButton => _btnApprove;
+
+    /// <summary>Test seam: what the Approve Plan button does.</summary>
+    internal Task<bool> ClickApproveAsync() => ApproveAsync();
     internal Control Badge => _badge;
     internal IReadOnlyList<DataGridView> CountGrids => new[] { _gridIssues, _gridFacts, _gridCustodians };
     internal DataGridView ChecksGrid => _gridChecks;

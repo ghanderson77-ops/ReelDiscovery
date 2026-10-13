@@ -1102,7 +1102,9 @@ public partial class StepGenerateCorpus : IWizardStep
             GenerationFileResult? key = null;
             if (plan != null && Draft.Corpus?.Approved == true)
             {
-                key = await GenerationOutputs.WriteAnswerKeyAsync(folder, Draft.Guide ?? new CaseGuide(), plan, new AnswerKeyOverlay());
+                // WR-07: the harvest reads, parses and hashes both key files; keep it off the UI thread
+                var keyGuide = Draft.Guide ?? new CaseGuide();
+                key = await Task.Run(() => GenerationOutputs.WriteAnswerKeyAsync(folder, keyGuide, plan, new AnswerKeyOverlay()));
                 if (IsDisposed)
                     return;
 

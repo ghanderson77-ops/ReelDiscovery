@@ -570,8 +570,15 @@ public partial class StepReviewPlan
             var overlay = await Task.Run(() => ApprovalOverlay(folder, plan, guide));
             if (IsDisposed)
                 return false;
-            // D-12: relabels of this PlanId are kept by the funnel; the overlay keeps the run statuses
-            var result = await CorpusApproval.ApproveAsync(folder, Draft!, plan, overlay: overlay);
+            // D-12: relabels of this PlanId are kept by the funnel; the overlay keeps the run statuses. WR-07: the funnel reads,
+            // parses and hashes both key files, so it runs on the pool (its gate wait completes synchronously when free); the
+            // draft is only read there and approval is recorded back on the UI thread
+            var draft = Draft!;
+            var result = await Task.Run(() => CorpusApproval.WriteFilesAsync(folder, draft, plan, overlay: overlay));
+            if (result.Succeeded)
+                CorpusApproval.RecordApproval(draft, plan, result.Files, DateTime.UtcNow);
+            else
+                CorpusApproval.RecordPartialWrites(draft, result.Files);
             if (IsDisposed)
                 return false;
 

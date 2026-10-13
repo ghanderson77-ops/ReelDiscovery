@@ -78,10 +78,10 @@ Filled at the phase gate (10-11) from the tasks of plans 10-01..10-10. Gate run 
 
 ## Manual-Only Verifications
 
-| Behavior | Requirement | Why Manual | Test Instructions |
-|----------|-------------|------------|-------------------|
-| Relabel in real Excel (open, edit Relevance, save as xlsx and as csv in a `;` locale) survives Continue and Start Over | QA-01 | Real Excel save behavior is only partly documented | Edit the key in Excel, click Continue, and check that the relabel is still there; repeat after Start Over |
-| Cross-provider resolution against the live provider APIs | PROV-01, RUN-03 | Live batch cancellation timing | Optional live UAT with both keys |
+| Behavior | Requirement | Why Manual | Test Instructions | Outcome |
+|----------|-------------|------------|-------------------|---------|
+| Relabel in real Excel (open, edit Relevance, save as xlsx and as csv in a `;` locale) survives Continue and Start Over | QA-01 | Real Excel save behavior is only partly documented | Edit the key in Excel, click Continue, and check that the relabel is still there; repeat after Start Over | pending — deferred (user, 2026-10-13); 150% DPI checks also deferred |
+| Cross-provider resolution against the live provider APIs | PROV-01, RUN-03 | Live batch cancellation timing | Optional live UAT with both keys | pending — deferred (user, 2026-10-13) |
 
 ---
 
@@ -94,4 +94,4 @@ Filled at the phase gate (10-11) from the tasks of plans 10-01..10-10. Gate run 
 - [x] Feedback latency < 90s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending (automated gate green 2026-10-12; manual Excel round trip and 150% DPI check awaiting the user, 10-11 Task 2)
+**Approval:** approved 2026-10-12 (automated gate); real-Excel round trip and 150% DPI check deferred by user 2026-10-13 — outstanding

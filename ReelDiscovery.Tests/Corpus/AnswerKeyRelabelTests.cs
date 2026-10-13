@@ -443,6 +443,48 @@ public class AnswerKeyRelabelTests : IDisposable
     }
 
     [Fact]
+    public async Task AppendedRationale_IsUserEdit()
+    {
+        // CR-02: appending to the projected rationale is the most natural edit; it must not read as "unchanged"
+        await Write();
+        var docId = Email(Relevant, 0);
+        var appended = ProjectedRationale(docId) + " Reviewer: actually only marginal, see 3/14 email.";
+        EditCsv(docId, NotRelevant, appended);
+
+        await Write();
+
+        Assert.Equal(appended, Sidecar(_folder).Relabels.Single(r => r.DocId == docId).Rationale);
+        Assert.Equal(appended, KeyRow(CsvPath(_folder), false, docId).Rationale);
+        Assert.Equal(appended, KeyRow(XlsxPath(_folder), true, docId).Rationale);
+
+        // A Rationale-only append on the relabeled row is captured too (D-23)
+        var again = appended + " Second look.";
+        EditXlsx(docId, NotRelevant, again);
+        await Write();
+        Assert.Equal(again, Sidecar(_folder).Relabels.Single(r => r.DocId == docId).Rationale);
+    }
+
+    [Fact]
+    public async Task RunNoteRationale_NotAnEdit()
+    {
+        // Pitfall 6 with CR-02: the projected rationale plus the run note the file was written with is unchanged, even
+        // when the next write's overlay has no note (or another one)
+        var docId = Email(Relevant, 0);
+        var overlay = new AnswerKeyOverlay();
+        overlay.ByDocId[docId] = new AnswerKeyOverlayEntry { Status = AnswerKeyBuilder.StatusSkipped, Note = "Skipped: test." };
+        await Write(overlay: overlay);
+        Assert.Equal(ProjectedRationale(docId) + " Skipped: test.", KeyRow(CsvPath(_folder), false, docId).Rationale);
+
+        EditXlsx(docId, NotRelevant);
+        await Write();
+
+        var relabel = Sidecar(_folder).Relabels.Single(r => r.DocId == docId);
+        Assert.Equal(NotRelevant, relabel.Relevance);
+        Assert.Equal(string.Empty, relabel.Rationale);
+        Assert.Equal(ProjectedRationale(docId), KeyRow(CsvPath(_folder), false, docId).Rationale);
+    }
+
+    [Fact]
     public async Task MultiLineRationale_LineEndings_NotAnEdit()
     {
         // XLSX stores CRLF in a cell as LF: an untouched multi-line rationale must not read as a user edit

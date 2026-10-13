@@ -180,8 +180,8 @@ public static class AnswerKeyBuilder
         };
     }
 
-    // "{rationale} {note}"; the rationale alone when there is no note
-    private static string WithNote(string rationale, string? note) =>
+    // "{rationale} {note}"; the rationale alone when there is no note. AnswerKeyFiles uses it to recognize an unchanged cell
+    internal static string WithNote(string rationale, string? note) =>
         string.IsNullOrWhiteSpace(note) ? rationale : $"{rationale} {note.Trim()}".Trim();
 
     // Prefix once from the root subject (no cumulative RE: RE:)

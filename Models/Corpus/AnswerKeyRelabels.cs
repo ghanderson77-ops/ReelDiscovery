@@ -28,6 +28,12 @@ public class AnswerKeyFileSnapshot
 
     public DateTime WrittenUtc { get; set; }
     public Dictionary<string, AnswerKeyRelabel> Applied { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Run note appended to each DocID's rationale in this write (only DocIDs that had one). A Rationale cell equal to the
+    /// projected rationale plus this note is unchanged, not a user edit (D-23, Pitfall 6).
+    /// </summary>
+    public Dictionary<string, string> Notes { get; set; } = new(StringComparer.Ordinal);
 }
 
 /// <summary>Contents of answer-key-relabels.json (D-01). Never part of case.json or the journal.</summary>

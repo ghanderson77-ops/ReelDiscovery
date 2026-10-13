@@ -57,9 +57,10 @@ public static class AnswerKeyFiles
         try
         {
             var store = new AnswerKeyRelabelStore(caseFolder);
-            var harvest = Harvest(caseFolder, store, plan, guide);
+            var harvest = Harvest(caseFolder, store, plan, guide, overlay);
             var relabels = harvest.Relabels;
             var set = harvest.Set;
+            var notes = NotesOf(overlay);
 
             var (csv, xlsx) = BuildBytes(plan, guide, overlay, relabels);
             result.Relabels = relabels.Count;
@@ -110,7 +111,8 @@ public static class AnswerKeyFiles
                         PlanId = plan.PlanId,
                         Sha256 = Hash(bytes),
                         WrittenUtc = DateTime.UtcNow,
-                        Applied = relabels.ToDictionary(p => p.Key, p => Copy(p.Value), StringComparer.Ordinal)
+                        Applied = relabels.ToDictionary(p => p.Key, p => Copy(p.Value), StringComparer.Ordinal),
+                        Notes = new Dictionary<string, string>(notes, StringComparer.Ordinal)
                     };
                 }
                 catch (OperationCanceledException)
@@ -157,7 +159,7 @@ public static class AnswerKeyFiles
         var store = new AnswerKeyRelabelStore(caseFolder);
         try
         {
-            return Harvest(caseFolder, store, plan, guide).Relabels;
+            return Harvest(caseFolder, store, plan, guide, overlay: null).Relabels;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -232,10 +234,12 @@ public static class AnswerKeyFiles
         public Dictionary<string, string> Rationale { get; } = new(StringComparer.Ordinal);
     }
 
-    private static HarvestResult Harvest(string caseFolder, AnswerKeyRelabelStore store, CorpusPlan plan, CaseGuide guide)
+    private static HarvestResult Harvest(string caseFolder, AnswerKeyRelabelStore store, CorpusPlan plan, CaseGuide guide,
+        AnswerKeyOverlay? overlay)
     {
         // Base projection without the overlay: its rationale is the one before any run note (Pitfall 6)
         var projection = PlanLabels(AnswerKeyBuilder.Build(plan, guide));
+        var currentNotes = NotesOf(overlay);
         var set = store.Load();
         var current = CurrentRelabels(set, plan.PlanId, projection);
         var harvest = new HarvestResult { Set = set };
@@ -273,7 +277,7 @@ public static class AnswerKeyFiles
             if (owner != plan.PlanId)
                 continue; // Another plan's key file (D-04, D-08, Pitfall 4)
 
-            votes.AddRange(VotesOf(parsed.Rows, fileName, read.LastWriteUtc, snapshot, current, projection));
+            votes.AddRange(VotesOf(parsed.Rows, fileName, read.LastWriteUtc, snapshot, current, projection, currentNotes));
         }
 
         foreach (var vote in Resolve(votes))
@@ -353,7 +357,8 @@ public static class AnswerKeyFiles
 
     // A row votes only when it differs from what this file held after our last write of it (D-20)
     private static List<Vote> VotesOf(List<AnswerKeyReadRow> rows, string fileName, DateTime lastWriteUtc,
-        AnswerKeyFileSnapshot? snapshot, Dictionary<string, AnswerKeyRelabel> current, PlanLabelSet projection)
+        AnswerKeyFileSnapshot? snapshot, Dictionary<string, AnswerKeyRelabel> current, PlanLabelSet projection,
+        Dictionary<string, string> currentNotes)
     {
         var votes = new List<Vote>();
         foreach (var group in rows.GroupBy(r => r.DocId, StringComparer.Ordinal))
@@ -373,7 +378,10 @@ public static class AnswerKeyFiles
             AnswerKeyRelabel? applied = null;
             snapshot?.Applied.TryGetValue(group.Key, out applied);
             var baseValue = applied?.Relevance ?? planLabel;
-            var custom = CustomRationale(row.Rationale, projection.Rationale[group.Key]);
+            string? writtenNote = null;
+            snapshot?.Notes?.TryGetValue(group.Key, out writtenNote);
+            currentNotes.TryGetValue(group.Key, out var currentNote);
+            var custom = CustomRationale(row.Rationale, projection.Rationale[group.Key], writtenNote, currentNote);
 
             if (value != baseValue)
             {
@@ -410,14 +418,34 @@ public static class AnswerKeyFiles
     }
 
     // The user's Rationale when it is not the projected one (D-05, D-23). XLSX stores CRLF as LF, so line endings are
-    // normalized before comparing (10-01); a run note appended to the projection keeps its prefix (Pitfall 6)
-    private static string CustomRationale(string? cell, string projected)
+    // normalized before comparing (10-01). Unchanged means exactly the projected rationale, alone or with the run note
+    // this file was written with (or the current one, Pitfall 6); anything else, text appended to it included, is the
+    // user's edit (CR-02)
+    private static string CustomRationale(string? cell, string projected, string? writtenNote, string? currentNote)
     {
         var text = Normalize(AnswerKeyReader.StripCsvGuard(cell)).Trim();
-        var baseText = Normalize(projected).Trim();
-        if (text.Length == 0 || (baseText.Length > 0 && text.StartsWith(baseText, StringComparison.Ordinal)))
+        if (text.Length == 0
+            || text == Normalize(projected).Trim()
+            || text == Normalize(AnswerKeyBuilder.WithNote(projected, writtenNote)).Trim()
+            || text == Normalize(AnswerKeyBuilder.WithNote(projected, currentNote)).Trim())
             return string.Empty;
         return text.Length > AnswerKeyXlsxWriter.MaxCellLength ? text[..AnswerKeyXlsxWriter.MaxCellLength] : text;
+    }
+
+    // DocID -> run note the overlay appends to its rationale (only DocIDs that have one)
+    private static Dictionary<string, string> NotesOf(AnswerKeyOverlay? overlay)
+    {
+        var notes = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (overlay == null)
+            return notes;
+
+        foreach (var (docId, entry) in overlay.ByDocId)
+        {
+            if (!string.IsNullOrEmpty(docId) && entry != null && !string.IsNullOrWhiteSpace(entry.Note))
+                notes[docId] = entry.Note;
+        }
+
+        return notes;
     }
 
     private static string Normalize(string? text) =>

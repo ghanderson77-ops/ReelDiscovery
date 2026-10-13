@@ -17,7 +17,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 
     <!-- Application metadata -->
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Company>ReelDiscovery</Company>
     <Product>ReelDiscovery - E-Discovery Dataset Generator</Product>
     <Description>Generate realistic email datasets for e-discovery training and testing</Description>

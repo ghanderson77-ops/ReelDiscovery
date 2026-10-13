@@ -1,139 +1,125 @@
 # ReelDiscovery
 
-**AI-Powered E-Discovery Email Dataset Generator**
+**AI-Powered E-Discovery Sample Data Generator**
 
 *A free tool from [QuikData](https://www.quikdata.com) — Scalable On-Prem, SaaS, and Hybrid E-Discovery solutions for law firms, service providers, and corporate/government. AI Powered.*
 
 ---
 
-ReelDiscovery generates realistic corporate email datasets for e-discovery training, testing, and demonstration purposes. Using OpenAI's GPT models, it creates authentic-feeling email threads based on movies, TV shows, books, or custom business scenarios.
+ReelDiscovery builds realistic, internally consistent eDiscovery data sets for training, testing and demonstrations. You describe a dispute or investigation in plain English. ReelDiscovery writes the legal document, builds a case guide from it, and generates up to ~5,000 emails with attachments. The relevant emails are the evidence behind the allegations, mixed with a share of ordinary business traffic you control, plus an exact answer key saying which documents are relevant and why.
+
+It works with **OpenAI** or **Anthropic Claude**.
+
+> **New in 2.0:** ReelDiscovery was rebuilt around a case guide. The 1.x topic → storylines → characters wizard is gone. See the [CHANGELOG](CHANGELOG.md).
+
+## How it works
+
+1. **Describe the Case.** Write a scenario, such as *"construction defect dispute between a window subcontractor, a general contractor and the developer on a midrise commercial project"*, and pick a Simple, Standard or Complex preset.
+2. **Review Core Document.** ReelDiscovery writes a Complaint, Petition or Investigation Memo. Edit it, regenerate sections, and fix any flagged issues.
+3. **Case Guide.** The document becomes a structured guide: issues, a cast of key characters, a dated timeline of key facts, and canonical values (amounts, dates, names). Everything later is generated from this guide, so edit it here.
+4. **Corpus Settings.** Choose the corpus size, the relevant share, the non-relevant mix, the date window and the attachment types.
+5. **Review Plan.** Before any email text is written, code plans every thread and message: dates, senders and recipients, replies, which facts each email covers, labels and attachments. Review the plan and its cost estimate, then approve it.
+6. **Generate Corpus.** Emails are written in date order. Each one knows only what its participants could know at that point, and later emails build on what earlier ones said. Finished threads are saved as they complete, so you can cancel and continue later.
+7. **Discovery Documents (optional).** Generate deposition excerpts, Requests for Production, Requests for Admission and Interrogatories that match the case and cite emails from the corpus as exhibits.
+8. **Case Summary.** Open the mailboxes, answer key, review protocol and QA findings; export the case guide to Word.
 
 ## Features
 
-### Email Generation
-- **Storyline-driven content** - Emails follow coherent narratives with beginnings, middles, and conclusions
-- **Character personalities** - Each character has a unique voice, writing style, and email signature
-- **Realistic threading** - Proper email threading with Message-ID, In-Reply-To, and References headers
-- **Variable email lengths** - From quick one-line replies to detailed multi-paragraph messages
-- **Branching conversations** - Side threads, forwards, and CC'd participants
+### Case-driven evidence
+- **One consistent story.** Relevant emails are tied to specific dated facts and characters, so a 5,000-email corpus reads like the evidence behind one case.
+- **Realistic mix of non-relevant mail.** The same custodians' daily business, other people in their orbit, newsletters, spam and personal mail, and **near-miss decoys** that share the project and keywords but not the alleged conduct.
+- **Hot and privileged documents**, flagged in the answer key.
+- **Realistic threading** with Message-ID, In-Reply-To and References headers, replies and forwards, business hours, time zones and holidays.
+
+### Answer key and QA
+- **Answer key** in CSV and Excel: one row per email and attachment, relevance with the reason, family relevance, Hot / Privileged / Near-miss flags, and statistics and legend sheets.
+- **Review protocol** in Word, written from the same plan.
+- **Manual relabels** you make in the answer key are kept when the corpus is continued, a thread is regenerated, or the run is started over.
+- **QA** on Case Summary: a blind-review sample, a label-leakage audit, and timeline and value consistency checks.
 
 ### Attachments
-- **Word Documents (.docx)** - Reports, memos, proposals with organization branding
-- **Excel Spreadsheets (.xlsx)** - Data tables, budgets, tracking sheets
-- **PowerPoint Presentations (.pptx)** - Slide decks with themed colors and fonts
-- **Document versioning** - Realistic version chains (v1, v2_revised, v3_FINAL, etc.)
+- **Word, Excel and PowerPoint** documents with per-organization branding.
+- **Calendar invites** (.ics).
+- **Images** (gpt-image), inline or attached.
+- **Voicemails** (text-to-speech MP3).
 
-### AI-Generated Images (DALL-E)
-- **Inline images** - Photos embedded directly in email body
-- **Image attachments** - Photos, screenshots, visual evidence
-- **Context-aware** - Images match the storyline and universe
-
-### Voicemails (Text-to-Speech)
-- **MP3 audio files** - Realistic voicemail recordings
-- **Character voices** - Different TTS voices for each character
-- **Natural speech** - Includes conversational elements like "um", pauses
-
-### Calendar Invites
-- **Auto-detection** - Finds meeting references in email content
-- **.ics files** - Standard calendar format compatible with Outlook, Gmail, etc.
-- **Attendee lists** - Pulls participants from email recipients
-
-### Organization Theming
-- **Per-domain branding** - Each organization gets unique colors and fonts
-- **AI-selected themes** - Colors match the organization's character (law firms get formal navy, tech startups get vibrant colors)
-- **Consistent styling** - Documents from the same organization share branding
+### Scale and cost
+- Up to **5,000 emails** per corpus.
+- **Batch APIs** (OpenAI and Anthropic) and prompt caching for lower cost; batches are tracked on disk and collected after a restart.
+- Running cost shown during the run; a rough estimate before you start.
+- **Nothing finished is lost.** One failed item never stops the run; cancel, close or crash and continue later.
 
 ## Requirements
 
 - Windows 10/11 (64-bit)
-- OpenAI API key with access to:
-  - GPT-4o or GPT-4o-mini (for text generation)
-  - DALL-E 3 (optional, for image generation)
-  - TTS (optional, for voicemails)
+- An API key for **OpenAI** or **Anthropic**. Images and voicemails use OpenAI, so they need an OpenAI key.
 
 ## Installation
 
-### Option 1: Download Release
-Download the latest `ReelDiscovery.exe` from the [Releases](../../releases) page. No installation required - just run the executable.
+### Option 1: Download a release
+Download the latest `ReelDiscovery.exe` from the [Releases](https://github.com/ghanderson77-ops/ReelDiscovery/releases) page. No installation required; just run it.
 
-### Option 2: Build from Source
+### Option 2: Build from source
+Requires the .NET 10 SDK.
+
 ```bash
-git clone https://github.com/yourusername/ReelDiscovery.git
+git clone https://github.com/ghanderson77-ops/ReelDiscovery.git
+```
+
+```bash
 cd ReelDiscovery
-dotnet build
-dotnet run
 ```
 
-## Quick Start
-
-1. **Launch ReelDiscovery**
-2. **Enter your OpenAI API key** and test the connection
-3. **Enter a topic** (e.g., "The Office", "Game of Thrones", "Healthcare Startup")
-4. **Review generated storylines** - Edit or regenerate as needed
-5. **Review characters** - Modify names, roles, organizations
-6. **Configure generation settings**:
-   - Number of emails
-   - Attachment percentages
-   - Date range
-7. **Generate** - Watch as emails are created
-8. **Open output folder** - Import .eml files into your e-discovery tool
-
-## Configuration Options
-
-### Generation Settings
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Email Count | 50 | Total emails to generate |
-| Parallel API Calls | 3 | Concurrent requests (higher = faster but more quota) |
-| Attachment % | 20% | Percentage of emails with document attachments |
-
-### Attachment Types
-- Word Documents (.docx)
-- Excel Spreadsheets (.xlsx)
-- PowerPoint Presentations (.pptx)
-
-### Optional Features
-| Feature | Default | API Cost |
-|---------|---------|----------|
-| AI Images | Off | ~$0.04/image |
-| Voicemails | Off | ~$0.015/voicemail |
-| Calendar Invites | On | No extra cost |
-
-## Output Format
-
-Generated emails are saved as standard `.eml` files that can be imported into:
-- Microsoft Outlook
-- Relativity
-- Nuix
-- Concordance
-- Most e-discovery platforms
-
-### File Organization
-```
-output_folder/
-├── john.smith@company.com/
-│   ├── 20240115_093042_RE_Budget_Meeting.eml
-│   └── 20240116_141523_FW_Q4_Report.eml
-├── jane.doe@company.com/
-│   └── 20240115_102315_Project_Update.eml
-└── ...
+```bash
+dotnet run --project ReelDiscovery.csproj
 ```
 
-## Example Topics
+Run the tests:
 
-ReelDiscovery works great with:
+```bash
+dotnet test ReelDiscovery.Tests/ReelDiscovery.Tests.csproj
+```
 
-**TV Shows & Movies**
-- "The Office" - Dunder Mifflin corporate drama
-- "Game of Thrones" - Medieval politics and intrigue
-- "Succession" - Family business conflicts
-- "Silicon Valley" - Tech startup chaos
+## Corpus settings
 
-**Business Scenarios**
-- "Healthcare Company Merger"
-- "Tech Startup Funding Round"
-- "Law Firm Partnership Dispute"
-- "Manufacturing Quality Issues"
+| Setting | Default | Range |
+|---------|---------|-------|
+| Total emails | 1,000 | 50 – 5,000 (presets 250 / 1,000 / 2,500 / 5,000) |
+| Relevant share | 20% | 5% – 60% |
+| Non-relevant mix | 50% daily business, 20% ancillary, 20% newsletter/spam/personal, 10% near-miss decoys | adjustable |
+| Attachment types | Office, calendar, images, voicemail | each can be turned off |
+
+## Output
+
+Each case gets its own folder (by default under `Documents\ReelDiscovery\Cases`):
+
+```
+My Case/
+├── case.json                         ← the case and its guide
+├── corpus-plan.json                  ← the approved plan
+├── answer-key.csv
+├── answer-key.xlsx
+├── My Case - Review Protocol.docx
+├── My Case - Core Document.docx      ← case guide exports
+├── My Case - Cast of Key Characters.docx
+├── My Case - Key Facts & Events.docx
+├── Mailboxes/
+│   ├── <custodian>/
+│   │   ├── Inbox/<DocID>.eml
+│   │   └── Sent Items/<DocID>.eml
+│   └── ...
+└── Discovery/                        ← optional discovery documents
+```
+
+Every email carries an `X-ReelDiscovery-DocID` header that matches its answer-key row. The `.eml` files can be loaded into Outlook, Relativity, Nuix, Concordance and most eDiscovery platforms.
+
+## Example scenarios
+
+- "Construction defect dispute between a window subcontractor, a general contractor and the developer on a midrise commercial project"
+- "Trade-secret theft by a departing sales director who joins a competitor"
+- "Hospital billing fraud investigation into upcoding by a physician group"
+- "Shareholder dispute over a family-owned manufacturing company"
+- "Correspondence inspired by a TV crime drama evidencing a criminal conspiracy" (names are swapped for fictional ones)
 
 ## Disclaimer
 
@@ -145,29 +131,18 @@ All generated content is fictional and created by AI for demonstration purposes 
 
 Do not use generated content to mislead or deceive.
 
-## Privacy & Telemetry
+## Privacy
 
-ReelDiscovery includes **optional, opt-in** anonymous usage telemetry to help us improve the product.
+- **No telemetry.** ReelDiscovery 2.0 sends no usage data to QuikData.
+- Your scenario and generated text go only to the AI provider you choose (OpenAI or Anthropic), under that provider's terms.
+- API keys are stored on your PC, encrypted with Windows DPAPI (`%LOCALAPPDATA%\ReelDiscovery`).
+- Cases and corpora stay in the local folder you choose.
 
-**On first run**, you'll be asked if you want to participate. You can change this anytime in the Generation Settings.
+## Tech stack
 
-**What we collect (if you opt in):**
-- Topic entered (first 50 characters only)
-- Number of emails/threads generated
-- AI model used
-- App version
-
-**What we DON'T collect:**
-- Your name, email, or any personal information
-- Your OpenAI API key
-- Generated email content
-- IP address or device identifiers
-
-## Tech Stack
-
-- .NET 8.0 / Windows Forms
-- OpenAI API (GPT-4, DALL-E, TTS)
-- MimeKit (email generation)
+- .NET 10 / Windows Forms, single self-contained executable
+- OpenAI and Anthropic APIs (text, Batch APIs); OpenAI gpt-image and TTS for media
+- MimeKit (email)
 - DocumentFormat.OpenXml (Office documents)
 
 ## About QuikData
@@ -197,7 +172,7 @@ Contributions welcome! Please open an issue to discuss proposed changes before s
 
 ## Acknowledgments
 
-- Built with [OpenAI](https://openai.com) APIs
+- Built with [OpenAI](https://openai.com) and [Anthropic](https://www.anthropic.com) APIs
 - Email handling by [MimeKit](https://github.com/jstedfast/MimeKit)
 - Office documents by [Open XML SDK](https://github.com/OfficeDev/Open-XML-SDK)
 - Created by [QuikData](https://quikdata.com)
